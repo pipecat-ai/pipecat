@@ -26,7 +26,6 @@ class MockLLMService(LLMService):
             time.sleep(0.1)
             yield i
 
-
 class MockImageService(ImageGenService):
     def run_image_gen(self, sentence) -> None:
         return None

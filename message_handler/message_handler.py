@@ -18,12 +18,13 @@ class Message:
 
 class MessageHandler:
     def __init__(self, intro):
-        self.messages = [Message("system", time.time(), intro)]
-        self.last_user_message_idx = None
+        self.messages: list[Message] = [Message("system", time.time(), intro)]
+        self.last_user_message_idx:int | None = None
+        self.finalized_user_message_idx: int | None = None
 
-    def add_user_message(self, message):
-        if (self.last_user_message_idx is not None and self.last_user_message_idx != self.finalized_user_message_idx):
-            previous_message = self.messages[self.last_user_message_idx].message
+    def add_user_message(self, message) -> None:
+        if self.last_user_message_idx is not None and self.last_user_message_idx != self.finalized_user_message_idx:
+            previous_message: str = self.messages[self.last_user_message_idx].message
             self.messages[self.last_user_message_idx] = Message(
                 "user", time.time(), ' '.join([previous_message, message])
             )
@@ -33,22 +34,22 @@ class MessageHandler:
 
         self.last_user_message_idx = len(self.messages) - 1
 
-    def add_assistant_message(self, message):
+    def add_assistant_message(self, message) -> None:
         if self.messages[-1].type == "assistant":
             self.messages[-1].message += " " + message
         else:
             self.messages.append(Message("assistant", time.time(), message))
 
-    def add_assistant_messages(self, messages):
+    def add_assistant_messages(self, messages) -> None:
         self.messages.append(Message("assistant", time.time(), " ".join(messages)))
 
-    def get_llm_messages(self):
+    def get_llm_messages(self) -> list[dict[str, str]]:
         return [{"role": m.type, "content": m.message} for m in self.messages]
 
-    def finalize_user_message(self):
-        pass
+    def finalize_user_message(self) -> None:
+        self.finalized_user_message_idx = self.last_user_message_idx
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         pass
 
 class IndexingMessageHandler(MessageHandler):
@@ -66,8 +67,6 @@ class IndexingMessageHandler(MessageHandler):
         self.index_writer_thread = Thread(target=self.indexer_writer, daemon=True)
         self.index_writer_thread.start()
 
-        self.finalized_user_message_idx = None
-
         self.logger = logging.getLogger("bot-instance")
 
     def shutdown(self):
@@ -75,7 +74,7 @@ class IndexingMessageHandler(MessageHandler):
         self.index_message_queue.put(None)
         self.index_writer_thread.join()
 
-    def indexer_writer(self):
+    def indexer_writer(self) -> None:
         while True:
             try:
                 message_idx = self.index_message_queue.get()
@@ -123,7 +122,7 @@ class IndexingMessageHandler(MessageHandler):
         return user_message
 
     def finalize_user_message(self):
-        self.finalized_user_message_idx = self.last_user_message_idx
+        super().finalize_user_message()
         self.write_messages_to_index()
 
     def write_messages_to_index(self):
