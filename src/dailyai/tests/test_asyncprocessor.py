@@ -5,13 +5,17 @@ from queue import Queue, Empty
 from threading import Thread, Event
 from typing import Generator
 
-from services.ai_services import LLMService, TTSService, ImageGenService
-from message_handler.message_handler import MessageHandler
-from async_processor.async_processor import (
-    AsyncProcessor,
+from dailyai.services.ai_services import (
     AIServiceConfig,
+    ImageGenService,
+    LLMService,
+    TTSService
+)
+from dailyai.message_handler.message_handler import MessageHandler
+from dailyai.async_processor.async_processor import (
+    AsyncProcessor,
     AsyncProcessorState,
-    Response
+    Response,
 )
 
 class MockTTSService(TTSService):

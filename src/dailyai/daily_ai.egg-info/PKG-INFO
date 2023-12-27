@@ -1,5 +1,5 @@
 Metadata-Version: 2.1
-Name: daily_ai
+Name: dailyai
 Version: 0.0.1
 Summary: Orchestrator for AI bots with Daily
 Requires-Dist: daily-python

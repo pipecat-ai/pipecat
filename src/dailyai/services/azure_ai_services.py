@@ -6,7 +6,7 @@ import requests
 
 from typing import Generator
 
-from daily_ai.services.ai_services import LLMService, TTSService, ImageGenService
+from dailyai.services.ai_services import LLMService, TTSService, ImageGenService
 from PIL import Image
 
 # See .env.example for Azure configuration needed

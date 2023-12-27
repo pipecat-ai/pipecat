@@ -3,9 +3,14 @@ import unittest
 
 from unittest.mock import MagicMock, call
 
-from message_handler.message_handler import MessageHandler, IndexingMessageHandler
-from services.ai_services import AIService, AIServiceConfig, TTSService, LLMService, ImageGenService
-from storage.search import SearchIndexer
+from dailyai.message_handler.message_handler import MessageHandler, IndexingMessageHandler
+from dailyai.services.ai_services import (
+    AIServiceConfig,
+    TTSService,
+    LLMService,
+    ImageGenService,
+)
+from ..storage.search import SearchIndexer
 
 
 class TestMessageHandler(unittest.TestCase):

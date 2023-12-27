@@ -9,11 +9,10 @@ from threading import Event, Semaphore, Thread
 from typing import Iterator, Optional, Type, TypedDict
 from typing_extensions import Unpack
 
-from services.ai_services import AIServiceConfig
-from message_handler.message_handler import MessageHandler
+from dailyai.services.ai_services import AIServiceConfig
+from dailyai.message_handler.message_handler import MessageHandler
 
 frame_idx = 0
-
 
 class AsyncProcessorState:
     # Setting class variables, other synchronous activities

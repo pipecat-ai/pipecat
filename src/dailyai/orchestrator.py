@@ -6,14 +6,14 @@ import wave
 from dataclasses import dataclass
 from queue import Queue, Empty
 
-from daily_ai.async_processor import (
+from dailyai.async_processor.async_processor import (
     AsyncProcessor,
     AsyncProcessorState,
     ConversationProcessorCollection,
     Response,
 )
-from daily_ai.services.ai_services import AIServiceConfig
-from daily_ai.message_handler import MessageHandler
+from dailyai.services.ai_services import AIServiceConfig
+from dailyai.message_handler.message_handler import MessageHandler
 
 from threading import Thread, Semaphore, Event, Timer
 

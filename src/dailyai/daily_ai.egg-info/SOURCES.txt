@@ -1,11 +1,11 @@
 README.md
 pyproject.toml
 src/daily-ai/async_processor/async_processor.py
-src/daily-ai/daily_ai.egg-info/PKG-INFO
-src/daily-ai/daily_ai.egg-info/SOURCES.txt
-src/daily-ai/daily_ai.egg-info/dependency_links.txt
-src/daily-ai/daily_ai.egg-info/requires.txt
-src/daily-ai/daily_ai.egg-info/top_level.txt
+src/daily-ai/dailyai.egg-info/PKG-INFO
+src/daily-ai/dailyai.egg-info/SOURCES.txt
+src/daily-ai/dailyai.egg-info/dependency_links.txt
+src/daily-ai/dailyai.egg-info/requires.txt
+src/daily-ai/dailyai.egg-info/top_level.txt
 src/daily-ai/message_handler/message_handler.py
 src/daily-ai/services/ai_services.py
 src/daily-ai/services/azure_ai_services.py

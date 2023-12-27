@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from queue import Queue, Empty
 from threading import Thread
 
-from storage.search import SearchIndexer
-from services.ai_services import AIServiceConfig
+from dailyai.storage.search import SearchIndexer
+from dailyai.services.ai_services import AIServiceConfig
 
 
 @dataclass

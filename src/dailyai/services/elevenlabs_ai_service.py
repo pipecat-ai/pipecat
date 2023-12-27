@@ -4,7 +4,7 @@ import time
 
 from typing import Generator
 
-from daily_ai.services.ai_services import TTSService
+from ..services.ai_services import TTSService
 
 
 class ElevenLabsTTSService(TTSService):
