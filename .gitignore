@@ -1,5 +1,6 @@
 .vscode
 env/
+build/
 __pycache__/
 *~
 #*#
