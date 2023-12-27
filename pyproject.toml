@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daily_ai"
+version = "0.0.1"
+description = "Orchestrator for AI bots with Daily"
+dependencies = [
+    "daily-python",
+    "Pillow",
+    "typing-extensions",
+    "openai",
+    "google-cloud-texttospeech",
+    "azure-cognitiveservices-speech",
+    "algoliasearch",
+    "algoliasearch",
+    "pyht"
+]
