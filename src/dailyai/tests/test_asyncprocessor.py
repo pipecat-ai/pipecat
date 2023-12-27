@@ -70,10 +70,6 @@ class TestResponse(unittest.TestCase):
         output_queue.task_done()
 
         while expected_words:
-            # get the corresponding video frame off the queue.
-            output_queue.get()
-            output_queue.task_done()
-
             actual_word = output_queue.get()
             word = expected_words.pop(0)
             self.assertEqual(actual_word['type'], 'audio_frame')

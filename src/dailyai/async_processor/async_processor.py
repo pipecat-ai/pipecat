@@ -6,8 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from queue import Queue, PriorityQueue, Empty
 from threading import Event, Semaphore, Thread
-from typing import Iterator, Optional, Type, TypedDict
-from typing_extensions import Unpack
+from typing import Any, Generator, Iterator, Optional, Type, TypedDict
 
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.message_handler.message_handler import MessageHandler
@@ -81,13 +80,13 @@ class AsyncProcessor:
 
         self.was_interrupted = False
 
-        self.logger = logging.getLogger("bot-instance")
+        self.logger: logging.Logger = logging.getLogger("bot-instance")
 
     def set_state(self, state: int) -> None:
         if state in AsyncProcessorState.state_transitions[self.state]:
             self.state_transition_semaphore.acquire()
 
-            self.state = state
+            self.state: int = state
             self.state_transition_semaphore.release()
 
             # wake up any threads waiting for this state transition
@@ -235,7 +234,7 @@ class Response(AsyncProcessor):
 
         self.chunks_in_preparation = Queue()
 
-        #self.sprite_loader = sprite_loader.SpriteLoader()
+        # self.sprite_loader = sprite_loader.SpriteLoader()
 
         self.llm_responses: list[str] = []
 
@@ -264,49 +263,15 @@ class Response(AsyncProcessor):
         if out.strip():
             yield out.strip()
 
+    def get_frames_from_tts_response(self, audio_frame) -> list[dict[str, Any]]:
+        return [{"type": "audio_frame", "data": audio_frame}]
+
+    def get_frames_from_chunk(self, chunk) -> Generator[list[dict[str, Any]], Any, None]:
+        for audio_frame in self.services.tts.run_tts(chunk):
+            yield self.get_frames_from_tts_response(audio_frame)
+
     def process_chunk(self, chunk) -> None:
-        # could also put other generators in this tuple
-        self.logger.info(f"putting chunk in preparation queue {chunk}")
-
-        def get_frames_from_chunk(chunk):
-            image_list = [
-                "sc-talk",
-                "sc-default",
-                "sc-default",
-                "sc-default",
-                "sc-talk",
-                "sc-default",
-                "sc-default",
-                "sc-default",
-                "sc-default",
-                "sc-talk",
-                "sc-talk",
-                "sc-default",
-                "sc-default",
-                "sc-talk",
-                "sc-talk",
-                "sc-default",
-                "sc-talk",
-                "sc-default",
-                "sc-default",
-                "sc-default",
-                "sc-talk",
-                "sc-talk",
-                "sc-talk",
-                "sc-talk",
-                "sc-talk",
-                "sc-talk",
-                "sc-default",
-                "sc-default",
-                "sc-talk",
-                "sc-talk",
-            ]
-            image_list_idx = 0
-            for frame in self.services.tts.run_tts(chunk):
-                yield (bytearray(frame), None) #self.sprite_loader.get_sprite_bytes(image_list[image_list_idx]))
-                image_list_idx = (image_list_idx + 1) % len(image_list)
-
-        self.chunks_in_preparation.put((chunk, get_frames_from_chunk(chunk)))
+        self.chunks_in_preparation.put((chunk, self.get_frames_from_chunk(chunk)))
 
     def preparation_done(self):
         self.chunks_in_preparation.put((None, None))
@@ -327,7 +292,7 @@ class Response(AsyncProcessor):
     def play_prepared_chunk(self, prepared_chunk) -> None:
         chunk, tts_generator = prepared_chunk
         global frame_idx
-        for tts_chunk in tts_generator:
+        for frames in tts_generator:
             if self.state not in [
                 AsyncProcessorState.READY,
                 AsyncProcessorState.PLAYING,
@@ -339,14 +304,10 @@ class Response(AsyncProcessor):
                 frame_idx += 1
                 self.has_sent_first_frame = True
 
-            (audio_frame, video_frame) = tts_chunk
-            self.output_queue.put(
-                {"type": "image_frame", "data": video_frame, "idx": frame_idx}
-            )
-            self.output_queue.put(
-                {"type": "audio_frame", "data": audio_frame, "idx": frame_idx + 1}
-            )
-            frame_idx += 2
+            for frame in frames:
+                frame["idx"] = frame_idx
+                self.output_queue.put(frame)
+                frame_idx += 1
 
         self.output_queue.join()
         self.llm_responses.append(chunk)
