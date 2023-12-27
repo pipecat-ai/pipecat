@@ -1,9 +1,0 @@
-daily-python
-Pillow
-typing-extensions
-openai
-google-cloud-texttospeech
-azure-cognitiveservices-speech
-algoliasearch
-algoliasearch
-pyht

@@ -13,9 +13,8 @@ dependencies = [
     "openai",
     "google-cloud-texttospeech",
     "azure-cognitiveservices-speech",
-    "algoliasearch",
-    "algoliasearch",
-    "pyht"
+    "pyht",
+    "opentelemetry-sdk"
 ]
 
 [tool.setuptools.packages.find]
