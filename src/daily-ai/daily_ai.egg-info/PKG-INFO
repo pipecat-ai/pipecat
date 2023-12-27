@@ -1,0 +1,13 @@
+Metadata-Version: 2.1
+Name: daily_ai
+Version: 0.0.1
+Summary: Orchestrator for AI bots with Daily
+Requires-Dist: daily-python
+Requires-Dist: Pillow
+Requires-Dist: typing-extensions
+Requires-Dist: openai
+Requires-Dist: google-cloud-texttospeech
+Requires-Dist: azure-cognitiveservices-speech
+Requires-Dist: algoliasearch
+Requires-Dist: algoliasearch
+Requires-Dist: pyht

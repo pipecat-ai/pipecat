@@ -17,3 +17,7 @@ dependencies = [
     "algoliasearch",
     "pyht"
 ]
+
+[tool.setuptools.packages.find]
+# All the following settings are optional:
+where = ["src"]
