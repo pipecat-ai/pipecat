@@ -91,7 +91,7 @@ class MockImageService(ImageGenService):
         return None
 
 
-class TestIndexingMessageHandler(unittest.TestCase):
+class TestStorageMessageHandler(unittest.TestCase):
     def test_user_message_finalized(self):
         mock_tts_service = MockTTSService()
         mock_llm_service = MockLLMService()
@@ -106,18 +106,20 @@ class TestIndexingMessageHandler(unittest.TestCase):
         message_handler = IndexingMessageHandler(
             "Hello world", service_config, mock_indexer
         )
+        message_handler.cleanup_user_message = MagicMock(return_value="Parsed user message.")
         message_handler.add_user_message("User message")
         message_handler.add_assistant_message("Assistant message will be ignored")
-        message_handler.add_user_message("User message plus something else")
+        message_handler.add_user_message("plus something else")
         message_handler.finalize_user_message()
         message_handler.add_assistant_message(
             "New assistant message will not be ignored"
         )
         message_handler.add_user_message("User message second time")
         message_handler.add_assistant_message("Assistant message second time")
-        message_handler.write_messages_to_index()
+        message_handler.write_messages_to_storage()
 
         time.sleep(0.5)
+        message_handler.cleanup_user_message.assert_called_with("User message plus something else")
         self.assertEqual(
             mock_indexer.mock_calls,
             [

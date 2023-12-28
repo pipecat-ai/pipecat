@@ -174,7 +174,7 @@ class AsyncProcessor:
         self.set_state(AsyncProcessorState.DONE)
 
     def async_play(self) -> None:
-        self.logger.info(f"starting to play")
+        self.logger.info(f"Starting to play")
         if self.maybe_set_state(AsyncProcessorState.PLAYING):
             self.do_play()
         self.maybe_set_state(AsyncProcessorState.DONE)
@@ -233,7 +233,7 @@ class Response(AsyncProcessor):
 
     def get_preparation_iterator(self) -> Iterator:
         messages_for_llm = self.message_handler.get_llm_messages()
-        self.logger.error(f"messages for llm: {json.dumps(messages_for_llm, indent=2)}")
+        self.logger.debug(f"Messages for llm: {json.dumps(messages_for_llm, indent=2)}")
         return self.clauses_from_chunks(
             self.services.llm.run_llm_async(messages_for_llm)
         )

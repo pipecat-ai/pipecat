@@ -62,23 +62,23 @@ class IndexingMessageHandler(MessageHandler):
         self.search_indexer = indexer
 
         self.last_written_idx = 0
-        self.index_message_queue = Queue()
+        self.storage_message_queue = Queue()
 
-        self.index_writer_thread = Thread(target=self.indexer_writer, daemon=True)
+        self.index_writer_thread = Thread(target=self.storage_writer, daemon=True)
         self.index_writer_thread.start()
 
         self.logger = logging.getLogger("bot-instance")
 
     def shutdown(self):
         self.finalize_user_message()
-        self.index_message_queue.put(None)
+        self.storage_message_queue.put(None)
         self.index_writer_thread.join()
 
-    def indexer_writer(self) -> None:
+    def storage_writer(self) -> None:
         while True:
             try:
-                message_idx = self.index_message_queue.get()
-                self.index_message_queue.task_done()
+                message_idx = self.storage_message_queue.get()
+                self.storage_message_queue.task_done()
 
                 if message_idx is None:
                     return
@@ -103,35 +103,19 @@ class IndexingMessageHandler(MessageHandler):
                 pass
 
     def cleanup_user_message(self, user_message) -> str:
-        messages = [
-            {
-                "role": "system",
-                "content": """
-                    You are an assistant who is very good at making transcriptions
-                    of human speech into well-capitalized and punctuated text, without
-                    changing any words or the order of the words. Please change this
-                    transcription to something suitable for the printed page.
-                """,
-            },
-            {"role": "user", "content": user_message},
-        ]
-        result = self.services.llm.run_llm(messages)
-        if result:
-            user_message = result
-
         return user_message
 
     def finalize_user_message(self):
         super().finalize_user_message()
-        self.write_messages_to_index()
+        self.write_messages_to_storage()
 
-    def write_messages_to_index(self):
+    def write_messages_to_storage(self):
         if self.finalized_user_message_idx is None:
             return
 
         for idx in range(self.last_written_idx, len(self.messages)):
             self.logger.info(
-                f"writing to index: {self.messages[idx].type} {self.messages[idx].message}"
+                f"Writing to storage: {self.messages[idx].type} {self.messages[idx].message}"
             )
             if (
                 self.messages[idx].type == "user"
@@ -140,4 +124,4 @@ class IndexingMessageHandler(MessageHandler):
                 break
 
             if self.messages[idx].type != "system":
-                self.index_message_queue.put(idx)
+                self.storage_message_queue.put(idx)

@@ -15,7 +15,7 @@ class DeepgramAIService(AIService):
         return 24000
 
     def run_tts(self, sentence):
-        self.logger.info(f"running deepgram tts for {sentence}")
+        self.logger.info(f"Running deepgram tts for {sentence}")
         base_url = "https://api.beta.deepgram.com/v1/speak"
         voice = os.getenv("DEEPGRAM_VOICE") or "alpha-apollo-en-v1"  # move this to an environment variable
         request_url = f"{base_url}?model={voice}&encoding=linear16&container=none"

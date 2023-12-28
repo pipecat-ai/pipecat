@@ -78,7 +78,7 @@ class Orchestrator(EventHandler):
             intro.prepare()
             intro.set_state_callback(AsyncProcessorState.DONE, self.on_intro_played)
             intro.set_state_callback(AsyncProcessorState.FINALIZED, self.on_intro_finished)
-            self.logger.info(f"Response is preparing")
+            self.logger.info(f"Introduction is preparing")
 
             self.current_response: AsyncProcessor = intro
         self.can_interrupt = False
@@ -88,14 +88,14 @@ class Orchestrator(EventHandler):
         self.speech_timeout = None
         self.interrupt_time = None
 
-        self.logger.info("configuring daily")
+        self.logger.info("Configuring daily")
         self.configure_daily()
 
     def configure_daily(self):
         Daily.init()
         self.client = CallClient(event_handler=self)
 
-        self.logger.info(f"mic sample rate: {self.services.tts.get_mic_sample_rate()}")
+        self.logger.info(f"Mic sample rate: {self.services.tts.get_mic_sample_rate()}")
         self.mic: VirtualMicrophoneDevice  = Daily.create_microphone_device(
             "mic", sample_rate=self.services.tts.get_mic_sample_rate(), channels=1
         )
@@ -168,23 +168,23 @@ class Orchestrator(EventHandler):
             self.client.leave()
 
     def stop(self):
-        self.logger.info("stop current response")
+        self.logger.info("Stop current response")
         if self.current_response:
             if self.current_response.state < AsyncProcessorState.INTERRUPTED:
                 self.current_response.interrupt()
 
-            self.logger.info("wait for state transition")
+            self.logger.info("Wait for state transition")
             self.current_response.wait_for_state_transition(AsyncProcessorState.FINALIZED)
 
         self.stop_threads.set()
         self.camera_thread.join()
-        self.logger.info("camera thread stopped")
+        self.logger.info("Camera thread stopped")
 
-        self.logger.info("put stop in output queue")
+        self.logger.info("Put stop in output queue")
         self.output_queue.put({"type": "stop"})
 
         self.frame_consumer_thread.join()
-        self.logger.info("orchestrator stopped.")
+        self.logger.info("Orchestrator stopped.")
 
     def on_intro_played(self, intro):
         self.can_interrupt = True
@@ -202,7 +202,7 @@ class Orchestrator(EventHandler):
             self.message_handler.finalize_user_message()
 
     def call_joined(self, join_data, client_error):
-        self.logger.info(f"call_joined: {join_data}, {client_error}")
+        self.logger.info(f"Call_joined: {join_data}, {client_error}")
         self.client.start_transcription(
             {
                 "language": "en",
@@ -231,7 +231,7 @@ class Orchestrator(EventHandler):
 
     def on_participant_left(self, participant, reason):
         if len(self.client.participants()) < 2:
-            self.logger.info("participant left")
+            self.logger.info(f"Participant {participant} left")
             self.participant_left = True
 
     def on_app_message(self, message, sender):
@@ -249,13 +249,13 @@ class Orchestrator(EventHandler):
                 self.handle_transcription_fragment(message['text'])
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
-        self.logger.info(f"transcription stopped {stopped_by}, {stopped_by_error}")
+        self.logger.info(f"Transcription stopped {stopped_by}, {stopped_by_error}")
 
     def on_transcription_error(self, message):
-        self.logger.error(f"transcription error {message}")
+        self.logger.error(f"Transcription error {message}")
 
     def on_transcription_started(self, status):
-        self.logger.info(f"transcription started {status}")
+        self.logger.info(f"Transcription started {status}")
 
     def set_image(self, image: bytes):
         self.image: bytes | None = image
@@ -380,14 +380,16 @@ class Orchestrator(EventHandler):
         # self.display_images(thinking_images)
 
     def action(self):
-        self.logger.info("starting camera thread")
+        self.logger.info("Starting camera thread")
         self.image: bytes | None = None
         self.camera_thread = Thread(target=self.run_camera, daemon=True)
         self.camera_thread.start()
 
+        self.logger.info("Starting frame consumer thread")
         self.frame_consumer_thread = Thread(target=self.frame_consumer, daemon=True)
         self.frame_consumer_thread.start()
 
+        self.logger.info("Playing introduction")
         self.can_interrupt = False
         self.current_response.play()
 
@@ -401,7 +403,7 @@ class Orchestrator(EventHandler):
             try:
                 frame = self.output_queue.get()
                 if frame["type"] == "stop":
-                    self.logger.info("🎬 Stopping frame consumer thread")
+                    self.logger.info("Stopping frame consumer thread")
 
                     if os.getenv("WRITE_BOT_AUDIO", False):
                         filename = f"conversation-{len(all_audio_frames)}.wav"
@@ -440,7 +442,7 @@ class Orchestrator(EventHandler):
                         b = bytearray()
                 else:
                     if self.interrupt_time:
-                        self.logger.info(f"====== lag to stop stream ====== {time.perf_counter() - self.interrupt_time}")
+                        self.logger.info(f"Lag to stop stream after interruption {time.perf_counter() - self.interrupt_time}")
                         self.interrupt_time = None
 
                     if frame["type"] == "start_stream":

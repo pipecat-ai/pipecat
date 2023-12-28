@@ -23,7 +23,7 @@ class AzureTTSService(TTSService):
         self.speech_synthesizer = SpeechSynthesizer(speech_config=self.speech_config, audio_config=None)
 
     def run_tts(self, sentence) -> Generator[bytes, None, None]:
-        self.logger.info("⌨️ running azure tts async")
+        self.logger.info("Running azure tts")
         ssml = "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' " \
            "xmlns:mstts='http://www.w3.org/2001/mstts'>" \
            "<voice name='en-US-SaraNeural'>" \
@@ -33,9 +33,9 @@ class AzureTTSService(TTSService):
            f"{sentence}" \
            "</prosody></mstts:express-as></voice></speak> "
         result = self.speech_synthesizer.speak_ssml(ssml)
-        self.logger.info("⌨️ got azure tts result")
+        self.logger.info("Got azure tts result")
         if result.reason == ResultReason.SynthesizingAudioCompleted:
-            self.logger.info("⌨️ returning result")
+            self.logger.info("Returning result")
             # azure always sends a 44-byte header. Strip it off.
             yield result.audio_data[44:]
         elif result.reason == ResultReason.Canceled:
@@ -60,7 +60,7 @@ class AzureLLMService(LLMService):
     def run_llm_async(self, messages) -> Generator[str, None, None]:
         local_messages = messages.copy()
         messages_for_log = json.dumps(local_messages)
-        self.logger.info(f"==== generating chat via azure: {messages_for_log}")
+        self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
         response = self.get_response(local_messages, stream=True)
 
@@ -75,10 +75,10 @@ class AzureLLMService(LLMService):
                     yield chunk["choices"][0]["delta"]["content"]
 
 
-    def run_llm(self, messages) -> str or None:
+    def run_llm(self, messages) -> str | None:
         local_messages = messages.copy()
         messages_for_log = json.dumps(local_messages)
-        self.logger.info(f"==== generating chat via azure: {messages_for_log}")
+        self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
         response = self.get_response(local_messages, stream=False)
         if (
@@ -93,8 +93,9 @@ class AzureLLMService(LLMService):
 
 
 class AzureImageGenService(ImageGenService):
-    def run_image_gen(self, sentence) -> Image.Image:
-        self.logger.info("generating azure image", sentence)
+
+    def run_image_gen(self, sentence) -> tuple[str, Image.Image]:
+        self.logger.info("Generating azure image", sentence)
 
         image = openai.Image.create(
             api_type = 'azure',
