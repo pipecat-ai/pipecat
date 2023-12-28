@@ -1,6 +1,7 @@
 import json
 import io
-import openai
+from openai import AzureOpenAI
+
 import os
 import requests
 
@@ -45,17 +46,20 @@ class AzureTTSService(TTSService):
                 self.logger.info("Error details: {}".format(cancellation_details.error_details))
 
 class AzureLLMService(LLMService):
-    def get_response(self, messages, stream):
-        return openai.ChatCompletion.create(
-            api_type="azure",
-            api_version="2023-06-01-preview",
+    def __init__(self):
+        super().__init__()
+        self.client = AzureOpenAI(
             api_key=os.getenv("AZURE_CHATGPT_KEY"),
-            api_base=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-            deployment_id=os.getenv("AZURE_CHATGPT_DEPLOYMENT_ID"),
-            stream=stream,
-            messages=messages,
+            azure_endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+            api_version="2023-12-01-preview",
         )
 
+    def get_response(self, messages, stream):
+        return self.client.chat.completions.create(
+            stream=stream,
+            messages=messages,
+            model=os.getenv("AZURE_CHATGPT_DEPLOYMENT_ID"),
+        )
 
     def run_llm_async(self, messages) -> Generator[str, None, None]:
         local_messages = messages.copy()
@@ -65,15 +69,11 @@ class AzureLLMService(LLMService):
         response = self.get_response(local_messages, stream=True)
 
         for chunk in response:
-            if len(chunk["choices"]) == 0:
+            if len(chunk.choices) == 0:
                 continue
 
-            if "content" in chunk["choices"][0]["delta"]:
-                if (
-                    chunk["choices"][0]["delta"]["content"] != {}
-                ):  # streaming a content chunk
-                    yield chunk["choices"][0]["delta"]["content"]
-
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
 
     def run_llm(self, messages) -> str | None:
         local_messages = messages.copy()
@@ -81,13 +81,8 @@ class AzureLLMService(LLMService):
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
         response = self.get_response(local_messages, stream=False)
-        if (
-            response
-            and len(response["choices"]) > 0
-            and "message" in response["choices"][0]
-            and "content" in response["choices"][0]["message"]
-        ):
-            return response["choices"][0]["message"]["content"]
+        if response and len(response.choices) > 0:
+            return response.choices[0].message.content
         else:
             return None
 
@@ -97,13 +92,13 @@ class AzureImageGenService(ImageGenService):
     def run_image_gen(self, sentence) -> tuple[str, Image.Image]:
         self.logger.info("Generating azure image", sentence)
 
-        image = openai.Image.create(
-            api_type = 'azure',
-            api_version = '2023-06-01-preview',
-            api_key = os.getenv('AZURE_DALLE_KEY'),
-            api_base = os.getenv('AZURE_DALLE_ENDPOINT'),
-            deployment_id = os.getenv("AZURE_DALLE_DEPLOYMENT_ID"),
-            prompt=f'{sentence} in the style of {self.image_style}',
+        image = OpenAI().images.generate(
+            api_type="azure",
+            api_version="2023-06-01-preview",
+            api_key=os.getenv("AZURE_DALLE_KEY"),
+            api_base=os.getenv("AZURE_DALLE_ENDPOINT"),
+            deployment_id=os.getenv("AZURE_DALLE_DEPLOYMENT_ID"),
+            prompt=f"{sentence} in the style of {self.image_style}",
             n=1,
             size=f"1024x1024",
         )
