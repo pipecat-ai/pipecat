@@ -69,6 +69,7 @@ class Orchestrator(EventHandler):
         self.story_started = False
 
         self.message_handler = message_handler
+        self.conversation_processors: ConversationProcessorCollection = conversation_processors
 
         if conversation_processors.introduction is not None:
             intro = conversation_processors.introduction(
@@ -303,7 +304,10 @@ class Orchestrator(EventHandler):
         self.display_thinking()
         self.message_handler.add_user_message(fragment)
 
-        new_response = Response(self.services, self.message_handler, self.output_queue)
+        response_type = self.conversation_processors.response or Response
+        new_response: Response = response_type(
+            self.services, self.message_handler, self.output_queue
+        )
         new_response.set_state_callback(
             AsyncProcessorState.DONE, self.on_response_played
         )
@@ -360,7 +364,7 @@ class Orchestrator(EventHandler):
             "sc-listen-1",
             "sc-listen-1",
         ]
-        #self.display_images(listening_images)
+        # self.display_images(listening_images)
 
     def display_thinking(self):
         thinking_images = [
@@ -373,7 +377,7 @@ class Orchestrator(EventHandler):
             "sc-think-4",
             "sc-think-4",
         ]
-        #self.display_images(thinking_images)
+        # self.display_images(thinking_images)
 
     def action(self):
         self.logger.info("starting camera thread")

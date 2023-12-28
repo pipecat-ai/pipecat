@@ -214,11 +214,6 @@ class AsyncProcessor:
         pass
 
 
-class ResponseArgs(TypedDict):
-    services: AIServiceConfig
-    message_handler: MessageHandler
-    output_queue: Queue
-
 class Response(AsyncProcessor):
     def __init__(
         self,
@@ -233,8 +228,6 @@ class Response(AsyncProcessor):
         self.has_sent_first_frame = False
 
         self.chunks_in_preparation = Queue()
-
-        # self.sprite_loader = sprite_loader.SpriteLoader()
 
         self.llm_responses: list[str] = []
 
