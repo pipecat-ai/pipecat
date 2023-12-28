@@ -5,6 +5,7 @@ import wave
 
 from dataclasses import dataclass
 from queue import Queue, Empty
+from opentelemetry import trace, context
 
 from dailyai.async_processor.async_processor import (
     AsyncProcessor,
@@ -45,7 +46,7 @@ class Orchestrator(EventHandler):
         ai_service_config: AIServiceConfig,
         conversation_processors: ConversationProcessorCollection,
         message_handler: MessageHandler,
-        tracer,
+        tracer=None,
     ):
         self.bot_name: str = daily_config.bot_name
         self.room_url: str = daily_config.room_url
@@ -53,7 +54,8 @@ class Orchestrator(EventHandler):
         self.expiration: float = daily_config.expiration
 
         self.logger: logging.Logger = logging.getLogger("bot-instance")
-        self.tracer = tracer
+        self.tracer = tracer or trace.get_tracer("orchestrator")
+
         self.ctx: Context = context.get_current()
 
         self.transcription = ""
