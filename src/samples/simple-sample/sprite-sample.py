@@ -14,6 +14,14 @@ from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.services.azure_ai_services import AzureImageGenService, AzureTTSService, AzureLLMService
 
+class SpriteResponse(Response):
+    def __init__(self, message, image):
+        super().__init__(message)
+        self.image = image
+
+    def get_image(self):
+        return self.image
+
 def add_bot_to_room(room_url, token, expiration) -> None:
 
     # A simple prompt for a simple sample.
@@ -42,6 +50,12 @@ def add_bot_to_room(room_url, token, expiration) -> None:
 
     services = AIServiceConfig(
         tts=AzureTTSService(), image=AzureImageGenService(), llm=AzureLLMService()
+    )
+
+    sprite_conversation_processors = ConversationProcessorCollection(
+        intro = IntroSpriteResponse,
+        waiting = WaitingSpriteResponse,
+        response = ResponseSpriteResponse,
     )
 
     orchestrator_config = OrchestratorConfig(

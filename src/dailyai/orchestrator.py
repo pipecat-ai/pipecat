@@ -311,7 +311,6 @@ class Orchestrator(EventHandler):
             self.is_interrupted.set()
             self.current_response.interrupt()
 
-        self.display_thinking()
         self.message_handler.add_user_message(fragment)
 
         response_type = self.conversation_processors.response or Response
@@ -339,55 +338,6 @@ class Orchestrator(EventHandler):
         self.current_response.play()
 
         self.response_semaphore.release()
-
-    def display_waiting(self):
-        # I don't love this design, need to think more about how to do this well
-        listening_images = [
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-2",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-2",
-            "sc-listen-1",
-            "sc-listen-2",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-2",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-2",
-            "sc-listen-1",
-            "sc-listen-1",
-            "sc-listen-1",
-        ]
-        # self.display_images(listening_images)
-
-    def display_thinking(self):
-        thinking_images = [
-            "sc-think-1",
-            "sc-think-1",
-            "sc-think-2",
-            "sc-think-2",
-            "sc-think-3",
-            "sc-think-3",
-            "sc-think-4",
-            "sc-think-4",
-        ]
-        # self.display_images(thinking_images)
 
     def action(self):
         self.logger.info("Starting camera thread")
