@@ -6,7 +6,7 @@ import time
 import urllib.parse
 
 from dailyai.async_processor.async_processor import (
-    Response,
+    LLMResponse,
     ConversationProcessorCollection,
 )
 from dailyai.orchestrator import OrchestratorConfig, Orchestrator

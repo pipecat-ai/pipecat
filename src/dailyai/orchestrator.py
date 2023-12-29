@@ -11,7 +11,8 @@ from dailyai.async_processor.async_processor import (
     AsyncProcessor,
     AsyncProcessorState,
     ConversationProcessorCollection,
-    Response,
+    OrchestratorResponse,
+    LLMResponse,
 )
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.message_handler.message_handler import MessageHandler
@@ -42,9 +43,9 @@ class OrchestratorConfig:
 # constructor. The dataclass is defined with Frozen=True, so this should
 # be safe.
 default_conversation_collection = ConversationProcessorCollection(
-    introduction=Response,
+    introduction=LLMResponse,
     waiting=None,
-    response=Response,
+    response=LLMResponse,
     goodbye=None,
 )
 
@@ -207,7 +208,6 @@ class Orchestrator(EventHandler):
 
     def on_response_played(self, response):
         response.finalize()
-        self.display_waiting()
 
     def on_response_finished(self, response):
         if not response.was_interrupted:
@@ -313,8 +313,8 @@ class Orchestrator(EventHandler):
 
         self.message_handler.add_user_message(fragment)
 
-        response_type = self.conversation_processors.response or Response
-        new_response: Response = response_type(
+        response_type: type[OrchestratorResponse] | type[LLMResponse] = self.conversation_processors.response or LLMResponse
+        new_response: OrchestratorResponse = response_type(
             self.services, self.message_handler, self.output_queue
         )
         new_response.set_state_callback(

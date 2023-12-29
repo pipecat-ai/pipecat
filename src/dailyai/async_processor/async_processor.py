@@ -181,19 +181,17 @@ class AsyncProcessor:
 
     def async_prepare(self) -> None:
         self.set_state(AsyncProcessorState.PREPARING)
-        self.preparation_iterator = self.get_preparation_iterator()
+        self.start_preparation()
         self.set_state(AsyncProcessorState.READY)
-        for chunk in self.preparation_iterator:
-            if self.state not in [
-                AsyncProcessorState.READY,
-                AsyncProcessorState.PLAYING,
-            ]:
-                break
-
-            self.process_chunk(chunk)
-
+        self.continue_preparation()
         self.logger.info(f"Preparation done for {self.__class__.__name__}")
         self.preparation_done()
+
+    def start_preparation(self) -> None:
+        pass
+
+    def continue_preparation(self) -> None:
+        pass
 
     def preparation_done(self):
         pass
@@ -213,8 +211,8 @@ class AsyncProcessor:
     def do_finalization(self) -> None:
         pass
 
+class OrchestratorResponse(AsyncProcessor):
 
-class Response(AsyncProcessor):
     def __init__(
         self,
         services,
@@ -225,6 +223,17 @@ class Response(AsyncProcessor):
 
         self.message_handler: MessageHandler = message_handler
         self.output_queue: Queue = output_queue
+
+
+class LLMResponse(OrchestratorResponse):
+    def __init__(
+        self,
+        services,
+        message_handler,
+        output_queue,
+    ) -> None:
+        super().__init__(services, message_handler, output_queue)
+
         self.has_sent_first_frame = False
 
         self.chunks_in_preparation = Queue()
@@ -262,6 +271,19 @@ class Response(AsyncProcessor):
     def get_frames_from_chunk(self, chunk) -> Generator[list[dict[str, Any]], Any, None]:
         for audio_frame in self.services.tts.run_tts(chunk):
             yield self.get_frames_from_tts_response(audio_frame)
+
+    def start_preparation(self) -> None:
+        self.preparation_iterator = self.get_preparation_iterator()
+
+    def continue_preparation(self) -> None:
+        for chunk in self.preparation_iterator:
+            if self.state not in [
+                AsyncProcessorState.READY,
+                AsyncProcessorState.PLAYING,
+            ]:
+                break
+
+            self.process_chunk(chunk)
 
     def process_chunk(self, chunk) -> None:
         self.chunks_in_preparation.put((chunk, self.get_frames_from_chunk(chunk)))
@@ -320,7 +342,7 @@ class Response(AsyncProcessor):
 
 @dataclass(frozen=True)
 class ConversationProcessorCollection:
-    introduction: Optional[Type[Response]] = None
-    waiting: Optional[Type[Response]] = None
-    response: Optional[Type[Response]] = None
-    goodbye: Optional[Type[Response]] = None
+    introduction: Optional[Type[OrchestratorResponse]] = None
+    waiting: Optional[Type[OrchestratorResponse]] = None
+    response: Optional[Type[OrchestratorResponse]] = None
+    goodbye: Optional[Type[OrchestratorResponse]] = None

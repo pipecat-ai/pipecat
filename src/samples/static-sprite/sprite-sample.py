@@ -1,26 +1,47 @@
 import argparse
-from email.mime import image
-from re import A
+import os
 import requests
 import time
 import urllib.parse
 
+from PIL import Image
+
 from dailyai.async_processor.async_processor import (
-    Response,
     ConversationProcessorCollection,
+    LLMResponse
 )
 from dailyai.orchestrator import OrchestratorConfig, Orchestrator
 from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.services.azure_ai_services import AzureImageGenService, AzureTTSService, AzureLLMService
 
-class SpriteResponse(Response):
-    def __init__(self, message, image):
-        super().__init__(message)
-        self.image = image
+class StaticSpriteResponse(LLMResponse):
 
-    def get_image(self):
-        return self.image
+    def __init__(
+        self,
+        services,
+        message_handler,
+        output_queue
+    ) -> None:
+        super().__init__(services, message_handler, output_queue)
+        self.image_bytes:bytes | None = None
+        self.filename = None # override this in subclasses
+
+    def start_preparation(self) -> None:
+        full_path = os.path.join(os.path.dirname(__file__), "/sprites/")
+
+        with Image.open(full_path) as img:
+            self.image_bytes = img.tobytes()
+
+    def async_play(self) -> None:
+        self.output_queue.put({"type": "image_frame", "data": self.image_bytes})
+
+
+class IntroSpriteResponse(StaticSpriteResponse):
+    def __init__(self, services, message_handler, output_queue) -> None:
+        super().__init__(services, message_handler, output_queue)
+        self.filename = "intro.png"
+
 
 def add_bot_to_room(room_url, token, expiration) -> None:
 

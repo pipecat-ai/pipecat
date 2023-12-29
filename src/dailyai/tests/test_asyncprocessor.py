@@ -15,7 +15,7 @@ from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.async_processor.async_processor import (
     AsyncProcessor,
     AsyncProcessorState,
-    Response,
+    LLMResponse,
 )
 
 class MockTTSService(TTSService):
@@ -51,7 +51,7 @@ class TestResponse(unittest.TestCase):
         mock_llm_service = MockLLMService()
         mock_image_service = MockImageService()
         message_handler = MessageHandler("Hello World")
-        processor = Response(
+        processor = LLMResponse(
             AIServiceConfig(
                 tts=mock_tts_service, llm=mock_llm_service, image=mock_image_service
             ),
@@ -86,7 +86,7 @@ class TestResponse(unittest.TestCase):
         mock_llm_service = MockLLMService()
         mock_image_service = MockImageService()
         message_handler = MessageHandler("System Message")
-        processor = Response(
+        processor = LLMResponse(
             AIServiceConfig(
                 tts=mock_tts_service, llm=mock_llm_service, image=mock_image_service
             ),
@@ -108,7 +108,7 @@ class TestResponse(unittest.TestCase):
         mock_llm_service = MockLLMService()
         mock_image_service = MockImageService()
         message_handler = MessageHandler("System Message")
-        processor = Response(
+        processor = LLMResponse(
             AIServiceConfig(
                 tts=mock_tts_service, llm=mock_llm_service, image=mock_image_service
             ),
