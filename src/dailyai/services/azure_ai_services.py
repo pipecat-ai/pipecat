@@ -66,11 +66,10 @@ class AzureLLMService(LLMService):
         )
 
     def run_llm_async(self, messages) -> Generator[str, None, None]:
-        local_messages = messages.copy()
-        messages_for_log = json.dumps(local_messages)
+        messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
-        response = self.get_response(local_messages, stream=True)
+        response = self.get_response(messages, stream=True)
 
         for chunk in response:
             if len(chunk.choices) == 0:
@@ -80,11 +79,10 @@ class AzureLLMService(LLMService):
                 yield chunk.choices[0].delta.content
 
     def run_llm(self, messages) -> str | None:
-        local_messages = messages.copy()
-        messages_for_log = json.dumps(local_messages)
+        messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
-        response = self.get_response(local_messages, stream=False)
+        response = self.get_response(messages, stream=False)
         if response and len(response.choices) > 0:
             return response.choices[0].message.content
         else:
