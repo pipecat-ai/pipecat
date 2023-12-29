@@ -38,14 +38,24 @@ class OrchestratorConfig:
     bot_name: str
     expiration: float
 
+# Note that we use this as a default parameter value in the Orchestrator
+# constructor. The dataclass is defined with Frozen=True, so this should
+# be safe.
+default_conversation_collection = ConversationProcessorCollection(
+    introduction=Response,
+    waiting=None,
+    response=Response,
+    goodbye=None,
+)
 
 class Orchestrator(EventHandler):
+
     def __init__(
         self,
         daily_config: OrchestratorConfig,
         ai_service_config: AIServiceConfig,
-        conversation_processors: ConversationProcessorCollection,
         message_handler: MessageHandler,
+        conversation_processors: ConversationProcessorCollection = default_conversation_collection,
         tracer=None,
     ):
         self.bot_name: str = daily_config.bot_name
@@ -271,8 +281,6 @@ class Orchestrator(EventHandler):
                 time.sleep(1.0 / 8.0)  # 8 fps
         except Exception as e:
             self.logger.error(f"Exception {e} in camera thread.")
-
-        print("==== camera thread exitings")
 
     def handle_user_started_talking(self):
         # TODO: allow configuration of the timer timeout

@@ -318,7 +318,7 @@ class Response(AsyncProcessor):
             self.play_thread.join()
 
 
-@dataclass
+@dataclass(frozen=True)
 class ConversationProcessorCollection:
     introduction: Optional[Type[Response]] = None
     waiting: Optional[Type[Response]] = None

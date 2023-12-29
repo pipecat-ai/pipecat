@@ -29,15 +29,6 @@ def add_bot_to_room(room_url, token, expiration) -> None:
     """
     )
 
-    # Use the standard Response classes for the intro and response. Do nothing while waiting
-    # or saying goodbye.
-    conversation_processors = ConversationProcessorCollection(
-        introduction=Response,
-        waiting=None,
-        response=Response,
-        goodbye=None,
-    )
-
     # Use Azure services for the TTS, image generation, and LLM.
     # Note that you'll need to set the following environment variables:
     # - AZURE_SPEECH_SERVICE_KEY
@@ -66,7 +57,6 @@ def add_bot_to_room(room_url, token, expiration) -> None:
     orchestrator = Orchestrator(
         orchestrator_config,
         services,
-        conversation_processors,
         message_handler,
     )
     orchestrator.start()
