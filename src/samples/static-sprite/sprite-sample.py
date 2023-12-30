@@ -12,6 +12,7 @@ from dailyai.async_processor.async_processor import (
     OrchestratorResponse
 )
 from dailyai.orchestrator import OrchestratorConfig, Orchestrator
+from dailyai.output_queue import OutputQueueFrame, FrameType
 from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.services.azure_ai_services import AzureImageGenService, AzureTTSService, AzureLLMService
@@ -36,7 +37,7 @@ class StaticSpriteResponse(OrchestratorResponse):
             self.image_bytes = img.tobytes()
 
     def async_play(self) -> None:
-        self.output_queue.put({"type": "image_frame", "data": self.image_bytes})
+        self.output_queue.put(OutputQueueFrame(FrameType.IMAGE_FRAME, self.image_bytes))
 
 
 class IntroSpriteResponse(StaticSpriteResponse):
