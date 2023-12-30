@@ -246,8 +246,8 @@ class Orchestrator(EventHandler):
                 self.story_started = True
 
     def on_participant_left(self, participant, reason):
+        self.logger.info(f"Participant {participant} left")
         if len(self.client.participants()) < 2:
-            self.logger.info(f"Participant {participant} left")
             self.participant_left = True
 
     def on_app_message(self, message, sender):
@@ -392,7 +392,7 @@ class Orchestrator(EventHandler):
                         self.logger.info(f"Lag to stop stream after interruption {time.perf_counter() - self.interrupt_time}")
                         self.interrupt_time = None
 
-                    if frame["type"] == "start_stream":
+                    if frame.frame_type == FrameType.START_STREAM:
                         self.is_interrupted.clear()
 
                 self.output_queue.task_done()

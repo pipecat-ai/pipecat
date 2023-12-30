@@ -62,6 +62,8 @@ class AnimatedSpriteLLMResponse(LLMResponse):
         self.image_bytes = []
 
     def start_preparation(self) -> None:
+        super().start_preparation()
+
         for filename in self.filenames:
             full_path = os.path.join(os.path.dirname(__file__), "sprites/", filename)
             print(full_path)
@@ -72,7 +74,7 @@ class AnimatedSpriteLLMResponse(LLMResponse):
     def get_frames_from_tts_response(self, audio_frame) -> list[OutputQueueFrame]:
         return [
             OutputQueueFrame(FrameType.AUDIO_FRAME, audio_frame),
-            random.choice(self.image_bytes)
+            OutputQueueFrame(FrameType.IMAGE_FRAME, random.choice(self.image_bytes))
         ]
 
 
@@ -119,14 +121,9 @@ def add_bot_to_room(room_url, token, expiration) -> None:
         expiration=expiration,
     )
 
-    FORMAT = f"%(levelno)s %(asctime)s %(message)s"
-    # Remove any handlers added by imported modules so we can use our formatting
-    while logging.root.handlers:
-        logging.root.removeHandler(logging.root.handlers[-1])
-    logging.basicConfig(format=FORMAT)
+    logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
     logger: logging.Logger = logging.getLogger("dailyai")
     logger.setLevel(logging.DEBUG)
-    logger.info("hello world")
 
     orchestrator = Orchestrator(
         orchestrator_config,
