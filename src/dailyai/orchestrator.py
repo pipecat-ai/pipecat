@@ -4,6 +4,7 @@ import time
 import wave
 
 from dataclasses import dataclass
+from enum import Enum
 from queue import Queue, Empty
 from opentelemetry import trace, context
 
@@ -14,6 +15,7 @@ from dailyai.async_processor.async_processor import (
     OrchestratorResponse,
     LLMResponse,
 )
+from dailyai.output_queue import OutputQueueFrame, FrameType
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.message_handler.message_handler import MessageHandler
 
@@ -48,6 +50,7 @@ default_conversation_collection = ConversationProcessorCollection(
     response=LLMResponse,
     goodbye=None,
 )
+
 
 class Orchestrator(EventHandler):
 
@@ -194,7 +197,7 @@ class Orchestrator(EventHandler):
         self.logger.info("Camera thread stopped")
 
         self.logger.info("Put stop in output queue")
-        self.output_queue.put({"type": "stop"})
+        self.output_queue.put(OutputQueueFrame(FrameType.END_STREAM, None))
 
         self.frame_consumer_thread.join()
         self.logger.info("Orchestrator stopped.")
@@ -357,36 +360,18 @@ class Orchestrator(EventHandler):
         self.logger.info("🎬 Starting frame consumer thread")
         b = bytearray()
         smallest_write_size = 3200
-        expected_idx = 0
         all_audio_frames = bytearray()
         while True:
             try:
-                frame = self.output_queue.get()
-                if frame["type"] == "stop":
+                frame:OutputQueueFrame = self.output_queue.get()
+                if frame.frame_type == FrameType.END_STREAM:
                     self.logger.info("Stopping frame consumer thread")
-
-                    if os.getenv("WRITE_BOT_AUDIO", False):
-                        filename = f"conversation-{len(all_audio_frames)}.wav"
-                        with wave.open(filename, "wb") as f:
-                            f.setnchannels(1)
-                            f.setframerate(16000)
-                            f.setsampwidth(2)
-                            f.setcomptype("NONE", "not compressed")
-                            f.writeframes(all_audio_frames)
-                    return
-
-                if frame["idx"] != expected_idx and frame["idx"] != 0:
-                    self.logger.error(
-                        f"🎬 Expected frame {expected_idx}, got {frame['idx']}"
-                    )
-
-                expected_idx += 1
 
                 # if interrupted, we just pull frames off the queue and discard them
                 if not self.is_interrupted.is_set():
                     if frame:
-                        if frame["type"] == "audio_frame":
-                            chunk = frame["data"]
+                        if frame.frame_type == FrameType.AUDIO_FRAME:
+                            chunk = frame.frame_data
 
                             all_audio_frames.extend(chunk)
 
@@ -395,8 +380,8 @@ class Orchestrator(EventHandler):
                             if l:
                                 self.mic.write_frames(bytes(b[:l]))
                                 b = b[l:]
-                        elif frame["type"] == "image_frame":
-                            self.set_image(frame["data"])
+                        elif frame.frame_type == FrameType.IMAGE_FRAME:
+                            self.set_image(frame.frame_data)
                     elif len(b):
                         self.mic.write_frames(bytes(b))
                         b = bytearray()

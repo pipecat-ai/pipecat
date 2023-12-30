@@ -8,14 +8,15 @@ from PIL import Image
 
 from dailyai.async_processor.async_processor import (
     ConversationProcessorCollection,
-    LLMResponse
+    LLMResponse,
+    OrchestratorResponse
 )
 from dailyai.orchestrator import OrchestratorConfig, Orchestrator
 from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.services.azure_ai_services import AzureImageGenService, AzureTTSService, AzureLLMService
 
-class StaticSpriteResponse(LLMResponse):
+class StaticSpriteResponse(OrchestratorResponse):
 
     def __init__(
         self,
@@ -28,7 +29,8 @@ class StaticSpriteResponse(LLMResponse):
         self.filename = None # override this in subclasses
 
     def start_preparation(self) -> None:
-        full_path = os.path.join(os.path.dirname(__file__), "/sprites/")
+        full_path = os.path.join(os.path.dirname(__file__), "sprites/", self.filename)
+        print(full_path)
 
         with Image.open(full_path) as img:
             self.image_bytes = img.tobytes()
@@ -41,6 +43,12 @@ class IntroSpriteResponse(StaticSpriteResponse):
     def __init__(self, services, message_handler, output_queue) -> None:
         super().__init__(services, message_handler, output_queue)
         self.filename = "intro.png"
+
+
+class WaitingSpriteResponse(StaticSpriteResponse):
+    def __init__(self, services, message_handler, output_queue) -> None:
+        super().__init__(services, message_handler, output_queue)
+        self.filename = "waiting.png"
 
 
 def add_bot_to_room(room_url, token, expiration) -> None:
@@ -74,9 +82,9 @@ def add_bot_to_room(room_url, token, expiration) -> None:
     )
 
     sprite_conversation_processors = ConversationProcessorCollection(
-        intro = IntroSpriteResponse,
-        waiting = WaitingSpriteResponse,
-        response = ResponseSpriteResponse,
+        introduction=IntroSpriteResponse,
+        waiting=WaitingSpriteResponse,
+        response=LLMResponse,
     )
 
     orchestrator_config = OrchestratorConfig(
@@ -90,6 +98,7 @@ def add_bot_to_room(room_url, token, expiration) -> None:
         orchestrator_config,
         services,
         message_handler,
+        sprite_conversation_processors
     )
     orchestrator.start()
 

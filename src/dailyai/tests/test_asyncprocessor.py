@@ -5,17 +5,18 @@ from queue import Queue, Empty
 from threading import Thread, Event
 from typing import Generator
 
-from dailyai.services.ai_services import (
-    AIServiceConfig,
-    ImageGenService,
-    LLMService,
-    TTSService
-)
-from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.async_processor.async_processor import (
     AsyncProcessor,
     AsyncProcessorState,
     LLMResponse,
+)
+from dailyai.message_handler.message_handler import MessageHandler
+from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.services.ai_services import (
+    AIServiceConfig,
+    ImageGenService,
+    LLMService,
+    TTSService,
 )
 
 class MockTTSService(TTSService):
@@ -70,10 +71,10 @@ class TestResponse(unittest.TestCase):
         output_queue.task_done()
 
         while expected_words:
-            actual_word = output_queue.get()
+            actual_word:OutputQueueFrame = output_queue.get()
             word = expected_words.pop(0)
-            self.assertEqual(actual_word['type'], 'audio_frame')
-            self.assertEqual(actual_word['data'], bytes(word, "utf-8"))
+            self.assertEqual(actual_word.frame_type, FrameType.AUDIO_FRAME)
+            self.assertEqual(actual_word.frame_data, bytes(word, "utf-8"))
             output_queue.task_done()
 
         processor.finalize()
@@ -126,12 +127,12 @@ class TestResponse(unittest.TestCase):
             expected_words = ["Hello", "there.", "How", "are", "you?", "I", "hope", "you", "are", "well."]
             while expected_words and not stop_processing_output_queue.is_set():
                 try:
-                    actual_word = output_queue.get_nowait()
-                    if actual_word['type'] == 'audio_frame':
+                    actual_word:OutputQueueFrame = output_queue.get_nowait()
+                    if actual_word.frame_type == FrameType.AUDIO_FRAME:
                         time.sleep(0.1)
                         word = expected_words.pop(0)
-                        self.assertEqual(actual_word['type'], 'audio_frame')
-                        self.assertEqual(actual_word['data'], bytes(word, "utf-8"))
+                        self.assertEqual(actual_word.frame_type, FrameType.AUDIO_FRAME)
+                        self.assertEqual(actual_word.frame_data, bytes(word, "utf-8"))
                     output_queue.task_done()
                 except Empty:
                     pass
