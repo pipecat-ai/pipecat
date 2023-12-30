@@ -67,7 +67,7 @@ class Orchestrator(EventHandler):
         self.token: str = daily_config.token
         self.expiration: float = daily_config.expiration
 
-        self.logger: logging.Logger = logging.getLogger("bot-instance")
+        self.logger: logging.Logger = logging.getLogger("dailyai")
         self.tracer = tracer or trace.get_tracer("orchestrator")
 
         self.ctx: Context = context.get_current()
@@ -203,11 +203,12 @@ class Orchestrator(EventHandler):
         self.logger.info("Orchestrator stopped.")
 
     def on_intro_played(self, intro):
+        self.logger.info(f"Introduction has played")
         self.can_interrupt = True
         intro.finalize()
 
     def on_intro_finished(self, intro):
-        pass
+        self.logger.info(f"Introduction has finished")
 
     def on_response_played(self, response):
         response.finalize()
@@ -366,6 +367,7 @@ class Orchestrator(EventHandler):
                 frame:OutputQueueFrame = self.output_queue.get()
                 if frame.frame_type == FrameType.END_STREAM:
                     self.logger.info("Stopping frame consumer thread")
+                    return
 
                 # if interrupted, we just pull frames off the queue and discard them
                 if not self.is_interrupted.is_set():

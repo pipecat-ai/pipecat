@@ -67,7 +67,7 @@ class IndexingMessageHandler(MessageHandler):
         self.index_writer_thread = Thread(target=self.storage_writer, daemon=True)
         self.index_writer_thread.start()
 
-        self.logger = logging.getLogger("bot-instance")
+        self.logger = logging.getLogger("dailyai")
 
     def shutdown(self):
         self.finalize_user_message()

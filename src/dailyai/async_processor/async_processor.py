@@ -80,7 +80,7 @@ class AsyncProcessor:
 
         self.was_interrupted = False
 
-        self.logger: logging.Logger = logging.getLogger("bot-instance")
+        self.logger: logging.Logger = logging.getLogger("dailyai")
 
     def set_state(self, state: int) -> None:
         if state in AsyncProcessorState.state_transitions[self.state]:

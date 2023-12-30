@@ -1,5 +1,8 @@
 import argparse
+from email.mime import image
+import logging
 import os
+import random
 import requests
 import time
 import urllib.parse
@@ -27,7 +30,7 @@ class StaticSpriteResponse(OrchestratorResponse):
     ) -> None:
         super().__init__(services, message_handler, output_queue)
         self.image_bytes:bytes | None = None
-        self.filename = None # override this in subclasses
+        self.filenames = None # override this in subclasses
 
     def start_preparation(self) -> None:
         full_path = os.path.join(os.path.dirname(__file__), "sprites/", self.filename)
@@ -36,7 +39,7 @@ class StaticSpriteResponse(OrchestratorResponse):
         with Image.open(full_path) as img:
             self.image_bytes = img.tobytes()
 
-    def async_play(self) -> None:
+    def do_play(self) -> None:
         self.output_queue.put(OutputQueueFrame(FrameType.IMAGE_FRAME, self.image_bytes))
 
 
@@ -50,6 +53,27 @@ class WaitingSpriteResponse(StaticSpriteResponse):
     def __init__(self, services, message_handler, output_queue) -> None:
         super().__init__(services, message_handler, output_queue)
         self.filename = "waiting.png"
+
+
+class AnimatedSpriteLLMResponse(LLMResponse):
+    def __init__(self, services, message_handler, output_queue) -> None:
+        super().__init__(services, message_handler, output_queue)
+        self.filenames = ["talk-1.png", "talk-2.png"]
+        self.image_bytes = []
+
+    def start_preparation(self) -> None:
+        for filename in self.filenames:
+            full_path = os.path.join(os.path.dirname(__file__), "sprites/", filename)
+            print(full_path)
+
+            with Image.open(full_path) as img:
+                self.image_bytes.append(img.tobytes())
+
+    def get_frames_from_tts_response(self, audio_frame) -> list[OutputQueueFrame]:
+        return [
+            OutputQueueFrame(FrameType.AUDIO_FRAME, audio_frame),
+            random.choice(self.image_bytes)
+        ]
 
 
 def add_bot_to_room(room_url, token, expiration) -> None:
@@ -85,7 +109,7 @@ def add_bot_to_room(room_url, token, expiration) -> None:
     sprite_conversation_processors = ConversationProcessorCollection(
         introduction=IntroSpriteResponse,
         waiting=WaitingSpriteResponse,
-        response=LLMResponse,
+        response=AnimatedSpriteLLMResponse,
     )
 
     orchestrator_config = OrchestratorConfig(
@@ -94,6 +118,15 @@ def add_bot_to_room(room_url, token, expiration) -> None:
         bot_name="Simple Bot",
         expiration=expiration,
     )
+
+    FORMAT = f"%(levelno)s %(asctime)s %(message)s"
+    # Remove any handlers added by imported modules so we can use our formatting
+    while logging.root.handlers:
+        logging.root.removeHandler(logging.root.handlers[-1])
+    logging.basicConfig(format=FORMAT)
+    logger: logging.Logger = logging.getLogger("dailyai")
+    logger.setLevel(logging.DEBUG)
+    logger.info("hello world")
 
     orchestrator = Orchestrator(
         orchestrator_config,

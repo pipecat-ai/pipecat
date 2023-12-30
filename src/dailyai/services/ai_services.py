@@ -8,7 +8,7 @@ from PIL import Image
 
 class AIService:
     def __init__(self):
-        self.logger = logging.getLogger("bot-instance")
+        self.logger = logging.getLogger("dailyai")
 
     def close(self):
         pass
