@@ -4,8 +4,13 @@ This SDK can help you build applications that participate in WebRTC meetings and
 
 ## Build/Install
 
-From the root of this repo, run the following:
+_Note that you may need to set up a virtual environment before following the instructions below. For instance, you might need to run the following from the root of the repo:_
+```
+python3 -m venv env
+source env/bin/activate
+```
 
+From the root of this repo, run the following:
 ```
 pip install -r requirements.txt
 python -m build
@@ -27,7 +32,7 @@ pip install path_to_this_repo
 Tou can run the simple sample like so:
 
 ```
-src/samples/simple-sample/simple-sample.py -u your_room_url -k your_daily_api_key
+python src/samples/simple-sample/simple-sample.py -u your_room_url -k your_daily_api_key
 ```
 
 Note that the sample uses Azure's TTS and LLM services. You'll need to set the following environment variables for the sample to work:
