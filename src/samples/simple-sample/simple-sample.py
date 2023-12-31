@@ -41,7 +41,7 @@ def add_bot_to_room(room_url, token, expiration) -> None:
     # - AZURE_DALLE_DEPLOYMENT_ID
 
     services = AIServiceConfig(
-        tts=AzureTTSService(), image=AzureImageGenService(), llm=AzureLLMService()
+        tts=AzureTTSService(), image=None, llm=AzureLLMService()
     )
 
     orchestrator_config = OrchestratorConfig(
@@ -64,7 +64,6 @@ def add_bot_to_room(room_url, token, expiration) -> None:
     message_handler.shutdown()
 
     services.tts.close()
-    services.image.close()
     services.llm.close()
 
 if __name__ == "__main__":
