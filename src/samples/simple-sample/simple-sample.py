@@ -4,6 +4,8 @@ from re import A
 import requests
 import time
 import urllib.parse
+import signal
+
 
 from dailyai.async_processor.async_processor import (
     LLMResponse,
@@ -14,11 +16,19 @@ from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.services.azure_ai_services import AzureImageGenService, AzureTTSService, AzureLLMService
 
+orchestrator = None
+message_handler = None
+services = None
+
+
 def add_bot_to_room(room_url, token, expiration) -> None:
+    global orchestrator
+    global message_handler
+    global services
 
     # A simple prompt for a simple sample.
     message_handler = MessageHandler(
-    """
+        """
         You are a sample bot, meant to demonstrate how to use an LLM with transcription at TTS.
         Answer user's questions and be friendly, and if you can, give some ideas about how someone
         could use a bot like you in a more in-depth way. Because your responses will be spoken,
@@ -51,24 +61,37 @@ def add_bot_to_room(room_url, token, expiration) -> None:
         expiration=expiration,
     )
 
+    # khk note: my expectation was that we'd join the Daily session below
+    # when we call orchestrator.start(), but we actually join it here.
+    #
     orchestrator = Orchestrator(
         orchestrator_config,
         services,
         message_handler,
     )
-    orchestrator.start()
 
+    orchestrator.start()
+    print("simple-sample.py should be finished now")
+
+
+def keyboard_interrupt_handler(signal, frame):
+    print("keyboard interrupt handler: shutting down gracefully")
+    orchestrator.stop()
+    orchestrator.participant_left = True
+    print("we called orchestrator.stop() and set participant_left to True")
     # When the orchestrator's done, we need to shut it down,
     # and the various services and handlers we've created.
-    orchestrator.stop()
     message_handler.shutdown()
 
     services.tts.close()
     services.llm.close()
+    print("we got past services.llm.close()")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
-    parser.add_argument("-u", "--url", type=str, required=True, help="URL of the Daily room")
+    parser.add_argument("-u", "--url", type=str,
+                        required=True, help="URL of the Daily room")
     parser.add_argument(
         "-k", "--apikey", type=str, required=True, help="Daily API Key (needed to create token)"
     )
@@ -88,8 +111,10 @@ if __name__ == "__main__":
     )
 
     if res.status_code != 200:
-        raise Exception(f'Failed to create meeting token: {res.status_code} {res.text}')
+        raise Exception(
+            f'Failed to create meeting token: {res.status_code} {res.text}')
 
     token: str = res.json()['token']
 
+    signal.signal(signal.SIGINT, keyboard_interrupt_handler)
     add_bot_to_room(args.url, token, expiration)
