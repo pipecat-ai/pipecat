@@ -209,6 +209,9 @@ class Orchestrator(EventHandler):
 
     def on_intro_finished(self, intro):
         self.logger.info(f"Introduction has finished")
+        waiting = self.conversation_processors.waiting(self.services, self.message_handler, self.output_queue)
+        waiting.prepare()
+        waiting.play()
 
     def on_response_played(self, response):
         response.finalize()

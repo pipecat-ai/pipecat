@@ -19,10 +19,11 @@ def add_bot_to_room(room_url, token, expiration) -> None:
     # A simple prompt for a simple sample.
     message_handler = MessageHandler(
     """
-        You are a sample bot, meant to demonstrate how to use an LLM with transcription at TTS.
+        You are a sample bot in a WebRTC session. You'll receive input as transcriptions of user's
+        speech, and your responses will be converted to audio via a TTS service.
         Answer user's questions and be friendly, and if you can, give some ideas about how someone
         could use a bot like you in a more in-depth way. Because your responses will be spoken,
-        try to keep them short and sweet.
+        try to keep them short.
     """
     )
 
@@ -33,12 +34,6 @@ def add_bot_to_room(room_url, token, expiration) -> None:
     # - AZURE_CHATGPT_KEY
     # - AZURE_CHATGPT_ENDPOINT
     # - AZURE_CHATGPT_DEPLOYMENT_ID
-    #
-    # This demo doesn't use image generation, but if you extend it to do so,
-    # you'll also need to set:
-    # - AZURE_DALLE_KEY
-    # - AZURE_DALLE_ENDPOINT
-    # - AZURE_DALLE_DEPLOYMENT_ID
 
     services = AIServiceConfig(
         tts=AzureTTSService(), image=None, llm=AzureLLMService()
