@@ -4,14 +4,12 @@ from dailyai.services.llm.AzureLLMService import AzureLLMService
 from dailyai.services.tts.AzureTTSService import AzureTTSService
 
 transport = None
-mic = None
 llm = None
 tts = None
 
 
 def main():
     global transport
-    global mic
     global llm
     global tts
 
@@ -27,8 +25,9 @@ def main():
     # scenes the full pipeline from the llm to the tts service to the
     # transport's audio queue is managed in such a way as to be
     # introspectible and cancelable. also, instead of piping the
-    # output to the tts service directly, we could pipe it through an
-    # adapter object that does chunking or processing or whatever.
+    # output to the tts service directly, we could pipe it to an
+    # adapter object that does chunking or processing before sending
+    # to the tts service.
     llm.set_output(tts)
 
     transport.on("error", lambda e: print(e))
