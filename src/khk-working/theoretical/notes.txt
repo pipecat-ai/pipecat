@@ -1,9 +1,9 @@
 
 -01 just say one thing and exit
 -02 llm say one thing and exit
--03 send "still frame" video
+-03 send "still frame" of video 
 -04 manual intro utterance and then llm say one thing and exit
--05 queue 10 spoken image prompts and synchronize the audio with the generated image frames
+-05 generate images for the months of the year, synchronized with their spoken descriptions
 -06 chat: llm speak and respond (ignoring transcription input while speaking)
 -07 chat: llm speak and respond (interruptible)
 -08 two llms arguing about a topic (in the same process)
@@ -11,4 +11,5 @@
 -10 listen for wake word before sending commands to llm
 -11 06 plus sound effects queued from sound file
 -12 06 plus background music played through a second "mic" device 
+
 

@@ -1,14 +1,15 @@
-
 from dailyai.services.transport.DailyTransport import DailyTransportService
 from dailyai.services.tts.AzureTTSService import AzureTTSService
 
 
 transport = None
+mic = None
 tts = None
 
 
 def main():
     global transport
+    global mic
     global tts
 
     # create a transport service object using environment variables for
@@ -28,7 +29,7 @@ def main():
     # chunks of audio to play sequentially. the "mic" object is a handle
     # we can use to inspect and control the queue if we need to. in this
     # case we will pipe into this queue from the tts service
-    mic = transport.audio_queue()
+    mic = transport.create_audio_queue()
     tts.set_output(mic)
 
     transport.on("error", lambda e: print(e))
@@ -39,7 +40,7 @@ def main():
 def say_one_thing():
     # say one thing, then leave
     tts.run_tts("hello world")
-    transport.on("audio-queue-empty", shutdown)
+    mic.on("audio-queue-empty", shutdown)
 
 
 def shutdown():
