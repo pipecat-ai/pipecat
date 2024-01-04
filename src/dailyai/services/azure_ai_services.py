@@ -84,7 +84,7 @@ class AzureLLMService(LLMService):
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
-        response = self.get_response(messages, stream=False)
+        response = await asyncio.to_thread(self.get_response, messages, False)
         if response and len(response.choices) > 0:
             return response.choices[0].message.content
         else:

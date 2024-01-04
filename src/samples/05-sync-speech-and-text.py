@@ -29,7 +29,7 @@ async def main(room_url, token):
     async def get_all_audio(text):
         all_audio = bytearray()
         async for audio in tts.run_tts(text):
-            all_audio.append(audio)
+            all_audio.extend(audio)
 
         return all_audio
 
@@ -48,7 +48,7 @@ async def main(room_url, token):
         (image, audio) = await asyncio.gather(
             *[dalle.run_image_gen(inference_text, "1024x1024"), get_all_audio(inference_text)]
         )
-        print(f"Got audio and video for {month}")
+        print(f"Got audio and video for {month}", image[0])
         transport.output_queue.put(
             [
                 OutputQueueFrame(FrameType.IMAGE_FRAME, image[1]),
@@ -70,9 +70,18 @@ async def main(room_url, token):
             "September",
             "October",
             "November",
+            "December"
         ]
+        sleeper = asyncio.sleep(meeting_duration_minutes * 60)
+        print("gathering")
         await asyncio.gather(*[show_month(month) for month in months])
+        print("waiting")
+        await sleeper
+        print("done")
+    except Exception as e:
+        print("Exception", e)
     finally:
+        print("finally")
         transport.stop()
     print("Done")
 

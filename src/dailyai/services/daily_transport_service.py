@@ -212,11 +212,13 @@ class DailyTransportService(EventHandler):
         try:
             while not self.stop_threads.is_set():
                 if self.image:
+                    print("rendering image")
                     self.camera.write_frame(self.image)
 
-                time.sleep(1.0 / 8.0)  # 8 fps
+                time.sleep(1.0 / 24)  # 24 fps
         except Exception as e:
             self.logger.error(f"Exception {e} in camera thread.")
+        print("exiting run_camera thread")
 
     def frame_consumer(self):
         self.logger.info("🎬 Starting frame consumer thread")
