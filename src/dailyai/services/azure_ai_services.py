@@ -1,11 +1,13 @@
-import json
+import aiohttp
+import asyncio
 import io
+import json
 from openai import AzureOpenAI
 
 import os
 import requests
 
-from typing import Generator
+from collections.abc import AsyncGenerator
 
 from dailyai.services.ai_services import LLMService, TTSService, ImageGenService
 from PIL import Image
@@ -23,7 +25,7 @@ class AzureTTSService(TTSService):
         self.speech_config = SpeechConfig(subscription=speech_key, region=speech_region)
         self.speech_synthesizer = SpeechSynthesizer(speech_config=self.speech_config, audio_config=None)
 
-    def run_tts(self, sentence) -> Generator[bytes, None, None]:
+    async def run_tts(self, sentence) -> AsyncGenerator[bytes, None, None]:
         self.logger.info("Running azure tts")
         ssml = "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' " \
            "xmlns:mstts='http://www.w3.org/2001/mstts'>" \
@@ -33,7 +35,7 @@ class AzureTTSService(TTSService):
            "<prosody rate='1.05'>" \
            f"{sentence}" \
            "</prosody></mstts:express-as></voice></speak> "
-        result = self.speech_synthesizer.speak_ssml(ssml)
+        result = await asyncio.to_thread(self.speech_synthesizer.speak_ssml, (ssml))
         self.logger.info("Got azure tts result")
         if result.reason == ResultReason.SynthesizingAudioCompleted:
             self.logger.info("Returning result")
@@ -65,7 +67,7 @@ class AzureLLMService(LLMService):
             model=self.model,
         )
 
-    def run_llm_async(self, messages) -> Generator[str, None, None]:
+    async def run_llm_async(self, messages) -> AsyncGenerator[str, None, None]:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
@@ -78,7 +80,7 @@ class AzureLLMService(LLMService):
             if chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
 
-    def run_llm(self, messages) -> str | None:
+    async def run_llm(self, messages) -> str | None:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
@@ -88,6 +90,49 @@ class AzureLLMService(LLMService):
         else:
             return None
 
+class AzureImageGenServiceREST(ImageGenService):
+
+    def __init__(self, api_key=None, azure_endpoint=None, api_version=None, model=None):
+        super().__init__()
+        self.api_key = api_key or os.getenv("AZURE_DALLE_KEY")
+        self.azure_endpoint = azure_endpoint or os.getenv("AZURE_DALLE_ENDPOINT")
+        self.api_version = api_version or "2023-06-01-preview"
+        self.model = model or os.getenv("AZURE_DALLE_DEPLOYMENT_ID")
+
+    async def run_image_gen(self, sentence, size) -> tuple[str, Image.Image]:
+        # TODO hoist the session to app-level
+        async with aiohttp.ClientSession() as session:
+            url = f"{self.azure_endpoint}openai/images/generations:submit?api-version={self.api_version}"
+            headers= { "api-key": self.api_key, "Content-Type": "application/json" }
+            body = {
+                # Enter your prompt text here
+                "prompt": sentence,
+                "size": size,
+                "n": 1,
+            }
+            async with session.post(url, headers=headers, json=body) as submission:
+                operation_location = submission.headers['operation-location']
+
+                status = ""
+                attempts_left = 120
+                while status != "succeeded":
+                    attempts_left -= 1
+                    if attempts_left == 0:
+                        raise Exception("Image generation timed out")
+
+                    await asyncio.sleep(1)
+                    response = await session.get(operation_location, headers=headers)
+                    json_response = await response.json()
+                    status = json_response["status"]
+
+                image_url = json_response["result"]["data"][0]["url"]
+
+                # Load the image from the url
+                async with session.get(image_url) as response:
+                    image_stream = io.BytesIO(await response.content.read())
+                    image = Image.open(image_stream)
+                    return (image_url, image.tobytes())
+
 
 class AzureImageGenService(ImageGenService):
 
@@ -96,7 +141,7 @@ class AzureImageGenService(ImageGenService):
 
         api_key = api_key or os.getenv("AZURE_DALLE_KEY")
         azure_endpoint = azure_endpoint or os.getenv("AZURE_DALLE_ENDPOINT")
-        api_version = api_version or "2023-12-01-preview"
+        api_version = api_version or "2023-06-01-preview"
         self.model = model or os.getenv("AZURE_DALLE_DEPLOYMENT_ID")
 
         self.client = AzureOpenAI(
@@ -105,7 +150,7 @@ class AzureImageGenService(ImageGenService):
             api_version=api_version,
         )
 
-    def run_image_gen(self, sentence) -> tuple[str, Image.Image]:
+    async def run_image_gen(self, sentence) -> tuple[str, Image.Image]:
         self.logger.info("Generating azure image", sentence)
 
         image = self.client.images.generate(
