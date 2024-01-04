@@ -147,9 +147,11 @@ class DailyTransportService(EventHandler):
 
     def stop(self):
         self.stop_threads.set()
-        self.camera_thread.join()
-        self.output_queue.put(OutputQueueFrame(FrameType.END_STREAM, None))
-        self.frame_consumer_thread.join()
+        if self.camera_thread and self.camera_thread.is_alive():
+            self.camera_thread.join()
+        if self.frame_consumer_thread and self.frame_consumer_thread.is_alive():
+            self.output_queue.put(OutputQueueFrame(FrameType.END_STREAM, None))
+            self.frame_consumer_thread.join()
         self.client.leave()
 
     def call_joined(self, join_data, client_error):
@@ -223,38 +225,42 @@ class DailyTransportService(EventHandler):
         all_audio_frames = bytearray()
         while True:
             try:
-                frame: OutputQueueFrame = self.output_queue.get()
-                if frame.frame_type == FrameType.END_STREAM:
-                    self.logger.info("Stopping frame consumer thread")
-                    return
+                frames: OutputQueueFrame | list[OutputQueueFrame] = self.output_queue.get()
+                if type(frames) != list:
+                    frames = [frames]
 
-                # if interrupted, we just pull frames off the queue and discard them
-                if not self.is_interrupted.is_set():
-                    if frame:
-                        if frame.frame_type == FrameType.AUDIO_FRAME:
-                            chunk = frame.frame_data
+                for frame in frames:
+                    if frame.frame_type == FrameType.END_STREAM:
+                        self.logger.info("Stopping frame consumer thread")
+                        return
 
-                            all_audio_frames.extend(chunk)
+                    # if interrupted, we just pull frames off the queue and discard them
+                    if not self.is_interrupted.is_set():
+                        if frame:
+                            if frame.frame_type == FrameType.AUDIO_FRAME:
+                                chunk = frame.frame_data
 
-                            b.extend(chunk)
-                            l = len(b) - (len(b) % smallest_write_size)
-                            if l:
-                                self.mic.write_frames(bytes(b[:l]))
-                                b = b[l:]
-                        elif frame.frame_type == FrameType.IMAGE_FRAME:
-                            self.set_image(frame.frame_data)
-                    elif len(b):
-                        self.mic.write_frames(bytes(b))
-                        b = bytearray()
-                else:
-                    if self.interrupt_time:
-                        self.logger.info(
-                            f"Lag to stop stream after interruption {time.perf_counter() - self.interrupt_time}"
-                        )
-                        self.interrupt_time = None
+                                all_audio_frames.extend(chunk)
 
-                    if frame.frame_type == FrameType.START_STREAM:
-                        self.is_interrupted.clear()
+                                b.extend(chunk)
+                                l = len(b) - (len(b) % smallest_write_size)
+                                if l:
+                                    self.mic.write_frames(bytes(b[:l]))
+                                    b = b[l:]
+                            elif frame.frame_type == FrameType.IMAGE_FRAME:
+                                self.set_image(frame.frame_data)
+                        elif len(b):
+                            self.mic.write_frames(bytes(b))
+                            b = bytearray()
+                    else:
+                        if self.interrupt_time:
+                            self.logger.info(
+                                f"Lag to stop stream after interruption {time.perf_counter() - self.interrupt_time}"
+                            )
+                            self.interrupt_time = None
+
+                        if frame.frame_type == FrameType.START_STREAM:
+                            self.is_interrupted.clear()
 
                 self.output_queue.task_done()
             except Empty:

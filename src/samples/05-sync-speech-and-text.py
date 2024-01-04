@@ -26,32 +26,52 @@ async def main(room_url, token):
     tts = AzureTTSService()
     dalle = AzureImageGenServiceREST()
 
-    inference_text_process = llm.run_llm(
-        [
-            {
-                "role": "system",
-                "content": f"Describe a nature photograph suitable for use in a calendar, for the month of January. Include only the image description with no preamble."
-            }
-        ]
-    )
+    async def get_all_audio(text):
+        all_audio = bytearray()
+        async for audio in tts.run_tts(text):
+            all_audio.append(audio)
+
+        return all_audio
+
+    async def show_month(month):
+        print(f"Running llm for {month}")
+        inference_text = await llm.run_llm(
+            [
+                {
+                    "role": "system",
+                    "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble."
+                }
+            ]
+        )
+        print(f"got llm for {month}")
+
+        (image, audio) = await asyncio.gather(
+            *[dalle.run_image_gen(inference_text, "1024x1024"), get_all_audio(inference_text)]
+        )
+        print(f"Got audio and video for {month}")
+        transport.output_queue.put(
+            [
+                OutputQueueFrame(FrameType.IMAGE_FRAME, image[1]),
+                OutputQueueFrame(FrameType.AUDIO_FRAME, audio),
+            ]
+        )
 
     try:
         transport.run()
-
-        inference_text = await inference_text_process
-
-        tts_iterator = tts.run_tts(inference_text)
-        (image, audio) = await asyncio.gather(
-            *[dalle.run_image_gen(inference_text, "1024x1024"), anext(tts_iterator)]
-        )
-        transport.output_queue.put(OutputQueueFrame(FrameType.IMAGE_FRAME, image[1]))
-        transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
-        async for audio in tts_iterator:
-            transport.output_queue.put(
-                OutputQueueFrame(FrameType.AUDIO_FRAME, audio)
-            )
-
-        await asyncio.sleep(meeting_duration_minutes * 60)
+        months = [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+        ]
+        await asyncio.gather(*[show_month(month) for month in months])
     finally:
         transport.stop()
     print("Done")
