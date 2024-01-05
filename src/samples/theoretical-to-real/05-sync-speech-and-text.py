@@ -1,7 +1,8 @@
 import asyncio
 
 from dailyai.output_queue import OutputQueueFrame, FrameType
-from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService, AzureImageGenServiceREST
+from dailyai.services.azure_ai_services import AzureTTSService
+from dailyai.services.open_ai_services import OpenAILLMService, OpenAIImageGenService
 from dailyai.services.daily_transport_service import DailyTransportService
 
 async def main(room_url, token):
@@ -23,9 +24,9 @@ async def main(room_url, token):
     transport.camera_width = 1024
     transport.camera_height = 1024
 
-    llm = AzureLLMService()
+    llm = OpenAILLMService()
     tts = AzureTTSService()
-    dalle = AzureImageGenServiceREST()
+    dalle = OpenAIImageGenService()
 
     async def get_all_audio(text):
         all_audio = bytearray()
@@ -44,7 +45,7 @@ async def main(room_url, token):
                 }
             ]
         )
-        print(f"got llm for {month}")
+        print(f"got llm for {month}, {inference_text}")
 
         (image, audio) = await asyncio.gather(
             *[dalle.run_image_gen(inference_text, "1024x1024"), get_all_audio(inference_text)]
@@ -90,4 +91,4 @@ async def main(room_url, token):
     print("Done")
 
 if __name__=="__main__":
-    asyncio.run(main("https://moishe.daily.co/Lettvins", None))
+    asyncio.run(main("https://chad-hq.daily.co/howdy", None))

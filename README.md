@@ -5,12 +5,14 @@ This SDK can help you build applications that participate in WebRTC meetings and
 ## Build/Install
 
 _Note that you may need to set up a virtual environment before following the instructions below. For instance, you might need to run the following from the root of the repo:_
+
 ```
 python3 -m venv env
 source env/bin/activate
 ```
 
 From the root of this repo, run the following:
+
 ```
 pip install -r requirements.txt
 python -m build
@@ -23,6 +25,7 @@ pip install .
 ```
 
 If you want to use this package from another directory, you can run:
+
 ```
 pip install path_to_this_repo
 ```
@@ -43,4 +46,10 @@ AZURE_SPEECH_SERVICE_REGION
 AZURE_CHATGPT_KEY
 AZURE_CHATGPT_ENDPOINT
 AZURE_CHATGPT_DEPLOYMENT_ID
+```
+
+If you have those environment variables stored in an .env file, you can quickly load them into your terminal's environment by running this:
+
+```bash
+$ export $(grep -v '^#' .env | xargs)
 ```
