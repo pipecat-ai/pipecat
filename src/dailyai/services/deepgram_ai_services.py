@@ -22,9 +22,8 @@ class DeepgramTTSService(TTSService):
         base_url = "https://api.beta.deepgram.com/v1/speak"
         request_url = f"{base_url}?model={self.voice}&encoding=linear16&container=none&sample_rate=16000"
         headers = {"authorization": f"token {self.speech_key}"}
-
-        r = requests.post(request_url, headers=headers, data=sentence)
-        self.logger.info(
-            f"audio fetch status code: {r.status_code}, content length: {len(r.content)}"
-        )
-        yield r.content
+        body = { "text": sentence }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(request_url, headers=headers, json=body) as r:
+                async for data in r.content:
+                    yield data
