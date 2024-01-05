@@ -3,6 +3,7 @@ import asyncio
 from dailyai.output_queue import OutputQueueFrame, FrameType
 from dailyai.services.azure_ai_services import AzureTTSService
 from dailyai.services.open_ai_services import OpenAILLMService, OpenAIImageGenService
+from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.daily_transport_service import DailyTransportService
 
 async def main(room_url, token):
@@ -25,7 +26,7 @@ async def main(room_url, token):
     transport.camera_height = 1024
 
     llm = OpenAILLMService()
-    tts = AzureTTSService()
+    tts = DeepgramTTSService()
     dalle = OpenAIImageGenService()
 
     async def get_all_audio(text):

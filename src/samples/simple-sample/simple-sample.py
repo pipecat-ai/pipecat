@@ -13,6 +13,7 @@ from dailyai.orchestrator import OrchestratorConfig, Orchestrator
 from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.services.azure_ai_services import AzureImageGenService, AzureTTSService, AzureLLMService
+from dailyai.services.deepgram_ai_services import DeepgramTTSService
 
 def add_bot_to_room(room_url, token, expiration) -> None:
 
