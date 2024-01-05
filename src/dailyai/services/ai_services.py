@@ -4,8 +4,6 @@ from abc import abstractmethod
 from collections.abc import AsyncGenerator
 
 from dataclasses import dataclass
-from typing import Generator
-from PIL import Image
 
 
 class AIService:
@@ -20,7 +18,7 @@ class LLMService(AIService):
     @abstractmethod
     async def run_llm_async(
         self, messages
-    ) -> AsyncGenerator[str, None, None]:
+    ) -> AsyncGenerator[str, None]:
         pass
 
     # Generate a responses to a prompt. Returns the response
@@ -39,14 +37,14 @@ class TTSService(AIService):
     # Converts the sentence to audio. Yields a list of audio frames that can
     # be sent to the microphone device
     @abstractmethod
-    async def run_tts(self, sentence) -> AsyncGenerator[bytes, None, None]:
+    async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
         pass
 
 
 class ImageGenService(AIService):
     # Renders the image. Returns an Image object.
     @abstractmethod
-    async def run_image_gen(self, sentence) -> tuple[str, Image.Image]:
+    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         pass
 
 

@@ -25,7 +25,7 @@ class AzureTTSService(TTSService):
         self.speech_config = SpeechConfig(subscription=speech_key, region=speech_region)
         self.speech_synthesizer = SpeechSynthesizer(speech_config=self.speech_config, audio_config=None)
 
-    async def run_tts(self, sentence) -> AsyncGenerator[bytes, None, None]:
+    async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
         self.logger.info("Running azure tts")
         ssml = "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' " \
            "xmlns:mstts='http://www.w3.org/2001/mstts'>" \
@@ -99,7 +99,7 @@ class AzureImageGenServiceREST(ImageGenService):
         self.api_version = api_version or "2023-06-01-preview"
         self.model = model or os.getenv("AZURE_DALLE_DEPLOYMENT_ID")
 
-    async def run_image_gen(self, sentence, size) -> tuple[str, Image.Image]:
+    async def run_image_gen(self, sentence, size) -> tuple[str, bytes]:
         # TODO hoist the session to app-level
         async with aiohttp.ClientSession() as session:
             url = f"{self.azure_endpoint}openai/images/generations:submit?api-version={self.api_version}"
@@ -115,6 +115,7 @@ class AzureImageGenServiceREST(ImageGenService):
 
                 status = ""
                 attempts_left = 120
+                json_response = None
                 while status != "succeeded":
                     attempts_left -= 1
                     if attempts_left == 0:
@@ -125,7 +126,9 @@ class AzureImageGenServiceREST(ImageGenService):
                     json_response = await response.json()
                     status = json_response["status"]
 
-                image_url = json_response["result"]["data"][0]["url"]
+                image_url = json_response["result"]["data"][0]["url"] if json_response else None
+                if not image_url:
+                    raise Exception("Image generation failed")
 
                 # Load the image from the url
                 async with session.get(image_url) as response:

@@ -23,14 +23,14 @@ class DailyTransportService(EventHandler):
     def __init__(
         self,
         room_url: str,
-        token: str,
+        token: str | None,
         bot_name: str,
         duration: float = 10,
     ):
         super().__init__()
         self.bot_name: str = bot_name
         self.room_url: str = room_url
-        self.token: str = token
+        self.token: str | None = token
         self.duration: float = duration
         self.expiration = time.time() + duration * 60
 
@@ -38,6 +38,9 @@ class DailyTransportService(EventHandler):
         self.is_interrupted = Event()
         self.stop_threads = Event()
         self.story_started = False
+        self.mic_enabled = False
+        self.mic_sample_rate = 16000
+        self.camera_enabled = False
 
         self.logger: logging.Logger = logging.getLogger("dailyai")
 
@@ -129,6 +132,7 @@ class DailyTransportService(EventHandler):
         self.configure_daily()
         self.running_thread = Thread(target=self.run_daily, daemon=True)
         self.running_thread.start()
+        self.running_thread.join()
 
     def run_daily(self):
         # TODO: this loop could, I think, be replaced with a timer and an event

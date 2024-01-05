@@ -14,7 +14,8 @@ dependencies = [
     "google-cloud-texttospeech",
     "azure-cognitiveservices-speech",
     "pyht",
-    "opentelemetry-sdk"
+    "opentelemetry-sdk",
+    "aiohttp"
 ]
 
 [tool.setuptools.packages.find]
