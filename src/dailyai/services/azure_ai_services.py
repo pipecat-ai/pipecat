@@ -153,20 +153,20 @@ class AzureImageGenService(ImageGenService):
             api_version=api_version,
         )
 
-    async def run_image_gen(self, sentence) -> tuple[str, Image.Image]:
+    async def run_image_gen(self, sentence, size) -> tuple[str, bytes]:
         self.logger.info("Generating azure image", sentence)
 
         image = self.client.images.generate(
             model=self.model,
             prompt=sentence,
             n=1,
-            size=f"1024x1024",
+            size=size,
         )
 
         url = image["data"][0]["url"]
         response = requests.get(url)
 
         dalle_stream = io.BytesIO(response.content)
-        dalle_im = Image.open(dalle_stream)
+        dalle_im = Image.open(dalle_stream.tobytes())
 
         return (url, dalle_im)

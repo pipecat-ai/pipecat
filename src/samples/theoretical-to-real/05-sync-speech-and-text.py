@@ -8,12 +8,13 @@ async def main(room_url, token):
     class Sample05Transport(DailyTransportService):
         def on_participant_joined(self, participant):
             super().on_participant_joined(participant)
+            asyncio.run(show_all_months())
 
     meeting_duration_minutes = 4
     transport = Sample05Transport(
         room_url,
         token,
-        "Simple Bot",
+        "Month Narration Bot",
         meeting_duration_minutes,
     )
     transport.mic_enabled = True
@@ -56,11 +57,12 @@ async def main(room_url, token):
             ]
         )
 
-    try:
-        transport.run()
+    async def show_all_months():
+        # for now just two to avoid 429s with Azure
         months = [
             "January",
-            "February",
+            "February",]
+        """
             "March",
             "April",
             "May",
@@ -70,14 +72,16 @@ async def main(room_url, token):
             "September",
             "October",
             "November",
-            "December"
+            "December",
         ]
-        sleeper = asyncio.sleep(meeting_duration_minutes * 60)
+        """
         print("gathering")
         await asyncio.gather(*[show_month(month) for month in months])
-        print("waiting")
-        await sleeper
         print("done")
+
+    try:
+        transport.run()
+        await asyncio.sleep(meeting_duration_minutes * 60)
     except Exception as e:
         print("Exception", e)
     finally:

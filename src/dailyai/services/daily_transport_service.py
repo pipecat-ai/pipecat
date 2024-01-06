@@ -194,11 +194,7 @@ class DailyTransportService(EventHandler):
         pass
 
     def on_transcription_message(self, message):
-        with self.tracer.start_as_current_span(
-            "on_transcription_message", context=self.ctx
-        ):
-            if message["session_id"] != self.my_participant_id:
-                self.handle_transcription_fragment(message["text"])
+        pass
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
         self.logger.info(f"Transcription stopped {stopped_by}, {stopped_by_error}")
@@ -216,10 +212,9 @@ class DailyTransportService(EventHandler):
         try:
             while not self.stop_threads.is_set():
                 if self.image:
-                    print("rendering image")
                     self.camera.write_frame(self.image)
 
-                time.sleep(1.0 / 24)  # 24 fps
+                time.sleep(1.0 / 8)  # 8 fps
         except Exception as e:
             self.logger.error(f"Exception {e} in camera thread.")
         print("exiting run_camera thread")
@@ -231,9 +226,13 @@ class DailyTransportService(EventHandler):
         all_audio_frames = bytearray()
         while True:
             try:
-                frames: OutputQueueFrame | list[OutputQueueFrame] = self.output_queue.get()
-                if type(frames) != list:
-                    frames = [frames]
+                frames_or_frame: OutputQueueFrame | list[OutputQueueFrame] = self.output_queue.get()
+                if type(frames_or_frame) == OutputQueueFrame:
+                    frames: list[OutputQueueFrame] = [frames_or_frame]
+                elif type(frames_or_frame) == list:
+                    frames: list[OutputQueueFrame] = frames_or_frame
+                else:
+                    raise Exception("Unknown type in output queue")
 
                 for frame in frames:
                     if frame.frame_type == FrameType.END_STREAM:

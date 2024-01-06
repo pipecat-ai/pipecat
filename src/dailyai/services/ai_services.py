@@ -44,7 +44,7 @@ class TTSService(AIService):
 class ImageGenService(AIService):
     # Renders the image. Returns an Image object.
     @abstractmethod
-    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence, size) -> tuple[str, bytes]:
         pass
 
 
