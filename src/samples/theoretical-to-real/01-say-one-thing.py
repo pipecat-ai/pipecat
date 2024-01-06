@@ -5,29 +5,6 @@ from dailyai.output_queue import OutputQueueFrame, FrameType
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureTTSService
 
-class Sample01Transport(DailyTransportService):
-    def __init__(
-        self,
-        room_url: str,
-        token: str | None,
-        bot_name: str,
-        duration: float = 10,
-    ):
-        super().__init__(room_url, token, bot_name, duration)
-
-    def set_audio_generator(self, audio_generator) -> None:
-        self.audio_generator = audio_generator
-
-    async def play_audio(self):
-        print("playing audio", self.audio_generator)
-        async for audio in self.audio_generator:
-            print("putting frame on queue")
-            self.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
-
-    def on_participant_joined(self, participant):
-        super().on_participant_joined(participant)
-        asyncio.run(self.play_audio())
-
 async def main(room_url):
     # create a transport service object using environment variables for
     # the transport service's API key, room url, and any other configuration.
@@ -38,7 +15,7 @@ async def main(room_url):
     # the abstract transport service APIs presumably can map pretty closely
     # to the daily-python basic API
     meeting_duration_minutes = 4
-    transport = Sample01Transport(
+    transport = DailyTransportService(
         room_url,
         None,
         "Say One Thing",
@@ -49,20 +26,22 @@ async def main(room_url):
     # similarly, create a tts service
     tts = AzureTTSService()
 
-    # ask the transport to create a local audio "device"/queue for
-    # chunks of audio to play sequentially. the "mic" object is a handle
-    # we can use to inspect and control the queue if we need to. in this
-    # case we will pipe into this queue from the tts service
+    async def play_audio(transport, audio_generator):
+        async for audio in audio_generator:
+            transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
+
+    # Get the generator for the audio. This will start running in the background,
+    # and when we ask the generator for its items, we'll get what it's generated.
     audio_generator: AsyncGenerator[bytes, None] = tts.run_tts("hello world")
 
-    # Should this just happen when we create the object?
-    transport.set_audio_generator(audio_generator)
-    try:
-        transport.run()
-    except KeyboardInterrupt:
-        print("Keyboard interrupt")
-    finally:
+    # Register an event handler so we can play the audio when the participant joins.
+    @transport.event_handler("on_participant_joined")
+    def on_participant_joined(transport, participant):
+        print("participant joined", participant)
+        asyncio.run(play_audio(transport, audio_generator))
         transport.stop()
+
+    transport.run()
 
 
 if __name__ == "__main__":

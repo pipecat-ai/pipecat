@@ -64,6 +64,13 @@ class DailyTransportService(EventHandler):
         else:
             self.event_handlers[event_name].append(types.MethodType(handler, self))
 
+    def event_handler(self, event_name: str):
+        def decorator(handler):
+            self.add_event_handler(event_name, handler)
+            return handler
+
+        return decorator
+
     def configure_daily(self):
         Daily.init()
         self.client = CallClient(event_handler=self)
@@ -141,7 +148,7 @@ class DailyTransportService(EventHandler):
         try:
             participant_count: int = len(self.client.participants())
             self.logger.info(f"{participant_count} participants in room")
-            while time.time() < self.expiration and not self.participant_left:
+            while time.time() < self.expiration and not self.participant_left and not self.stop_threads.is_set():
                 # all handling of incoming transcriptions happens in on_transcription_message
                 time.sleep(1)
         except Exception as e:
@@ -149,14 +156,14 @@ class DailyTransportService(EventHandler):
         finally:
             self.client.leave()
 
-    def stop(self):
-        self.stop_threads.set()
         if self.camera_thread and self.camera_thread.is_alive():
             self.camera_thread.join()
         if self.frame_consumer_thread and self.frame_consumer_thread.is_alive():
             self.output_queue.put(OutputQueueFrame(FrameType.END_STREAM, None))
             self.frame_consumer_thread.join()
-        self.client.leave()
+
+    def stop(self):
+        self.stop_threads.set()
 
     def call_joined(self, join_data, client_error):
         self.logger.info(f"Call_joined: {join_data}, {client_error}")

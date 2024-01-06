@@ -11,4 +11,4 @@ class FrameType(Enum):
 @dataclass(frozen=True)
 class OutputQueueFrame:
     frame_type: FrameType
-    frame_data: bytes
+    frame_data: bytes | None
