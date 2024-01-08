@@ -39,7 +39,7 @@ async def main(room_url):
         async for audio in audio_generator:
             transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
 
-    transport.run()
+    await transport.run()
 
 
 if __name__ == "__main__":
