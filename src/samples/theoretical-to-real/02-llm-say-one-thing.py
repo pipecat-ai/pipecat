@@ -32,7 +32,6 @@ async def main(room_url):
     async def on_participant_joined(transport, participant):
         current_text = ""
         async for text in llm_generator:
-            print("text", text)
             current_text += text
             if re.match(r"^.*[.!?]$", text):
                 async for audio in tts.run_tts(current_text):

@@ -161,11 +161,6 @@ class DailyTransportService(EventHandler):
             participant_count: int = len(self.client.participants())
             self.logger.info(f"{participant_count} participants in room")
             while time.time() < self.expiration and not self.participant_left and not self.stop_threads.is_set():
-                print(
-                    time.time() < self.expiration,
-                    not self.participant_left,
-                    not self.stop_threads.is_set()
-                )
                 # all handling of incoming transcriptions happens in on_transcription_message
                 await asyncio.sleep(1)
         except Exception as e:
