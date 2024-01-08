@@ -41,6 +41,8 @@ class DailyTransportService(EventHandler):
         self.story_started = False
         self.mic_enabled = False
         self.mic_sample_rate = 16000
+        self.camera_width = 1024
+        self.camera_height = 768
         self.camera_enabled = False
 
         self.camera_thread = None
@@ -159,6 +161,11 @@ class DailyTransportService(EventHandler):
             participant_count: int = len(self.client.participants())
             self.logger.info(f"{participant_count} participants in room")
             while time.time() < self.expiration and not self.participant_left and not self.stop_threads.is_set():
+                print(
+                    time.time() < self.expiration,
+                    not self.participant_left,
+                    not self.stop_threads.is_set()
+                )
                 # all handling of incoming transcriptions happens in on_transcription_message
                 await asyncio.sleep(1)
         except Exception as e:
@@ -166,6 +173,7 @@ class DailyTransportService(EventHandler):
         finally:
             self.client.leave()
 
+        self.stop_threads.set()
         if self.camera_thread and self.camera_thread.is_alive():
             self.camera_thread.join()
         if self.frame_consumer_thread and self.frame_consumer_thread.is_alive():
@@ -208,6 +216,8 @@ class DailyTransportService(EventHandler):
         pass
 
     def on_participant_left(self, participant, reason):
+        if len(self.client.participants()) < 2:
+            self.participant_left = True
         pass
 
     def on_app_message(self, message, sender):

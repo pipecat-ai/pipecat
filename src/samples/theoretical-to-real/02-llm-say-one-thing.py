@@ -30,8 +30,6 @@ async def main(room_url):
 
     @transport.event_handler("on_participant_joined")
     async def on_participant_joined(transport, participant):
-        print(local_joined, participant_joined)
-
         current_text = ""
         async for text in llm_generator:
             print("text", text)
