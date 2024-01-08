@@ -17,7 +17,7 @@ class DeepgramTTSService(TTSService):
     def get_mic_sample_rate(self):
         return 24000
 
-    async def run_tts(self, sentence) -> AsyncGenerator[bytes, None, None]:
+    async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
         self.logger.info(f"Running deepgram tts for {sentence}")
         base_url = "https://api.beta.deepgram.com/v1/speak"
         request_url = f"{base_url}?model={self.voice}&encoding=linear16&container=none&sample_rate=16000"

@@ -26,7 +26,7 @@ class OpenAILLMService(LLMService):
             model=self.model
         )
 
-    async def run_llm_async(self, messages) -> AsyncGenerator[str, None, None]:
+    async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
 
