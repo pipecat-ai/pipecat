@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import AsyncGenerator
 
 from dailyai.output_queue import OutputQueueFrame, FrameType
@@ -14,7 +15,7 @@ async def main(room_url):
     #
     # the abstract transport service APIs presumably can map pretty closely
     # to the daily-python basic API
-    meeting_duration_minutes = 4
+    meeting_duration_minutes = 1
     transport = DailyTransportService(
         room_url,
         None,
@@ -26,20 +27,17 @@ async def main(room_url):
     # similarly, create a tts service
     tts = AzureTTSService()
 
-    async def play_audio(transport, audio_generator):
-        async for audio in audio_generator:
-            transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
-
     # Get the generator for the audio. This will start running in the background,
     # and when we ask the generator for its items, we'll get what it's generated.
     audio_generator: AsyncGenerator[bytes, None] = tts.run_tts("hello world")
 
     # Register an event handler so we can play the audio when the participant joins.
     @transport.event_handler("on_participant_joined")
-    def on_participant_joined(transport, participant):
-        print("participant joined", participant)
-        asyncio.run(play_audio(transport, audio_generator))
-        transport.stop()
+    async def on_participant_joined(transport, participant):
+        if participant["info"]["isLocal"]:
+            return
+        async for audio in audio_generator:
+            transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
 
     transport.run()
 

@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import logging
 import time
@@ -42,13 +43,29 @@ class DailyTransportService(EventHandler):
         self.mic_sample_rate = 16000
         self.camera_enabled = False
 
+        self.camera_thread = None
+        self.frame_consumer_thread = None
+
         self.logger: logging.Logger = logging.getLogger("dailyai")
 
         self.event_handlers = {}
 
-    def monkeypatch(self, event_name, *args):
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.loop = None
+
+    def patch_method(self, event_name, *args):
         for handler in self.event_handlers[event_name]:
-            handler(*args)
+            if inspect.iscoroutinefunction(handler):
+                if self.loop:
+                    future = asyncio.run_coroutine_threadsafe(handler(*args), self.loop)
+                    #concurrent.futures.wait(future)
+                else:
+                    raise Exception("No event loop to run coroutine. In order to use async event handlers, you must run the DailyTransportService in an asyncio event loop.")
+                asyncio.run(handler(*args))
+            else:
+                handler(*args)
 
     def add_event_handler(self, event_name: str, handler):
         if not event_name.startswith("on_"):
@@ -60,7 +77,7 @@ class DailyTransportService(EventHandler):
 
         if not event_name in self.event_handlers:
             self.event_handlers[event_name] = [getattr(self, event_name), types.MethodType(handler, self)]
-            setattr(self, event_name, partial(self.monkeypatch, event_name))
+            setattr(self, event_name, partial(self.patch_method, event_name))
         else:
             self.event_handlers[event_name].append(types.MethodType(handler, self))
 
@@ -191,6 +208,9 @@ class DailyTransportService(EventHandler):
                 }
             )
 
+    def on_call_state_updated(self, state):
+        pass
+
     def on_participant_joined(self, participant):
         pass
 
@@ -224,7 +244,6 @@ class DailyTransportService(EventHandler):
                 time.sleep(1.0 / 8)  # 8 fps
         except Exception as e:
             self.logger.error(f"Exception {e} in camera thread.")
-        print("exiting run_camera thread")
 
     def frame_consumer(self):
         self.logger.info("🎬 Starting frame consumer thread")
