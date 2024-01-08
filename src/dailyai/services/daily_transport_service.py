@@ -55,17 +55,15 @@ class DailyTransportService(EventHandler):
         except RuntimeError:
             self.loop = None
 
-    def patch_method(self, event_name, *args):
+    def patch_method(self, event_name, *args, **kwargs):
         for handler in self.event_handlers[event_name]:
             if inspect.iscoroutinefunction(handler):
                 if self.loop:
-                    future = asyncio.run_coroutine_threadsafe(handler(*args), self.loop)
-                    #concurrent.futures.wait(future)
+                    asyncio.run_coroutine_threadsafe(handler(*args, **kwargs), self.loop)
                 else:
                     raise Exception("No event loop to run coroutine. In order to use async event handlers, you must run the DailyTransportService in an asyncio event loop.")
-                asyncio.run(handler(*args))
             else:
-                handler(*args)
+                handler(*args, **kwargs)
 
     def add_event_handler(self, event_name: str, handler):
         if not event_name.startswith("on_"):
@@ -152,14 +150,9 @@ class DailyTransportService(EventHandler):
 
         self.my_participant_id = self.client.participants()["local"]["id"]
 
-    def run(self) -> None:
+    async def run(self) -> None:
         self.configure_daily()
-        self.running_thread = Thread(target=self.run_daily, daemon=True)
-        self.running_thread.start()
-        self.running_thread.join()
 
-    def run_daily(self):
-        # TODO: this loop could, I think, be replaced with a timer and an event
         self.participant_left = False
 
         try:
@@ -167,7 +160,7 @@ class DailyTransportService(EventHandler):
             self.logger.info(f"{participant_count} participants in room")
             while time.time() < self.expiration and not self.participant_left and not self.stop_threads.is_set():
                 # all handling of incoming transcriptions happens in on_transcription_message
-                time.sleep(1)
+                await asyncio.sleep(1)
         except Exception as e:
             self.logger.error(f"Exception {e}")
         finally:
