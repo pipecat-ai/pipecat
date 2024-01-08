@@ -56,7 +56,7 @@ class OpenAIImageGenService(ImageGenService):
         self.model = model or os.getenv("OPEN_AI_IMAGE_MODEL") or "dall-e-3"
         self.client = AsyncOpenAI(api_key=api_key)
 
-    async def run_image_gen(self, sentence, size) -> tuple[str, Image.Image]:
+    async def run_image_gen(self, sentence, size) -> tuple[str, bytes]:
         self.logger.info("Generating OpenAI image", sentence)
 
         image = await self.client.images.generate(
