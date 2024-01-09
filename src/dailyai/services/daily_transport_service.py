@@ -261,6 +261,7 @@ class DailyTransportService(EventHandler):
                 for frame in frames:
                     if frame.frame_type == FrameType.END_STREAM:
                         self.logger.info("Stopping frame consumer thread")
+                        self.output_queue.task_done()
                         return
 
                     # if interrupted, we just pull frames off the queue and discard them

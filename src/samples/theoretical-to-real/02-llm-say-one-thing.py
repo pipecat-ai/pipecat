@@ -32,6 +32,9 @@ async def main(room_url):
 
     @transport.event_handler("on_participant_joined")
     async def on_participant_joined(transport, participant):
+        if participant["id"] == transport.my_participant_id:
+            return
+
         current_text = ""
         async for text in llm_generator:
             current_text += text
@@ -39,6 +42,13 @@ async def main(room_url):
                 async for audio in tts.run_tts(current_text):
                     transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
                 current_text = ""
+
+        # Put an "end stream" item on the queue, which will cause it to shut down when it's processed
+        # all the audio.
+        transport.output_queue.put(OutputQueueFrame(FrameType.END_STREAM, None))
+        transport.output_queue.join()
+
+        transport.stop()
 
     await transport.run()
 

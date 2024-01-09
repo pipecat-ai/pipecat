@@ -39,6 +39,13 @@ async def main(room_url):
         async for audio in audio_generator:
             transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
 
+        # Put an "end stream" item on the queue, which will cause it to shut down when it's processed
+        # all the audio.
+        transport.output_queue.put(OutputQueueFrame(FrameType.END_STREAM, None))
+        transport.output_queue.join()
+
+        transport.stop()
+
     await transport.run()
 
 
