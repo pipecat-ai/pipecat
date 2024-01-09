@@ -1,8 +1,11 @@
 import argparse
 import asyncio
 
+from asyncio.queues import Queue
+import re
+
 from dailyai.output_queue import OutputQueueFrame, FrameType
-from dailyai.services.azure_ai_services import AzureTTSService
+from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.open_ai_services import OpenAILLMService, OpenAIImageGenService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
@@ -22,10 +25,12 @@ async def main(room_url):
     transport.camera_width = 1024
     transport.camera_height = 1024
 
-    llm = OpenAILLMService()
+    llm = AzureLLMService()
     tts = ElevenLabsTTSService()
     dalle = OpenAIImageGenService()
 
+    # Get a complete audio chunk from the given text. Splitting this into its own
+    # coroutine lets us ensure proper ordering of the audio chunks on the output queue.
     async def get_all_audio(text):
         all_audio = bytearray()
         async for audio in tts.run_tts(text):
@@ -33,58 +38,78 @@ async def main(room_url):
 
         return all_audio
 
-    async def show_month(month):
-        inference_text = await llm.run_llm(
+    async def get_month_data(month):
+        image_text = ""
+        current_clause = ""
+        tts_tasks = []
+        async for text in llm.run_llm_async(
             [
                 {
                     "role": "system",
-                    "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit your description to 1 sentence."
+                    "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please."
                 }
             ]
+        ):
+            image_text += text
+            current_clause += text
+            if re.match(r"^.*[.!?]$", text):
+                tts_tasks.append(get_all_audio(current_clause))
+                current_clause = ""
+
+        tts_tasks.insert(0, dalle.run_image_gen(image_text, "1024x1024"))
+
+        data = await asyncio.gather(
+            *tts_tasks
         )
 
-        (image, audio) = await asyncio.gather(
-            *[dalle.run_image_gen(inference_text, "1024x1024"), get_all_audio(inference_text)]
-        )
-        transport.output_queue.put(
-            [
-                OutputQueueFrame(FrameType.IMAGE_FRAME, image[1]),
-                OutputQueueFrame(FrameType.AUDIO_FRAME, audio),
-            ]
-        )
+        return {
+            "month": month,
+            "text": image_text,
+            "image": data[0][1],
+            "audio": data[1:],
+        }
 
-    async def show_all_months():
-        # for now just two to avoid 429s with Azure
-        months: list[str] = [
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
-        ]
+    months: list[str] = [
+        "January",
+        "February",
+        "March",
+        "April",
+    ]
 
-        await asyncio.gather(*[show_month(month) for month in months])
+    unused_months = [
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ]
 
     @transport.event_handler("on_participant_joined")
     async def on_participant_joined(transport, participant):
         if participant["id"] == transport.my_participant_id:
             return
 
-        await show_all_months()
+        for month_data_task in asyncio.as_completed(month_tasks):
+            data = await month_data_task
+            transport.output_queue.put(
+                [
+                    OutputQueueFrame(FrameType.IMAGE_FRAME, data["image"]),
+                    OutputQueueFrame(FrameType.AUDIO_FRAME, data["audio"][0]),
+                ]
+            )
+            for audio in data["audio"][1:]:
+                transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
 
         # wait for the output queue to be empty, then leave the meeting
         transport.output_queue.join()
         transport.stop()
 
+    month_tasks = [asyncio.create_task(get_month_data(month)) for month in months]
+
     await transport.run()
-    print("Done")
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")

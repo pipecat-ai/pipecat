@@ -2,7 +2,7 @@ import aiohttp
 import asyncio
 import io
 import json
-from openai import AzureOpenAI
+from openai import AsyncAzureOpenAI
 
 import os
 import requests
@@ -51,29 +51,29 @@ class AzureLLMService(LLMService):
     def __init__(self, api_key=None, azure_endpoint=None, api_version=None, model=None):
         super().__init__()
         api_key = api_key or os.getenv("AZURE_CHATGPT_KEY")
+
         azure_endpoint = azure_endpoint or os.getenv("AZURE_CHATGPT_ENDPOINT")
+        if not azure_endpoint:
+            raise Exception("No azure endpoint specified for Azure LLM, please set AZURE_CHATGPT_ENDPOINT in the environment or pass it to the AzureLLMService constructor")
+
+        model: str | None = model or os.getenv("AZURE_CHATGPT_DEPLOYMENT_ID")
+        if not model:
+            raise Exception("No model specified for Azure LLM, please set AZURE_CHATGPT_DEPLOYMENT_ID in the environment or pass it to the AzureLLMService constructor")
+        self.model: str = model
+
         api_version = api_version or "2023-12-01-preview"
-        self.client = AzureOpenAI(
+        self.client = AsyncAzureOpenAI(
             api_key=api_key,
             azure_endpoint=azure_endpoint,
             api_version=api_version,
         )
-        self.model = model or os.getenv("AZURE_CHATGPT_DEPLOYMENT_ID")
 
-    def get_response(self, messages, stream):
-        return self.client.chat.completions.create(
-            stream=stream,
-            messages=messages,
-            model=self.model,
-        )
-
-    async def run_llm_async(self, messages) -> AsyncGenerator[str, None, None]:
+    async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
-        response = self.get_response(messages, stream=True)
-
-        for chunk in response:
+        chunks = await self.client.chat.completions.create(model=self.model, stream=True, messages=messages)
+        async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue
 
@@ -84,7 +84,7 @@ class AzureLLMService(LLMService):
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
-        response = await asyncio.to_thread(self.get_response, messages, False)
+        response = await self.client.chat.completions.create(model=self.model, stream=False, messages=messages)
         if response and len(response.choices) > 0:
             return response.choices[0].message.content
         else:
