@@ -4,7 +4,8 @@ from typing import AsyncGenerator
 
 from dailyai.output_queue import OutputQueueFrame, FrameType
 from dailyai.services.daily_transport_service import DailyTransportService
-from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
+from dailyai.services.azure_ai_services import AzureLLMService
+from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 local_joined = False
 participant_joined = False
@@ -19,7 +20,7 @@ async def main(room_url):
     )
     transport.mic_enabled = True
 
-    tts = AzureTTSService()
+    tts = ElevenLabsTTSService()
     llm = AzureLLMService()
 
     messages = [{
