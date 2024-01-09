@@ -1,5 +1,4 @@
 import argparse
-
 import asyncio
 
 from asyncio.queues import Queue
@@ -75,9 +74,6 @@ async def main(room_url):
         "February",
         "March",
         "April",
-    ]
-
-    unused_months = [
         "May",
         "June",
         "July",
