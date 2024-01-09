@@ -1,5 +1,5 @@
+import argparse
 import asyncio
-import time
 from typing import AsyncGenerator
 
 from dailyai.output_queue import OutputQueueFrame, FrameType
@@ -43,4 +43,11 @@ async def main(room_url):
 
 
 if __name__ == "__main__":
-    asyncio.run(main("https://moishe.daily.co/Lettvins"))
+    parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
+    parser.add_argument(
+        "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
+    )
+
+    args: argparse.Namespace = parser.parse_args()
+
+    asyncio.run(main(args.url))
