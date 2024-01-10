@@ -5,10 +5,9 @@ from asyncio.queues import Queue
 import re
 
 from dailyai.output_queue import OutputQueueFrame, FrameType
-from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
+from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.services.open_ai_services import OpenAILLMService, OpenAIImageGenService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
+from dailyai.services.open_ai_services import OpenAIImageGenService
 from dailyai.services.daily_transport_service import DailyTransportService
 
 async def main(room_url):
@@ -89,6 +88,9 @@ async def main(room_url):
         if participant["id"] == transport.my_participant_id:
             return
 
+        # This will play the months in the order they're completed. The benefit
+        # is we'll have as little delay as possible before the first month, and
+        # likely no delay between months, but the months won't display in order.
         for month_data_task in asyncio.as_completed(month_tasks):
             data = await month_data_task
             transport.output_queue.put(

@@ -58,14 +58,17 @@ class DailyTransportService(EventHandler):
             self.loop = None
 
     def patch_method(self, event_name, *args, **kwargs):
-        for handler in self.event_handlers[event_name]:
-            if inspect.iscoroutinefunction(handler):
-                if self.loop:
-                    asyncio.run_coroutine_threadsafe(handler(*args, **kwargs), self.loop)
+        try:
+            for handler in self.event_handlers[event_name]:
+                if inspect.iscoroutinefunction(handler):
+                    if self.loop:
+                        asyncio.run_coroutine_threadsafe(handler(*args, **kwargs), self.loop)
+                    else:
+                        raise Exception("No event loop to run coroutine. In order to use async event handlers, you must run the DailyTransportService in an asyncio event loop.")
                 else:
-                    raise Exception("No event loop to run coroutine. In order to use async event handlers, you must run the DailyTransportService in an asyncio event loop.")
-            else:
-                handler(*args, **kwargs)
+                    handler(*args, **kwargs)
+        except Exception as e:
+            self.logger.error(f"Exception in event handler {event_name}: {e}")
 
     def add_event_handler(self, event_name: str, handler):
         if not event_name.startswith("on_"):
@@ -105,6 +108,14 @@ class DailyTransportService(EventHandler):
         self.speaker: VirtualSpeakerDevice = Daily.create_speaker_device(
             "speaker", sample_rate=16000, channels=1
         )
+
+        self.image: bytes | None = None
+        self.camera_thread = Thread(target=self.run_camera, daemon=True)
+        self.camera_thread.start()
+
+        self.logger.info("Starting frame consumer thread")
+        self.frame_consumer_thread = Thread(target=self.frame_consumer, daemon=True)
+        self.frame_consumer_thread.start()
 
         Daily.select_speaker_device("speaker")
 
@@ -150,7 +161,26 @@ class DailyTransportService(EventHandler):
             }
         )
 
+        if self.token:
+            self.client.start_transcription(
+                {
+                    "language": "en",
+                    "tier": "nova",
+                    "model": "2-conversationalai",
+                    "profanity_filter": True,
+                    "redact": False,
+                    "extra": {
+                        "endpointing": True,
+                        "punctuate": False,
+                    },
+                },
+                self.transcription_callback,
+            )
+
         self.my_participant_id = self.client.participants()["local"]["id"]
+
+    def transcription_callback(self, foo, bar):
+        print("transcription callback", foo, bar)
 
     async def run(self) -> None:
         self.configure_daily()
@@ -181,29 +211,6 @@ class DailyTransportService(EventHandler):
     def call_joined(self, join_data, client_error):
         self.logger.info(f"Call_joined: {join_data}, {client_error}")
 
-        self.image: bytes | None = None
-        self.camera_thread = Thread(target=self.run_camera, daemon=True)
-        self.camera_thread.start()
-
-        self.logger.info("Starting frame consumer thread")
-        self.frame_consumer_thread = Thread(target=self.frame_consumer, daemon=True)
-        self.frame_consumer_thread.start()
-
-        if self.token:
-            self.client.start_transcription(
-                {
-                    "language": "en",
-                    "tier": "nova",
-                    "model": "2-conversationalai",
-                    "profanity_filter": True,
-                    "redact": False,
-                    "extra": {
-                        "endpointing": True,
-                        "punctuate": False,
-                    },
-                }
-            )
-
     def on_call_state_updated(self, state):
         pass
 
@@ -219,15 +226,19 @@ class DailyTransportService(EventHandler):
         pass
 
     def on_transcription_message(self, message):
+        print("on transcription message", message)
         pass
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
+        print("on transcription stopped", stopped_by, stopped_by_error)
         pass
 
     def on_transcription_error(self, message):
+        print("transcription error", message)
         pass
 
     def on_transcription_started(self, status):
+        print("transcription started", status)
         pass
 
     def set_image(self, image: bytes):
