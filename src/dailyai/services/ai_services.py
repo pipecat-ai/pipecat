@@ -1,8 +1,8 @@
 import logging
 
+from asyncio import Queue
 from abc import abstractmethod
-from collections.abc import AsyncGenerator
-
+from typing import AsyncGenerator
 from dataclasses import dataclass
 
 
@@ -16,9 +16,7 @@ class AIService:
 class LLMService(AIService):
     # Generate a set of responses to a prompt. Yields a list of responses.
     @abstractmethod
-    async def run_llm_async(
-        self, messages
-    ) -> AsyncGenerator[str, None]:
+    async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
         pass
 
     # Generate a responses to a prompt. Returns the response

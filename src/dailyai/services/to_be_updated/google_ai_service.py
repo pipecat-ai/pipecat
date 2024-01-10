@@ -20,7 +20,6 @@ class GoogleAIService(AIService):
         )
 
     def run_tts(self, sentence):
-        print("running google tts")
         synthesis_input = texttospeech.SynthesisInput(text = sentence.strip())
         result = self.client.synthesize_speech(input=synthesis_input, voice=self.voice, audio_config=self.audio_config)
         return result

@@ -222,13 +222,13 @@ class DailyTransportService(EventHandler):
         pass
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
-        self.logger.info(f"Transcription stopped {stopped_by}, {stopped_by_error}")
+        pass
 
     def on_transcription_error(self, message):
-        self.logger.error(f"Transcription error {message}")
+        pass
 
     def on_transcription_started(self, status):
-        self.logger.info(f"Transcription started {status}")
+        pass
 
     def set_image(self, image: bytes):
         self.image: bytes | None = image
