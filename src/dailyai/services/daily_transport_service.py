@@ -173,14 +173,10 @@ class DailyTransportService(EventHandler):
                         "endpointing": True,
                         "punctuate": False,
                     },
-                },
-                self.transcription_callback,
+                }
             )
 
         self.my_participant_id = self.client.participants()["local"]["id"]
-
-    def transcription_callback(self, foo, bar):
-        print("transcription callback", foo, bar)
 
     async def run(self) -> None:
         self.configure_daily()
@@ -191,7 +187,6 @@ class DailyTransportService(EventHandler):
             participant_count: int = len(self.client.participants())
             self.logger.info(f"{participant_count} participants in room")
             while time.time() < self.expiration and not self.participant_left and not self.stop_threads.is_set():
-                # all handling of incoming transcriptions happens in on_transcription_message
                 await asyncio.sleep(1)
         except Exception as e:
             self.logger.error(f"Exception {e}")
@@ -211,6 +206,9 @@ class DailyTransportService(EventHandler):
     def call_joined(self, join_data, client_error):
         self.logger.info(f"Call_joined: {join_data}, {client_error}")
 
+    def on_error(self, error):
+        self.logger.error(f"on_error: {error}")
+
     def on_call_state_updated(self, state):
         pass
 
@@ -226,19 +224,15 @@ class DailyTransportService(EventHandler):
         pass
 
     def on_transcription_message(self, message):
-        print("on transcription message", message)
         pass
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
-        print("on transcription stopped", stopped_by, stopped_by_error)
         pass
 
     def on_transcription_error(self, message):
-        print("transcription error", message)
         pass
 
     def on_transcription_started(self, status):
-        print("transcription started", status)
         pass
 
     def set_image(self, image: bytes):
