@@ -28,7 +28,7 @@ async def main(room_url:str, token):
 
     transcribed_message = ""
     transcription_timeout = None
-    """
+
     @transport.event_handler("on_participant_joined")
     async def on_joined(transport, participant):
         if participant["id"] == transport.my_participant_id:
@@ -47,16 +47,7 @@ async def main(room_url:str, token):
 
             print("message received", transcribed_message)
 
-    @transport.event_handler("on_transcription_error")
-    def on_transcription_error(transport, status) -> None:
-        print("transcription error", status)
-
-    @transport.event_handler("on_transcription_started")
-    def on_transcription_started(transport, status) -> None:
-        print("transcription started", status)
-    """
-    #await transport.run()
-    transport.run()
+    await transport.run()
 
 
 if __name__ == "__main__":
