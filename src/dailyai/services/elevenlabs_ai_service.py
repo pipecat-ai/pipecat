@@ -9,11 +9,11 @@ from dailyai.services.ai_services import TTSService
 
 
 class ElevenLabsTTSService(TTSService):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, input_queue, output_queue, api_key=None, voice_id=None):
+        super().__init__(input_queue, output_queue)
 
-        self.api_key = os.getenv("ELEVENLABS_API_KEY")
-        self.voice_id = os.getenv("ELEVENLABS_VOICE_ID")
+        self.api_key = api_key or os.getenv("ELEVENLABS_API_KEY")
+        self.voice_id = voice_id or os.getenv("ELEVENLABS_VOICE_ID")
 
     async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
         async with aiohttp.ClientSession() as session:

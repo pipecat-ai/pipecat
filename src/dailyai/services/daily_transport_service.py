@@ -7,7 +7,7 @@ import types
 from functools import partial
 from queue import Queue, Empty
 
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 
 from threading import Thread, Event, Timer
 
@@ -47,6 +47,12 @@ class DailyTransportService(EventHandler):
 
         self.camera_thread = None
         self.frame_consumer_thread = None
+
+        # This queue is used to marshal frames from the async output queue to the sync output queue
+        # We need this to maintain the asynchronous behavior of asyncio queues -- to give async functions
+        # a chance to run while waiting for queue items -- but also to maintain thread safety for the
+        # primary output queue.
+        self.async_output_queue = asyncio.Queue()
 
         self.logger: logging.Logger = logging.getLogger("dailyai")
 
@@ -162,6 +168,7 @@ class DailyTransportService(EventHandler):
         )
 
         if self.token:
+            self.transcription_queue = Queue()
             self.client.start_transcription(
                 {
                     "language": "en",
@@ -178,10 +185,28 @@ class DailyTransportService(EventHandler):
 
         self.my_participant_id = self.client.participants()["local"]["id"]
 
+    def get_transcriptions(self):
+        while True:
+            transcript = self.transcription_queue.get()
+            yield transcript
+
+    def get_async_output_queue(self):
+        return self.async_output_queue
+
+    async def marshal_frames(self):
+        while True:
+            frame = await self.async_output_queue.get()
+            self.output_queue.put(frame)
+            self.async_output_queue.task_done()
+            if frame.frame_type == FrameType.END_STREAM:
+                break
+
     async def run(self) -> None:
         self.configure_daily()
 
         self.participant_left = False
+
+        async_output_queue_marshal_task = asyncio.create_task(self.marshal_frames())
 
         try:
             participant_count: int = len(self.client.participants())
@@ -194,10 +219,13 @@ class DailyTransportService(EventHandler):
             self.client.leave()
 
         self.stop_threads.set()
+
+        await self.async_output_queue.put(QueueFrame(FrameType.END_STREAM, None))
+        await async_output_queue_marshal_task
+
         if self.camera_thread and self.camera_thread.is_alive():
             self.camera_thread.join()
         if self.frame_consumer_thread and self.frame_consumer_thread.is_alive():
-            self.output_queue.put(OutputQueueFrame(FrameType.END_STREAM, None))
             self.frame_consumer_thread.join()
 
     def stop(self):
@@ -224,6 +252,7 @@ class DailyTransportService(EventHandler):
         pass
 
     def on_transcription_message(self, message):
+        self.transcription_queue.put(message["text"])
         pass
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
@@ -255,11 +284,11 @@ class DailyTransportService(EventHandler):
         all_audio_frames = bytearray()
         while True:
             try:
-                frames_or_frame: OutputQueueFrame | list[OutputQueueFrame] = self.output_queue.get()
-                if type(frames_or_frame) == OutputQueueFrame:
-                    frames: list[OutputQueueFrame] = [frames_or_frame]
+                frames_or_frame: QueueFrame | list[QueueFrame] = self.output_queue.get()
+                if type(frames_or_frame) == QueueFrame:
+                    frames: list[QueueFrame] = [frames_or_frame]
                 elif type(frames_or_frame) == list:
-                    frames: list[OutputQueueFrame] = frames_or_frame
+                    frames: list[QueueFrame] = frames_or_frame
                 else:
                     raise Exception("Unknown type in output queue")
 

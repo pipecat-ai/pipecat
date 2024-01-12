@@ -2,7 +2,7 @@ import asyncio
 import time
 from typing import AsyncGenerator
 
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureTTSService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
@@ -41,13 +41,13 @@ async def main(room_url):
         audio_generator: AsyncGenerator[bytes, None] = tts.run_tts(f"Hello there, {participant['info']['userName']}!")
 
         async for audio in audio_generator:
-            transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
+            transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
 
     print("setting up call state handler")
     @transport.event_handler("on_call_state_updated")
     async def on_call_joined(transport, state):
         print(f"call state callback: {state}")
-    
+
     await transport.run()
 
 
