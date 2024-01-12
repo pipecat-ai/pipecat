@@ -25,7 +25,7 @@ async def main(room_url):
     transport.camera_height = 1024
 
     llm = AzureLLMService()
-    tts = ElevenLabsTTSService()
+    tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
     dalle = OpenAIImageGenService()
 
     # Get a complete audio chunk from the given text. Splitting this into its own
@@ -39,9 +39,9 @@ async def main(room_url):
 
     async def get_month_data(month):
         image_text = ""
-        current_clause = ""
         tts_tasks = []
-        async for text in llm.run_llm_async(
+        first_sentence = True
+        async for sentence in llm.run_llm_async_sentences(
             [
                 {
                     "role": "system",
@@ -49,17 +49,23 @@ async def main(room_url):
                 }
             ]
         ):
-            image_text += text
-            current_clause += text
-            if re.match(r"^.*[.!?]$", text):
-                tts_tasks.append(get_all_audio(current_clause))
-                current_clause = ""
+            image_text += sentence
+
+            if first_sentence:
+                sentence = f"{month}: {sentence}"
+            else:
+                first_sentence = False
+
+            tts_tasks.append(get_all_audio(sentence))
 
         tts_tasks.insert(0, dalle.run_image_gen(image_text, "1024x1024"))
 
+        print(f"waiting for tasks to finish for {month}")
         data = await asyncio.gather(
             *tts_tasks
         )
+
+        print(f"done gathering tts tasks for {month}")
 
         return {
             "month": month,
@@ -83,11 +89,8 @@ async def main(room_url):
         "December",
     ]
 
-    @transport.event_handler("on_participant_joined")
-    async def on_participant_joined(transport, participant):
-        if participant["id"] == transport.my_participant_id:
-            return
-
+    @transport.event_handler("on_first_other_participant_joined")
+    async def on_first_other_participant_joined(transport):
         # This will play the months in the order they're completed. The benefit
         # is we'll have as little delay as possible before the first month, and
         # likely no delay between months, but the months won't display in order.
@@ -116,6 +119,6 @@ if __name__=="__main__":
         "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
     )
 
-    args: argparse.Namespace = parser.parse_args()
+    args, unknown = parser.parse_known_args()
 
     asyncio.run(main(args.url))
