@@ -26,7 +26,7 @@ async def main(room_url):
     transport.camera_height = 1024
 
     llm = AzureLLMService()
-    tts = ElevenLabsTTSService()
+    tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
     dalle = FalImageGenService()
     # dalle = OpenAIImageGenService() 
 
