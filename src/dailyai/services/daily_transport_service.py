@@ -259,10 +259,8 @@ class DailyTransportService(EventHandler):
         pass
 
     def on_transcription_message(self, message):
-        print("got transcription", message)
         if self.loop:
-            asyncio.run_coroutine_threadsafe(self.transcription_queue.put(message["text"]), self.loop)
-            print("put transcription in queue", message)
+            asyncio.run_coroutine_threadsafe(self.transcription_queue.put(message), self.loop)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
         pass
