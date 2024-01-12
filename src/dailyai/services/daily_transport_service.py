@@ -50,6 +50,18 @@ class DailyTransportService(EventHandler):
         self.camera_thread = None
         self.frame_consumer_thread = None
 
+        self.transcription_settings = {
+            "language": "en",
+            "tier": "nova",
+            "model": "2-conversationalai",
+            "profanity_filter": True,
+            "redact": False,
+            "extra": {
+                "endpointing": True,
+                "punctuate": False,
+            },
+        }
+
         # This queue is used to marshal frames from the async output queue to the sync output queue
         # We need this to maintain the asynchronous behavior of asyncio queues -- to give async functions
         # a chance to run while waiting for queue items -- but also to maintain thread safety for the
@@ -170,26 +182,14 @@ class DailyTransportService(EventHandler):
         )
 
         if self.token:
-            self.transcription_queue = Queue()
-            self.client.start_transcription(
-                {
-                    "language": "en",
-                    "tier": "nova",
-                    "model": "2-conversationalai",
-                    "profanity_filter": True,
-                    "redact": False,
-                    "extra": {
-                        "endpointing": True,
-                        "punctuate": False,
-                    },
-                }
-            )
+            self.transcription_queue = asyncio.Queue()
+            self.client.start_transcription(self.transcription_settings)
 
         self.my_participant_id = self.client.participants()["local"]["id"]
 
-    def get_transcriptions(self):
+    async def get_transcriptions(self):
         while True:
-            transcript = self.transcription_queue.get()
+            transcript = await self.transcription_queue.get()
             yield transcript
 
     def get_async_output_queue(self):
@@ -259,8 +259,10 @@ class DailyTransportService(EventHandler):
         pass
 
     def on_transcription_message(self, message):
-        self.transcription_queue.put(message["text"])
-        pass
+        print("got transcription", message)
+        if self.loop:
+            asyncio.run_coroutine_threadsafe(self.transcription_queue.put(message["text"]), self.loop)
+            print("put transcription in queue", message)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
         pass
