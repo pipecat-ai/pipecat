@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.open_ai_services import OpenAIImageGenService
 
@@ -27,7 +27,7 @@ async def main(room_url):
     @transport.event_handler("on_participant_joined")
     async def on_participant_joined(transport, participant):
         (_, image_bytes) = await image_task
-        transport.output_queue.put(OutputQueueFrame(FrameType.IMAGE_FRAME, image_bytes))
+        transport.output_queue.put(QueueFrame(FrameType.IMAGE_FRAME, image_bytes))
 
     await transport.run()
 

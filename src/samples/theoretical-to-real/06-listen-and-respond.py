@@ -6,7 +6,7 @@ import urllib.parse
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 
 async def main(room_url:str, token):
     global transport
@@ -35,7 +35,7 @@ async def main(room_url:str, token):
             return
 
         async for audio_chunk in tts.run_tts("If you say something, I will respond."):
-            transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio_chunk))
+            transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio_chunk))
 
     @transport.event_handler("on_transcription_message")
     async def on_transcription_message(transport, message) -> None:

@@ -4,7 +4,7 @@ import asyncio
 from asyncio.queues import Queue
 import re
 
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.open_ai_services import OpenAIImageGenService
@@ -95,12 +95,12 @@ async def main(room_url):
             data = await month_data_task
             transport.output_queue.put(
                 [
-                    OutputQueueFrame(FrameType.IMAGE_FRAME, data["image"]),
-                    OutputQueueFrame(FrameType.AUDIO_FRAME, data["audio"][0]),
+                    QueueFrame(FrameType.IMAGE_FRAME, data["image"]),
+                    QueueFrame(FrameType.AUDIO_FRAME, data["audio"][0]),
                 ]
             )
             for audio in data["audio"][1:]:
-                transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
+                transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
 
         # wait for the output queue to be empty, then leave the meeting
         transport.output_queue.join()
