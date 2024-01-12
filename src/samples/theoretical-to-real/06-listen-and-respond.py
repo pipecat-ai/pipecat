@@ -67,7 +67,7 @@ if __name__ == "__main__":
         help="Daily API Key (needed to create token)",
     )
 
-    args: argparse.Namespace = parser.parse_args()
+    args, unknown = parser.parse_known_args()
 
     # Create a meeting token for the given room with an expiration 1 hour in the future.
     room_name: str = urllib.parse.urlparse(args.url).path[1:]

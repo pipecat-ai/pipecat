@@ -36,6 +36,7 @@ async def main(room_url):
     async def on_participant_joined(transport, participant):
         if participant["info"]["isLocal"]:
             return
+
         async for audio in audio_generator:
             transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
 
@@ -52,6 +53,6 @@ if __name__ == "__main__":
         "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
     )
 
-    args: argparse.Namespace = parser.parse_args()
+    args, unknown = parser.parse_known_args()
 
     asyncio.run(main(args.url))
