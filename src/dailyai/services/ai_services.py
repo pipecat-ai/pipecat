@@ -29,7 +29,7 @@ class AIService:
 
         while True:
             frame = await self.input_queue.get()
-            print(f"{self.__class__.__name__} got frame:", frame.frame_type)
+            self.logger.debug(f"{self.__class__.__name__} got frame:", frame.frame_type)
             if frame.frame_type == FrameType.END_STREAM:
                 self.input_queue.task_done()
                 await self.output_queue.put(QueueFrame(FrameType.END_STREAM, None))
@@ -80,7 +80,6 @@ class LLMService(AIService):
 
             messages: list[dict[str, str]] = frame.frame_data
             async for message in self.run_llm_async_sentences(messages):
-                print("got message", message)
                 await self.output_queue.put(QueueFrame(FrameType.SENTENCE_FRAME, message))
 
 
@@ -100,7 +99,6 @@ class TTSService(AIService):
         if not self.output_queue:
             raise Exception("Output queue must be set before using the run method.")
 
-        print(frame.frame_type)
         if frame.frame_type == FrameType.SENTENCE_FRAME:
             if type(frame.frame_data) != str:
                 raise Exception("TTS service requires a string for the data field")
