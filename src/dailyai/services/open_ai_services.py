@@ -66,9 +66,14 @@ class OpenAIImageGenService(ImageGenService):
             size=size
         )
         image_url = image.data[0].url
-        response = requests.get(image_url)
+        if not image_url:
+            raise Exception("No image provided in response", image)
 
-        dalle_stream = io.BytesIO(response.content)
-        dalle_im = Image.open(dalle_stream)
+        # Load the image from the url
+        async with aiohttp.ClientSession() as session:
+            async with session.get(image_url) as response:
+                image_stream = io.BytesIO(await response.content.read())
+                image = Image.open(image_stream)
+                return (image_url, image.tobytes())
 
         return (image_url, dalle_im.tobytes())
