@@ -33,7 +33,11 @@ async def main(room_url:str, token):
 
         sentence = ""
         async for message in transport.get_transcriptions():
-            sentence += message
+            if message["session_id"] == transport.my_participant_id:
+                continue
+
+            # todo: we could differentiate between transcriptions from different participants
+            sentence += message["text"]
             if sentence.endswith((".", "?", "!")):
                 messages.append({"role": "user", "content": sentence})
                 sentence = ''
