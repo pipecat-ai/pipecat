@@ -35,7 +35,7 @@ pip install path_to_this_repo
 Tou can run the simple sample like so:
 
 ```
-python src/samples/simple-sample/simple-sample.py -u your_room_url -k your_daily_api_key
+python src/samples/theoretical-to-real/01-say-one-thing.py -u <url of your Daily meeting> -k <your Daily API Key>
 ```
 
 Note that the sample uses Azure's TTS and LLM services. You'll need to set the following environment variables for the sample to work:
