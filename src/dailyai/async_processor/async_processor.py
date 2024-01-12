@@ -9,7 +9,7 @@ from queue import Queue, PriorityQueue, Empty
 from threading import Event, Semaphore, Thread
 from typing import Any, Generator, Iterator, Optional, Type
 
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.services.ai_services import AIServiceConfig
 
@@ -268,10 +268,10 @@ class LLMResponse(OrchestratorResponse):
         if out.strip():
             yield out.strip()
 
-    def get_frames_from_tts_response(self, audio_frame) -> list[OutputQueueFrame]:
-        return [OutputQueueFrame(FrameType.AUDIO_FRAME, audio_frame)]
+    def get_frames_from_tts_response(self, audio_frame) -> list[QueueFrame]:
+        return [QueueFrame(FrameType.AUDIO_FRAME, audio_frame)]
 
-    def get_frames_from_chunk(self, chunk) -> Generator[list[OutputQueueFrame], Any, None]:
+    def get_frames_from_chunk(self, chunk) -> Generator[list[QueueFrame], Any, None]:
         for audio_frame in self.services.tts.run_tts(chunk):
             yield self.get_frames_from_tts_response(audio_frame)
 
@@ -317,7 +317,7 @@ class LLMResponse(OrchestratorResponse):
                 break
 
             if not self.has_sent_first_frame:
-                self.output_queue.put(OutputQueueFrame(FrameType.START_STREAM, None))
+                self.output_queue.put(QueueFrame(FrameType.START_STREAM, None))
                 self.has_sent_first_frame = True
 
             for frame in frames:

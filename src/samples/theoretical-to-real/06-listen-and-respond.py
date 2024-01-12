@@ -6,7 +6,7 @@ import urllib.parse
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 
 async def main(room_url:str, token):
     global transport
@@ -26,28 +26,28 @@ async def main(room_url:str, token):
     llm = AzureLLMService()
     tts = AzureTTSService()
 
-    transcribed_message = ""
-    transcription_timeout = None
+    async def handle_transcriptions():
+        messages = [
+            {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
+        ]
 
-    @transport.event_handler("on_participant_joined")
-    async def on_joined(transport, participant):
-        if participant["id"] == transport.my_participant_id:
-            return
+        sentence = ""
+        async for message in transport.get_transcriptions():
+            sentence += message
+            if sentence.endswith((".", "?", "!")):
+                messages.append({"role": "user", "content": sentence})
+                sentence = ''
 
-        async for audio_chunk in tts.run_tts("If you say something, I will respond."):
-            transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio_chunk))
+                full_response = ""
+                async for response in llm.run_llm_async_sentences(messages):
+                    full_response += response
+                    async for audio in tts.run_tts(response):
+                        transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
 
-    @transport.event_handler("on_transcription_message")
-    async def on_transcription_message(transport, message) -> None:
-        nonlocal transcribed_message
-        nonlocal transcription_timeout
-        print(message)
-        if message["session_id"] != transport.my_participant_id:
-            transcribed_message += message['text']
+                messages.append({"role": "assistant", "content": full_response})
 
-            print("message received", transcribed_message)
-
-    await transport.run()
+    transport.transcription_settings["extra"]["punctuate"] = True
+    await asyncio.gather(transport.run(), handle_transcriptions())
 
 
 if __name__ == "__main__":

@@ -1,15 +1,11 @@
 import argparse
 import asyncio
-import re
 from typing import AsyncGenerator
 
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-
-local_joined = False
-participant_joined = False
 
 async def main(room_url):
     meeting_duration_minutes = 1
@@ -21,27 +17,26 @@ async def main(room_url):
     )
     transport.mic_enabled = True
 
-    tts = ElevenLabsTTSService()
-    llm = AzureLLMService()
+    text_to_llm_queue = asyncio.Queue()
+    llm_to_tts_queue = asyncio.Queue()
+
+    tts = ElevenLabsTTSService(
+        llm_to_tts_queue, transport.get_async_output_queue(), voice_id="29vD33N1CtxCmqQRPOHJ"
+    )
+    llm = AzureLLMService(text_to_llm_queue, llm_to_tts_queue)
 
     messages = [{
         "role": "system",
-        "content": "You are an LLM in a WebRTC session, and your text will be converted to audio. Introduce yourself."
+        "content": "You are an LLM in a WebRTC session, and this is a 'hello world' demo. Say hello to the world."
     }]
-    llm_generator: AsyncGenerator[str, None] = llm.run_llm_async(messages)
+    await text_to_llm_queue.put(QueueFrame(FrameType.LLM_MESSAGE_FRAME, messages))
+    await text_to_llm_queue.put(QueueFrame(FrameType.END_STREAM, None))
 
-    @transport.event_handler("on_participant_joined")
-    async def on_participant_joined(transport, participant):
-        if participant["id"] == transport.my_participant_id:
-            return
+    llm_task = asyncio.create_task(llm.run())
 
-        current_text = ""
-        async for text in llm_generator:
-            current_text += text
-            if re.match(r"^.*[.!?]$", text):
-                async for audio in tts.run_tts(current_text):
-                    transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
-                current_text = ""
+    @transport.event_handler("on_first_other_participant_joined")
+    async def on_first_other_participant_joined(transport):
+        await asyncio.gather(llm_task, tts.run())
 
         # wait for the output queue to be empty, then leave the meeting
         transport.output_queue.join()
@@ -56,6 +51,5 @@ if __name__ == "__main__":
         "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
     )
 
-    args: argparse.Namespace = parser.parse_args()
-
+    args, unknown = parser.parse_known_args()
     asyncio.run(main(args.url))

@@ -15,7 +15,7 @@ from dailyai.async_processor.async_processor import (
     OrchestratorResponse,
     LLMResponse,
 )
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.message_handler.message_handler import MessageHandler
 
@@ -197,7 +197,7 @@ class Orchestrator(EventHandler):
         self.logger.info("Camera thread stopped")
 
         self.logger.info("Put stop in output queue")
-        self.output_queue.put(OutputQueueFrame(FrameType.END_STREAM, None))
+        self.output_queue.put(QueueFrame(FrameType.END_STREAM, None))
 
         self.frame_consumer_thread.join()
         self.logger.info("Orchestrator stopped.")
@@ -367,7 +367,7 @@ class Orchestrator(EventHandler):
         all_audio_frames = bytearray()
         while True:
             try:
-                frame:OutputQueueFrame = self.output_queue.get()
+                frame:QueueFrame = self.output_queue.get()
                 if frame.frame_type == FrameType.END_STREAM:
                     self.logger.info("Stopping frame consumer thread")
                     return

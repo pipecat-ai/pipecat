@@ -16,8 +16,8 @@ from PIL import Image
 from azure.cognitiveservices.speech import SpeechSynthesizer, SpeechConfig, ResultReason, CancellationReason
 
 class AzureTTSService(TTSService):
-    def __init__(self, speech_key=None, speech_region=None):
-        super().__init__()
+    def __init__(self, input_queue=None, output_queue=None, speech_key=None, speech_region=None):
+        super().__init__(input_queue, output_queue)
 
         speech_key = speech_key or os.getenv("AZURE_SPEECH_SERVICE_KEY")
         speech_region = speech_region or os.getenv("AZURE_SPEECH_SERVICE_REGION")
@@ -48,8 +48,8 @@ class AzureTTSService(TTSService):
                 self.logger.info("Error details: {}".format(cancellation_details.error_details))
 
 class AzureLLMService(LLMService):
-    def __init__(self, api_key=None, azure_endpoint=None, api_version=None, model=None):
-        super().__init__()
+    def __init__(self, input_queue=None, output_queue=None, api_key=None, azure_endpoint=None, api_version=None, model=None):
+        super().__init__(input_queue, output_queue)
         api_key = api_key or os.getenv("AZURE_CHATGPT_KEY")
 
         azure_endpoint = azure_endpoint or os.getenv("AZURE_CHATGPT_ENDPOINT")

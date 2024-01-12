@@ -2,7 +2,7 @@ import argparse
 import asyncio
 from typing import AsyncGenerator
 
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureTTSService
 
@@ -37,7 +37,7 @@ async def main(room_url):
         if participant["info"]["isLocal"]:
             return
         async for audio in audio_generator:
-            transport.output_queue.put(OutputQueueFrame(FrameType.AUDIO_FRAME, audio))
+            transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
 
         # wait for the output queue to be empty, then leave the meeting
         transport.output_queue.join()
