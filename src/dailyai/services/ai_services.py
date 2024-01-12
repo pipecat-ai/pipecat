@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import re
-from tkinter import END
 
 from dailyai.queue_frame import QueueFrame, FrameType
 
