@@ -34,14 +34,8 @@ async def main(room_url):
 
     llm_task = asyncio.create_task(llm.run())
 
-    has_joined = False
-    @transport.event_handler("on_participant_joined")
-    async def on_participant_joined(transport, participant):
-        nonlocal has_joined
-        if participant["id"] == transport.my_participant_id or has_joined:
-            return
-
-        has_joined = True
+    @transport.event_handler("on_first_other_participant_joined")
+    async def on_first_other_participant_joined(transport):
         await asyncio.gather(llm_task, tts.run())
 
         # wait for the output queue to be empty, then leave the meeting

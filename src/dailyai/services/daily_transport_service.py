@@ -45,6 +45,8 @@ class DailyTransportService(EventHandler):
         self.camera_height = 768
         self.camera_enabled = False
 
+        self.other_participant_has_joined = False
+
         self.camera_thread = None
         self.frame_consumer_thread = None
 
@@ -231,6 +233,9 @@ class DailyTransportService(EventHandler):
     def stop(self):
         self.stop_threads.set()
 
+    def on_first_other_participant_joined(self):
+        pass
+
     def call_joined(self, join_data, client_error):
         self.logger.info(f"Call_joined: {join_data}, {client_error}")
 
@@ -241,7 +246,9 @@ class DailyTransportService(EventHandler):
         pass
 
     def on_participant_joined(self, participant):
-        pass
+        if not self.other_participant_has_joined and participant["id"] != self.my_participant_id:
+            self.other_participant_has_joined = True
+            self.on_first_other_participant_joined()
 
     def on_participant_left(self, participant, reason):
         if len(self.client.participants()) < 2:
