@@ -15,7 +15,7 @@ from dailyai.async_processor.async_processor import (
     OrchestratorResponse
 )
 from dailyai.orchestrator import OrchestratorConfig, Orchestrator
-from dailyai.output_queue import OutputQueueFrame, FrameType
+from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.services.azure_ai_services import AzureImageGenService, AzureTTSService, AzureLLMService
@@ -40,7 +40,7 @@ class StaticSpriteResponse(OrchestratorResponse):
             self.image_bytes = img.tobytes()
 
     def do_play(self) -> None:
-        self.output_queue.put(OutputQueueFrame(FrameType.IMAGE_FRAME, self.image_bytes))
+        self.output_queue.put(QueueFrame(FrameType.IMAGE_FRAME, self.image_bytes))
 
 
 class IntroSpriteResponse(StaticSpriteResponse):
@@ -71,10 +71,10 @@ class AnimatedSpriteLLMResponse(LLMResponse):
             with Image.open(full_path) as img:
                 self.image_bytes.append(img.tobytes())
 
-    def get_frames_from_tts_response(self, audio_frame) -> list[OutputQueueFrame]:
+    def get_frames_from_tts_response(self, audio_frame) -> list[QueueFrame]:
         return [
-            OutputQueueFrame(FrameType.AUDIO_FRAME, audio_frame),
-            OutputQueueFrame(FrameType.IMAGE_FRAME, random.choice(self.image_bytes))
+            QueueFrame(FrameType.AUDIO_FRAME, audio_frame),
+            QueueFrame(FrameType.IMAGE_FRAME, random.choice(self.image_bytes))
         ]
 
 
