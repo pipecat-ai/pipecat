@@ -7,9 +7,6 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
-local_joined = False
-participant_joined = False
-
 async def main(room_url):
     meeting_duration_minutes = 1
     transport = DailyTransportService(
