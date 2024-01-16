@@ -7,6 +7,7 @@ import urllib.parse
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.services.fal_ai_services import FalImageGenService
 
 async def main(room_url:str, token):
     global transport
@@ -20,37 +21,38 @@ async def main(room_url:str, token):
         1,
     )
     transport.mic_enabled = True
+    transport.camera_enabled = True
     transport.mic_sample_rate = 16000
-    transport.camera_enabled = False
+    transport.camera_width = 1024
+    transport.camera_height = 1024
 
     llm = AzureLLMService()
     tts = AzureTTSService()
+    img = FalImageGenService()
+
 
     async def handle_transcriptions():
-        messages = [
-            {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
-        ]
+        print("handle_transcriptions got called")
 
         sentence = ""
         async for message in transport.get_transcriptions():
+            print(f"transcription message: {message}")
             if message["session_id"] == transport.my_participant_id:
                 continue
 
             # todo: we could differentiate between transcriptions from different participants
-            sentence += message["text"]
-            if sentence.endswith((".", "?", "!")):
-                messages.append({"role": "user", "content": sentence})
-                sentence = ''
+            sentence += f" {message['text']}"
+            print(f"sentence is now: {sentence}")
+            img_result = img.run_image_gen(sentence, "1024x1024")
+            awaited_img = await asyncio.gather(img_result)
+            transport.output_queue.put(
+                [
+                    QueueFrame(FrameType.IMAGE_FRAME, awaited_img[0][1]),
+                ]
+            )
 
-                full_response = ""
-                async for response in llm.run_llm_async_sentences(messages):
-                    full_response += response
-                    async for audio in tts.run_tts(response):
-                        transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
-
-                messages.append({"role": "assistant", "content": full_response})
-
-    transport.transcription_settings["extra"]["punctuate"] = True
+    transport.transcription_settings["extra"]["punctuate"] = False
+    transport.transcription_settings["extra"]["endpointing"] = False
     await asyncio.gather(transport.run(), handle_transcriptions())
 
 
