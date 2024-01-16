@@ -26,7 +26,8 @@ async def main(room_url):
     transport.camera_height = 1024
 
     llm = AzureLLMService()
-    tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
+    #tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
+    tts = ElevenLabsTTSService()
     dalle = FalImageGenService()
     # dalle = OpenAIImageGenService() 
 
@@ -79,7 +80,8 @@ async def main(room_url):
     months: list[str] = [
         "January",
         "February",
-        "March",
+        "March"]
+    """
         "April",
         "May",
         "June",
@@ -90,6 +92,7 @@ async def main(room_url):
         "November",
         "December",
     ]
+    """
 
     @transport.event_handler("on_first_other_participant_joined")
     async def on_first_other_participant_joined(transport):
@@ -98,6 +101,7 @@ async def main(room_url):
         # likely no delay between months, but the months won't display in order.
         for month_data_task in asyncio.as_completed(month_tasks):
             data = await month_data_task
+            print(f"got data, queueing frames...")
             transport.output_queue.put(
                 [
                     QueueFrame(FrameType.IMAGE_FRAME, data["image"]),

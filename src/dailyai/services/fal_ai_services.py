@@ -12,27 +12,30 @@ class FalImageGenService(ImageGenService):
     def __init__(self):
         super().__init__()
 
+
+
     async def run_image_gen(self, sentence, size) -> tuple[str, bytes]:
+        def get_image_url(sentence, size):
+            handler = fal.apps.submit(
+                "110602490-fast-sdxl",
+                arguments={
+                "prompt": sentence
+                },
+                )
+            for event in handler.iter_events():
+                if isinstance(event, fal.apps.InProgress):
+                    print('Request in progress')
+                    print(event.logs)
 
-        handler = fal.apps.submit(
-            "110602490-fast-sdxl",
-            arguments={
-            "prompt": sentence
-            },
-            )
+            result = handler.get()
 
-        for event in handler.iter_events():
-            if isinstance(event, fal.apps.InProgress):
-                print('Request in progress')
-                print(event.logs)
+            image_url = result["images"][0]["url"] if result else None
+            if not image_url:
+                raise Exception("Image generation failed")
 
-        result = handler.get()
-        print(f"result: {result}")
-        image_url = result["images"][0]["url"] if result else None
-        if not image_url:
-            raise Exception("Image generation failed")
-        print(f"image url: {image_url}")
-
+            return image_url
+        
+        image_url = await asyncio.to_thread(get_image_url, sentence, size)
         # Load the image from the url
         async with aiohttp.ClientSession() as session:
             async with session.get(image_url) as response:
