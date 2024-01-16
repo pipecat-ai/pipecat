@@ -8,6 +8,7 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.services.fal_ai_services import FalImageGenService
+from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 async def main(room_url:str, token):
     global transport
@@ -39,7 +40,13 @@ async def main(room_url:str, token):
             print(f"transcription message: {message}")
             if message["session_id"] == transport.my_participant_id:
                 continue
-
+            finder =  message["text"].find("start over")
+            print(f"finder: {finder}")
+            if finder >= 0:
+                async for audio in tts.run_tts(f"Resetting."):
+                    transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
+                sentence = ""
+                continue
             # todo: we could differentiate between transcriptions from different participants
             sentence += f" {message['text']}"
             print(f"sentence is now: {sentence}")
@@ -50,6 +57,16 @@ async def main(room_url:str, token):
                     QueueFrame(FrameType.IMAGE_FRAME, awaited_img[0][1]),
                 ]
             )
+
+    @transport.event_handler("on_participant_joined")
+    async def on_participant_joined(transport, participant):
+        print(f"participant joined: {participant['info']['userName']}")
+        if participant["info"]["isLocal"]:
+            return
+        async for audio in tts.run_tts("Describe an image, and I'll create it."):
+            audio_generator = tts.run_tts(f"Hello, {participant['info']['userName']}! Describe an image and I'll create it. To start over, just say 'start over'.")
+            async for audio in audio_generator:
+                transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
 
     transport.transcription_settings["extra"]["punctuate"] = False
     transport.transcription_settings["extra"]["endpointing"] = False
