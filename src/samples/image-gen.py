@@ -3,6 +3,7 @@ import asyncio
 import requests
 import time
 import urllib.parse
+import random
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
@@ -50,6 +51,10 @@ async def main(room_url:str, token):
             # todo: we could differentiate between transcriptions from different participants
             sentence += f" {message['text']}"
             print(f"sentence is now: {sentence}")
+            # TODO: Cache this audio
+            phrase = random.choice(["OK.", "Got it.", "Sure.", "You bet.", "Sure thing."])
+            async for audio in tts.run_tts(phrase):
+                transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
             img_result = img.run_image_gen(sentence, "1024x1024")
             awaited_img = await asyncio.gather(img_result)
             transport.output_queue.put(
