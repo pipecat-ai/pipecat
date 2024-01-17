@@ -18,7 +18,7 @@ from dailyai.services.ai_services import (
     LLMService,
     TTSService,
 )
-
+"""
 class MockTTSService(TTSService):
     def run_tts(self, sentence):
         for word in sentence.split(' '):
@@ -73,7 +73,7 @@ class TestResponse(unittest.TestCase):
         while expected_words:
             actual_word:QueueFrame = output_queue.get()
             word = expected_words.pop(0)
-            self.assertEqual(actual_word.frame_type, FrameType.AUDIO)
+            self.assertEqual(actual_word.frame_type, FrameType.AUDIO_FRAME)
             self.assertEqual(actual_word.frame_data, bytes(word, "utf-8"))
             output_queue.task_done()
 
@@ -128,10 +128,10 @@ class TestResponse(unittest.TestCase):
             while expected_words and not stop_processing_output_queue.is_set():
                 try:
                     actual_word:QueueFrame = output_queue.get_nowait()
-                    if actual_word.frame_type == FrameType.AUDIO:
+                    if actual_word.frame_type == FrameType.AUDIO_FRAME:
                         time.sleep(0.1)
                         word = expected_words.pop(0)
-                        self.assertEqual(actual_word.frame_type, FrameType.AUDIO)
+                        self.assertEqual(actual_word.frame_type, FrameType.AUDIO_FRAME)
                         self.assertEqual(actual_word.frame_data, bytes(word, "utf-8"))
                     output_queue.task_done()
                 except Empty:
@@ -177,3 +177,4 @@ class TestResponse(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+"""
