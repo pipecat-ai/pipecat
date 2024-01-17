@@ -29,7 +29,6 @@ class AIService:
 
     async def run_to_queue(self, queue: asyncio.Queue, frames, add_end_of_stream=False) -> None:
         async for frame in self.run(frames):
-            print("got frame", frame.frame_type)
             await queue.put(frame)
 
         if add_end_of_stream:
@@ -48,29 +47,18 @@ class AIService:
         if not requested_frame_types:
             requested_frame_types = self.possible_output_frame_types()
 
-        print("running", self.__class__.__name__, "with frame types", requested_frame_types)
-
         if isinstance(frames, AsyncIterable):
             async for frame in frames:
                 async for output_frame in self.process_frame(requested_frame_types, frame):
-                    print(
-                        "yielding frame", self.__class__.__name__, output_frame.frame_type
-                    )
                     yield output_frame
         elif isinstance(frames, Iterable):
             for frame in frames:
                 async for output_frame in self.process_frame(requested_frame_types, frame):
-                    print(
-                        "yielding frame", self.__class__.__name__, output_frame.frame_type
-                    )
                     yield output_frame
         elif isinstance(frames, asyncio.Queue):
             while True:
                 frame = await frames.get()
                 async for output_frame in self.process_frame(requested_frame_types, frame):
-                    print(
-                        "yielding frame", self.__class__.__name__, output_frame.frame_type
-                    )
                     yield output_frame
                 if frame.frame_type == FrameType.END_STREAM:
                     break

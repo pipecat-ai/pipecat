@@ -13,7 +13,6 @@ class HuggingFaceAIService(AIService):
     # available models at https://huggingface.co/Helsinki-NLP (**not all models use 2-character language codes**)
     def run_text_translation(self, sentence, source_language, target_language):
         translator = pipeline(f"translation", model=f"Helsinki-NLP/opus-mt-{source_language}-{target_language}")
-        print(translator(sentence))
 
         return translator(sentence)[0]["translation_text"]
 
