@@ -206,6 +206,9 @@ class DailyTransportService(EventHandler):
             if frame.frame_type == FrameType.END_STREAM:
                 break
 
+    def wait_for_send_queue_to_empty(self):
+        self.threadsafe_send_queue.join()
+
     async def run(self) -> None:
         self.configure_daily()
 

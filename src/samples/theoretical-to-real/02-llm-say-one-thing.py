@@ -4,6 +4,7 @@ from typing import AsyncGenerator
 
 from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.services.ai_services import SentenceAggregator
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
@@ -17,29 +18,27 @@ async def main(room_url):
     )
     transport.mic_enabled = True
 
-    text_to_llm_queue = asyncio.Queue()
-    llm_to_tts_queue = asyncio.Queue()
-
-    tts = ElevenLabsTTSService(
-        llm_to_tts_queue, transport.get_async_send_queue(), voice_id="29vD33N1CtxCmqQRPOHJ"
-    )
-    llm = AzureLLMService(text_to_llm_queue, llm_to_tts_queue)
+    tts = ElevenLabsTTSService(voice_id="29vD33N1CtxCmqQRPOHJ")
+    llm = AzureLLMService()
 
     messages = [{
         "role": "system",
         "content": "You are an LLM in a WebRTC session, and this is a 'hello world' demo. Say hello to the world."
     }]
-    await text_to_llm_queue.put(QueueFrame(FrameType.LLM_MESSAGE, messages))
-    await text_to_llm_queue.put(QueueFrame(FrameType.END_STREAM, None))
-
-    llm_task = asyncio.create_task(llm.run())
+    tts_task = asyncio.create_task(
+        tts.run_to_queue(
+            transport.send_queue,
+            SentenceAggregator().run(
+                llm.run([QueueFrame(FrameType.LLM_MESSAGE, messages)])
+            )
+        )
+    )
 
     @transport.event_handler("on_first_other_participant_joined")
     async def on_first_other_participant_joined(transport):
-        await asyncio.gather(llm_task, tts.run())
+        await tts_task
 
-        # wait for the output queue to be empty, then leave the meeting
-        transport.output_queue.join()
+        transport.wait_for_send_queue_to_empty()
         transport.stop()
 
     await transport.run()

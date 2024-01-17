@@ -16,8 +16,8 @@ from PIL import Image
 from azure.cognitiveservices.speech import SpeechSynthesizer, SpeechConfig, ResultReason, CancellationReason
 
 class AzureTTSService(TTSService):
-    def __init__(self, input_queue=None, output_queue=None, speech_key=None, speech_region=None):
-        super().__init__(input_queue, output_queue)
+    def __init__(self, speech_key=None, speech_region=None):
+        super().__init__()
 
         speech_key = speech_key or os.getenv("AZURE_SPEECH_SERVICE_KEY")
         speech_region = speech_region or os.getenv("AZURE_SPEECH_SERVICE_REGION")
@@ -35,7 +35,10 @@ class AzureTTSService(TTSService):
            "<prosody rate='1.05'>" \
            f"{sentence}" \
            "</prosody></mstts:express-as></voice></speak> "
-        result = await asyncio.to_thread(self.speech_synthesizer.speak_ssml, (ssml))
+        try:
+            result = await asyncio.to_thread(self.speech_synthesizer.speak_ssml, (ssml))
+        except Exception as e:
+            self.logger.error("Error in azure tts", e)
         self.logger.info("Got azure tts result")
         if result.reason == ResultReason.SynthesizingAudioCompleted:
             self.logger.info("Returning result")
@@ -48,8 +51,8 @@ class AzureTTSService(TTSService):
                 self.logger.info("Error details: {}".format(cancellation_details.error_details))
 
 class AzureLLMService(LLMService):
-    def __init__(self, input_queue=None, output_queue=None, api_key=None, azure_endpoint=None, api_version=None, model=None):
-        super().__init__(input_queue, output_queue)
+    def __init__(self, api_key=None, azure_endpoint=None, api_version=None, model=None):
+        super().__init__()
         api_key = api_key or os.getenv("AZURE_CHATGPT_KEY")
 
         azure_endpoint = azure_endpoint or os.getenv("AZURE_CHATGPT_ENDPOINT")
@@ -92,14 +95,14 @@ class AzureLLMService(LLMService):
 
 class AzureImageGenServiceREST(ImageGenService):
 
-    def __init__(self, api_key=None, azure_endpoint=None, api_version=None, model=None):
-        super().__init__()
+    def __init__(self, image_size:str, api_key=None, azure_endpoint=None, api_version=None, model=None):
+        super().__init__(image_size=image_size)
         self.api_key = api_key or os.getenv("AZURE_DALLE_KEY")
         self.azure_endpoint = azure_endpoint or os.getenv("AZURE_DALLE_ENDPOINT")
         self.api_version = api_version or "2023-06-01-preview"
         self.model = model or os.getenv("AZURE_DALLE_DEPLOYMENT_ID")
 
-    async def run_image_gen(self, sentence, size) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         # TODO hoist the session to app-level
         async with aiohttp.ClientSession() as session:
             url = f"{self.azure_endpoint}openai/images/generations:submit?api-version={self.api_version}"
@@ -107,7 +110,7 @@ class AzureImageGenServiceREST(ImageGenService):
             body = {
                 # Enter your prompt text here
                 "prompt": sentence,
-                "size": size,
+                "size": self.image_size,
                 "n": 1,
             }
             async with session.post(url, headers=headers, json=body) as submission:
@@ -153,14 +156,14 @@ class AzureImageGenService(ImageGenService):
             api_version=api_version,
         )
 
-    async def run_image_gen(self, sentence, size) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         self.logger.info("Generating azure image", sentence)
 
         image = self.client.images.generate(
             model=self.model,
             prompt=sentence,
             n=1,
-            size=size,
+            size=self.image_size,
         )
 
         url = image["data"][0]["url"]

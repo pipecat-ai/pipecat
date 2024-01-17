@@ -26,10 +26,9 @@ async def main(room_url):
     transport.camera_height = 1024
 
     llm = AzureLLMService()
-    #tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
-    tts = ElevenLabsTTSService()
     dalle = FalImageGenService()
-    # dalle = OpenAIImageGenService() 
+    tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
+    #dalle = OpenAIImageGenService(image_size="1024x1024")
 
     # Get a complete audio chunk from the given text. Splitting this into its own
     # coroutine lets us ensure proper ordering of the audio chunks on the output queue.
@@ -61,7 +60,7 @@ async def main(room_url):
 
             tts_tasks.append(get_all_audio(sentence))
 
-        tts_tasks.insert(0, dalle.run_image_gen(image_text, "1024x1024"))
+        tts_tasks.insert(0, dalle.run_image_gen(image_text))
 
         print(f"waiting for tasks to finish for {month}")
         data = await asyncio.gather(
