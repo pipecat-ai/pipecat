@@ -375,7 +375,7 @@ class Orchestrator(EventHandler):
                 # if interrupted, we just pull frames off the queue and discard them
                 if not self.is_interrupted.is_set():
                     if frame:
-                        if frame.frame_type == FrameType.AUDIO_FRAME:
+                        if frame.frame_type == FrameType.AUDIO:
                             chunk = frame.frame_data
 
                             all_audio_frames.extend(chunk)
@@ -385,7 +385,7 @@ class Orchestrator(EventHandler):
                             if l:
                                 self.mic.write_frames(bytes(b[:l]))
                                 b = b[l:]
-                        elif frame.frame_type == FrameType.IMAGE_FRAME:
+                        elif frame.frame_type == FrameType.IMAGE:
                             self.set_image(frame.frame_data)
                     elif len(b):
                         self.mic.write_frames(bytes(b))

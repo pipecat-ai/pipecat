@@ -32,7 +32,11 @@ async def main(room_url:str, token):
         ]
 
         sentence = ""
-        async for message in transport.get_transcriptions():
+        async for frame in transport.get_media_frames():
+            if frame.frame_type != FrameType.TRANSCRIPTION:
+                continue
+
+            message = frame.frame_data
             if message["session_id"] == transport.my_participant_id:
                 continue
 
@@ -46,7 +50,7 @@ async def main(room_url:str, token):
                 async for response in llm.run_llm_async_sentences(messages):
                     full_response += response
                     async for audio in tts.run_tts(response):
-                        transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
+                        await transport.output_queue.put(QueueFrame(FrameType.AUDIO, audio))
 
                 messages.append({"role": "assistant", "content": full_response})
 

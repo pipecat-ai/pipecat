@@ -29,7 +29,7 @@ async def main(room_url):
         "role": "system",
         "content": "You are an LLM in a WebRTC session, and this is a 'hello world' demo. Say hello to the world."
     }]
-    await text_to_llm_queue.put(QueueFrame(FrameType.LLM_MESSAGE_FRAME, messages))
+    await text_to_llm_queue.put(QueueFrame(FrameType.LLM_MESSAGE, messages))
     await text_to_llm_queue.put(QueueFrame(FrameType.END_STREAM, None))
 
     llm_task = asyncio.create_task(llm.run())

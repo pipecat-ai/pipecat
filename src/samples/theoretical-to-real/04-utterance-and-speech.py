@@ -41,11 +41,11 @@ async def main(room_url:str):
         ))
 
         async for audio_chunk in tts.run_tts("My friend the LLM is now going to tell a joke about llamas."):
-            transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio_chunk))
+            transport.output_queue.put(QueueFrame(FrameType.AUDIO, audio_chunk))
 
         llm_response = await llm_response_task
         async for audio_chunk in tts.run_tts(llm_response):
-            transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio_chunk))
+            transport.output_queue.put(QueueFrame(FrameType.AUDIO, audio_chunk))
 
 
         # wait for the output queue to be empty, then leave the meeting

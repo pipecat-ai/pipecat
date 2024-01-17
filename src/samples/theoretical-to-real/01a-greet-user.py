@@ -41,7 +41,7 @@ async def main(room_url):
         audio_generator: AsyncGenerator[bytes, None] = tts.run_tts(f"Hello there, {participant['info']['userName']}!")
 
         async for audio in audio_generator:
-            transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
+            transport.output_queue.put(QueueFrame(FrameType.AUDIO, audio))
 
     print("setting up call state handler")
     @transport.event_handler("on_call_state_updated")

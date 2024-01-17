@@ -27,7 +27,7 @@ async def main(room_url):
     @transport.event_handler("on_participant_joined")
     async def on_participant_joined(transport, participant):
         (_, image_bytes) = await image_task
-        transport.output_queue.put(QueueFrame(FrameType.IMAGE_FRAME, image_bytes))
+        transport.output_queue.put(QueueFrame(FrameType.IMAGE, image_bytes))
 
     await transport.run()
 
