@@ -9,6 +9,7 @@ from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.open_ai_services import OpenAIImageGenService
 from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.services.fal_ai_services import FalImageGenService
 
 async def main(room_url):
     meeting_duration_minutes = 5
@@ -25,8 +26,10 @@ async def main(room_url):
     transport.camera_height = 1024
 
     llm = AzureLLMService()
-    tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
-    dalle = OpenAIImageGenService()
+    #tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
+    tts = ElevenLabsTTSService()
+    dalle = FalImageGenService()
+    # dalle = OpenAIImageGenService() 
 
     # Get a complete audio chunk from the given text. Splitting this into its own
     # coroutine lets us ensure proper ordering of the audio chunks on the output queue.
@@ -77,7 +80,8 @@ async def main(room_url):
     months: list[str] = [
         "January",
         "February",
-        "March",
+        "March"]
+    """
         "April",
         "May",
         "June",
@@ -88,6 +92,7 @@ async def main(room_url):
         "November",
         "December",
     ]
+    """
 
     @transport.event_handler("on_first_other_participant_joined")
     async def on_first_other_participant_joined(transport):
@@ -96,6 +101,7 @@ async def main(room_url):
         # likely no delay between months, but the months won't display in order.
         for month_data_task in asyncio.as_completed(month_tasks):
             data = await month_data_task
+            print(f"got data, queueing frames...")
             transport.output_queue.put(
                 [
                     QueueFrame(FrameType.IMAGE, data["image"]),
