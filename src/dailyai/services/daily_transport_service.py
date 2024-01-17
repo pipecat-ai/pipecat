@@ -35,10 +35,11 @@ class DailyTransportService(EventHandler):
         self.duration: float = duration
         self.expiration = time.time() + duration * 60
 
-        # This queue is used to marshal frames from the async output queue to the thread that emits audio & video.
+        # This queue is used to marshal frames from the async send queue to the thread that emits audio & video.
         # We need this to maintain the asynchronous behavior of asyncio queues -- to give async functions
-        # a chance to run while waiting for queue items -- but also to maintain thread safety.
-        self.threadsafe_output_queue = Queue()
+        # a chance to run while waiting for queue items -- but also to maintain thread safety and have a threaded
+        # handler to send frames, to ensure that sending isn't subject to pauses in the async thread.
+        self.threadsafe_send_queue = Queue()
 
         self.is_interrupted = Event()
         self.stop_threads = Event()
@@ -49,8 +50,8 @@ class DailyTransportService(EventHandler):
         self.camera_height = 768
         self.camera_enabled = False
 
-        self.output_queue = asyncio.Queue()
-        self.media_queue = asyncio.Queue()
+        self.send_queue = asyncio.Queue()
+        self.receive_queue = asyncio.Queue()
 
         self.other_participant_has_joined = False
 
@@ -187,21 +188,21 @@ class DailyTransportService(EventHandler):
 
         self.my_participant_id = self.client.participants()["local"]["id"]
 
-    async def get_media_frames(self):
+    async def get_receive_frames(self):
         while True:
-            frame = await self.media_queue.get()
+            frame = await self.receive_queue.get()
             yield frame
             if frame.frame_type == FrameType.END_STREAM:
                 break
 
-    def get_async_output_queue(self):
-        return self.output_queue
+    def get_async_send_queue(self):
+        return self.send_queue
 
     async def marshal_frames(self):
         while True:
-            frame = await self.output_queue.get()
-            self.threadsafe_output_queue.put(frame)
-            self.output_queue.task_done()
+            frame = await self.send_queue.get()
+            self.threadsafe_send_queue.put(frame)
+            self.send_queue.task_done()
             if frame.frame_type == FrameType.END_STREAM:
                 break
 
@@ -224,8 +225,8 @@ class DailyTransportService(EventHandler):
 
         self.stop_threads.set()
 
-        await self.media_queue.put(QueueFrame(FrameType.END_STREAM, None))
-        await self.output_queue.put(QueueFrame(FrameType.END_STREAM, None))
+        await self.receive_queue.put(QueueFrame(FrameType.END_STREAM, None))
+        await self.send_queue.put(QueueFrame(FrameType.END_STREAM, None))
         await async_output_queue_marshal_task
 
         if self.camera_thread and self.camera_thread.is_alive():
@@ -264,7 +265,7 @@ class DailyTransportService(EventHandler):
     def on_transcription_message(self, message:dict):
         if self.loop:
             frame = QueueFrame(FrameType.TRANSCRIPTION, message)
-            asyncio.run_coroutine_threadsafe(self.media_queue.put(frame), self.loop)
+            asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self.loop)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
         pass
@@ -295,7 +296,7 @@ class DailyTransportService(EventHandler):
         all_audio_frames = bytearray()
         while True:
             try:
-                frames_or_frame: QueueFrame | list[QueueFrame] = self.threadsafe_output_queue.get()
+                frames_or_frame: QueueFrame | list[QueueFrame] = self.threadsafe_send_queue.get()
                 if type(frames_or_frame) == QueueFrame:
                     frames: list[QueueFrame] = [frames_or_frame]
                 elif type(frames_or_frame) == list:
@@ -306,7 +307,7 @@ class DailyTransportService(EventHandler):
                 for frame in frames:
                     if frame.frame_type == FrameType.END_STREAM:
                         self.logger.info("Stopping frame consumer thread")
-                        self.threadsafe_output_queue.task_done()
+                        self.threadsafe_send_queue.task_done()
                         return
 
                     # if interrupted, we just pull frames off the queue and discard them
@@ -337,7 +338,7 @@ class DailyTransportService(EventHandler):
                         if frame.frame_type == FrameType.START_STREAM:
                             self.is_interrupted.clear()
 
-                self.threadsafe_output_queue.task_done()
+                self.threadsafe_send_queue.task_done()
             except Empty:
                 try:
                     if len(b):

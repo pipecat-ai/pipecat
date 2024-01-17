@@ -21,7 +21,7 @@ async def main(room_url):
     llm_to_tts_queue = asyncio.Queue()
 
     tts = ElevenLabsTTSService(
-        llm_to_tts_queue, transport.get_async_output_queue(), voice_id="29vD33N1CtxCmqQRPOHJ"
+        llm_to_tts_queue, transport.get_async_send_queue(), voice_id="29vD33N1CtxCmqQRPOHJ"
     )
     llm = AzureLLMService(text_to_llm_queue, llm_to_tts_queue)
 
