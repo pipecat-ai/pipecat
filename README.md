@@ -21,7 +21,7 @@ python -m build
 This builds the package. To use the package locally (eg to run sample files), run
 
 ```
-pip install .
+pip install --editable .
 ```
 
 If you want to use this package from another directory, you can run:
@@ -51,5 +51,5 @@ AZURE_CHATGPT_DEPLOYMENT_ID
 If you have those environment variables stored in an .env file, you can quickly load them into your terminal's environment by running this:
 
 ```bash
-$ export $(grep -v '^#' .env | xargs)
+export $(grep -v '^#' .env | xargs)
 ```
