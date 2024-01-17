@@ -27,21 +27,16 @@ async def main(room_url):
     # similarly, create a tts service
     tts = AzureTTSService()
 
-    # Get the generator for the audio. This will start running in the background,
-    # and when we ask the generator for its items, we'll get what it's generated.
-    audio_generator: AsyncGenerator[bytes, None] = tts.run_tts("hello world")
-
     # Register an event handler so we can play the audio when the participant joins.
     @transport.event_handler("on_participant_joined")
     async def on_participant_joined(transport, participant):
         if participant["info"]["isLocal"]:
             return
 
-        async for audio in audio_generator:
-            transport.output_queue.put(QueueFrame(FrameType.AUDIO, audio))
+        await tts.say("Hello there, " + participant["info"]["userName"] + "!", transport.send_queue)
 
         # wait for the output queue to be empty, then leave the meeting
-        transport.output_queue.join()
+        transport.wait_for_send_queue_to_empty()
         transport.stop()
 
     await transport.run()

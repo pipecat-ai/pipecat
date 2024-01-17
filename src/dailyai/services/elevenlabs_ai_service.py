@@ -9,8 +9,8 @@ from dailyai.services.ai_services import TTSService
 
 
 class ElevenLabsTTSService(TTSService):
-    def __init__(self, input_queue=None, output_queue=None, api_key=None, voice_id=None):
-        super().__init__(input_queue, output_queue)
+    def __init__(self, api_key=None, voice_id=None):
+        super().__init__()
 
         self.api_key = api_key or os.getenv("ELEVENLABS_API_KEY")
         self.voice_id = voice_id or os.getenv("ELEVENLABS_VOICE_ID")
