@@ -15,7 +15,8 @@ dependencies = [
     "azure-cognitiveservices-speech",
     "pyht",
     "opentelemetry-sdk",
-    "aiohttp"
+    "aiohttp",
+    "fal"
 ]
 
 [tool.setuptools.packages.find]
