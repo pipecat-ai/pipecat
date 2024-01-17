@@ -32,7 +32,7 @@ async def main(room_url:str, token):
         ]
 
         sentence = ""
-        async for frame in transport.get_media_frames():
+        async for frame in transport.get_receive_frames():
             if frame.frame_type != FrameType.TRANSCRIPTION:
                 continue
 
@@ -50,7 +50,7 @@ async def main(room_url:str, token):
                 async for response in llm.run_llm_async_sentences(messages):
                     full_response += response
                     async for audio in tts.run_tts(response):
-                        await transport.output_queue.put(QueueFrame(FrameType.AUDIO, audio))
+                        await transport.send_queue.put(QueueFrame(FrameType.AUDIO, audio))
 
                 messages.append({"role": "assistant", "content": full_response})
 
