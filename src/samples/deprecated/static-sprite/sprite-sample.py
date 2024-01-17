@@ -40,7 +40,7 @@ class StaticSpriteResponse(OrchestratorResponse):
             self.image_bytes = img.tobytes()
 
     def do_play(self) -> None:
-        self.output_queue.put(QueueFrame(FrameType.IMAGE_FRAME, self.image_bytes))
+        self.output_queue.put(QueueFrame(FrameType.IMAGE, self.image_bytes))
 
 
 class IntroSpriteResponse(StaticSpriteResponse):
@@ -73,8 +73,8 @@ class AnimatedSpriteLLMResponse(LLMResponse):
 
     def get_frames_from_tts_response(self, audio_frame) -> list[QueueFrame]:
         return [
-            QueueFrame(FrameType.AUDIO_FRAME, audio_frame),
-            QueueFrame(FrameType.IMAGE_FRAME, random.choice(self.image_bytes))
+            QueueFrame(FrameType.AUDIO, audio_frame),
+            QueueFrame(FrameType.IMAGE, random.choice(self.image_bytes))
         ]
 
 

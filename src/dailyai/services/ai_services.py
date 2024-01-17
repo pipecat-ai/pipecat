@@ -73,13 +73,13 @@ class LLMService(AIService):
         if not self.output_queue:
             raise Exception("Output queue must be set before using the run method.")
 
-        if frame.frame_type == FrameType.LLM_MESSAGE_FRAME:
+        if frame.frame_type == FrameType.LLM_MESSAGE:
             if type(frame.frame_data) != list:
                 raise Exception("LLM service requires a dict for the data field")
 
             messages: list[dict[str, str]] = frame.frame_data
             async for message in self.run_llm_async_sentences(messages):
-                await self.output_queue.put(QueueFrame(FrameType.SENTENCE_FRAME, message))
+                await self.output_queue.put(QueueFrame(FrameType.SENTENCE, message))
 
 
 class TTSService(AIService):
@@ -98,13 +98,13 @@ class TTSService(AIService):
         if not self.output_queue:
             raise Exception("Output queue must be set before using the run method.")
 
-        if frame.frame_type == FrameType.SENTENCE_FRAME:
+        if frame.frame_type == FrameType.SENTENCE:
             if type(frame.frame_data) != str:
                 raise Exception("TTS service requires a string for the data field")
 
             text = frame.frame_data
             async for audio in self.run_tts(text):
-                await self.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
+                await self.output_queue.put(QueueFrame(FrameType.AUDIO, audio))
 
 
 class ImageGenService(AIService):

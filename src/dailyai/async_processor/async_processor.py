@@ -269,7 +269,7 @@ class LLMResponse(OrchestratorResponse):
             yield out.strip()
 
     def get_frames_from_tts_response(self, audio_frame) -> list[QueueFrame]:
-        return [QueueFrame(FrameType.AUDIO_FRAME, audio_frame)]
+        return [QueueFrame(FrameType.AUDIO, audio_frame)]
 
     def get_frames_from_chunk(self, chunk) -> Generator[list[QueueFrame], Any, None]:
         for audio_frame in self.services.tts.run_tts(chunk):

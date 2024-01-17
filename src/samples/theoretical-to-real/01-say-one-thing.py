@@ -38,7 +38,7 @@ async def main(room_url):
             return
 
         async for audio in audio_generator:
-            transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
+            transport.output_queue.put(QueueFrame(FrameType.AUDIO, audio))
 
         # wait for the output queue to be empty, then leave the meeting
         transport.output_queue.join()
