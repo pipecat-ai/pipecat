@@ -21,13 +21,14 @@ async def main(room_url):
     transport.camera_width = 1024
     transport.camera_height = 1024
 
-    imagegen = OpenAIImageGenService()
-    image_task = asyncio.create_task(imagegen.run_image_gen("a cat in the style of picasso", "1024x1024"))
+    imagegen = OpenAIImageGenService(image_size="1024x1024")
+    image_task = asyncio.create_task(
+        imagegen.run_to_queue(transport.send_queue, [QueueFrame(FrameType.IMAGE_DESCRIPTION, "a cat in the style of picasso")])
+    )
 
     @transport.event_handler("on_participant_joined")
     async def on_participant_joined(transport, participant):
-        (_, image_bytes) = await image_task
-        transport.output_queue.put(QueueFrame(FrameType.IMAGE, image_bytes))
+        await image_task
 
     await transport.run()
 
@@ -38,6 +39,6 @@ if __name__ == "__main__":
         "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
     )
 
-    args: argparse.Namespace = parser.parse_args()
+    args, unknown = parser.parse_known_args()
 
     asyncio.run(main(args.url))

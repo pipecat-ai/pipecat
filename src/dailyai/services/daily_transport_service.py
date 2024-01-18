@@ -200,11 +200,18 @@ class DailyTransportService(EventHandler):
 
     async def marshal_frames(self):
         while True:
-            frame = await self.send_queue.get()
+            frame: QueueFrame | list = await self.send_queue.get()
             self.threadsafe_send_queue.put(frame)
             self.send_queue.task_done()
-            if frame.frame_type == FrameType.END_STREAM:
+            if type(frame) == QueueFrame and frame.frame_type == FrameType.END_STREAM:
                 break
+
+    def wait_for_send_queue_to_empty(self):
+        self.threadsafe_send_queue.join()
+
+    def stop_when_done(self):
+        self.wait_for_send_queue_to_empty()
+        self.stop()
 
     async def run(self) -> None:
         self.configure_daily()
