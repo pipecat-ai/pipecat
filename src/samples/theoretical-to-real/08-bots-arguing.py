@@ -28,7 +28,7 @@ async def main(room_url:str):
     tts1 = AzureTTSService()
     tts2 = ElevenLabsTTSService()
 
-    async def handle_transcriptions():
+    async def argue():
         bot1_messages = [
             {"role": "system", "content": "You strongly believe that a hot dog is a sandwich. Start by stating this fact in a few sentences, then be prepared to debate this with the user. Your responses should only be a few sentences long."},
         ]
@@ -59,7 +59,7 @@ async def main(room_url:str):
             async for audio in audio_generator2:
                 await transport.send_queue.put(QueueFrame(FrameType.AUDIO, audio))
 
-    await asyncio.gather(transport.run(), handle_transcriptions())
+    await asyncio.gather(transport.run(), argue())
 
 
 if __name__ == "__main__":
