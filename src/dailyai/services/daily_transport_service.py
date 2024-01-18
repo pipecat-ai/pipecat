@@ -209,6 +209,10 @@ class DailyTransportService(EventHandler):
     def wait_for_send_queue_to_empty(self):
         self.threadsafe_send_queue.join()
 
+    def stop_when_done(self):
+        self.wait_for_send_queue_to_empty()
+        self.stop()
+
     async def run(self) -> None:
         self.configure_daily()
 

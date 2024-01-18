@@ -5,6 +5,7 @@ from typing import AsyncGenerator
 from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureTTSService
+from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 async def main(room_url):
     # create a transport service object using environment variables for
@@ -23,9 +24,7 @@ async def main(room_url):
         meeting_duration_minutes,
     )
     transport.mic_enabled = True
-
-    # similarly, create a tts service
-    tts = AzureTTSService()
+    tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
 
     # Register an event handler so we can play the audio when the participant joins.
     @transport.event_handler("on_participant_joined")
@@ -33,11 +32,13 @@ async def main(room_url):
         if participant["info"]["isLocal"]:
             return
 
-        await tts.say("Hello there, " + participant["info"]["userName"] + "!", transport.send_queue)
+        await tts.say(
+            "Hello there, " + participant["info"]["userName"] + "!",
+            transport.send_queue,
+        )
 
         # wait for the output queue to be empty, then leave the meeting
-        transport.wait_for_send_queue_to_empty()
-        transport.stop()
+        transport.stop_when_done()
 
     await transport.run()
 

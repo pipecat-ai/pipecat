@@ -115,8 +115,7 @@ async def main(room_url):
                 await transport.send_queue.put(QueueFrame(FrameType.AUDIO, audio))
 
         # wait for the output queue to be empty, then leave the meeting
-        transport.wait_for_send_queue_to_empty()
-        transport.stop()
+        transport.stop_when_done()
 
     month_tasks = [asyncio.create_task(get_month_data(month)) for month in months]
 
