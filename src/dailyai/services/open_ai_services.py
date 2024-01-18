@@ -50,20 +50,20 @@ class OpenAILLMService(LLMService):
             return None
 
 class OpenAIImageGenService(ImageGenService):
-    def __init__(self, api_key=None, model=None):
-        super().__init__()
+    def __init__(self, image_size:str, api_key=None, model=None):
+        super().__init__(image_size=image_size)
         api_key = api_key or os.getenv("OPEN_AI_KEY")
         self.model = model or os.getenv("OPEN_AI_IMAGE_MODEL") or "dall-e-3"
         self.client = AsyncOpenAI(api_key=api_key)
 
-    async def run_image_gen(self, sentence, size) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         self.logger.info("Generating OpenAI image", sentence)
 
         image = await self.client.images.generate(
             prompt=sentence,
             model=self.model,
             n=1,
-            size=size
+            size=self.image_size
         )
         image_url = image.data[0].url
         if not image_url:

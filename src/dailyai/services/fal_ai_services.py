@@ -9,12 +9,10 @@ from PIL import Image
 from dailyai.services.ai_services import LLMService, TTSService, ImageGenService
 # Fal expects FAL_KEY_ID and FAL_KEY_SECRET to be set in the env
 class FalImageGenService(ImageGenService):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, image_size):
+        super().__init__(image_size)
 
-
-
-    async def run_image_gen(self, sentence, size) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         def get_image_url(sentence, size):
             print("starting fal submit...")
             handler = fal.apps.submit(
@@ -37,7 +35,7 @@ class FalImageGenService(ImageGenService):
 
             return image_url
         print(f"fetching image url...")
-        image_url = await asyncio.to_thread(get_image_url, sentence, size)
+        image_url = await asyncio.to_thread(get_image_url, sentence, self.image_size)
         print(f"got image url, downloading image...")
         # Load the image from the url
         async with aiohttp.ClientSession() as session:

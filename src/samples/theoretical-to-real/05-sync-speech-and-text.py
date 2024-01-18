@@ -5,6 +5,7 @@ from asyncio.queues import Queue
 import re
 
 from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.services.ai_services import SentenceAggregator
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.open_ai_services import OpenAIImageGenService
@@ -26,13 +27,12 @@ async def main(room_url):
     transport.camera_height = 1024
 
     llm = AzureLLMService()
-    #tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
-    tts = ElevenLabsTTSService()
-    dalle = FalImageGenService()
-    # dalle = OpenAIImageGenService() 
+    dalle = FalImageGenService(image_size="1024x1024")
+    tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
+    # dalle = OpenAIImageGenService(image_size="1024x1024")
 
     # Get a complete audio chunk from the given text. Splitting this into its own
-    # coroutine lets us ensure proper ordering of the audio chunks on the output queue.
+    # coroutine lets us ensure proper ordering of the audio chunks on the send queue.
     async def get_all_audio(text):
         all_audio = bytearray()
         async for audio in tts.run_tts(text):
@@ -44,14 +44,18 @@ async def main(room_url):
         image_text = ""
         tts_tasks = []
         first_sentence = True
-        async for sentence in llm.run_llm_async_sentences(
-            [
-                {
-                    "role": "system",
-                    "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please."
-                }
-            ]
-        ):
+        messages = [
+            {
+                "role": "system",
+                "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
+            }
+        ]
+
+        async for frame in SentenceAggregator().run(llm.run([QueueFrame(FrameType.LLM_MESSAGE, messages)])):
+            if type(frame.frame_data) != str:
+                raise Exception("LLM service requires a string for the data field")
+
+            sentence: str = frame.frame_data
             image_text += sentence
 
             if first_sentence:
@@ -61,7 +65,7 @@ async def main(room_url):
 
             tts_tasks.append(get_all_audio(sentence))
 
-        tts_tasks.insert(0, dalle.run_image_gen(image_text, "1024x1024"))
+        tts_tasks.insert(0, dalle.run_image_gen(image_text))
 
         print(f"waiting for tasks to finish for {month}")
         data = await asyncio.gather(
@@ -101,19 +105,17 @@ async def main(room_url):
         # likely no delay between months, but the months won't display in order.
         for month_data_task in asyncio.as_completed(month_tasks):
             data = await month_data_task
-            print(f"got data, queueing frames...")
-            transport.output_queue.put(
+            await transport.send_queue.put(
                 [
                     QueueFrame(FrameType.IMAGE, data["image"]),
                     QueueFrame(FrameType.AUDIO, data["audio"][0]),
                 ]
             )
             for audio in data["audio"][1:]:
-                transport.output_queue.put(QueueFrame(FrameType.AUDIO, audio))
+                await transport.send_queue.put(QueueFrame(FrameType.AUDIO, audio))
 
         # wait for the output queue to be empty, then leave the meeting
-        transport.output_queue.join()
-        transport.stop()
+        transport.stop_when_done()
 
     month_tasks = [asyncio.create_task(get_month_data(month)) for month in months]
 
