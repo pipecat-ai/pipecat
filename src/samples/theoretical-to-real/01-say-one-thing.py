@@ -38,7 +38,7 @@ async def main(room_url):
         )
 
         # wait for the output queue to be empty, then leave the meeting
-        transport.stop_when_done()
+        await transport.stop_when_done()
 
     await transport.run()
 

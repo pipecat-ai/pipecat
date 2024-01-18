@@ -37,8 +37,7 @@ async def main(room_url):
     @transport.event_handler("on_first_other_participant_joined")
     async def on_first_other_participant_joined(transport):
         await tts_task
-
-        transport.stop_when_done()
+        await transport.stop_when_done()
 
     await transport.run()
 
