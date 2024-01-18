@@ -38,8 +38,7 @@ async def main(room_url):
     async def on_first_other_participant_joined(transport):
         await tts_task
 
-        transport.wait_for_send_queue_to_empty()
-        transport.stop()
+        transport.stop_when_done()
 
     await transport.run()
 

@@ -163,8 +163,7 @@ class TTSService(AIService):
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue):
-        async for audio_chunk in self.run_tts(sentence):
-            await queue.put(QueueFrame(FrameType.AUDIO, audio_chunk))
+        await self.run_to_queue(queue, [QueueFrame(FrameType.SENTENCE, sentence)])
 
 
 class ImageGenService(AIService):

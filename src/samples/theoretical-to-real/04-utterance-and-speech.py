@@ -63,8 +63,7 @@ async def main(room_url:str):
 
         await asyncio.gather(llm_response_task, buffer_to_send_queue())
 
-        transport.wait_for_send_queue_to_empty()
-        transport.stop()
+        transport.stop_when_done()
 
     await transport.run()
 
