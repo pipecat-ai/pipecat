@@ -3,6 +3,7 @@ import asyncio
 import requests
 import time
 import urllib.parse
+from dailyai.services.ai_services import SentenceAggregator
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
