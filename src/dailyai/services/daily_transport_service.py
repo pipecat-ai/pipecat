@@ -206,11 +206,12 @@ class DailyTransportService(EventHandler):
             if type(frame) == QueueFrame and frame.frame_type == FrameType.END_STREAM:
                 break
 
-    def wait_for_send_queue_to_empty(self):
+    async def wait_for_send_queue_to_empty(self):
+        await self.send_queue.join()
         self.threadsafe_send_queue.join()
 
-    def stop_when_done(self):
-        self.wait_for_send_queue_to_empty()
+    async def stop_when_done(self):
+        await self.wait_for_send_queue_to_empty()
         self.stop()
 
     async def run(self) -> None:

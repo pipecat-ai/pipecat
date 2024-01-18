@@ -41,9 +41,6 @@ async def main(room_url):
         return all_audio
 
     async def get_month_data(month):
-        image_text = ""
-        tts_tasks = []
-        first_sentence = True
         messages = [
             {
                 "role": "system",
@@ -51,41 +48,23 @@ async def main(room_url):
             }
         ]
 
-        async for frame in SentenceAggregator().run(llm.run([QueueFrame(FrameType.LLM_MESSAGE, messages)])):
-            if type(frame.frame_data) != str:
-                raise Exception("LLM service requires a string for the data field")
-
-            sentence: str = frame.frame_data
-            image_text += sentence
-
-            if first_sentence:
-                sentence = f"{month}: {sentence}"
-            else:
-                first_sentence = False
-
-            tts_tasks.append(get_all_audio(sentence))
-
-        tts_tasks.insert(0, dalle.run_image_gen(image_text))
-
-        print(f"waiting for tasks to finish for {month}")
-        data = await asyncio.gather(
-            *tts_tasks
+        image_description = await llm.run_llm(messages)
+        to_speak = f"{month}: {image_description}"
+        (audio, image_data) = await asyncio.gather(
+            get_all_audio(to_speak), dalle.run_image_gen(image_description)
         )
-
-        print(f"done gathering tts tasks for {month}")
 
         return {
             "month": month,
-            "text": image_text,
-            "image": data[0][1],
-            "audio": data[1:],
+            "text": image_description,
+            "image": image_data[1],
+            "audio": audio,
         }
 
     months: list[str] = [
         "January",
         "February",
-        "March"]
-    """
+        "March",
         "April",
         "May",
         "June",
@@ -96,7 +75,6 @@ async def main(room_url):
         "November",
         "December",
     ]
-    """
 
     @transport.event_handler("on_first_other_participant_joined")
     async def on_first_other_participant_joined(transport):
@@ -108,14 +86,12 @@ async def main(room_url):
             await transport.send_queue.put(
                 [
                     QueueFrame(FrameType.IMAGE, data["image"]),
-                    QueueFrame(FrameType.AUDIO, data["audio"][0]),
+                    QueueFrame(FrameType.AUDIO, data["audio"]),
                 ]
             )
-            for audio in data["audio"][1:]:
-                await transport.send_queue.put(QueueFrame(FrameType.AUDIO, audio))
 
         # wait for the output queue to be empty, then leave the meeting
-        transport.stop_when_done()
+        await transport.stop_when_done()
 
     month_tasks = [asyncio.create_task(get_month_data(month)) for month in months]
 
