@@ -27,9 +27,9 @@ async def main(room_url):
     transport.camera_height = 1024
 
     llm = AzureLLMService()
-    dalle = FalImageGenService()
+    dalle = FalImageGenService(image_size="1024x1024")
     tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
-    #dalle = OpenAIImageGenService(image_size="1024x1024")
+    # dalle = OpenAIImageGenService(image_size="1024x1024")
 
     # Get a complete audio chunk from the given text. Splitting this into its own
     # coroutine lets us ensure proper ordering of the audio chunks on the send queue.
