@@ -33,7 +33,7 @@ async def main(room_url:str, token):
 
         sentence = ""
         async for frame in transport.get_receive_frames():
-            if frame.frame_type != FrameType.TRANSCRIPTION:
+            if frame.frame_type != FrameType.TEXT:
                 continue
 
             message = frame.frame_data

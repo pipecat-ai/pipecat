@@ -21,12 +21,6 @@ class AIService:
     def stop(self):
         pass
 
-    def allowed_input_frame_types(self) -> set[FrameType]:
-        return set()
-
-    def possible_output_frame_types(self) -> set[FrameType]:
-        return set()
-
     async def run_to_queue(self, queue: asyncio.Queue, frames, add_end_of_stream=False) -> None:
         async for frame in self.run(frames):
             await queue.put(frame)
@@ -39,76 +33,50 @@ class AIService:
         frames: Iterable[QueueFrame]
         | AsyncIterable[QueueFrame]
         | asyncio.Queue[QueueFrame],
-        requested_frame_types: set[FrameType] | None=None,
     ) -> AsyncGenerator[QueueFrame, None]:
-        if requested_frame_types and self.possible_output_frame_types().intersection(requested_frame_types) == set():
-            raise Exception(f"Requested frame types {requested_frame_types} are not supported by this service.")
+        try:
+            if isinstance(frames, AsyncIterable):
+                async for frame in frames:
+                    async for output_frame in self.process_frame(frame):
+                        yield output_frame
+            elif isinstance(frames, Iterable):
+                for frame in frames:
+                    async for output_frame in self.process_frame(frame):
+                        yield output_frame
+            elif isinstance(frames, asyncio.Queue):
+                while True:
+                    frame = await frames.get()
+                    async for output_frame in self.process_frame(frame):
+                        yield output_frame
+                    if frame.frame_type == FrameType.END_STREAM:
+                        break
+            else:
+                raise Exception("Frames must be an iterable or async iterable")
 
-        if not requested_frame_types:
-            requested_frame_types = self.possible_output_frame_types()
-
-        if isinstance(frames, AsyncIterable):
-            async for frame in frames:
-                async for output_frame in self.process_frame(requested_frame_types, frame):
-                    yield output_frame
-        elif isinstance(frames, Iterable):
-            for frame in frames:
-                async for output_frame in self.process_frame(requested_frame_types, frame):
-                    yield output_frame
-        elif isinstance(frames, asyncio.Queue):
-            while True:
-                frame = await frames.get()
-                async for output_frame in self.process_frame(requested_frame_types, frame):
-                    yield output_frame
-                if frame.frame_type == FrameType.END_STREAM:
-                    break
-        else:
-            raise Exception("Frames must be an iterable or async iterable")
+            async for output_frame in self.finalize():
+                yield output_frame
+        except Exception as e:
+            self.logger.error("Exception occurred while running AI service", e)
+            raise e
 
     @abstractmethod
-    async def process_frame(self, requested_frame_types:set[FrameType], frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        # Yield something so the linter can deduce what should happen here.
-        yield QueueFrame(FrameType.END_STREAM, None)
+    async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        # This is a trick for the interpreter (and linter) to know that this is a generator.
+        if False:
+            yield QueueFrame(FrameType.NOOP, None)
 
-class SentenceAggregator(AIService):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.current_sentence = ""
-
-    def allowed_input_frame_types(self) -> set[FrameType]:
-        return set([FrameType.TEXT_CHUNK, FrameType.SENTENCE])
-
-    def possible_output_frame_types(self) -> set[FrameType]:
-        return set([FrameType.SENTENCE])
-
-    async def process_frame(self, requested_frame_types: set[FrameType], frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if not FrameType.SENTENCE in requested_frame_types:
-            return
-
-        if frame.frame_type == FrameType.TEXT_CHUNK:
-            if type(frame.frame_data) != str:
-                raise Exception(
-                    "Sentence aggregator requires a string for the data field"
-                )
-
-            self.current_sentence += frame.frame_data
-            if self.current_sentence.endswith((".", "?", "!")):
-                sentence = self.current_sentence
-                self.current_sentence = ""
-                yield QueueFrame(FrameType.SENTENCE, sentence)
-        elif frame.frame_type == FrameType.END_STREAM:
-            if self.current_sentence:
-                yield QueueFrame(FrameType.SENTENCE, self.current_sentence)
-        elif frame.frame_type == FrameType.SENTENCE:
-            yield frame
-
+    @abstractmethod
+    async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
+        # This is a trick for the interpreter (and linter) to know that this is a generator.
+        if False:
+            yield QueueFrame(FrameType.NOOP, None)
 
 class LLMService(AIService):
     def allowed_input_frame_types(self) -> set[FrameType]:
-        return set([FrameType.LLM_MESSAGE, FrameType.SENTENCE, FrameType.TRANSCRIPTION])
+        return set([FrameType.LLM_MESSAGE])
 
     def allowed_output_frame_types(self) -> set[FrameType]:
-        return set([FrameType.SENTENCE, FrameType.TEXT_CHUNK])
+        return set([FrameType.TEXT])
 
     @abstractmethod
     async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
@@ -118,52 +86,58 @@ class LLMService(AIService):
     async def run_llm(self, messages) -> str:
         pass
 
-    async def process_frame(self, requested_frame_types: set[FrameType], frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if frame.frame_type == FrameType.LLM_MESSAGE:
             if type(frame.frame_data) != list:
                 raise Exception("LLM service requires a dict for the data field")
 
             messages: list[dict[str, str]] = frame.frame_data
-            if FrameType.SENTENCE in requested_frame_types:
-                yield QueueFrame(FrameType.SENTENCE, await self.run_llm(messages))
-            else:
-                async for text_chunk in self.run_llm_async(messages):
-                    yield QueueFrame(FrameType.TEXT_CHUNK, text_chunk)
-
-        # TODO: handle other frame types! Need to aggregate into messages
+            async for text_chunk in self.run_llm_async(messages):
+                yield QueueFrame(FrameType.TEXT, text_chunk)
 
 
 class TTSService(AIService):
+    def __init__(self, aggregate_sentences=True):
+        super().__init__()
+        self.aggregate_sentences: bool = aggregate_sentences
+        self.current_sentence: str = ""
+
     # Some TTS services require a specific sample rate. We default to 16k
     def get_mic_sample_rate(self):
         return 16000
 
-    def allowed_input_frame_types(self) -> set[FrameType]:
-        return set([FrameType.SENTENCE, FrameType.TRANSCRIPTION, FrameType.TEXT_CHUNK])
-
-    def possible_output_frame_types(self) -> set[FrameType]:
-        return set([FrameType.AUDIO])
-
-    # Converts the sentence to audio. Yields a list of audio frames that can
+    # Converts the text to audio. Yields a list of audio frames that can
     # be sent to the microphone device
     @abstractmethod
-    async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
+    async def run_tts(self, text) -> AsyncGenerator[bytes, None]:
         # yield empty bytes here, so linting can infer what this method does
         yield bytes()
 
-    async def process_frame(self, requested_frame_types: set[FrameType], frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if not FrameType.AUDIO in requested_frame_types:
-            return
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        if frame.frame_type != FrameType.TEXT or type(frame.frame_data) != str:
+            raise Exception(f"TTS service requires a string for the data field, got {frame.frame_type} and frame_data type {type(frame.frame_data)}")
 
-        if type(frame.frame_data) != str:
-            raise Exception("TTS service requires a string for the data field")
+        text: str | None = None
+        if not self.aggregate_sentences:
+            text = frame.frame_data
+        else:
+            self.current_sentence += frame.frame_data
+            if self.current_sentence.endswith((".", "?", "!")):
+                text = self.current_sentence
+                self.current_sentence = ""
 
-        async for audio_chunk in self.run_tts(frame.frame_data):
-            yield QueueFrame(FrameType.AUDIO, audio_chunk)
+        if text:
+            async for audio_chunk in self.run_tts(text):
+                yield QueueFrame(FrameType.AUDIO, audio_chunk)
+
+    async def finalize(self):
+        if self.current_sentence:
+            async for audio_chunk in self.run_tts(self.current_sentence):
+                yield QueueFrame(FrameType.AUDIO, audio_chunk)
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue):
-        await self.run_to_queue(queue, [QueueFrame(FrameType.SENTENCE, sentence)])
+        await self.run_to_queue(queue, [QueueFrame(FrameType.TEXT, sentence)])
 
 
 class ImageGenService(AIService):
@@ -171,21 +145,12 @@ class ImageGenService(AIService):
         super().__init__(**kwargs)
         self.image_size = image_size
 
-    def allowed_input_frame_types(self) -> set[FrameType]:
-        return set([FrameType.SENTENCE, FrameType.TRANSCRIPTION, FrameType.TEXT_CHUNK, FrameType.IMAGE_DESCRIPTION])
-
-    def possible_output_frame_types(self) -> set[FrameType]:
-        return set([FrameType.IMAGE])
-
     # Renders the image. Returns an Image object.
     @abstractmethod
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         pass
 
-    async def process_frame(self, requested_frame_types: set[FrameType], frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if not FrameType.IMAGE in requested_frame_types:
-            return
-
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if type(frame.frame_data) != str:
             raise Exception("Image service requires a string for the data field")
 
