@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import logging
+import threading
 import time
 import types
 
@@ -21,6 +22,8 @@ from daily import (
 )
 
 class DailyTransportService(EventHandler):
+    _daily_initialized = False
+    _lock = threading.Lock()
     def __init__(
         self,
         room_url: str,
@@ -114,7 +117,11 @@ class DailyTransportService(EventHandler):
         return decorator
 
     def configure_daily(self):
-        Daily.init()
+        # Only initialize Daily once
+        if not DailyTransportService._daily_initialized:
+            with DailyTransportService._lock:
+                Daily.init()
+                DailyTransportService._daily_initialized = True
         self.client = CallClient(event_handler=self)
 
         if self.mic_enabled:
