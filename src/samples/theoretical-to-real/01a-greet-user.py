@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import time
 from typing import AsyncGenerator
@@ -38,10 +39,7 @@ async def main(room_url):
         print(f"participant joined: {participant['info']['userName']}")
         if participant["info"]["isLocal"]:
             return
-        audio_generator: AsyncGenerator[bytes, None] = tts.run_tts(f"Hello there, {participant['info']['userName']}!")
-
-        async for audio in audio_generator:
-            transport.output_queue.put(QueueFrame(FrameType.AUDIO, audio))
+        await tts.say(f"Hello there, {participant['info']['userName']}!", transport.send_queue)
 
     print("setting up call state handler")
     @transport.event_handler("on_call_state_updated")
@@ -52,4 +50,10 @@ async def main(room_url):
 
 
 if __name__ == "__main__":
-    asyncio.run(main("https://chad-hq.daily.co/howdy"))
+    parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
+    parser.add_argument(
+        "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
+    )
+
+    args, unknown = parser.parse_known_args()
+    asyncio.run(main(args.url))
