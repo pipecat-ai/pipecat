@@ -21,8 +21,9 @@ async def main(room_url):
         meeting_duration_minutes,
     )
     transport.mic_enabled = True
-    transport.camera_enabled = True
     transport.mic_sample_rate = 16000
+    
+    transport.camera_enabled = True
     transport.camera_width = 1024
     transport.camera_height = 1024
 

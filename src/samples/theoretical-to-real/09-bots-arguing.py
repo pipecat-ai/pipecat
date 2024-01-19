@@ -44,20 +44,14 @@ async def main(room_url:str):
             bot1_messages.append({"role": "assistant", "content": bot1_msg})
             bot2_messages.append({"role": "user", "content": bot1_msg})
 
-            audio_generator1 = tts1.run_tts(bot1_msg)
-
-            async for audio in audio_generator1:
-                await transport.send_queue.put(QueueFrame(FrameType.AUDIO, audio))
+            await tts1.say(bot1_msg, transport.send_queue)
 
             bot2_msg = await llm.run_llm(bot2_messages)
             print(f"bot2_msg: {bot2_msg}")
             bot2_messages.append({"role": "assistant", "content": bot2_msg})
             bot1_messages.append({"role": "user", "content": bot2_msg})
 
-            audio_generator2 = tts2.run_tts(bot2_msg)
-
-            async for audio in audio_generator2:
-                await transport.send_queue.put(QueueFrame(FrameType.AUDIO, audio))
+            await tts2.say(bot2_msg, transport.send_queue)
 
     await asyncio.gather(transport.run(), argue())
 
