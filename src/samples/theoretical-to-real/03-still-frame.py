@@ -23,7 +23,7 @@ async def main(room_url):
 
     imagegen = OpenAIImageGenService(image_size="1024x1024")
     image_task = asyncio.create_task(
-        imagegen.run_to_queue(transport.send_queue, [QueueFrame(FrameType.IMAGE_DESCRIPTION, "a cat in the style of picasso")])
+        imagegen.run_to_queue(transport.send_queue, [QueueFrame(FrameType.TEXT, "a cat in the style of picasso")])
     )
 
     @transport.event_handler("on_participant_joined")
