@@ -279,7 +279,7 @@ class DailyTransportService(EventHandler):
 
     def on_transcription_message(self, message:dict):
         if self.loop:
-            frame = QueueFrame(FrameType.TRANSCRIPTION, message)
+            frame = QueueFrame(FrameType.TEXT, message)
             asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self.loop)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
