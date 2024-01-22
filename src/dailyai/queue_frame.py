@@ -8,8 +8,9 @@ class FrameType(Enum):
     AUDIO = 2
     IMAGE = 3
     TEXT = 4
-    LLM_MESSAGE = 5
-    APP_MESSAGE = 6
+    TRANSCRIPTION = 5
+    LLM_MESSAGE = 6
+    APP_MESSAGE = 7
 
 @dataclass(frozen=True)
 class QueueFrame:
