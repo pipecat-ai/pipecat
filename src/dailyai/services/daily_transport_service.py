@@ -57,6 +57,7 @@ class DailyTransportService(EventHandler):
         self.receive_queue = asyncio.Queue()
 
         self.other_participant_has_joined = False
+        self.my_participant_id = None
 
         self.camera_thread = None
         self.frame_consumer_thread = None
@@ -150,6 +151,7 @@ class DailyTransportService(EventHandler):
 
         self.client.set_user_name(self.bot_name)
         self.client.join(self.room_url, self.token, completion=self.call_joined)
+        self.my_participant_id = self.client.participants()["local"]["id"]
 
         self.client.update_inputs(
             {
@@ -192,8 +194,6 @@ class DailyTransportService(EventHandler):
 
         if self.token:
             self.client.start_transcription(self.transcription_settings)
-
-        self.my_participant_id = self.client.participants()["local"]["id"]
 
     async def get_receive_frames(self):
         while True:
@@ -279,7 +279,7 @@ class DailyTransportService(EventHandler):
 
     def on_transcription_message(self, message:dict):
         if self.loop:
-            frame = QueueFrame(FrameType.TEXT, message)
+            frame = QueueFrame(FrameType.TRANSCRIPTION, message)
             asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self.loop)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):

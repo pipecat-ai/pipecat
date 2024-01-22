@@ -7,11 +7,9 @@ from httpx import request
 from dailyai.queue_frame import QueueFrame, FrameType
 
 from abc import abstractmethod
-from typing import AsyncGenerator, Iterable
+from typing import AsyncGenerator, AsyncIterable, Iterable
 from dataclasses import dataclass
-from typing import AsyncGenerator
 
-from collections.abc import Iterable, AsyncIterable
 
 class AIService:
 
