@@ -24,44 +24,36 @@ class QueueTee:
             for queue in output_queues:
                 await queue.put(frame)
 
-class TranscriptionToLLMMessageAggregator(AIService):
-    def __init__(self, messages, bot_participant_id):
+class LLMContextAggregator(AIService):
+    def __init__(self, messages: list[dict], role:str, bot_participant_id=None):
         self.messages = messages
         self.bot_participant_id = bot_participant_id
+        self.role = role
         self.sentence = ""
 
     async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if frame.frame_type != FrameType.TRANSCRIPTION:
-            return
+        content: str = ""
 
-        message = frame.frame_data
-        if not isinstance(message, dict):
-            return
+        if frame.frame_type == FrameType.TRANSCRIPTION:
+            message = frame.frame_data
+            if not isinstance(message, dict):
+                return
 
-        if message["session_id"] == self.bot_participant_id:
-            return
+            if message["session_id"] == self.bot_participant_id:
+                return
 
-        print("transcription to message", frame)
+            content = message["text"]
+        elif frame.frame_type == FrameType.TEXT:
+            if not isinstance(frame.frame_data, str):
+                return
 
-        # todo: we could differentiate between transcriptions from different participants
-        self.sentence += message["text"]
+            content = frame.frame_data
+
+        # todo: we should differentiate between transcriptions from different participants
+        self.sentence += content
         if self.sentence.endswith((".", "?", "!")):
-            self.messages.append({"role": "user", "content": self.sentence})
+            self.messages.append({"role": self.role, "content": self.sentence})
             self.sentence = ""
             yield QueueFrame(FrameType.LLM_MESSAGE, self.messages)
-
-
-class LLMResponseToLLMMessageAggregator(AIService):
-    def __init__(self, messages):
-        self.messages = messages
-        self.sentence = ""
-
-    async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if frame.frame_type == FrameType.TEXT and isinstance(frame.frame_data, str):
-            print("llmresponse to message", frame)
-            self.sentence += frame.frame_data
-            if self.sentence.endswith((".", "?", "!")):
-                self.messages.append({"role": "assistant", "content": self.sentence})
-                self.sentence = ""
 
         yield frame
