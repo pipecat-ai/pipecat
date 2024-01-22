@@ -112,8 +112,12 @@ class TTSService(AIService):
         yield bytes()
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if frame.frame_type != FrameType.TEXT or type(frame.frame_data) != str:
-            raise Exception(f"TTS service requires a string for the data field, got {frame.frame_type} and frame_data type {type(frame.frame_data)}")
+        if frame.frame_type != FrameType.TEXT:
+            yield frame
+            return
+
+        if not isinstance(frame.frame_data, str):
+            raise(Exception(f"Invalid data type in frame type: {frame.frame_type}, type: {type(frame.frame_data)}"))
 
         text: str | None = None
         if not self.aggregate_sentences:
