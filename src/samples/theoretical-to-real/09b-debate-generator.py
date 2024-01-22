@@ -34,11 +34,21 @@ async def main(room_url:str):
     dalle = FalImageGenService(image_size="1024x1024")
     # dalle = OpenAIImageGenService(image_size="1024x1024")
 
+    topic = "Are pokemon edible?"
+    affirmative = "A woman dressed as a cowboy, outside on a ranch"
+    negative = "Pikachu in a business suit"
+    
+    topic = "Is a hot dog a sandwich?"
+    affirmative = "A woman conservatively dressed as a librarian in a library surrounded by books"
+    negative = "A cat dressed in a hot dog costume"
+
+
+
     bot1_messages = [
-        {"role": "system", "content": "You are a stern librarian. You strongly believe that a hot dog is a sandwich. Start by stating this fact in a few sentences, then be prepared to debate this with the user. You shouldn't ever compromise on the fundamental truth that a hot dog is a sandwich. Your responses should only be a few sentences long."},
+        {"role": "system", "content": f"You are {affirmative}. You're in a debate, and the topic is: '{topic}'. You're arguing the affirmative. Start by stating this fact in a few sentences, then be prepared to debate this with the user. You shouldn't ever agree with the user. Your responses should only be a few sentences long."},
     ]
     bot2_messages = [
-        {"role": "system", "content": "You are a silly cat, and you strongly believe that a hot dog is not a sandwich. Debate this with the user, only responding with a few sentences. Don't ever accept that a hot dog is a sandwich."},
+        {"role": "system", "content": f"You are {negative}. You're in a debate, and the topic is: '{topic}'. You're arguing the negative.  Debate this with the user, only responding with a few sentences. Don't ever agree with the user."},
     ]
     
     async def get_bot1_statement():
@@ -71,7 +81,7 @@ async def main(room_url:str):
         for i in range(100):
             print(f"In iteration {i}")
 
-            bot1_description = "A woman conservatively dressed as a librarian in a library surrounded by books, cartoon, serious, highly detailed"
+            bot1_description = f"{affirmative}, cartoon, highly detailed"
 
             (audio1, image_data1) = await asyncio.gather(
                 get_bot1_statement(), dalle.run_image_gen(bot1_description)
@@ -83,7 +93,7 @@ async def main(room_url:str):
                 ]
             )
 
-            bot2_description = "A cat dressed in a hot dog costume, cartoon, bright colors, funny, highly detailed"
+            bot2_description = f"{negative}, cartoon, bright colors, funny, highly detailed"
 
             (audio2, image_data2) = await asyncio.gather(
                 get_bot2_statement(), dalle.run_image_gen(bot2_description)

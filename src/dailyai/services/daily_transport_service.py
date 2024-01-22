@@ -50,7 +50,7 @@ class DailyTransportService(EventHandler):
         self.camera_height = 768
         self.camera_enabled = False
 
-        self.send_queue = asyncio.Queue()
+        self.send_queue = asyncio.Queue(maxsize=5)
         self.receive_queue = asyncio.Queue()
 
         self.other_participant_has_joined = False

@@ -24,8 +24,7 @@ class FalImageGenService(ImageGenService):
             print("past fal handler init, about to wait for iter_events...")
             for event in handler.iter_events():
                 if isinstance(event, fal.apps.InProgress):
-                    print('Request in progress')
-                    print(event.logs)
+                    pass
 
             result = handler.get()
 
