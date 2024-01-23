@@ -2,6 +2,7 @@
 env/
 __pycache__/
 *~
+venv
 #*#
 
 # Distribution / packaging

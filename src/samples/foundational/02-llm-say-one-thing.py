@@ -1,10 +1,8 @@
 import argparse
 import asyncio
-from typing import AsyncGenerator
 
-from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.queue_frame import LLMMessagesQueueFrame
 from dailyai.services.daily_transport_service import DailyTransportService
-from dailyai.services.ai_services import SentenceAggregator
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
@@ -28,9 +26,7 @@ async def main(room_url):
     tts_task = asyncio.create_task(
         tts.run_to_queue(
             transport.send_queue,
-            SentenceAggregator().run(
-                llm.run([QueueFrame(FrameType.LLM_MESSAGE, messages)])
-            )
+            llm.run([LLMMessagesQueueFrame(messages)]),
         )
     )
 

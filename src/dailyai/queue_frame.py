@@ -1,19 +1,38 @@
 from enum import Enum
 from dataclasses import dataclass
+from typing import Any
 
-class FrameType(Enum):
-    START_STREAM = 0
-    END_STREAM = 1
-    AUDIO = 2
-    IMAGE = 3
-    SENTENCE = 4
-    TEXT_CHUNK = 5
-    LLM_MESSAGE = 6
-    APP_MESSAGE = 7
-    IMAGE_DESCRIPTION = 8
-    TRANSCRIPTION = 9
-
-@dataclass(frozen=True)
 class QueueFrame:
-    frame_type: FrameType
-    frame_data: str | dict | bytes | list | None
+    pass
+
+class StartStreamQueueFrame(QueueFrame):
+    pass
+
+class EndStreamQueueFrame(QueueFrame):
+    pass
+
+@dataclass()
+class AudioQueueFrame(QueueFrame):
+    data: bytes
+
+@dataclass()
+class ImageQueueFrame(QueueFrame):
+    url: str | None
+    image: bytes
+
+@dataclass()
+class TextQueueFrame(QueueFrame):
+    text: str
+
+@dataclass()
+class TranscriptionQueueFrame(TextQueueFrame):
+    participantId: str
+    timestamp: str
+
+@dataclass()
+class LLMMessagesQueueFrame(QueueFrame):
+    messages: list[dict[str,str]] # TODO: define this more concretely!
+
+class AppMessageQueueFrame(QueueFrame):
+    message: Any
+    participantId: str

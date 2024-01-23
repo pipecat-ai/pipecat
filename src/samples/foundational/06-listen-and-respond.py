@@ -6,7 +6,7 @@ import urllib.parse
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.queue_aggregators import LLMContextAggregator
 
 async def main(room_url:str, token):
     global transport
@@ -17,7 +17,7 @@ async def main(room_url:str, token):
         room_url,
         token,
         "Respond bot",
-        1,
+        5,
     )
     transport.mic_enabled = True
     transport.mic_sample_rate = 16000
@@ -26,33 +26,31 @@ async def main(room_url:str, token):
     llm = AzureLLMService()
     tts = AzureTTSService()
 
+    @transport.event_handler("on_first_other_participant_joined")
+    async def on_first_other_participant_joined(transport):
+        await tts.say("Hi, I'm listening!", transport.send_queue)
+
     async def handle_transcriptions():
         messages = [
             {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
         ]
 
-        sentence = ""
-        async for frame in transport.get_receive_frames():
-            if frame.frame_type != FrameType.TRANSCRIPTION:
-                continue
-
-            message = frame.frame_data
-            if message["session_id"] == transport.my_participant_id:
-                continue
-
-            # todo: we could differentiate between transcriptions from different participants
-            sentence += message["text"]
-            if sentence.endswith((".", "?", "!")):
-                messages.append({"role": "user", "content": sentence})
-                sentence = ''
-
-                full_response = ""
-                async for response in llm.run_llm_async_sentences(messages):
-                    full_response += response
-                    async for audio in tts.run_tts(response):
-                        await transport.send_queue.put(QueueFrame(FrameType.AUDIO, audio))
-
-                messages.append({"role": "assistant", "content": full_response})
+        tma_in = LLMContextAggregator(
+            messages, "user", transport.my_participant_id
+        )
+        tma_out = LLMContextAggregator(
+            messages, "assistant", transport.my_participant_id
+        )
+        await tts.run_to_queue(
+            transport.send_queue,
+            tma_out.run(
+                llm.run(
+                    tma_in.run(
+                        transport.get_receive_frames()
+                    )
+                )
+            )
+        )
 
     transport.transcription_settings["extra"]["punctuate"] = True
     await asyncio.gather(transport.run(), handle_transcriptions())

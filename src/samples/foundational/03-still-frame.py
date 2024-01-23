@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 
-from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.queue_frame import TextQueueFrame
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.open_ai_services import OpenAIImageGenService
 
@@ -23,7 +23,7 @@ async def main(room_url):
 
     imagegen = OpenAIImageGenService(image_size="1024x1024")
     image_task = asyncio.create_task(
-        imagegen.run_to_queue(transport.send_queue, [QueueFrame(FrameType.IMAGE_DESCRIPTION, "a cat in the style of picasso")])
+        imagegen.run_to_queue(transport.send_queue, [TextQueueFrame("a cat in the style of picasso")])
     )
 
     @transport.event_handler("on_participant_joined")
