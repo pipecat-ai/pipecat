@@ -1,13 +1,9 @@
 import argparse
 import asyncio
 
-from asyncio.queues import Queue
-import re
-
-from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.queue_frame import AudioQueueFrame, ImageQueueFrame
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.services.open_ai_services import OpenAIImageGenService
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
 
@@ -48,14 +44,20 @@ async def main(room_url):
         ]
 
         image_description = await llm.run_llm(messages)
+        if not image_description:
+            return
+
         to_speak = f"{month}: {image_description}"
+        audio_task = asyncio.create_task(get_all_audio(to_speak))
+        image_task = asyncio.create_task(dalle.run_image_gen(image_description))
         (audio, image_data) = await asyncio.gather(
-            get_all_audio(to_speak), dalle.run_image_gen(image_description)
+            audio_task, image_task
         )
 
         return {
             "month": month,
             "text": image_description,
+            "image_url": image_data[0],
             "image": image_data[1],
             "audio": audio,
         }
@@ -84,8 +86,8 @@ async def main(room_url):
             data = await month_data_task
             await transport.send_queue.put(
                 [
-                    QueueFrame(FrameType.IMAGE, data["image"]),
-                    QueueFrame(FrameType.AUDIO, data["audio"]),
+                    ImageQueueFrame(data["image_url"], data["image"]),
+                    AudioQueueFrame(data["audio"]),
                 ]
             )
 

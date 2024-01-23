@@ -1,10 +1,14 @@
 import asyncio
 import logging
-import re
 
-from httpx import request
-
-from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.queue_frame import (
+    AudioQueueFrame,
+    EndStreamQueueFrame,
+    ImageQueueFrame,
+    LLMMessagesQueueFrame,
+    QueueFrame,
+    TextQueueFrame,
+)
 
 from abc import abstractmethod
 from typing import AsyncGenerator, AsyncIterable, Iterable
@@ -24,7 +28,7 @@ class AIService:
             await queue.put(frame)
 
         if add_end_of_stream:
-            await queue.put(QueueFrame(FrameType.END_STREAM, None))
+            await queue.put(EndStreamQueueFrame())
 
     async def run(
         self,
@@ -46,7 +50,7 @@ class AIService:
                     frame = await frames.get()
                     async for output_frame in self.process_frame(frame):
                         yield output_frame
-                    if frame.frame_type == FrameType.END_STREAM:
+                    if isinstance(frame, EndStreamQueueFrame):
                         break
             else:
                 raise Exception("Frames must be an iterable or async iterable")
@@ -61,21 +65,15 @@ class AIService:
     async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         # This is a trick for the interpreter (and linter) to know that this is a generator.
         if False:
-            yield QueueFrame(FrameType.NOOP, None)
+            yield QueueFrame()
 
     @abstractmethod
     async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
         # This is a trick for the interpreter (and linter) to know that this is a generator.
         if False:
-            yield QueueFrame(FrameType.NOOP, None)
+            yield QueueFrame()
 
 class LLMService(AIService):
-    def allowed_input_frame_types(self) -> set[FrameType]:
-        return set([FrameType.LLM_MESSAGE])
-
-    def allowed_output_frame_types(self) -> set[FrameType]:
-        return set([FrameType.TEXT])
-
     @abstractmethod
     async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
         yield ""
@@ -85,13 +83,9 @@ class LLMService(AIService):
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if frame.frame_type == FrameType.LLM_MESSAGE:
-            if type(frame.frame_data) != list:
-                raise Exception("LLM service requires a dict for the data field")
-
-            messages: list[dict[str, str]] = frame.frame_data
-            async for text_chunk in self.run_llm_async(messages):
-                yield QueueFrame(FrameType.TEXT, text_chunk)
+        if isinstance(frame, LLMMessagesQueueFrame):
+            async for text_chunk in self.run_llm_async(frame.messages):
+                yield TextQueueFrame(text_chunk)
 
 
 class TTSService(AIService):
@@ -112,34 +106,31 @@ class TTSService(AIService):
         yield bytes()
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if frame.frame_type != FrameType.TEXT:
+        if not isinstance(frame, TextQueueFrame):
             yield frame
             return
 
-        if not isinstance(frame.frame_data, str):
-            raise(Exception(f"Invalid data type in frame type: {frame.frame_type}, type: {type(frame.frame_data)}"))
-
         text: str | None = None
         if not self.aggregate_sentences:
-            text = frame.frame_data
+            text = frame.text
         else:
-            self.current_sentence += frame.frame_data
+            self.current_sentence += frame.text
             if self.current_sentence.endswith((".", "?", "!")):
                 text = self.current_sentence
                 self.current_sentence = ""
 
         if text:
             async for audio_chunk in self.run_tts(text):
-                yield QueueFrame(FrameType.AUDIO, audio_chunk)
+                yield AudioQueueFrame(audio_chunk)
 
     async def finalize(self):
         if self.current_sentence:
             async for audio_chunk in self.run_tts(self.current_sentence):
-                yield QueueFrame(FrameType.AUDIO, audio_chunk)
+                yield AudioQueueFrame(audio_chunk)
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue):
-        await self.run_to_queue(queue, [QueueFrame(FrameType.TEXT, sentence)])
+        await self.run_to_queue(queue, [TextQueueFrame(sentence)])
 
 
 class ImageGenService(AIService):
@@ -149,15 +140,15 @@ class ImageGenService(AIService):
 
     # Renders the image. Returns an Image object.
     @abstractmethod
-    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence:str) -> tuple[str, bytes]:
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if type(frame.frame_data) != str:
-            raise Exception("Image service requires a string for the data field")
+        if not isinstance(frame, TextQueueFrame):
+            return
 
-        (_, image_data) = await self.run_image_gen(frame.frame_data)
-        yield QueueFrame(FrameType.IMAGE, image_data)
+        (url, image_data) = await self.run_image_gen(frame.text)
+        yield ImageQueueFrame(url, image_data)
 
 
 @dataclass
