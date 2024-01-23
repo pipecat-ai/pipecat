@@ -30,6 +30,7 @@ class DailyTransportService(EventHandler):
         token: str | None,
         bot_name: str,
         duration: float = 10,
+        min_others_count: int = 1,
     ):
         super().__init__()
         self.bot_name: str = bot_name
@@ -37,6 +38,7 @@ class DailyTransportService(EventHandler):
         self.token: str | None = token
         self.duration: float = duration
         self.expiration = time.time() + duration * 60
+        self.min_others_count = min_others_count
 
         # This queue is used to marshal frames from the async send queue to the thread that emits audio & video.
         # We need this to maintain the asynchronous behavior of asyncio queues -- to give async functions
@@ -224,14 +226,14 @@ class DailyTransportService(EventHandler):
     async def run(self) -> None:
         self.configure_daily()
 
-        self.participant_left = False
+        self.do_shutdown = False
 
         async_output_queue_marshal_task = asyncio.create_task(self.marshal_frames())
 
         try:
             participant_count: int = len(self.client.participants())
             self.logger.info(f"{participant_count} participants in room")
-            while time.time() < self.expiration and not self.participant_left and not self.stop_threads.is_set():
+            while time.time() < self.expiration and not self.do_shutdown and not self.stop_threads.is_set():
                 await asyncio.sleep(1)
         except Exception as e:
             self.logger.error(f"Exception {e}")
@@ -270,8 +272,8 @@ class DailyTransportService(EventHandler):
             self.on_first_other_participant_joined()
 
     def on_participant_left(self, participant, reason):
-        if len(self.client.participants()) < 2:
-            self.participant_left = True
+        if len(self.client.participants()) < self.min_others_count + 1:
+            self.do_shutdown = True
         pass
 
     def on_app_message(self, message, sender):
