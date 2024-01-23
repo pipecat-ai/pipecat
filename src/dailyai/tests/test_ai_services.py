@@ -4,7 +4,7 @@ import unittest
 from typing import AsyncGenerator, Generator
 
 from dailyai.services.ai_services import AIService
-from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.queue_frame import EndStreamQueueFrame, QueueFrame, TextQueueFrame
 
 class SimpleAIService(AIService):
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
@@ -15,8 +15,8 @@ class TestBaseAIService(unittest.IsolatedAsyncioTestCase):
         service = SimpleAIService()
 
         input_frames = [
-            QueueFrame(FrameType.TEXT, "hello"),
-            QueueFrame(FrameType.END_STREAM, None),
+            TextQueueFrame("hello"),
+            EndStreamQueueFrame()
         ]
         async def iterate_frames() -> AsyncGenerator[QueueFrame, None]:
             for frame in input_frames:
@@ -31,10 +31,7 @@ class TestBaseAIService(unittest.IsolatedAsyncioTestCase):
     async def test_nonasync_input(self):
         service = SimpleAIService()
 
-        input_frames = [
-            QueueFrame(FrameType.TEXT, "hello"),
-            QueueFrame(FrameType.END_STREAM, None),
-        ]
+        input_frames = [TextQueueFrame("hello"), EndStreamQueueFrame()]
 
         def iterate_frames() -> Generator[QueueFrame, None, None]:
             for frame in input_frames:
