@@ -1,6 +1,6 @@
 import asyncio
 
-from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame
 from dailyai.services.ai_services import AIService
 
 from typing import AsyncGenerator, List
@@ -34,26 +34,14 @@ class LLMContextAggregator(AIService):
     async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         content: str = ""
 
-        if frame.frame_type == FrameType.TRANSCRIPTION:
-            message = frame.frame_data
-            if not isinstance(message, dict):
-                return
+        # TODO: split up transcription by participant
+        if isinstance(frame, TextQueueFrame):
+            content = frame.text
 
-            if message["session_id"] == self.bot_participant_id:
-                return
-
-            content = message["text"]
-        elif frame.frame_type == FrameType.TEXT:
-            if not isinstance(frame.frame_data, str):
-                return
-
-            content = frame.frame_data
-
-        # todo: we should differentiate between transcriptions from different participants
         self.sentence += content
         if self.sentence.endswith((".", "?", "!")):
             self.messages.append({"role": self.role, "content": self.sentence})
             self.sentence = ""
-            yield QueueFrame(FrameType.LLM_MESSAGE, self.messages)
+            yield LLMMessagesQueueFrame(self.messages)
 
         yield frame
