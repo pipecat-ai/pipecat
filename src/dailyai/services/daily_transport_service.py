@@ -8,9 +8,16 @@ import types
 from functools import partial
 from queue import Queue, Empty
 
-from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.queue_frame import (
+    AudioQueueFrame,
+    EndStreamQueueFrame,
+    ImageQueueFrame,
+    QueueFrame,
+    StartStreamQueueFrame,
+    TranscriptionQueueFrame,
+)
 
-from threading import Thread, Event, Timer
+from threading import Thread, Event
 
 from daily import (
     EventHandler,
@@ -199,7 +206,7 @@ class DailyTransportService(EventHandler):
         while True:
             frame = await self.receive_queue.get()
             yield frame
-            if frame.frame_type == FrameType.END_STREAM:
+            if isinstance(frame, EndStreamQueueFrame):
                 break
 
     def get_async_send_queue(self):
@@ -210,7 +217,7 @@ class DailyTransportService(EventHandler):
             frame: QueueFrame | list = await self.send_queue.get()
             self.threadsafe_send_queue.put(frame)
             self.send_queue.task_done()
-            if type(frame) == QueueFrame and frame.frame_type == FrameType.END_STREAM:
+            if isinstance(frame, EndStreamQueueFrame):
                 break
 
     async def wait_for_send_queue_to_empty(self):
@@ -240,8 +247,8 @@ class DailyTransportService(EventHandler):
 
         self.stop_threads.set()
 
-        await self.receive_queue.put(QueueFrame(FrameType.END_STREAM, None))
-        await self.send_queue.put(QueueFrame(FrameType.END_STREAM, None))
+        await self.receive_queue.put(EndStreamQueueFrame())
+        await self.send_queue.put(EndStreamQueueFrame())
         await async_output_queue_marshal_task
 
         if self.camera_thread and self.camera_thread.is_alive():
@@ -279,7 +286,12 @@ class DailyTransportService(EventHandler):
 
     def on_transcription_message(self, message:dict):
         if self.loop:
-            frame = QueueFrame(FrameType.TRANSCRIPTION, message)
+            participantId = ""
+            if "participantId" in message:
+                participantId = message["participantId"]
+            elif "session_id" in message:
+                participantId = message["session_id"]
+            frame = TranscriptionQueueFrame(message["text"], participantId, message["timestamp"])
             asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self.loop)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
@@ -312,15 +324,15 @@ class DailyTransportService(EventHandler):
         while True:
             try:
                 frames_or_frame: QueueFrame | list[QueueFrame] = self.threadsafe_send_queue.get()
-                if type(frames_or_frame) == QueueFrame:
+                if isinstance(frames_or_frame, QueueFrame):
                     frames: list[QueueFrame] = [frames_or_frame]
-                elif type(frames_or_frame) == list:
+                elif isinstance(frames_or_frame,  list):
                     frames: list[QueueFrame] = frames_or_frame
                 else:
                     raise Exception("Unknown type in output queue")
 
                 for frame in frames:
-                    if frame.frame_type == FrameType.END_STREAM:
+                    if isinstance(frame, EndStreamQueueFrame):
                         self.logger.info("Stopping frame consumer thread")
                         self.threadsafe_send_queue.task_done()
                         return
@@ -328,8 +340,8 @@ class DailyTransportService(EventHandler):
                     # if interrupted, we just pull frames off the queue and discard them
                     if not self.is_interrupted.is_set():
                         if frame:
-                            if frame.frame_type == FrameType.AUDIO:
-                                chunk = frame.frame_data
+                            if isinstance(frame, AudioQueueFrame):
+                                chunk = frame.data
 
                                 all_audio_frames.extend(chunk)
 
@@ -338,8 +350,8 @@ class DailyTransportService(EventHandler):
                                 if l:
                                     self.mic.write_frames(bytes(b[:l]))
                                     b = b[l:]
-                            elif frame.frame_type == FrameType.IMAGE:
-                                self.set_image(frame.frame_data)
+                            elif isinstance(frame, ImageQueueFrame):
+                                self.set_image(frame.image)
                         elif len(b):
                             self.mic.write_frames(bytes(b))
                             b = bytearray()
@@ -350,7 +362,7 @@ class DailyTransportService(EventHandler):
                             )
                             self.interrupt_time = None
 
-                        if frame.frame_type == FrameType.START_STREAM:
+                        if isinstance(frame, StartStreamQueueFrame):
                             self.is_interrupted.clear()
 
                 self.threadsafe_send_queue.task_done()
