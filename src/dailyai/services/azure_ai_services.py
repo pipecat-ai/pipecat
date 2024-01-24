@@ -35,10 +35,7 @@ class AzureTTSService(TTSService):
            "<prosody rate='1.05'>" \
            f"{sentence}" \
            "</prosody></mstts:express-as></voice></speak> "
-        try:
-            result = await asyncio.to_thread(self.speech_synthesizer.speak_ssml, (ssml))
-        except Exception as e:
-            self.logger.error("Error in azure tts", e)
+        result = await asyncio.to_thread(self.speech_synthesizer.speak_ssml, (ssml))
         self.logger.info("Got azure tts result")
         if result.reason == ResultReason.SynthesizingAudioCompleted:
             self.logger.info("Returning result")

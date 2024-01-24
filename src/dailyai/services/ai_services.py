@@ -7,6 +7,7 @@ import wave
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
+    ControlQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
     LLMMessagesQueueFrame,
@@ -28,11 +29,15 @@ class AIService:
         pass
 
     async def run_to_queue(self, queue: asyncio.Queue, frames, add_end_of_stream=False) -> None:
-        async for frame in self.run(frames):
-            await queue.put(frame)
+        try:
+            async for frame in self.run(frames):
+                await queue.put(frame)
 
-        if add_end_of_stream:
-            await queue.put(EndStreamQueueFrame())
+            if add_end_of_stream:
+                await queue.put(EndStreamQueueFrame())
+        except Exception as e:
+            print("Exception in run_to_queue", e)
+            raise e
 
     async def run(
         self,
@@ -67,9 +72,8 @@ class AIService:
 
     @abstractmethod
     async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        # This is a trick for the interpreter (and linter) to know that this is a generator.
-        if False:
-            yield QueueFrame()
+        if isinstance(frame, ControlQueueFrame):
+            yield frame
 
     @abstractmethod
     async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
@@ -87,7 +91,9 @@ class LLMService(AIService):
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, LLMMessagesQueueFrame):
+        if isinstance(frame, ControlQueueFrame):
+            yield frame
+        elif isinstance(frame, LLMMessagesQueueFrame):
             async for text_chunk in self.run_llm_async(frame.messages):
                 yield TextQueueFrame(text_chunk)
 
@@ -110,8 +116,10 @@ class TTSService(AIService):
         yield bytes()
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if not isinstance(frame, TextQueueFrame):
+        if isinstance(frame, ControlQueueFrame):
             yield frame
+            return
+        elif not isinstance(frame, TextQueueFrame):
             return
 
         text: str | None = None
@@ -149,6 +157,7 @@ class ImageGenService(AIService):
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if not isinstance(frame, TextQueueFrame):
+            yield frame
             return
 
         (url, image_data) = await self.run_image_gen(frame.text)
