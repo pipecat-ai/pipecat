@@ -16,6 +16,7 @@ dependencies = [
     "pyht",
     "opentelemetry-sdk",
     "aiohttp",
+    "flask",
     "fal"
 ]
 
