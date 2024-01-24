@@ -1,13 +1,8 @@
 import argparse
 import asyncio
-import io
 from threading import Thread
-import time
-import urllib.parse
-import wave
 
 from dailyai.services.daily_transport_service import DailyTransportService
-from dailyai.queue_aggregators import LLMContextAggregator, STTContextAggregator
 from dailyai.services.whisper_ai_services import WhisperSTTService
 
 async def main(room_url: str):
@@ -35,7 +30,6 @@ async def main(room_url: str):
             transcription_output_queue,
             transport.get_receive_frames()   
         )
-
     await asyncio.gather(transport.run(), handle_speaker(), handle_transcription())
 
 
@@ -46,9 +40,4 @@ if __name__ == "__main__":
     )
 
     args, unknown = parser.parse_known_args()
-
-    # Create a meeting token for the given room with an expiration 1 hour in the future.
-    room_name: str = urllib.parse.urlparse(args.url).path[1:]
-    expiration: float = time.time() + 60 * 60
-
     asyncio.run(main(args.url))
