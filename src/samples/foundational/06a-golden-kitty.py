@@ -29,6 +29,29 @@ class TranscriptFilter(AIService):
         if frame.participantId != self.bot_participant_id:
             yield frame
 
+class NameCheckFilter(AIService):
+    def __init__(self, names=None):
+        self.names = names
+        self.sentence = ""
+
+    async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        content: str = ""
+
+        # TODO: split up transcription by participant
+        if isinstance(frame, TextQueueFrame):
+            content = frame.text
+
+        self.sentence += content
+        if self.sentence.endswith((".", "?", "!")):
+            if any(name in self.sentence for name in self.names):
+                print(f"I got one: {frame.text}")
+                out = self.sentence
+                self.sentence = ""
+                yield TextQueueFrame(out)
+            else:
+                out = self.sentence
+                self.sentence = ""
+                print(f"ignoring: {out}")
 
 async def main(room_url:str, token):
     global transport
@@ -38,7 +61,7 @@ async def main(room_url:str, token):
     transport = DailyTransportService(
         room_url,
         token,
-        "The Golden Kitty",
+        "Derrick",
         180,
     )
     transport.mic_enabled = True
@@ -56,7 +79,7 @@ async def main(room_url:str, token):
 
     async def handle_transcriptions():
         messages = [
-            {"role": "system", "content": "You are the Golden Kitty, the mascot for Product Hunt's annual awards. You are a cat who knows everything about all the cool new tech startups. You should be clever, and a bit sarcastic. You should also tell jokes every once in a while.  Your responses should only be a few sentences long."},
+            {"role": "system", "content": "You are Derek, the Golden Kitty, the mascot for Product Hunt's annual awards. You are a cat who knows everything about all the cool new tech startups. You should be clever, and a bit sarcastic. You should also tell jokes every once in a while.  Your responses should only be a few sentences long."},
         ]
 
         tma_in = LLMContextAggregator(
@@ -66,14 +89,18 @@ async def main(room_url:str, token):
             messages, "assistant", transport.my_participant_id
         )
         tf = TranscriptFilter(transport.my_participant_id)
+        ncf = NameCheckFilter(["Derek", "Derrick"])
         await tts.run_to_queue(
             transport.send_queue,
             tma_out.run(
                 llm.run(
                     tma_in.run(
-                        tf.run(
-                            transport.get_receive_frames()
+                        ncf.run(
+                            tf.run(
+                                transport.get_receive_frames()
+                            )
                         )
+
                     )
                 )
             )
