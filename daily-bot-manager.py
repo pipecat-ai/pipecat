@@ -57,11 +57,9 @@ def start_bot(bot_path, args=None):
     else:
         extra_args = ""
 
-    otel_path = "opentelemetry-instrument" if os.getenv("USE_OTEL") else ""
-    print("using otel path: ", otel_path, os.getenv("USE_OTEL"))
     proc = subprocess.Popen(
         [
-            f"{otel_path} python {bot_path} -u {room_url} -t {meeting_token} -k {daily_api_key} {extra_args}"
+            f"python {bot_path} -u {room_url} -t {meeting_token} -k {daily_api_key} {extra_args}"
         ],
         shell=True,
         bufsize=1,
