@@ -12,5 +12,6 @@ opentelemetry-sdk
 aiohttp
 flask
 flask_cors
+gunicorn
 fal
 python-dotenv
