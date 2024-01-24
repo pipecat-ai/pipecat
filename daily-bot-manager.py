@@ -88,4 +88,6 @@ def start_bot(bot_path, args=None):
 def spin_up_kitty():
     return start_bot("./src/samples/foundational/06a-golden-kitty.py")
 
-
+@app.route("/healthz")
+def health_check():
+    return "ok", 200
