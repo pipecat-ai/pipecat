@@ -4,6 +4,10 @@ import requests
 import time
 import urllib.parse
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
@@ -14,6 +18,8 @@ from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFram
 from dailyai.services.ai_services import AIService
 
 from typing import AsyncGenerator, List
+
+
 
 class TranscriptFilter(AIService):
     def __init__(self, bot_participant_id=None):
@@ -33,7 +39,7 @@ async def main(room_url:str, token):
         room_url,
         token,
         "The Golden Kitty",
-        5,
+        180,
     )
     transport.mic_enabled = True
     transport.mic_sample_rate = 16000

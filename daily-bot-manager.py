@@ -3,13 +3,18 @@ import requests
 import subprocess
 import time
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect
 from flask_cors import CORS
 from auth import get_meeting_token
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
+print(f"I loaded an environment, and my FAL_KEY_ID is {os.getenv('FAL_KEY_ID')}")
 
 def start_bot(bot_path, args=None):
     daily_api_key = os.getenv("DAILY_API_KEY")
@@ -27,6 +32,7 @@ def start_bot(bot_path, args=None):
                 "enable_emoji_reactions": True,
                 "eject_at_room_exp": True,
                 "enable_prejoin_ui": False,
+                "enable_recording": "cloud"
             }
         },
     )
@@ -81,12 +87,18 @@ def start_bot(bot_path, args=None):
     else:
         config['vad_timeout_sec'] = 1.5
 
-    return jsonify({"room_url": room_url, "token": meeting_token, "config": config}), 200
+    #return jsonify({"room_url": room_url, "token": meeting_token, "config": config}), 200
+    return redirect(room_url, code=302)
 
 
 @app.route("/spin-up-kitty", methods=["POST"])
 def spin_up_kitty():
     return start_bot("./src/samples/foundational/06a-golden-kitty.py")
+
+@app.route("/spin-up-kitty", methods=["GET"])
+def quick_start_kitty():
+    return start_bot("./src/samples/foundational/06a-golden-kitty.py")
+
 
 @app.route("/healthz")
 def health_check():
