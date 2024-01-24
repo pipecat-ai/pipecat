@@ -38,6 +38,7 @@ class DailyTransportService(EventHandler):
         bot_name: str,
         duration: float = 10,
         min_others_count: int = 1,
+        start_transcription: bool = True,
     ):
         super().__init__()
         self.bot_name: str = bot_name
@@ -46,7 +47,7 @@ class DailyTransportService(EventHandler):
         self.duration: float = duration
         self.expiration = time.time() + duration * 60
         self.min_others_count = min_others_count
-
+        self.start_transcription = start_transcription
         # This queue is used to marshal frames from the async send queue to the thread that emits audio & video.
         # We need this to maintain the asynchronous behavior of asyncio queues -- to give async functions
         # a chance to run while waiting for queue items -- but also to maintain thread safety and have a threaded
@@ -201,8 +202,20 @@ class DailyTransportService(EventHandler):
             }
         )
 
-        if self.token:
+        if self.token and self.start_transcription:
             self.client.start_transcription(self.transcription_settings)
+
+
+    def _receive_audio(self):
+        """Receive audio from the Daily call and put it on the receive queue"""
+        sample_rate = 16000
+        seconds = 1
+        desired_frame_count = sample_rate * seconds
+        while True:
+            buffer = self.speaker.read_frames(desired_frame_count)
+            if len(buffer) > 0:
+                frame = AudioQueueFrame(buffer)
+                asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self.loop)
 
     async def get_receive_frames(self):
         while True:
@@ -266,6 +279,8 @@ class DailyTransportService(EventHandler):
 
     def call_joined(self, join_data, client_error):
         self.logger.info(f"Call_joined: {join_data}, {client_error}")
+        t = Thread(target=self._receive_audio, daemon=True)
+        t.start()
 
     def on_error(self, error):
         self.logger.error(f"on_error: {error}")

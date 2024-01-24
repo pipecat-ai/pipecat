@@ -1,5 +1,9 @@
+import array
 import asyncio
+import io
 import logging
+import math
+import wave
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
@@ -11,7 +15,7 @@ from dailyai.queue_frame import (
 )
 
 from abc import abstractmethod
-from typing import AsyncGenerator, AsyncIterable, Iterable
+from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable
 from dataclasses import dataclass
 
 
@@ -150,9 +154,67 @@ class ImageGenService(AIService):
         (url, image_data) = await self.run_image_gen(frame.text)
         yield ImageQueueFrame(url, image_data)
 
+class STTService(AIService):
+    """STTService is a base class for speech-to-text services."""
+    _content: io.BufferedRandom
+    _wave: wave.Wave_write
+    _silence_frames: int
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._new_wave()
+        self._silence_frames = 0
+
+    def _new_wave(self):
+        """Creates a new wave object and content buffer."""
+        self._content = io.BufferedRandom(io.BytesIO())
+        ww = wave.open(self._content, "wb")
+        ww.setnchannels(1)
+        ww.setsampwidth(2)
+        ww.setframerate(16000)
+        self._wave = ww
+
+    @abstractmethod
+    def run_stt(self, audio: BinaryIO) -> str:
+        """Returns transcript as a string"""
+        pass
+
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        """Processes a frame of audio data, either buffering or transcribing it."""
+        if not isinstance(frame, AudioQueueFrame):
+            return
+        
+        data = frame.data
+        # Try to filter out empty background noise
+        # (Very rudimentary approach, can be improved)
+        volume = self._get_volume(data)
+        if volume > 400:
+            # If volume is high enough, write new data to wave file
+            self._wave.writeframesraw(data)
+
+        # If buffer is not empty and we detect a 3-frame pause in speech,
+        # transcribe the audio gathered so far.
+        if self._content.tell() > 0 and self._silence_frames > 3:
+            self._silence_frames = 0
+            self._wave.close()
+            self._content.seek(0)
+            text = self.run_stt(self._content)
+            self._new_wave()
+            yield TextQueueFrame(text)
+        # If we get this far, this is a frame of silence
+        self._silence_frames += 1
+
+    def _get_volume(self, audio: bytes) -> float:
+        # https://docs.python.org/3/library/array.html
+        audio_array = array.array('h', audio) 
+        squares = [sample**2 for sample in audio_array]
+        mean = sum(squares) / len(audio_array)
+        rms = math.sqrt(mean)
+        return rms
 
 @dataclass
 class AIServiceConfig:
     tts: TTSService
     image: ImageGenService
     llm: LLMService
+    stt: STTService
