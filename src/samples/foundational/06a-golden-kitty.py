@@ -8,6 +8,7 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
+from dailyai.services.open_ai_services import OpenAIImageGenService
 from dailyai.queue_aggregators import LLMContextAggregator
 from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame
 from dailyai.services.ai_services import AIService
@@ -73,11 +74,12 @@ async def main(room_url:str, token):
         )
 
     async def make_cats():
-        imagegen = FalImageGenService(image_size="1024x1024")
+        imagegen = OpenAIImageGenService(image_size="1024x1024")
 
         while True:
-            imagegen.run_to_queue(transport.send_queue, [TextQueueFrame("a golden kitty trophy, cartoon, colorful, detailed, 4k")])
-            await asyncio.sleep(60)
+            print("generating new image")
+            await imagegen.run_to_queue(transport.send_queue, [TextQueueFrame("a golden kitty trophy, cartoon, colorful, detailed, 4k")])
+            await asyncio.sleep(10)
         
     transport.transcription_settings["extra"]["punctuate"] = True
     await asyncio.gather(transport.run(), handle_transcriptions(), make_cats())
@@ -101,9 +103,9 @@ if __name__ == "__main__":
 
     args, unknown = parser.parse_known_args()
 
-    # Create a meeting token for the given room with an expiration 5 hours in the future.
+    # Create a meeting token for the given room with an expiration 24 hours in the future.
     room_name: str = urllib.parse.urlparse(args.url).path[1:]
-    expiration: float = time.time() + 60 * 60 * 5
+    expiration: float = time.time() + 60 * 60 * 24
 
     res: requests.Response = requests.post(
         f"https://api.daily.co/v1/meeting-tokens",

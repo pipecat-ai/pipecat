@@ -12,6 +12,7 @@ from dailyai.queue_frame import (
     AudioQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
+    ImageListQueueFrame,
     QueueFrame,
     StartStreamQueueFrame,
     TranscriptionQueueFrame,
@@ -149,6 +150,7 @@ class DailyTransportService(EventHandler):
         )
 
         self.image: bytes | None = None
+        self.images: list[bytes] | None = None
         self.camera_thread = Thread(target=self.run_camera, daemon=True)
         self.camera_thread.start()
 
@@ -307,12 +309,22 @@ class DailyTransportService(EventHandler):
 
     def set_image(self, image: bytes):
         self.image: bytes | None = image
+        self.images: list[bytes] | None = None
+    
+    def set_images(self, images: list[bytes], start_frame=0):
+        self.images: list[bytes] | None = images
+        self.image = None
+        self.current_frame = start_frame
 
     def run_camera(self):
         try:
             while not self.stop_threads.is_set():
                 if self.image:
                     self.camera.write_frame(self.image)
+                if self.images:
+                    this_frame = self.current_frame % len(self.images)
+                    self.camera.write_frame(self.sprites[self.images[this_frame]])
+                    self.current_frame = this_frame + 1
 
                 time.sleep(1.0 / 8)  # 8 fps
         except Exception as e:
@@ -354,6 +366,8 @@ class DailyTransportService(EventHandler):
                                     b = b[l:]
                             elif isinstance(frame, ImageQueueFrame):
                                 self.set_image(frame.image)
+                            elif isinstance(frame, ImageListQueueFrame):
+                                self.set_images(frame.images)
                         elif len(b):
                             self.mic.write_frames(bytes(b))
                             b = bytearray()
