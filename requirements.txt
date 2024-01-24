@@ -12,3 +12,4 @@ opentelemetry-sdk
 aiohttp
 flask
 fal
+python-dotenv
