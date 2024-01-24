@@ -1,17 +1,8 @@
 build==1.0.3
 packaging==23.2
 pyproject_hooks==1.0.0
-daily-python
-Pillow
-typing-extensions
-openai
-google-cloud-texttospeech
-azure-cognitiveservices-speech
-pyht
-opentelemetry-sdk
 aiohttp
 flask
 flask_cors
 gunicorn
-fal
 python-dotenv
