@@ -1,5 +1,9 @@
+import array
 import asyncio
+import io
 import logging
+import math
+import wave
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
@@ -11,7 +15,7 @@ from dailyai.queue_frame import (
 )
 
 from abc import abstractmethod
-from typing import AsyncGenerator, AsyncIterable, Iterable
+from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable
 from dataclasses import dataclass
 
 
@@ -150,9 +154,40 @@ class ImageGenService(AIService):
         (url, image_data) = await self.run_image_gen(frame.text)
         yield ImageQueueFrame(url, image_data)
 
+class STTService(AIService):
+    """STTService is a base class for speech-to-text services."""
+
+    _frame_rate: int
+    def __init__(self, frame_rate: int = 16000, **kwargs):
+        super().__init__(**kwargs)
+        self._frame_rate = frame_rate
+
+
+    @abstractmethod
+    async def run_stt(self, audio: BinaryIO) -> str:
+        """Returns transcript as a string"""
+        pass
+
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        """Processes a frame of audio data, either buffering or transcribing it."""
+        if not isinstance(frame, AudioQueueFrame):
+            return
+        
+        data = frame.data
+        content = io.BufferedRandom(io.BytesIO())
+        ww = wave.open(self._content, "wb")
+        ww.setnchannels(1)
+        ww.setsampwidth(2)
+        ww.setframerate(self._frame_rate)
+        ww.writeframesraw(data)
+        ww.close()
+        content.seek(0)
+        text = await self.run_stt(content)
+        yield TextQueueFrame(text)
 
 @dataclass
 class AIServiceConfig:
     tts: TTSService
     image: ImageGenService
     llm: LLMService
+    stt: STTService
