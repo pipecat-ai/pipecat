@@ -8,7 +8,8 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.queue_aggregators import LLMContextAggregator
 
-async def main(room_url:str, token):
+
+async def main(room_url: str, token):
     global transport
     global llm
     global tts
