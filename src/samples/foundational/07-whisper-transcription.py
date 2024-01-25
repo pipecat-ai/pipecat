@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-from threading import Thread
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.whisper_ai_services import WhisperSTTService
