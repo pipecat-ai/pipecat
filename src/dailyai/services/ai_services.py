@@ -1,8 +1,6 @@
-import array
 import asyncio
 import io
 import logging
-import math
 import wave
 
 from dailyai.queue_frame import (
@@ -29,15 +27,11 @@ class AIService:
         pass
 
     async def run_to_queue(self, queue: asyncio.Queue, frames, add_end_of_stream=False) -> None:
-        try:
-            async for frame in self.run(frames):
-                await queue.put(frame)
+        async for frame in self.run(frames):
+            await queue.put(frame)
 
-            if add_end_of_stream:
-                await queue.put(EndStreamQueueFrame())
-        except Exception as e:
-            print("Exception in run_to_queue", e)
-            raise e
+        if add_end_of_stream:
+            await queue.put(EndStreamQueueFrame())
 
     async def run(
         self,
@@ -181,7 +175,7 @@ class STTService(AIService):
         """Processes a frame of audio data, either buffering or transcribing it."""
         if not isinstance(frame, AudioQueueFrame):
             return
-        
+
         data = frame.data
         content = io.BufferedRandom(io.BytesIO())
         ww = wave.open(self._content, "wb")
