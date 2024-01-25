@@ -5,10 +5,13 @@ from typing import Any
 class QueueFrame:
     pass
 
-class StartStreamQueueFrame(QueueFrame):
+class ControlQueueFrame(QueueFrame):
     pass
 
-class EndStreamQueueFrame(QueueFrame):
+class StartStreamQueueFrame(ControlQueueFrame):
+    pass
+
+class EndStreamQueueFrame(ControlQueueFrame):
     pass
 
 @dataclass()
