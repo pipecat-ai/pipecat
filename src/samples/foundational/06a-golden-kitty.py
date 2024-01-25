@@ -1,10 +1,13 @@
 import argparse
 import asyncio
+import os
+import random
 import requests
 import time
 import urllib.parse
 
 from dotenv import load_dotenv
+from PIL import Image
 
 load_dotenv()
 
@@ -14,13 +17,33 @@ from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.open_ai_services import OpenAIImageGenService
 from dailyai.queue_aggregators import LLMContextAggregator
-from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame
+from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame, ImageQueueFrame, ImageListQueueFrame
 from dailyai.services.ai_services import AIService
 
 from typing import AsyncGenerator, List
 
+sprites = {}
+image_files = [
+    'cat1.png',
+    'cat2.png',
+    'cat3.png'
+]
 
+script_dir = os.path.dirname(__file__)
 
+for file in image_files:
+    # Build the full path to the image file
+    full_path = os.path.join(script_dir, "images", file)
+    # Get the filename without the extension to use as the dictionary key
+    filename = os.path.splitext(os.path.basename(full_path))[0]
+    # Open the image and convert it to bytes
+    with Image.open(full_path) as img:
+        sprites[file] = img.tobytes()
+
+quiet_frame = ImageQueueFrame("", sprites["cat1.png"])
+sprite_list = list(sprites.values())
+talking = [random.choice(sprite_list) for x in range(30)]
+talking_frame = ImageListQueueFrame(images=talking)
 class TranscriptFilter(AIService):
     def __init__(self, bot_participant_id=None):
         self.bot_participant_id = bot_participant_id
@@ -67,8 +90,8 @@ async def main(room_url:str, token):
     transport.mic_enabled = True
     transport.mic_sample_rate = 16000
     transport.camera_enabled = True
-    transport.camera_width = 1024
-    transport.camera_height = 1024
+    transport.camera_width = 960
+    transport.camera_height = 960
 
     llm = AzureLLMService()
     tts = ElevenLabsTTSService()
@@ -107,12 +130,7 @@ async def main(room_url:str, token):
         )
 
     async def make_cats():
-        imagegen = OpenAIImageGenService(image_size="1024x1024")
-
-        while True:
-            print("generating new image")
-            await imagegen.run_to_queue(transport.send_queue, [TextQueueFrame("a golden kitty trophy, cartoon, colorful, detailed, 4k")])
-            await asyncio.sleep(10)
+        await transport.send_queue.put(talking_frame)
         
     transport.transcription_settings["extra"]["punctuate"] = True
     await asyncio.gather(transport.run(), handle_transcriptions(), make_cats())

@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import logging
+import sys
 import threading
 import time
 import types
@@ -59,8 +60,8 @@ class DailyTransportService(EventHandler):
         self.story_started = False
         self.mic_enabled = False
         self.mic_sample_rate = 16000
-        self.camera_width = 1024
-        self.camera_height = 768
+        self.camera_width = 960
+        self.camera_height = 960
         self.camera_enabled = False
 
         self.send_queue = asyncio.Queue()
@@ -322,9 +323,10 @@ class DailyTransportService(EventHandler):
                 if self.image:
                     self.camera.write_frame(self.image)
                 if self.images:
-                    this_frame = self.current_frame % len(self.images)
-                    self.camera.write_frame(self.sprites[self.images[this_frame]])
-                    self.current_frame = this_frame + 1
+                    frame_index = self.current_frame % len(self.images)
+                    this_frame = self.images[frame_index]
+                    self.camera.write_frame(this_frame)
+                    self.current_frame = frame_index + 1
 
                 time.sleep(1.0 / 8)  # 8 fps
         except Exception as e:
