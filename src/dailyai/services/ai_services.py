@@ -65,7 +65,7 @@ class AIService:
             raise e
 
     @abstractmethod
-    async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if isinstance(frame, ControlQueueFrame):
             yield frame
 
@@ -74,6 +74,7 @@ class AIService:
         # This is a trick for the interpreter (and linter) to know that this is a generator.
         if False:
             yield QueueFrame()
+
 
 class LLMService(AIService):
     @abstractmethod
@@ -146,7 +147,7 @@ class ImageGenService(AIService):
 
     # Renders the image. Returns an Image object.
     @abstractmethod
-    async def run_image_gen(self, sentence:str) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence: str) -> tuple[str, bytes]:
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
@@ -157,14 +158,15 @@ class ImageGenService(AIService):
         (url, image_data) = await self.run_image_gen(frame.text)
         yield ImageQueueFrame(url, image_data)
 
+
 class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
     _frame_rate: int
+
     def __init__(self, frame_rate: int = 16000, **kwargs):
         super().__init__(**kwargs)
         self._frame_rate = frame_rate
-
 
     @abstractmethod
     async def run_stt(self, audio: BinaryIO) -> str:
@@ -187,6 +189,7 @@ class STTService(AIService):
         content.seek(0)
         text = await self.run_stt(content)
         yield TextQueueFrame(text)
+
 
 @dataclass
 class AIServiceConfig:

@@ -4,6 +4,8 @@ from services.ai_service import AIService
 
 # Note that Cloudflare's AI workers are still in beta.
 # https://developers.cloudflare.com/workers-ai/
+
+
 class CloudflareAIService(AIService):
     def __init__(self):
         super().__init__()
@@ -19,11 +21,11 @@ class CloudflareAIService(AIService):
         return response.json()
 
     # https://developers.cloudflare.com/workers-ai/models/llm/
-    def run_llm(self, messages, latest_user_message=None, stream = True):
+    def run_llm(self, messages, latest_user_message=None, stream=True):
         input = {
             "messages": [
-                { "role": "system", "content": "You are a friendly assistant" },
-                { "role": "user", "content": sentence }
+                {"role": "system", "content": "You are a friendly assistant"},
+                {"role": "user", "content": sentence}
             ]
         }
 
@@ -57,9 +59,9 @@ class CloudflareAIService(AIService):
     # https://developers.cloudflare.com/workers-ai/models/embedding/
     def run_embeddings(self, texts, size="medium"):
         models = {
-            "small": "@cf/baai/bge-small-en-v1.5", # 384 output dimensions
-            "medium": "@cf/baai/bge-base-en-v1.5", # 768 output dimensions
-            "large": "@cf/baai/bge-large-en-v1.5" #1024 output dimensions
+            "small": "@cf/baai/bge-small-en-v1.5",  # 384 output dimensions
+            "medium": "@cf/baai/bge-base-en-v1.5",  # 768 output dimensions
+            "large": "@cf/baai/bge-large-en-v1.5"  # 1024 output dimensions
         }
 
         return self.run(models[size], {"text": texts})

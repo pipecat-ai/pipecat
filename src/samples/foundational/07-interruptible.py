@@ -11,7 +11,7 @@ from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 
-async def main(room_url:str, token):
+async def main(room_url: str, token):
     global transport
     global llm
     global tts

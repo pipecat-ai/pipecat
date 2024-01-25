@@ -5,6 +5,7 @@ from typing import AsyncGenerator, Awaitable, Callable
 from dailyai.queue_aggregators import LLMContextAggregator
 from dailyai.queue_frame import EndStreamQueueFrame, QueueFrame, TranscriptionQueueFrame
 
+
 class InterruptibleConversationWrapper:
 
     def __init__(
@@ -14,7 +15,7 @@ class InterruptibleConversationWrapper:
             [str, LLMContextAggregator, LLMContextAggregator], Awaitable[None]
         ],
         interrupt: Callable[[], None],
-        my_participant_id: str|None,
+        my_participant_id: str | None,
         llm_messages: list[dict[str, str]],
         llm_context_aggregator_in=LLMContextAggregator,
         llm_context_aggregator_out=LLMContextAggregator,
