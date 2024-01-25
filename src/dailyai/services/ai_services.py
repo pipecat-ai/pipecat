@@ -1,12 +1,11 @@
-import array
 import asyncio
 import io
 import logging
-import math
 import wave
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
+    ControlQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
     LLMMessagesQueueFrame,
@@ -67,9 +66,8 @@ class AIService:
 
     @abstractmethod
     async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        # This is a trick for the interpreter (and linter) to know that this is a generator.
-        if False:
-            yield QueueFrame()
+        if isinstance(frame, ControlQueueFrame):
+            yield frame
 
     @abstractmethod
     async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
@@ -87,7 +85,9 @@ class LLMService(AIService):
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, LLMMessagesQueueFrame):
+        if isinstance(frame, ControlQueueFrame):
+            yield frame
+        elif isinstance(frame, LLMMessagesQueueFrame):
             async for text_chunk in self.run_llm_async(frame.messages):
                 yield TextQueueFrame(text_chunk)
 
@@ -110,8 +110,10 @@ class TTSService(AIService):
         yield bytes()
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if not isinstance(frame, TextQueueFrame):
+        if isinstance(frame, ControlQueueFrame):
             yield frame
+            return
+        elif not isinstance(frame, TextQueueFrame):
             return
 
         text: str | None = None
@@ -149,6 +151,7 @@ class ImageGenService(AIService):
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if not isinstance(frame, TextQueueFrame):
+            yield frame
             return
 
         (url, image_data) = await self.run_image_gen(frame.text)
@@ -172,7 +175,7 @@ class STTService(AIService):
         """Processes a frame of audio data, either buffering or transcribing it."""
         if not isinstance(frame, AudioQueueFrame):
             return
-        
+
         data = frame.data
         content = io.BufferedRandom(io.BytesIO())
         ww = wave.open(self._content, "wb")
