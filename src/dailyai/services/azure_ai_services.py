@@ -92,25 +92,27 @@ class AzureLLMService(LLMService):
 
 class AzureImageGenServiceREST(ImageGenService):
 
-    def __init__(self, image_size:str, api_key=None, azure_endpoint=None, api_version=None, model=None):
+    def __init__(self, image_size:str, api_key=None, azure_endpoint=None, api_version=None, model=None, aiohttp_client_session=None):
         super().__init__(image_size=image_size)
         self.api_key = api_key or os.getenv("AZURE_DALLE_KEY")
         self.azure_endpoint = azure_endpoint or os.getenv("AZURE_DALLE_ENDPOINT")
         self.api_version = api_version or "2023-06-01-preview"
         self.model = model or os.getenv("AZURE_DALLE_DEPLOYMENT_ID")
+        self.aiohttp_client_session = aiohttp_client_session or aiohttp.ClientSession()
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         # TODO hoist the session to app-level
-        async with aiohttp.ClientSession() as session:
+        async with self.aiohttp_client_session as session:
             url = f"{self.azure_endpoint}openai/images/generations:submit?api-version={self.api_version}"
             headers= { "api-key": self.api_key, "Content-Type": "application/json" }
             body = {
-                # Enter your prompt text here
                 "prompt": sentence,
                 "size": self.image_size,
                 "n": 1,
             }
-            async with session.post(url, headers=headers, json=body) as submission:
+            async with self.aiohttp_client_session.post(
+                url, headers=headers, json=body
+            ) as submission:
                 operation_location = submission.headers['operation-location']
 
                 status = ""
@@ -135,38 +137,3 @@ class AzureImageGenServiceREST(ImageGenService):
                     image_stream = io.BytesIO(await response.content.read())
                     image = Image.open(image_stream)
                     return (image_url, image.tobytes())
-
-
-class AzureImageGenService(ImageGenService):
-
-    def __init__(self, api_key=None, azure_endpoint=None, api_version=None, model=None):
-        super().__init__()
-
-        api_key = api_key or os.getenv("AZURE_DALLE_KEY")
-        azure_endpoint = azure_endpoint or os.getenv("AZURE_DALLE_ENDPOINT")
-        api_version = api_version or "2023-06-01-preview"
-        self.model = model or os.getenv("AZURE_DALLE_DEPLOYMENT_ID")
-
-        self.client = AzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=azure_endpoint,
-            api_version=api_version,
-        )
-
-    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
-        self.logger.info("Generating azure image", sentence)
-
-        image = self.client.images.generate(
-            model=self.model,
-            prompt=sentence,
-            n=1,
-            size=self.image_size,
-        )
-
-        url = image["data"][0]["url"]
-        response = requests.get(url)
-
-        dalle_stream = io.BytesIO(response.content)
-        dalle_im = Image.open(dalle_stream.tobytes())
-
-        return (url, dalle_im)
