@@ -1,9 +1,11 @@
 """This module implements Whisper transcription with a locally-downloaded model."""
+import asyncio
 from enum import Enum
 import logging
 from typing import BinaryIO
 from faster_whisper import WhisperModel
-from dailyai.services.ai_services import STTService
+from dailyai.services.local_stt_service import LocalSTTService
+
 
 class Model(Enum):
     """Class of basic Whisper model selection options"""
@@ -14,7 +16,8 @@ class Model(Enum):
     DISTIL_LARGE_V2 = "Systran/faster-distil-whisper-large-v2"
     DISTIL_MEDIUM_EN = "Systran/faster-distil-whisper-medium.en"
 
-class WhisperSTTService(STTService):
+
+class WhisperSTTService(LocalSTTService):
     """Class to transcribe audio with a locally-downloaded Whisper model"""
     _model: WhisperModel
 
@@ -22,11 +25,11 @@ class WhisperSTTService(STTService):
     _model_name: Model
     _device: str
     _compute_type: str
-   
+
     def __init__(self, model_name: Model = Model.DISTIL_MEDIUM_EN,
                  device: str = "auto",
                  compute_type: str = "default"):
-        
+
         super().__init__()
         self.logger: logging.Logger = logging.getLogger("dailyai")
         self._model_name = model_name
@@ -43,9 +46,9 @@ class WhisperSTTService(STTService):
             compute_type=self._compute_type)
         self._model = model
 
-    def run_stt(self, audio: BinaryIO = None) -> str:
+    async def run_stt(self, audio: BinaryIO = None) -> str:
         """Transcribes given audio using Whisper"""
-        segments, _ = self._model.transcribe(audio)
+        segments, _ = await asyncio.to_thread(self._model.transcribe, audio)
         res: str = ""
         for segment in segments:
             res += f"{segment.text} "

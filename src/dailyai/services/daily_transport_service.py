@@ -31,6 +31,10 @@ from daily import (
 class DailyTransportService(EventHandler):
     _daily_initialized = False
     _lock = threading.Lock()
+
+    speaker_enabled: bool
+    speaker_sample_rate: int
+
     def __init__(
         self,
         room_url: str,
@@ -39,6 +43,8 @@ class DailyTransportService(EventHandler):
         duration: float = 10,
         min_others_count: int = 1,
         start_transcription: bool = True,
+        speaker_enabled: bool = False,
+        speaker_sample_rate: int = 16000,
     ):
         super().__init__()
         self.bot_name: str = bot_name
@@ -48,6 +54,7 @@ class DailyTransportService(EventHandler):
         self.expiration = time.time() + duration * 60
         self.min_others_count = min_others_count
         self.start_transcription = start_transcription
+
         # This queue is used to marshal frames from the async send queue to the thread that emits audio & video.
         # We need this to maintain the asynchronous behavior of asyncio queues -- to give async functions
         # a chance to run while waiting for queue items -- but also to maintain thread safety and have a threaded
@@ -62,6 +69,8 @@ class DailyTransportService(EventHandler):
         self.camera_width = 1024
         self.camera_height = 768
         self.camera_enabled = False
+        self.speaker_enabled = speaker_enabled
+        self.speaker_sample_rate = speaker_sample_rate
 
         self.send_queue = asyncio.Queue()
         self.receive_queue = asyncio.Queue()
@@ -145,9 +154,11 @@ class DailyTransportService(EventHandler):
                 "camera", width=self.camera_width, height=self.camera_height, color_format="RGB"
             )
 
-        self.speaker: VirtualSpeakerDevice = Daily.create_speaker_device(
-            "speaker", sample_rate=16000, channels=1
-        )
+        if self.speaker_enabled:
+            self.speaker: VirtualSpeakerDevice = Daily.create_speaker_device(
+                "speaker", sample_rate=self.speaker_sample_rate, channels=1
+            )
+            Daily.select_speaker_device("speaker")
 
         self.image: bytes | None = None
         self.camera_thread = Thread(target=self.run_camera, daemon=True)
@@ -156,8 +167,6 @@ class DailyTransportService(EventHandler):
         self.logger.info("Starting frame consumer thread")
         self.frame_consumer_thread = Thread(target=self.frame_consumer, daemon=True)
         self.frame_consumer_thread.start()
-
-        Daily.select_speaker_device("speaker")
 
         self.client.set_user_name(self.bot_name)
         self.client.join(self.room_url, self.token, completion=self.call_joined)
@@ -208,9 +217,8 @@ class DailyTransportService(EventHandler):
 
     def _receive_audio(self):
         """Receive audio from the Daily call and put it on the receive queue"""
-        sample_rate = 16000
         seconds = 1
-        desired_frame_count = sample_rate * seconds
+        desired_frame_count = self.speaker_sample_rate * seconds
         while True:
             buffer = self.speaker.read_frames(desired_frame_count)
             if len(buffer) > 0:
@@ -279,8 +287,9 @@ class DailyTransportService(EventHandler):
 
     def call_joined(self, join_data, client_error):
         self.logger.info(f"Call_joined: {join_data}, {client_error}")
-        t = Thread(target=self._receive_audio, daemon=True)
-        t.start()
+        if self.speaker_enabled:
+            t = Thread(target=self._receive_audio, daemon=True)
+            t.start()
 
     def on_error(self, error):
         self.logger.error(f"on_error: {error}")

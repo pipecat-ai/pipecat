@@ -5,6 +5,7 @@ from threading import Thread
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.whisper_ai_services import WhisperSTTService
 
+
 async def main(room_url: str):
     global transport
     global stt
@@ -16,6 +17,7 @@ async def main(room_url: str):
     )
     transport.mic_enabled = False
     transport.camera_enabled = False
+    transport.speaker_enabled = True
     stt = WhisperSTTService()
     transcription_output_queue = asyncio.Queue()
 
@@ -28,7 +30,7 @@ async def main(room_url: str):
     async def handle_speaker():
         await stt.run_to_queue(
             transcription_output_queue,
-            transport.get_receive_frames()   
+            transport.get_receive_frames()
         )
     await asyncio.gather(transport.run(), handle_speaker(), handle_transcription())
 

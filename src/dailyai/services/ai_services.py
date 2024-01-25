@@ -156,26 +156,15 @@ class ImageGenService(AIService):
 
 class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
-    _content: io.BufferedRandom
-    _wave: wave.Wave_write
-    _silence_frames: int
 
-    def __init__(self, **kwargs):
+    _frame_rate: int
+    def __init__(self, frame_rate: int = 16000, **kwargs):
         super().__init__(**kwargs)
-        self._new_wave()
-        self._silence_frames = 0
+        self._frame_rate = frame_rate
 
-    def _new_wave(self):
-        """Creates a new wave object and content buffer."""
-        self._content = io.BufferedRandom(io.BytesIO())
-        ww = wave.open(self._content, "wb")
-        ww.setnchannels(1)
-        ww.setsampwidth(2)
-        ww.setframerate(16000)
-        self._wave = ww
 
     @abstractmethod
-    def run_stt(self, audio: BinaryIO) -> str:
+    async def run_stt(self, audio: BinaryIO) -> str:
         """Returns transcript as a string"""
         pass
 
@@ -185,32 +174,16 @@ class STTService(AIService):
             return
         
         data = frame.data
-        # Try to filter out empty background noise
-        # (Very rudimentary approach, can be improved)
-        volume = self._get_volume(data)
-        if volume > 400:
-            # If volume is high enough, write new data to wave file
-            self._wave.writeframesraw(data)
-
-        # If buffer is not empty and we detect a 3-frame pause in speech,
-        # transcribe the audio gathered so far.
-        if self._content.tell() > 0 and self._silence_frames > 3:
-            self._silence_frames = 0
-            self._wave.close()
-            self._content.seek(0)
-            text = self.run_stt(self._content)
-            self._new_wave()
-            yield TextQueueFrame(text)
-        # If we get this far, this is a frame of silence
-        self._silence_frames += 1
-
-    def _get_volume(self, audio: bytes) -> float:
-        # https://docs.python.org/3/library/array.html
-        audio_array = array.array('h', audio) 
-        squares = [sample**2 for sample in audio_array]
-        mean = sum(squares) / len(audio_array)
-        rms = math.sqrt(mean)
-        return rms
+        content = io.BufferedRandom(io.BytesIO())
+        ww = wave.open(self._content, "wb")
+        ww.setnchannels(1)
+        ww.setsampwidth(2)
+        ww.setframerate(self._frame_rate)
+        ww.writeframesraw(data)
+        ww.close()
+        content.seek(0)
+        text = await self.run_stt(content)
+        yield TextQueueFrame(text)
 
 @dataclass
 class AIServiceConfig:
