@@ -43,5 +43,4 @@ class LLMContextAggregator(AIService):
             self.messages.append({"role": self.role, "content": self.sentence})
             self.sentence = ""
             yield LLMMessagesQueueFrame(self.messages)
-
         yield frame

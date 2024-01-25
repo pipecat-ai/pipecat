@@ -130,7 +130,7 @@ async def main(room_url:str, token):
         )
 
     async def make_cats():
-        await transport.send_queue.put(talking_frame)
+        await transport.send_queue.put(quiet_frame)
         
     transport.transcription_settings["extra"]["punctuate"] = True
     await asyncio.gather(transport.run(), handle_transcriptions(), make_cats())

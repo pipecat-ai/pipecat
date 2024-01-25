@@ -316,7 +316,7 @@ class DailyTransportService(EventHandler):
         self.images: list[bytes] | None = images
         self.image = None
         self.current_frame = start_frame
-
+    
     def run_camera(self):
         try:
             while not self.stop_threads.is_set():
