@@ -49,8 +49,9 @@ class OpenAILLMService(LLMService):
         else:
             return None
 
+
 class OpenAIImageGenService(ImageGenService):
-    def __init__(self, image_size:str, api_key=None, model=None):
+    def __init__(self, image_size: str, api_key=None, model=None):
         super().__init__(image_size=image_size)
         api_key = api_key or os.getenv("OPEN_AI_KEY")
         self.model = model or os.getenv("OPEN_AI_IMAGE_MODEL") or "dall-e-3"

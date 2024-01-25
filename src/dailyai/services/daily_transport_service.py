@@ -30,6 +30,7 @@ from daily import (
     VirtualSpeakerDevice,
 )
 
+
 class DailyTransportService(EventHandler):
     _daily_initialized = False
     _lock = threading.Lock()
@@ -111,7 +112,8 @@ class DailyTransportService(EventHandler):
                     if self.loop:
                         asyncio.run_coroutine_threadsafe(handler(*args, **kwargs), self.loop)
                     else:
-                        raise Exception("No event loop to run coroutine. In order to use async event handlers, you must run the DailyTransportService in an asyncio event loop.")
+                        raise Exception(
+                            "No event loop to run coroutine. In order to use async event handlers, you must run the DailyTransportService in an asyncio event loop.")
                 else:
                     handler(*args, **kwargs)
         except Exception as e:
@@ -126,8 +128,11 @@ class DailyTransportService(EventHandler):
         if event_name not in [method[0] for method in methods]:
             raise Exception(f"Event handler {event_name} not found")
 
-        if not event_name in self.event_handlers:
-            self.event_handlers[event_name] = [getattr(self, event_name), types.MethodType(handler, self)]
+        if event_name not in self.event_handlers:
+            self.event_handlers[event_name] = [
+                getattr(
+                    self, event_name), types.MethodType(
+                    handler, self)]
             setattr(self, event_name, partial(self.patch_method, event_name))
         else:
             self.event_handlers[event_name].append(types.MethodType(handler, self))
@@ -317,7 +322,7 @@ class DailyTransportService(EventHandler):
     def on_app_message(self, message, sender):
         pass
 
-    def on_transcription_message(self, message:dict):
+    def on_transcription_message(self, message: dict):
         if self.loop:
             participantId = ""
             if "participantId" in message:
@@ -360,7 +365,7 @@ class DailyTransportService(EventHandler):
                 frames_or_frame: QueueFrame | list[QueueFrame] = self.threadsafe_send_queue.get()
                 if isinstance(frames_or_frame, QueueFrame):
                     frames: list[QueueFrame] = [frames_or_frame]
-                elif isinstance(frames_or_frame,  list):
+                elif isinstance(frames_or_frame, list):
                     frames: list[QueueFrame] = frames_or_frame
                 else:
                     raise Exception("Unknown type in output queue")

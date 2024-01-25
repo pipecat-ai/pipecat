@@ -20,6 +20,7 @@ from dailyai.message_handler.message_handler import MessageHandler
 from dailyai.services.ai_services import AIServiceConfig
 from dailyai.services.azure_ai_services import AzureImageGenService, AzureTTSService, AzureLLMService
 
+
 class StaticSpriteResponse(OrchestratorResponse):
 
     def __init__(
@@ -29,8 +30,8 @@ class StaticSpriteResponse(OrchestratorResponse):
         output_queue
     ) -> None:
         super().__init__(services, message_handler, output_queue)
-        self.image_bytes:bytes | None = None
-        self.filenames = None # override this in subclasses
+        self.image_bytes: bytes | None = None
+        self.filenames = None  # override this in subclasses
 
     def start_preparation(self) -> None:
         full_path = os.path.join(os.path.dirname(__file__), "sprites/", self.filename)
@@ -82,7 +83,7 @@ def add_bot_to_room(room_url, token, expiration) -> None:
 
     # A simple prompt for a simple sample.
     message_handler = MessageHandler(
-    """
+        """
         You are a sample bot in a WebRTC session. You'll receive input as transcriptions of user's
         speech, and your responses will be converted to audio via a TTS service.
         Answer user's questions and be friendly, and if you can, give some ideas about how someone
@@ -142,6 +143,7 @@ def add_bot_to_room(room_url, token, expiration) -> None:
     services.tts.close()
     services.image.close()
     services.llm.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")

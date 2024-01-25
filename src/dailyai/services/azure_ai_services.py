@@ -15,6 +15,7 @@ from PIL import Image
 # See .env.example for Azure configuration needed
 from azure.cognitiveservices.speech import SpeechSynthesizer, SpeechConfig, ResultReason, CancellationReason
 
+
 class AzureTTSService(TTSService):
     def __init__(self, speech_key=None, speech_region=None):
         super().__init__()
@@ -23,18 +24,19 @@ class AzureTTSService(TTSService):
         speech_region = speech_region or os.getenv("AZURE_SPEECH_SERVICE_REGION")
 
         self.speech_config = SpeechConfig(subscription=speech_key, region=speech_region)
-        self.speech_synthesizer = SpeechSynthesizer(speech_config=self.speech_config, audio_config=None)
+        self.speech_synthesizer = SpeechSynthesizer(
+            speech_config=self.speech_config, audio_config=None)
 
     async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
         self.logger.info("Running azure tts")
         ssml = "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' " \
-           "xmlns:mstts='http://www.w3.org/2001/mstts'>" \
-           "<voice name='en-US-SaraNeural'>" \
-           "<mstts:silence type='Sentenceboundary' value='20ms' />" \
-           "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>" \
-           "<prosody rate='1.05'>" \
-           f"{sentence}" \
-           "</prosody></mstts:express-as></voice></speak> "
+            "xmlns:mstts='http://www.w3.org/2001/mstts'>" \
+            "<voice name='en-US-SaraNeural'>" \
+            "<mstts:silence type='Sentenceboundary' value='20ms' />" \
+            "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>" \
+            "<prosody rate='1.05'>" \
+            f"{sentence}" \
+            "</prosody></mstts:express-as></voice></speak> "
         result = await asyncio.to_thread(self.speech_synthesizer.speak_ssml, (ssml))
         self.logger.info("Got azure tts result")
         if result.reason == ResultReason.SynthesizingAudioCompleted:
@@ -47,6 +49,7 @@ class AzureTTSService(TTSService):
             if cancellation_details.reason == CancellationReason.Error:
                 self.logger.info("Error details: {}".format(cancellation_details.error_details))
 
+
 class AzureLLMService(LLMService):
     def __init__(self, api_key=None, azure_endpoint=None, api_version=None, model=None):
         super().__init__()
@@ -54,11 +57,13 @@ class AzureLLMService(LLMService):
 
         azure_endpoint = azure_endpoint or os.getenv("AZURE_CHATGPT_ENDPOINT")
         if not azure_endpoint:
-            raise Exception("No azure endpoint specified for Azure LLM, please set AZURE_CHATGPT_ENDPOINT in the environment or pass it to the AzureLLMService constructor")
+            raise Exception(
+                "No azure endpoint specified for Azure LLM, please set AZURE_CHATGPT_ENDPOINT in the environment or pass it to the AzureLLMService constructor")
 
         model: str | None = model or os.getenv("AZURE_CHATGPT_DEPLOYMENT_ID")
         if not model:
-            raise Exception("No model specified for Azure LLM, please set AZURE_CHATGPT_DEPLOYMENT_ID in the environment or pass it to the AzureLLMService constructor")
+            raise Exception(
+                "No model specified for Azure LLM, please set AZURE_CHATGPT_DEPLOYMENT_ID in the environment or pass it to the AzureLLMService constructor")
         self.model: str = model
 
         api_version = api_version or "2023-12-01-preview"
@@ -90,9 +95,16 @@ class AzureLLMService(LLMService):
         else:
             return None
 
+
 class AzureImageGenServiceREST(ImageGenService):
 
-    def __init__(self, image_size:str, api_key=None, azure_endpoint=None, api_version=None, model=None):
+    def __init__(
+            self,
+            image_size: str,
+            api_key=None,
+            azure_endpoint=None,
+            api_version=None,
+            model=None):
         super().__init__(image_size=image_size)
         self.api_key = api_key or os.getenv("AZURE_DALLE_KEY")
         self.azure_endpoint = azure_endpoint or os.getenv("AZURE_DALLE_ENDPOINT")
@@ -103,7 +115,7 @@ class AzureImageGenServiceREST(ImageGenService):
         # TODO hoist the session to app-level
         async with aiohttp.ClientSession() as session:
             url = f"{self.azure_endpoint}openai/images/generations:submit?api-version={self.api_version}"
-            headers= { "api-key": self.api_key, "Content-Type": "application/json" }
+            headers = {"api-key": self.api_key, "Content-Type": "application/json"}
             body = {
                 # Enter your prompt text here
                 "prompt": sentence,
