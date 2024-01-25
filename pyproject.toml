@@ -16,7 +16,8 @@ dependencies = [
     "pyht",
     "opentelemetry-sdk",
     "aiohttp",
-    "fal"
+    "fal",
+    "faster_whisper"
 ]
 
 [tool.setuptools.packages.find]
