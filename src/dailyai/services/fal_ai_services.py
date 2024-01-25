@@ -8,6 +8,8 @@ from PIL import Image
 
 from dailyai.services.ai_services import LLMService, TTSService, ImageGenService
 # Fal expects FAL_KEY_ID and FAL_KEY_SECRET to be set in the env
+
+
 class FalImageGenService(ImageGenService):
     def __init__(self, image_size):
         super().__init__(image_size)
@@ -18,9 +20,9 @@ class FalImageGenService(ImageGenService):
             handler = fal.apps.submit(
                 "110602490-fast-sdxl",
                 arguments={
-                "prompt": sentence
+                    "prompt": sentence
                 },
-                )
+            )
             print("past fal handler init, about to wait for iter_events...")
             for event in handler.iter_events():
                 if isinstance(event, fal.apps.InProgress):

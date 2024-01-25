@@ -5,6 +5,7 @@ from dailyai.services.ai_services import AIService
 
 from typing import AsyncGenerator, List
 
+
 class QueueTee:
     async def run_to_queue_and_generate(
         self,
@@ -24,15 +25,21 @@ class QueueTee:
             for queue in output_queues:
                 await queue.put(frame)
 
+
 class LLMContextAggregator(AIService):
-    def __init__(self, messages: list[dict], role:str, bot_participant_id=None, complete_sentences=True):
+    def __init__(
+            self,
+            messages: list[dict],
+            role: str,
+            bot_participant_id=None,
+            complete_sentences=True):
         self.messages = messages
         self.bot_participant_id = bot_participant_id
         self.role = role
         self.sentence = ""
         self.complete_sentences = complete_sentences
 
-    async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         # TODO: split up transcription by participant
         if isinstance(frame, TextQueueFrame):
             if self.complete_sentences:

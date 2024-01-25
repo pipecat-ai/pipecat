@@ -7,6 +7,7 @@ from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
 
+
 async def main(room_url):
     meeting_duration_minutes = 5
     transport = DailyTransportService(
@@ -98,7 +99,7 @@ async def main(room_url):
 
     await transport.run()
 
-if __name__=="__main__":
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
     parser.add_argument(
         "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
