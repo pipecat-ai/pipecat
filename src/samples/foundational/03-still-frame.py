@@ -4,6 +4,7 @@ import asyncio
 from dailyai.queue_frame import TextQueueFrame
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.open_ai_services import OpenAIImageGenService
+from dailyai.services.azure_ai_services import AzureImageGenServiceREST
 
 local_joined = False
 participant_joined = False
@@ -21,7 +22,7 @@ async def main(room_url):
     transport.camera_width = 1024
     transport.camera_height = 1024
 
-    imagegen = OpenAIImageGenService(image_size="1024x1024")
+    imagegen = AzureImageGenServiceREST(image_size="1024x1024")
     image_task = asyncio.create_task(
         imagegen.run_to_queue(transport.send_queue, [TextQueueFrame("a cat in the style of picasso")])
     )

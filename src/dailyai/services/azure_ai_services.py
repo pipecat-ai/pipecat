@@ -101,39 +101,37 @@ class AzureImageGenServiceREST(ImageGenService):
         self.aiohttp_client_session = aiohttp_client_session or aiohttp.ClientSession()
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
-        # TODO hoist the session to app-level
-        async with self.aiohttp_client_session as session:
-            url = f"{self.azure_endpoint}openai/images/generations:submit?api-version={self.api_version}"
-            headers= { "api-key": self.api_key, "Content-Type": "application/json" }
-            body = {
-                "prompt": sentence,
-                "size": self.image_size,
-                "n": 1,
-            }
-            async with self.aiohttp_client_session.post(
-                url, headers=headers, json=body
-            ) as submission:
-                operation_location = submission.headers['operation-location']
+        url = f"{self.azure_endpoint}openai/images/generations:submit?api-version={self.api_version}"
+        headers= { "api-key": self.api_key, "Content-Type": "application/json" }
+        body = {
+            "prompt": sentence,
+            "size": self.image_size,
+            "n": 1,
+        }
+        async with self.aiohttp_client_session.post(
+            url, headers=headers, json=body
+        ) as submission:
+            operation_location = submission.headers['operation-location']
 
-                status = ""
-                attempts_left = 120
-                json_response = None
-                while status != "succeeded":
-                    attempts_left -= 1
-                    if attempts_left == 0:
-                        raise Exception("Image generation timed out")
+            status = ""
+            attempts_left = 120
+            json_response = None
+            while status != "succeeded":
+                attempts_left -= 1
+                if attempts_left == 0:
+                    raise Exception("Image generation timed out")
 
-                    await asyncio.sleep(1)
-                    response = await session.get(operation_location, headers=headers)
-                    json_response = await response.json()
-                    status = json_response["status"]
+                await asyncio.sleep(1)
+                response = await self.aiohttp_client_session.get(operation_location, headers=headers)
+                json_response = await response.json()
+                status = json_response["status"]
 
-                image_url = json_response["result"]["data"][0]["url"] if json_response else None
-                if not image_url:
-                    raise Exception("Image generation failed")
+            image_url = json_response["result"]["data"][0]["url"] if json_response else None
+            if not image_url:
+                raise Exception("Image generation failed")
 
-                # Load the image from the url
-                async with session.get(image_url) as response:
-                    image_stream = io.BytesIO(await response.content.read())
-                    image = Image.open(image_stream)
-                    return (image_url, image.tobytes())
+            # Load the image from the url
+            async with self.aiohttp_client_session.get(image_url) as response:
+                image_stream = io.BytesIO(await response.content.read())
+                image = Image.open(image_stream)
+                return (image_url, image.tobytes())
