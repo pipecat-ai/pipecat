@@ -151,11 +151,11 @@ async def main(room_url:str, token):
                 )
             )
 
-    async def starting_image():
-        await transport.send_queue.put(quiet_frame)
-        
-    transport.transcription_settings["extra"]["punctuate"] = True
-    await asyncio.gather(transport.run(), handle_transcriptions(), starting_image())
+        async def starting_image():
+            await transport.send_queue.put(quiet_frame)
+            
+        transport.transcription_settings["extra"]["punctuate"] = True
+        await asyncio.gather(transport.run(), handle_transcriptions(), starting_image())
 
 
 
