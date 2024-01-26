@@ -24,9 +24,13 @@ from typing import AsyncGenerator, List
 
 sprites = {}
 image_files = [
-    'cat1.png',
-    'cat2.png',
-    'cat3.png'
+    'sc-default.png',
+    'sc-talk.png',
+    'sc-listen-1.png',
+    'sc-think-1.png',
+    'sc-think-2.png',
+    'sc-think-3.png',
+    'sc-think-4.png'
 ]
 
 script_dir = os.path.dirname(__file__)
@@ -40,10 +44,17 @@ for file in image_files:
     with Image.open(full_path) as img:
         sprites[file] = img.tobytes()
 
-quiet_frame = ImageQueueFrame("", sprites["cat1.png"])
-sprite_list = list(sprites.values())
-talking = [random.choice(sprite_list) for x in range(30)]
+# When the bot isn't talking, show a static image of the cat listening
+quiet_frame = ImageQueueFrame("", sprites["sc-listen-1.png"])
+# When the bot is talking, build an animation from two sprites
+talking_list = [sprites['sc-default.png'], sprites['sc-talk.png']]
+talking = [random.choice(talking_list) for x in range(30)]
 talking_frame = ImageListQueueFrame(images=talking)
+
+# TODO: Support "thinking" as soon as we get a valid transcript, while LLM is processing
+thinking_list = [sprites['sc-think-1.png'], sprites['sc-think-2.png'], sprites['sc-think-3.png'], sprites['sc-think-4.png']]
+thinking_frame = ImageListQueueFrame(images=thinking_list)
+
 class TranscriptFilter(AIService):
     def __init__(self, bot_participant_id=None):
         self.bot_participant_id = bot_participant_id
@@ -67,14 +78,21 @@ class NameCheckFilter(AIService):
         self.sentence += content
         if self.sentence.endswith((".", "?", "!")):
             if any(name in self.sentence for name in self.names):
-                print(f"I got one: {frame.text}")
                 out = self.sentence
                 self.sentence = ""
                 yield TextQueueFrame(out)
             else:
                 out = self.sentence
                 self.sentence = ""
-                print(f"ignoring: {out}")
+
+class ImageSyncAggregator(AIService):
+    def __init__(self):
+        pass
+
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        yield talking_frame
+        yield frame
+        yield quiet_frame
 
 async def main(room_url:str, token):
     global transport
@@ -84,17 +102,18 @@ async def main(room_url:str, token):
     transport = DailyTransportService(
         room_url,
         token,
-        "Derrick",
+        "Santa Cat",
         180,
     )
     transport.mic_enabled = True
     transport.mic_sample_rate = 16000
     transport.camera_enabled = True
-    transport.camera_width = 960
-    transport.camera_height = 960
+    transport.camera_width = 720
+    transport.camera_height = 1280
 
     llm = AzureLLMService()
     tts = ElevenLabsTTSService()
+    isa = ImageSyncAggregator()
 
     @transport.event_handler("on_first_other_participant_joined")
     async def on_first_other_participant_joined(transport):
@@ -102,7 +121,7 @@ async def main(room_url:str, token):
 
     async def handle_transcriptions():
         messages = [
-            {"role": "system", "content": "You are Derek, the Golden Kitty, the mascot for Product Hunt's annual awards. You are a cat who knows everything about all the cool new tech startups. You should be clever, and a bit sarcastic. You should also tell jokes every once in a while.  Your responses should only be a few sentences long."},
+            {"role": "system", "content": "You are Santa Cat, a cat that lives in Santa's workshop at the North Pole. You should be clever, and a bit sarcastic. You should also tell jokes every once in a while.  Your responses should only be a few sentences long."},
         ]
 
         tma_in = LLMContextAggregator(
@@ -112,18 +131,19 @@ async def main(room_url:str, token):
             messages, "assistant", transport.my_participant_id
         )
         tf = TranscriptFilter(transport.my_participant_id)
-        ncf = NameCheckFilter(["Derek", "Derrick"])
+        ncf = NameCheckFilter(["Santa Cat", "Santa"])
         await tts.run_to_queue(
             transport.send_queue,
-            tma_out.run(
-                llm.run(
-                    tma_in.run(
-                        ncf.run(
-                            tf.run(
-                                transport.get_receive_frames()
+            isa.run(
+                tma_out.run(
+                    llm.run(
+                        tma_in.run(
+                            ncf.run(
+                                tf.run(
+                                    transport.get_receive_frames()
+                                )
                             )
                         )
-
                     )
                 )
             )
