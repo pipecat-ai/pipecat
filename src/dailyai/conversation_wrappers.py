@@ -43,10 +43,10 @@ class InterruptibleConversationWrapper:
     async def speak_after_delay(self, user_speech, messages):
         await asyncio.sleep(self._delay_before_speech_seconds)
         tma_in = self._llm_context_aggregator_in(
-            messages, "user", self._my_participant_id, False
+            messages, self._my_participant_id, complete_sentences=False
         )
         tma_out = self._llm_context_aggregator_out(
-            messages, "assistant", self._my_participant_id
+            messages, self._my_participant_id
         )
 
         await self._runner(user_speech, tma_in, tma_out)

@@ -47,16 +47,16 @@ class LLMContextAggregator(AIService):
             yield frame
             return
 
+        # Ignore transcription frames from the bot
+        if isinstance(frame, TranscriptionQueueFrame):
+            if frame.participantId == self.bot_participant_id:
+                return
+
         # The common case for "pass through" is receiving frames from the LLM that we'll
         # use to update the "assistant" LLM messages, but also passing the text frames
         # along to a TTS service to be spoken to the user.
         if self.pass_through:
             yield frame
-
-        # Ignore transcription frames from the bot
-        if isinstance(frame, TranscriptionQueueFrame):
-            if frame.participantId == self.bot_participant_id:
-                return
 
         # TODO: split up transcription by participant
         if self.complete_sentences:
