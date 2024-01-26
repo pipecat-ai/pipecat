@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import aiohttp
 import requests
 import time
 import urllib.parse
@@ -12,56 +13,53 @@ from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 
 async def main(room_url: str, token):
-    global transport
-    global llm
-    global tts
+    async with aiohttp.ClientSession() as session:
+        transport = DailyTransportService(
+            room_url,
+            token,
+            "Respond bot",
+            5,
+        )
+        transport.mic_enabled = True
+        transport.mic_sample_rate = 16000
+        transport.camera_enabled = False
+        transport.start_transcription = True
 
-    transport = DailyTransportService(
-        room_url,
-        token,
-        "Respond bot",
-        5,
-    )
-    transport.mic_enabled = True
-    transport.mic_sample_rate = 16000
-    transport.camera_enabled = False
-    transport.start_transcription = True
+        llm = AzureLLMService()
+        tts = ElevenLabsTTSService(session, voice_id="ErXwobaYiN019PkySvjV")
 
-    llm = AzureLLMService()
-    tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
-
-    async def run_response(user_speech, tma_in, tma_out):
-        await tts.run_to_queue(
-            transport.send_queue,
-            tma_out.run(
-                llm.run(
-                    tma_in.run(
-                        [StartStreamQueueFrame(), TextQueueFrame(user_speech)]
+        async def run_response(user_speech, tma_in, tma_out):
+            await tts.run_to_queue(
+                transport.send_queue,
+                tma_out.run(
+                    llm.run(
+                        tma_in.run(
+                            [StartStreamQueueFrame(), TextQueueFrame(user_speech)]
+                        )
                     )
-                )
-            ),
-        )
+                ),
+            )
 
-    @transport.event_handler("on_first_other_participant_joined")
-    async def on_first_other_participant_joined(transport):
-        await tts.say("Hi, I'm listening!", transport.send_queue)
+        @transport.event_handler("on_first_other_participant_joined")
+        async def on_first_other_participant_joined(transport):
+            await tts.say("Hi, I'm listening!", transport.send_queue)
 
-    async def run_conversation():
-        messages = [
-            {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
-        ]
+        async def run_conversation():
+            messages = [
+                {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
+            ]
 
-        conversation_wrapper = InterruptibleConversationWrapper(
-            frame_generator=transport.get_receive_frames,
-            runner=run_response,
-            interrupt=transport.interrupt,
-            my_participant_id=transport.my_participant_id,
-            llm_messages=messages,
-        )
-        await conversation_wrapper.run_conversation()
+            conversation_wrapper = InterruptibleConversationWrapper(
+                frame_generator=transport.get_receive_frames,
+                runner=run_response,
+                interrupt=transport.interrupt,
+                my_participant_id=transport.my_participant_id,
+                llm_messages=messages,
+            )
+            await conversation_wrapper.run_conversation()
 
-    transport.transcription_settings["extra"]["punctuate"] = False
-    await asyncio.gather(transport.run(), run_conversation())
+        transport.transcription_settings["extra"]["punctuate"] = False
+        await asyncio.gather(transport.run(), run_conversation())
 
 
 if __name__ == "__main__":

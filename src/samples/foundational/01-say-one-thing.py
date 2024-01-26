@@ -1,44 +1,47 @@
 import argparse
 import asyncio
 
+import aiohttp
+
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 
 async def main(room_url):
-    # create a transport service object using environment variables for
-    # the transport service's API key, room url, and any other configuration.
-    # services can all define and document the environment variables they use.
-    # services all also take an optional config object that is used instead of
-    # environment variables.
-    #
-    # the abstract transport service APIs presumably can map pretty closely
-    # to the daily-python basic API
-    meeting_duration_minutes = 1
-    transport = DailyTransportService(
-        room_url,
-        None,
-        "Say One Thing",
-        meeting_duration_minutes,
-    )
-    transport.mic_enabled = True
-    tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
-
-    # Register an event handler so we can play the audio when the participant joins.
-    @transport.event_handler("on_participant_joined")
-    async def on_participant_joined(transport, participant):
-        if participant["info"]["isLocal"]:
-            return
-
-        await tts.say(
-            "Hello there, " + participant["info"]["userName"] + "!",
-            transport.send_queue,
+    async with aiohttp.ClientSession() as session:
+        # create a transport service object using environment variables for
+        # the transport service's API key, room url, and any other configuration.
+        # services can all define and document the environment variables they use.
+        # services all also take an optional config object that is used instead of
+        # environment variables.
+        #
+        # the abstract transport service APIs presumably can map pretty closely
+        # to the daily-python basic API
+        meeting_duration_minutes = 1
+        transport = DailyTransportService(
+            room_url,
+            None,
+            "Say One Thing",
+            meeting_duration_minutes,
         )
+        transport.mic_enabled = True
+        tts = ElevenLabsTTSService(session, voice_id="ErXwobaYiN019PkySvjV")
 
-        # wait for the output queue to be empty, then leave the meeting
-        await transport.stop_when_done()
+        # Register an event handler so we can play the audio when the participant joins.
+        @transport.event_handler("on_participant_joined")
+        async def on_participant_joined(transport, participant):
+            if participant["info"]["isLocal"]:
+                return
 
-    await transport.run()
+            await tts.say(
+                "Hello there, " + participant["info"]["userName"] + "!",
+                transport.send_queue,
+            )
+
+            # wait for the output queue to be empty, then leave the meeting
+            await transport.stop_when_done()
+
+        await transport.run()
 
 
 if __name__ == "__main__":
