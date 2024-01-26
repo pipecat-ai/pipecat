@@ -86,9 +86,7 @@ class LLMService(AIService):
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, ControlQueueFrame):
-            yield frame
-        elif isinstance(frame, LLMMessagesQueueFrame):
+        if isinstance(frame, LLMMessagesQueueFrame):
             async for text_chunk in self.run_llm_async(frame.messages):
                 yield TextQueueFrame(text_chunk)
 
@@ -111,10 +109,8 @@ class TTSService(AIService):
         yield bytes()
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, ControlQueueFrame):
+        if not isinstance(frame, TextQueueFrame):
             yield frame
-            return
-        elif not isinstance(frame, TextQueueFrame):
             return
 
         text: str | None = None
