@@ -2,7 +2,7 @@ import asyncio
 import copy
 import functools
 from typing import AsyncGenerator, Awaitable, Callable
-from dailyai.queue_aggregators import LLMContextAggregator
+from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
 from dailyai.queue_frame import EndStreamQueueFrame, QueueFrame, TranscriptionQueueFrame
 
 
@@ -17,8 +17,8 @@ class InterruptibleConversationWrapper:
         interrupt: Callable[[], None],
         my_participant_id: str | None,
         llm_messages: list[dict[str, str]],
-        llm_context_aggregator_in=LLMContextAggregator,
-        llm_context_aggregator_out=LLMContextAggregator,
+        llm_context_aggregator_in=LLMUserContextAggregator,
+        llm_context_aggregator_out=LLMAssistantContextAggregator,
         delay_before_speech_seconds: float = 1.0,
     ):
         self._frame_generator: Callable[[], AsyncGenerator[QueueFrame, None]] = frame_generator

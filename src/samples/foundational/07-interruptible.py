@@ -25,6 +25,7 @@ async def main(room_url: str, token):
     transport.mic_enabled = True
     transport.mic_sample_rate = 16000
     transport.camera_enabled = False
+    transport.start_transcription = True
 
     llm = AzureLLMService()
     tts = ElevenLabsTTSService(voice_id="ErXwobaYiN019PkySvjV")
