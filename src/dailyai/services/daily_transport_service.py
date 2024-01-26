@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import logging
+import sys
 import threading
 import time
 import types
@@ -13,6 +14,7 @@ from dailyai.queue_frame import (
     AudioQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
+    SpriteQueueFrame,
     QueueFrame,
     StartStreamQueueFrame,
     TranscriptionQueueFrame,
@@ -167,7 +169,9 @@ class DailyTransportService(EventHandler):
             Daily.select_speaker_device("speaker")
 
         self._image: bytes | None = None
-        self._camera_thread = Thread(target=self._run_camera, daemon=True)
+        self._images: list[bytes] | None = None
+
+        self._camera_thread = Thread(target=self.run_camera, daemon=True)
         self._camera_thread.start()
 
         self._logger.info("Starting frame consumer thread")
@@ -341,12 +345,22 @@ class DailyTransportService(EventHandler):
 
     def set_image(self, image: bytes):
         self._image: bytes | None = image
-
-    def _run_camera(self):
+        self._images: list[bytes] | None = None
+    
+    def set_images(self, images: list[bytes], start_frame=0):
+        self._images: list[bytes] | None = images
+        self._image = None
+        self._current_frame = start_frame
+    
+    def run_camera(self):
         try:
             while not self._stop_threads.is_set():
                 if self._image:
                     self.camera.write_frame(self._image)
+                if self._images:
+                    this_frame = self._images[self._current_frame]
+                    self.camera.write_frame(this_frame)
+                    self._current_frame = (self._current_frame + 1) % len(self._images)
 
                 time.sleep(1.0 / 8)  # 8 fps
         except Exception as e:
@@ -389,6 +403,8 @@ class DailyTransportService(EventHandler):
                                     b = b[l:]
                             elif isinstance(frame, ImageQueueFrame):
                                 self.set_image(frame.image)
+                            elif isinstance(frame, SpriteQueueFrame):
+                                self.set_images(frame.images)
                         elif len(b):
                             self.mic.write_frames(bytes(b))
                             b = bytearray()

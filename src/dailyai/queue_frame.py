@@ -31,6 +31,10 @@ class ImageQueueFrame(QueueFrame):
 
 
 @dataclass()
+class SpriteQueueFrame(QueueFrame):
+    images: list[bytes] | None
+
+@dataclass()
 class TextQueueFrame(QueueFrame):
     text: str
 
