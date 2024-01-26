@@ -5,7 +5,6 @@ import json
 from openai import AsyncAzureOpenAI
 
 import os
-import requests
 
 from collections.abc import AsyncGenerator
 
@@ -16,7 +15,10 @@ from PIL import Image
 from azure.cognitiveservices.speech import SpeechSynthesizer, SpeechConfig, ResultReason, CancellationReason
 
 class AzureTTSService(TTSService):
-    def __init__(self, speech_key=None, speech_region=None):
+
+    def __init__(
+        self, speech_key=None, speech_region=None, voice_name="en-US-SaraNeural"
+    ):
         super().__init__()
 
         speech_key = speech_key or os.getenv("AZURE_SPEECH_SERVICE_KEY")
@@ -25,11 +27,13 @@ class AzureTTSService(TTSService):
         self.speech_config = SpeechConfig(subscription=speech_key, region=speech_region)
         self.speech_synthesizer = SpeechSynthesizer(speech_config=self.speech_config, audio_config=None)
 
+        self.voice_name = voice_name
+
     async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
         self.logger.info("Running azure tts")
-        ssml = "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' " \
+        ssml = f"<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' " \
            "xmlns:mstts='http://www.w3.org/2001/mstts'>" \
-           "<voice name='en-US-SaraNeural'>" \
+           f"<voice name={self.voice_name}>" \
            "<mstts:silence type='Sentenceboundary' value='20ms' />" \
            "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>" \
            "<prosody rate='1.05'>" \
@@ -92,13 +96,25 @@ class AzureLLMService(LLMService):
 
 class AzureImageGenServiceREST(ImageGenService):
 
-    def __init__(self, image_size:str, api_key=None, azure_endpoint=None, api_version=None, model=None, aiohttp_client_session=None):
+    def __init__(
+        self,
+        image_size: str,
+        api_key: str | None = None,
+        azure_endpoint: str | None = None,
+        api_version: str | None = None,
+        model: str | None = None,
+        aiohttp_session: aiohttp.ClientSession | None=None,
+        timeout_seconds=120,
+    ):
         super().__init__(image_size=image_size)
         self.api_key = api_key or os.getenv("AZURE_DALLE_KEY")
         self.azure_endpoint = azure_endpoint or os.getenv("AZURE_DALLE_ENDPOINT")
         self.api_version = api_version or "2023-06-01-preview"
         self.model = model or os.getenv("AZURE_DALLE_DEPLOYMENT_ID")
-        self.aiohttp_client_session = aiohttp_client_session or aiohttp.ClientSession()
+        self.aiohttp_session: aiohttp.ClientSession = (
+            aiohttp_session or aiohttp.ClientSession()
+        )
+        self.timeout_seconds = timeout_seconds
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         url = f"{self.azure_endpoint}openai/images/generations:submit?api-version={self.api_version}"
@@ -108,13 +124,13 @@ class AzureImageGenServiceREST(ImageGenService):
             "size": self.image_size,
             "n": 1,
         }
-        async with self.aiohttp_client_session.post(
+        async with self.aiohttp_session.post(
             url, headers=headers, json=body
         ) as submission:
             operation_location = submission.headers['operation-location']
 
             status = ""
-            attempts_left = 120
+            attempts_left = self.timeout_seconds
             json_response = None
             while status != "succeeded":
                 attempts_left -= 1
@@ -122,7 +138,7 @@ class AzureImageGenServiceREST(ImageGenService):
                     raise Exception("Image generation timed out")
 
                 await asyncio.sleep(1)
-                response = await self.aiohttp_client_session.get(operation_location, headers=headers)
+                response = await self.aiohttp_session.get(operation_location, headers=headers)
                 json_response = await response.json()
                 status = json_response["status"]
 
@@ -131,7 +147,7 @@ class AzureImageGenServiceREST(ImageGenService):
                 raise Exception("Image generation failed")
 
             # Load the image from the url
-            async with self.aiohttp_client_session.get(image_url) as response:
+            async with self.aiohttp_session.get(image_url) as response:
                 image_stream = io.BytesIO(await response.content.read())
                 image = Image.open(image_stream)
                 return (image_url, image.tobytes())

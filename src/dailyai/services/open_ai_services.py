@@ -1,6 +1,4 @@
-import requests
 import aiohttp
-import asyncio
 from PIL import Image
 import io
 from openai import AsyncOpenAI
@@ -9,7 +7,7 @@ import os
 import json
 from collections.abc import AsyncGenerator
 
-from dailyai.services.ai_services import AIService, TTSService, LLMService, ImageGenService
+from dailyai.services.ai_services import LLMService, ImageGenService
 
 
 class OpenAILLMService(LLMService):
@@ -50,11 +48,19 @@ class OpenAILLMService(LLMService):
             return None
 
 class OpenAIImageGenService(ImageGenService):
-    def __init__(self, image_size:str, api_key=None, model=None):
+
+    def __init__(
+        self,
+        image_size: str,
+        api_key=None,
+        model=None,
+        aiohttp_session: aiohttp.ClientSession | None = None,
+    ):
         super().__init__(image_size=image_size)
         api_key = api_key or os.getenv("OPEN_AI_KEY")
         self.model = model or os.getenv("OPEN_AI_IMAGE_MODEL") or "dall-e-3"
         self.client = AsyncOpenAI(api_key=api_key)
+        self.aiohttp_session=aiohttp_session or aiohttp.ClientSession()
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         self.logger.info("Generating OpenAI image", sentence)
@@ -70,10 +76,7 @@ class OpenAIImageGenService(ImageGenService):
             raise Exception("No image provided in response", image)
 
         # Load the image from the url
-        async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as response:
-                image_stream = io.BytesIO(await response.content.read())
-                image = Image.open(image_stream)
-                return (image_url, image.tobytes())
-
-        return (image_url, dalle_im.tobytes())
+        async with self.aiohttp_session.get(image_url) as response:
+            image_stream = io.BytesIO(await response.content.read())
+            image = Image.open(image_stream)
+            return (image_url, image.tobytes())

@@ -34,9 +34,9 @@ class FalImageGenService(ImageGenService):
                 raise Exception("Image generation failed")
 
             return image_url
-        print(f"fetching image url...")
+        print("fetching image url...")
         image_url = await asyncio.to_thread(get_image_url, sentence, self.image_size)
-        print(f"got image url, downloading image...")
+        print("got image url, downloading image...")
         # Load the image from the url
         async with aiohttp.ClientSession() as session:
             async with session.get(image_url) as response:
