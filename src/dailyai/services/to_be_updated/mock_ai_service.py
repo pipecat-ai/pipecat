@@ -4,6 +4,7 @@ import time
 from PIL import Image
 from services.ai_service import AIService
 
+
 class MockAIService(AIService):
     def __init__(self):
         super().__init__()
@@ -20,8 +21,7 @@ class MockAIService(AIService):
         time.sleep(1)
         return (image_url, image)
 
-    def run_llm(self, messages, latest_user_message=None, stream = True):
+    def run_llm(self, messages, latest_user_message=None, stream=True):
         for i in range(5):
             time.sleep(1)
-            yield({"choices": [{"delta": {"content": f"hello {i}!"}}]})
-
+            yield ({"choices": [{"delta": {"content": f"hello {i}!"}}]})

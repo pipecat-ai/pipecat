@@ -7,6 +7,7 @@ import types
 
 from functools import partial
 from queue import Queue, Empty
+from typing import AsyncGenerator
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
@@ -14,6 +15,7 @@ from dailyai.queue_frame import (
     ImageQueueFrame,
     QueueFrame,
     StartStreamQueueFrame,
+    TextQueueFrame,
     TranscriptionQueueFrame,
 )
 
@@ -27,6 +29,7 @@ from daily import (
     VirtualMicrophoneDevice,
     VirtualSpeakerDevice,
 )
+
 
 class DailyTransportService(EventHandler):
     _daily_initialized = False
@@ -108,11 +111,13 @@ class DailyTransportService(EventHandler):
                     if self._loop:
                         asyncio.run_coroutine_threadsafe(handler(*args, **kwargs), self._loop)
                     else:
-                        raise Exception("No event loop to run coroutine. In order to use async event handlers, you must run the DailyTransportService in an asyncio event loop.")
+                        raise Exception(
+                            "No event loop to run coroutine. In order to use async event handlers, you must run the DailyTransportService in an asyncio event loop.")
                 else:
                     handler(*args, **kwargs)
         except Exception as e:
             self._logger.error(f"Exception in event handler {event_name}: {e}")
+            raise e
 
     def add_event_handler(self, event_name: str, handler):
         if not event_name.startswith("on_"):
@@ -122,8 +127,11 @@ class DailyTransportService(EventHandler):
         if event_name not in [method[0] for method in methods]:
             raise Exception(f"Event handler {event_name} not found")
 
-        if not event_name in self._event_handlers:
-            self._event_handlers[event_name] = [getattr(self, event_name), types.MethodType(handler, self)]
+        if event_name not in self.event_handlers:
+            self.event_handlers[event_name] = [
+                getattr(
+                    self, event_name), types.MethodType(
+                    handler, self)]
             setattr(self, event_name, partial(self._patch_method, event_name))
         else:
             self._event_handlers[event_name].append(types.MethodType(handler, self))
@@ -213,7 +221,6 @@ class DailyTransportService(EventHandler):
         if self.token and self.start_transcription:
             self.client.start_transcription(self.transcription_settings)
 
-
     def _receive_audio(self):
         """Receive audio from the Daily call and put it on the receive queue"""
         seconds = 1
@@ -222,9 +229,13 @@ class DailyTransportService(EventHandler):
             buffer = self.speaker.read_frames(desired_frame_count)
             if len(buffer) > 0:
                 frame = AudioQueueFrame(buffer)
-                asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self._loop)
+                if self._loop:
+                    asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self._loop)
 
-    async def get_receive_frames(self):
+    def interrupt(self):
+        self.is_interrupted.set()
+
+    async def get_receive_frames(self) -> AsyncGenerator[QueueFrame, None]:
         while True:
             frame = await self.receive_queue.get()
             yield frame
@@ -264,6 +275,7 @@ class DailyTransportService(EventHandler):
                 await asyncio.sleep(1)
         except Exception as e:
             self._logger.error(f"Exception {e}")
+            raise e
         finally:
             self.client.leave()
 
@@ -309,7 +321,7 @@ class DailyTransportService(EventHandler):
     def on_app_message(self, message, sender):
         pass
 
-    def on_transcription_message(self, message:dict):
+    def on_transcription_message(self, message: dict):
         if self._loop:
             participantId = ""
             if "participantId" in message:
@@ -340,6 +352,7 @@ class DailyTransportService(EventHandler):
                 time.sleep(1.0 / 8)  # 8 fps
         except Exception as e:
             self._logger.error(f"Exception {e} in camera thread.")
+            raise e
 
     def _frame_consumer(self):
         self._logger.info("🎬 Starting frame consumer thread")
@@ -351,7 +364,7 @@ class DailyTransportService(EventHandler):
                 frames_or_frame: QueueFrame | list[QueueFrame] = self.threadsafe_send_queue.get()
                 if isinstance(frames_or_frame, QueueFrame):
                     frames: list[QueueFrame] = [frames_or_frame]
-                elif isinstance(frames_or_frame,  list):
+                elif isinstance(frames_or_frame, list):
                     frames: list[QueueFrame] = frames_or_frame
                 else:
                     raise Exception("Unknown type in output queue")
@@ -381,11 +394,11 @@ class DailyTransportService(EventHandler):
                             self.mic.write_frames(bytes(b))
                             b = bytearray()
                     else:
-                        if self.interrupt_time:
-                            self._logger.info(
-                                f"Lag to stop stream after interruption {time.perf_counter() - self.interrupt_time}"
-                            )
-                            self.interrupt_time = None
+                        # if there are leftover audio bytes, write them now; failing to do so
+                        # can cause static in the audio stream.
+                        if len(b):
+                            self.mic.write_frames(bytes(b))
+                            b = bytearray()
 
                         if isinstance(frame, StartStreamQueueFrame):
                             self._is_interrupted.clear()
@@ -396,6 +409,7 @@ class DailyTransportService(EventHandler):
                     if len(b):
                         self.mic.write_frames(bytes(b))
                 except Exception as e:
-                    self._logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
+                    self.logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
+                    raise e
 
                 b = bytearray()

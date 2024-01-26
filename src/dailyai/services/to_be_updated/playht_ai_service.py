@@ -8,6 +8,7 @@ from pyht.protos.api_pb2 import Format
 
 from services.ai_service import AIService
 
+
 class PlayHTAIService(AIService):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -23,8 +24,7 @@ class PlayHTAIService(AIService):
             voice="s3://voice-cloning-zero-shot/820da3d2-3a3b-42e7-844d-e68db835a206/sarah/manifest.json",
             sample_rate=16000,
             quality="higher",
-            format=Format.FORMAT_WAV
-        )
+            format=Format.FORMAT_WAV)
 
     def close(self):
         super().close()
@@ -43,14 +43,15 @@ class PlayHTAIService(AIService):
                     fh = io.BytesIO(b)
                     fh.seek(36)
                     (data, size) = struct.unpack('<4sI', fh.read(8))
-                    self.logger.info(f"first attempt: data: {data}, size: {hex(size)}, position: {fh.tell()}")
+                    self.logger.info(
+                        f"first attempt: data: {data}, size: {hex(size)}, position: {fh.tell()}")
                     while data != b'data':
                         fh.read(size)
                         (data, size) = struct.unpack('<4sI', fh.read(8))
-                        self.logger.info(f"subsequent data: {data}, size: {hex(size)}, position: {fh.tell()}, data != data: {data != b'data'}")
+                        self.logger.info(
+                            f"subsequent data: {data}, size: {hex(size)}, position: {fh.tell()}, data != data: {data != b'data'}")
                     self.logger.info("position: ", fh.tell())
                     in_header = False
             else:
                 if len(chunk):
                     yield chunk
-

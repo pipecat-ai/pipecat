@@ -8,6 +8,7 @@ from dailyai.services.open_ai_services import OpenAIImageGenService
 local_joined = False
 participant_joined = False
 
+
 async def main(room_url):
     meeting_duration_minutes = 1
     transport = DailyTransportService(
@@ -23,8 +24,9 @@ async def main(room_url):
 
     imagegen = OpenAIImageGenService(image_size="1024x1024")
     image_task = asyncio.create_task(
-        imagegen.run_to_queue(transport.send_queue, [TextQueueFrame("a cat in the style of picasso")])
-    )
+        imagegen.run_to_queue(
+            transport.send_queue, [
+                TextQueueFrame("a cat in the style of picasso")]))
 
     @transport.event_handler("on_participant_joined")
     async def on_participant_joined(transport, participant):
