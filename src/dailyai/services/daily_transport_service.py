@@ -14,7 +14,7 @@ from dailyai.queue_frame import (
     AudioQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
-    ImageListQueueFrame,
+    SpriteQueueFrame,
     QueueFrame,
     StartStreamQueueFrame,
     TranscriptionQueueFrame,
@@ -358,10 +358,9 @@ class DailyTransportService(EventHandler):
                 if self._image:
                     self.camera.write_frame(self._image)
                 if self._images:
-                    frame_index = self._current_frame % len(self._images)
-                    this_frame = self._images[frame_index]
+                    this_frame = self._images[self._current_frame]
                     self.camera.write_frame(this_frame)
-                    self._current_frame = frame_index + 1
+                    self._current_frame = (self._current_frame + 1) % len(self._images)
 
                 time.sleep(1.0 / 8)  # 8 fps
         except Exception as e:
@@ -404,7 +403,7 @@ class DailyTransportService(EventHandler):
                                     b = b[l:]
                             elif isinstance(frame, ImageQueueFrame):
                                 self.set_image(frame.image)
-                            elif isinstance(frame, ImageListQueueFrame):
+                            elif isinstance(frame, SpriteQueueFrame):
                                 self.set_images(frame.images)
                         elif len(b):
                             self.mic.write_frames(bytes(b))

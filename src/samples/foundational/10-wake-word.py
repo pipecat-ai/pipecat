@@ -18,7 +18,7 @@ from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.open_ai_services import OpenAIImageGenService
 from dailyai.queue_aggregators import LLMContextAggregator
-from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame, ImageQueueFrame, ImageListQueueFrame
+from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame, ImageQueueFrame, SpriteQueueFrame
 from dailyai.services.ai_services import AIService
 
 from typing import AsyncGenerator, List
@@ -50,11 +50,11 @@ quiet_frame = ImageQueueFrame("", sprites["sc-listen-1.png"])
 # When the bot is talking, build an animation from two sprites
 talking_list = [sprites['sc-default.png'], sprites['sc-talk.png']]
 talking = [random.choice(talking_list) for x in range(30)]
-talking_frame = ImageListQueueFrame(images=talking)
+talking_frame = SpriteQueueFrame(images=talking)
 
 # TODO: Support "thinking" as soon as we get a valid transcript, while LLM is processing
 thinking_list = [sprites['sc-think-1.png'], sprites['sc-think-2.png'], sprites['sc-think-3.png'], sprites['sc-think-4.png']]
-thinking_frame = ImageListQueueFrame(images=thinking_list)
+thinking_frame = SpriteQueueFrame(images=thinking_list)
 
 class TranscriptFilter(AIService):
     def __init__(self, bot_participant_id=None):
