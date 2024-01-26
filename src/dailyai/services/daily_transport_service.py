@@ -171,7 +171,7 @@ class DailyTransportService(EventHandler):
         self._image: bytes | None = None
         self._images: list[bytes] | None = None
 
-        self._camera_thread = Thread(target=self._run_camera, daemon=True)
+        self._camera_thread = Thread(target=self.run_camera, daemon=True)
         self._camera_thread.start()
 
         self._logger.info("Starting frame consumer thread")
@@ -354,7 +354,7 @@ class DailyTransportService(EventHandler):
     
     def run_camera(self):
         try:
-            while not self.stop_threads.is_set():
+            while not self._stop_threads.is_set():
                 if self._image:
                     self.camera.write_frame(self._image)
                 if self._images:
