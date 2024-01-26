@@ -12,9 +12,6 @@ from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
-        logger = logging.getLogger("dailyai")
-        logger.setLevel(logging.DEBUG)
-
         meeting_duration_minutes = 1
         transport = DailyTransportService(
             room_url,

@@ -404,14 +404,10 @@ class DailyTransportService(EventHandler):
 
                 self.threadsafe_send_queue.task_done()
             except Empty:
-                try:
-                    if len(b):
-                        self.mic.write_frames(bytes(b))
-                except Exception as e:
-                    self._logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
-                    raise e
+                if len(b):
+                    self.mic.write_frames(bytes(b))
 
                 b = bytearray()
             except Exception as e:
-                print("!!!!", e)
+                self._logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
                 raise e
