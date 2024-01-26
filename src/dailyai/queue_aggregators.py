@@ -1,6 +1,6 @@
 import asyncio
 
-from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame
+from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame, TranscriptionQueueFrame
 from dailyai.services.ai_services import AIService
 
 from typing import AsyncGenerator, List
@@ -32,16 +32,24 @@ class LLMContextAggregator(AIService):
             messages: list[dict],
             role: str,
             bot_participant_id=None,
-            complete_sentences=True):
+            complete_sentences=True,
+            pass_through=False):
         self.messages = messages
         self.bot_participant_id = bot_participant_id
         self.role = role
         self.sentence = ""
         self.complete_sentences = complete_sentences
+        self.pass_through = pass_through
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         # TODO: split up transcription by participant
         if isinstance(frame, TextQueueFrame):
+
+            # Ignore transcription frames from the bot
+            if isinstance(frame, TranscriptionQueueFrame):
+                if frame.participantId == self.bot_participant_id:
+                    return
+
             if self.complete_sentences:
                 self.sentence += frame.text
                 if self.sentence.endswith((".", "?", "!")):
@@ -52,4 +60,23 @@ class LLMContextAggregator(AIService):
                 self.messages.append({"role": self.role, "content": frame.text})
                 yield LLMMessagesQueueFrame(self.messages)
 
-        yield frame
+            if self.pass_through:
+                yield frame
+        else:
+            yield frame
+
+class LLMUserContextAggregator(LLMContextAggregator):
+    def __init__(self,
+            messages: list[dict],
+            bot_participant_id=None,
+            complete_sentences=True):
+        super().__init__(messages, "user", bot_participant_id, complete_sentences, pass_through=False)
+
+
+class LLMAssistantContextAggregator(LLMContextAggregator):
+    def __init__(
+        self, messages: list[dict], bot_participant_id=None, complete_sentences=True
+    ):
+        super().__init__(
+            messages, "assistan", bot_participant_id, complete_sentences, pass_through=True
+        )
