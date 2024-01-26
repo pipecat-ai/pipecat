@@ -128,8 +128,8 @@ class DailyTransportService(EventHandler):
         if event_name not in [method[0] for method in methods]:
             raise Exception(f"Event handler {event_name} not found")
 
-        if event_name not in self.event_handlers:
-            self.event_handlers[event_name] = [
+        if event_name not in self._event_handlers:
+            self._event_handlers[event_name] = [
                 getattr(
                     self, event_name), types.MethodType(
                     handler, self)]
@@ -236,7 +236,7 @@ class DailyTransportService(EventHandler):
                     asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self._loop)
 
     def interrupt(self):
-        self.is_interrupted.set()
+        self._is_interrupted.set()
 
     async def get_receive_frames(self) -> AsyncGenerator[QueueFrame, None]:
         while True:
@@ -296,7 +296,7 @@ class DailyTransportService(EventHandler):
     def stop(self):
         self._stop_threads.set()
 
-    def _on_first_other_participant_joined(self):
+    def on_first_other_participant_joined(self):
         pass
 
     def call_joined(self, join_data, client_error):
@@ -314,7 +314,7 @@ class DailyTransportService(EventHandler):
     def on_participant_joined(self, participant):
         if not self._other_participant_has_joined and participant["id"] != self.my_participant_id:
             self._other_participant_has_joined = True
-            self._on_first_other_participant_joined()
+            self.on_first_other_participant_joined()
 
     def on_participant_left(self, participant, reason):
         if len(self.client.participants()) < self.min_others_count + 1:
@@ -425,7 +425,7 @@ class DailyTransportService(EventHandler):
                     if len(b):
                         self.mic.write_frames(bytes(b))
                 except Exception as e:
-                    self.logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
+                    self._logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
                     raise e
 
                 b = bytearray()
