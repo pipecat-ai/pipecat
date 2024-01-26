@@ -2,7 +2,7 @@ import asyncio
 import copy
 import functools
 from typing import AsyncGenerator, Awaitable, Callable
-from dailyai.queue_aggregators import LLMContextAggregator
+from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
 from dailyai.queue_frame import EndStreamQueueFrame, QueueFrame, TranscriptionQueueFrame
 
 
@@ -17,8 +17,8 @@ class InterruptibleConversationWrapper:
         interrupt: Callable[[], None],
         my_participant_id: str | None,
         llm_messages: list[dict[str, str]],
-        llm_context_aggregator_in=LLMContextAggregator,
-        llm_context_aggregator_out=LLMContextAggregator,
+        llm_context_aggregator_in=LLMUserContextAggregator,
+        llm_context_aggregator_out=LLMAssistantContextAggregator,
         delay_before_speech_seconds: float = 1.0,
     ):
         self._frame_generator: Callable[[], AsyncGenerator[QueueFrame, None]] = frame_generator
@@ -43,10 +43,10 @@ class InterruptibleConversationWrapper:
     async def speak_after_delay(self, user_speech, messages):
         await asyncio.sleep(self._delay_before_speech_seconds)
         tma_in = self._llm_context_aggregator_in(
-            messages, "user", self._my_participant_id, False
+            messages, self._my_participant_id, complete_sentences=False
         )
         tma_out = self._llm_context_aggregator_out(
-            messages, "assistant", self._my_participant_id
+            messages, self._my_participant_id
         )
 
         await self._runner(user_speech, tma_in, tma_out)

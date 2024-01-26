@@ -1,6 +1,6 @@
 import asyncio
 
-from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame
+from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame, TranscriptionQueueFrame
 from dailyai.services.ai_services import AIService
 
 from typing import AsyncGenerator, List
@@ -32,24 +32,55 @@ class LLMContextAggregator(AIService):
             messages: list[dict],
             role: str,
             bot_participant_id=None,
-            complete_sentences=True):
+            complete_sentences=True,
+            pass_through=True):
         self.messages = messages
         self.bot_participant_id = bot_participant_id
         self.role = role
         self.sentence = ""
         self.complete_sentences = complete_sentences
+        self.pass_through = pass_through
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        # TODO: split up transcription by participant
-        if isinstance(frame, TextQueueFrame):
-            if self.complete_sentences:
-                self.sentence += frame.text
-                if self.sentence.endswith((".", "?", "!")):
-                    self.messages.append({"role": self.role, "content": self.sentence})
-                    self.sentence = ""
-                    yield LLMMessagesQueueFrame(self.messages)
-            else:
-                self.messages.append({"role": self.role, "content": frame.text})
-                yield LLMMessagesQueueFrame(self.messages)
+        # We don't do anything with non-text frames, pass it along to next in the pipeline.
+        if not isinstance(frame, TextQueueFrame):
+            yield frame
+            return
 
-        yield frame
+        # Ignore transcription frames from the bot
+        if isinstance(frame, TranscriptionQueueFrame):
+            if frame.participantId == self.bot_participant_id:
+                return
+
+        # The common case for "pass through" is receiving frames from the LLM that we'll
+        # use to update the "assistant" LLM messages, but also passing the text frames
+        # along to a TTS service to be spoken to the user.
+        if self.pass_through:
+            yield frame
+
+        # TODO: split up transcription by participant
+        if self.complete_sentences:
+            self.sentence += frame.text # type: ignore -- the linter thinks this isn't a TextQueueFrame, even though we check it above
+            if self.sentence.endswith((".", "?", "!")):
+                self.messages.append({"role": self.role, "content": self.sentence})
+                self.sentence = ""
+                yield LLMMessagesQueueFrame(self.messages)
+        else:
+            self.messages.append({"role": self.role, "content": frame.text})  # type: ignore -- the linter thinks this isn't a TextQueueFrame, even though we check it above
+            yield LLMMessagesQueueFrame(self.messages)
+
+class LLMUserContextAggregator(LLMContextAggregator):
+    def __init__(self,
+            messages: list[dict],
+            bot_participant_id=None,
+            complete_sentences=True):
+        super().__init__(messages, "user", bot_participant_id, complete_sentences, pass_through=False)
+
+
+class LLMAssistantContextAggregator(LLMContextAggregator):
+    def __init__(
+        self, messages: list[dict], bot_participant_id=None, complete_sentences=True
+    ):
+        super().__init__(
+            messages, "assistan", bot_participant_id, complete_sentences, pass_through=True
+        )
