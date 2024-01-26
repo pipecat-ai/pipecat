@@ -1,8 +1,11 @@
 import asyncio
+import io
 import logging
+import wave
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
+    ControlQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
     LLMMessagesQueueFrame,
@@ -11,7 +14,7 @@ from dailyai.queue_frame import (
 )
 
 from abc import abstractmethod
-from typing import AsyncGenerator, AsyncIterable, Iterable
+from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable
 from dataclasses import dataclass
 
 
@@ -62,16 +65,16 @@ class AIService:
             raise e
 
     @abstractmethod
-    async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        # This is a trick for the interpreter (and linter) to know that this is a generator.
-        if False:
-            yield QueueFrame()
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        if isinstance(frame, ControlQueueFrame):
+            yield frame
 
     @abstractmethod
     async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
         # This is a trick for the interpreter (and linter) to know that this is a generator.
         if False:
             yield QueueFrame()
+
 
 class LLMService(AIService):
     @abstractmethod
@@ -140,15 +143,48 @@ class ImageGenService(AIService):
 
     # Renders the image. Returns an Image object.
     @abstractmethod
-    async def run_image_gen(self, sentence:str) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence: str) -> tuple[str, bytes]:
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if not isinstance(frame, TextQueueFrame):
+            yield frame
             return
 
         (url, image_data) = await self.run_image_gen(frame.text)
         yield ImageQueueFrame(url, image_data)
+
+
+class STTService(AIService):
+    """STTService is a base class for speech-to-text services."""
+
+    _frame_rate: int
+
+    def __init__(self, frame_rate: int = 16000, **kwargs):
+        super().__init__(**kwargs)
+        self._frame_rate = frame_rate
+
+    @abstractmethod
+    async def run_stt(self, audio: BinaryIO) -> str:
+        """Returns transcript as a string"""
+        pass
+
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        """Processes a frame of audio data, either buffering or transcribing it."""
+        if not isinstance(frame, AudioQueueFrame):
+            return
+
+        data = frame.data
+        content = io.BufferedRandom(io.BytesIO())
+        ww = wave.open(self._content, "wb")
+        ww.setnchannels(1)
+        ww.setsampwidth(2)
+        ww.setframerate(self._frame_rate)
+        ww.writeframesraw(data)
+        ww.close()
+        content.seek(0)
+        text = await self.run_stt(content)
+        yield TextQueueFrame(text)
 
 
 @dataclass
@@ -156,3 +192,4 @@ class AIServiceConfig:
     tts: TTSService
     image: ImageGenService
     llm: LLMService
+    stt: STTService

@@ -11,7 +11,8 @@ from dailyai.queue_frame import QueueFrame, FrameType
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
-async def main(room_url:str, token):
+
+async def main(room_url: str, token):
     global transport
     global llm
     global tts
@@ -32,7 +33,6 @@ async def main(room_url:str, token):
     tts = AzureTTSService()
     img = FalImageGenService()
 
-
     async def handle_transcriptions():
         print("handle_transcriptions got called")
 
@@ -41,7 +41,7 @@ async def main(room_url:str, token):
             print(f"transcription message: {message}")
             if message["session_id"] == transport.my_participant_id:
                 continue
-            finder =  message["text"].find("start over")
+            finder = message["text"].find("start over")
             print(f"finder: {finder}")
             if finder >= 0:
                 async for audio in tts.run_tts(f"Resetting."):
@@ -69,7 +69,8 @@ async def main(room_url:str, token):
         if participant["info"]["isLocal"]:
             return
         async for audio in tts.run_tts("Describe an image, and I'll create it."):
-            audio_generator = tts.run_tts(f"Hello, {participant['info']['userName']}! Describe an image and I'll create it. To start over, just say 'start over'.")
+            audio_generator = tts.run_tts(
+                f"Hello, {participant['info']['userName']}! Describe an image and I'll create it. To start over, just say 'start over'.")
             async for audio in audio_generator:
                 transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
 

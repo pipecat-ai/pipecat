@@ -15,11 +15,12 @@ from dailyai.services.ai_services import AIServiceConfig
 from dailyai.services.azure_ai_services import AzureImageGenService, AzureTTSService, AzureLLMService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
 
+
 def add_bot_to_room(room_url, token, expiration) -> None:
 
     # A simple prompt for a simple sample.
     message_handler = MessageHandler(
-    """
+        """
         You are a sample bot in a WebRTC session. You'll receive input as transcriptions of user's
         speech, and your responses will be converted to audio via a TTS service.
         Answer user's questions and be friendly, and if you can, give some ideas about how someone
@@ -61,6 +62,7 @@ def add_bot_to_room(room_url, token, expiration) -> None:
 
     services.tts.close()
     services.llm.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
