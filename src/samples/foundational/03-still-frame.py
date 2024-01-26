@@ -1,6 +1,8 @@
 import argparse
 import asyncio
 
+import aiohttp
+
 from dailyai.queue_frame import TextQueueFrame
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.open_ai_services import OpenAIImageGenService
@@ -10,29 +12,30 @@ participant_joined = False
 
 
 async def main(room_url):
-    meeting_duration_minutes = 1
-    transport = DailyTransportService(
-        room_url,
-        None,
-        "Show a still frame image",
-        meeting_duration_minutes,
-    )
-    transport.mic_enabled = False
-    transport.camera_enabled = True
-    transport.camera_width = 1024
-    transport.camera_height = 1024
+    async with aiohttp.ClientSession() as session:
+        meeting_duration_minutes = 1
+        transport = DailyTransportService(
+            room_url,
+            None,
+            "Show a still frame image",
+            meeting_duration_minutes,
+        )
+        transport.mic_enabled = False
+        transport.camera_enabled = True
+        transport.camera_width = 1024
+        transport.camera_height = 1024
 
-    imagegen = OpenAIImageGenService(image_size="1024x1024")
-    image_task = asyncio.create_task(
-        imagegen.run_to_queue(
-            transport.send_queue, [
-                TextQueueFrame("a cat in the style of picasso")]))
+        imagegen = OpenAIImageGenService(image_size="1024x1024", aiohttp_session=session)
+        image_task = asyncio.create_task(
+            imagegen.run_to_queue(
+                transport.send_queue, [
+                    TextQueueFrame("a cat in the style of picasso")]))
 
-    @transport.event_handler("on_participant_joined")
-    async def on_participant_joined(transport, participant):
-        await image_task
+        @transport.event_handler("on_participant_joined")
+        async def on_participant_joined(transport, participant):
+            await image_task
 
-    await transport.run()
+        await transport.run()
 
 
 if __name__ == "__main__":

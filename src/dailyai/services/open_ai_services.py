@@ -51,18 +51,26 @@ class OpenAILLMService(LLMService):
 
 
 class OpenAIImageGenService(ImageGenService):
-    def __init__(self, image_size: str, api_key=None, model=None):
+
+    def __init__(
+        self,
+        image_size: str,
+        aiohttp_session: aiohttp.ClientSession,
+        api_key=None,
+        model=None,
+    ):
         super().__init__(image_size=image_size)
         api_key = api_key or os.getenv("OPEN_AI_KEY")
-        self.model = model or os.getenv("OPEN_AI_IMAGE_MODEL") or "dall-e-3"
-        self.client = AsyncOpenAI(api_key=api_key)
+        self._model = model or os.getenv("OPEN_AI_IMAGE_MODEL") or "dall-e-3"
+        self._client = AsyncOpenAI(api_key=api_key)
+        self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         self.logger.info("Generating OpenAI image", sentence)
 
-        image = await self.client.images.generate(
+        image = await self._client.images.generate(
             prompt=sentence,
-            model=self.model,
+            model=self._model,
             n=1,
             size=self.image_size
         )
@@ -71,10 +79,7 @@ class OpenAIImageGenService(ImageGenService):
             raise Exception("No image provided in response", image)
 
         # Load the image from the url
-        async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as response:
-                image_stream = io.BytesIO(await response.content.read())
-                image = Image.open(image_stream)
-                return (image_url, image.tobytes())
-
-        return (image_url, dalle_im.tobytes())
+        async with self._aiohttp_session.get(image_url) as response:
+            image_stream = io.BytesIO(await response.content.read())
+            image = Image.open(image_stream)
+            return (image_url, image.tobytes())

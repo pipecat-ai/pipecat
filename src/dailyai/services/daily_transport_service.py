@@ -15,7 +15,6 @@ from dailyai.queue_frame import (
     ImageQueueFrame,
     QueueFrame,
     StartStreamQueueFrame,
-    TextQueueFrame,
     TranscriptionQueueFrame,
 )
 
@@ -413,3 +412,6 @@ class DailyTransportService(EventHandler):
                     raise e
 
                 b = bytearray()
+            except Exception as e:
+                print("!!!!", e)
+                raise e
