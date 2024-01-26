@@ -5,7 +5,7 @@ import time
 
 from flask import Flask, jsonify, request, redirect
 from flask_cors import CORS
-from auth import get_meeting_token
+from samples.server.auth import get_meeting_token
 
 from dotenv import load_dotenv
 
@@ -86,16 +86,12 @@ def start_bot(bot_path, args=None):
         config['vad_timeout_sec'] = 1.5
 
     #return jsonify({"room_url": room_url, "token": meeting_token, "config": config}), 200
-    return redirect(room_url, code=302)
+    return redirect(room_url, code=301)
 
 
-@app.route("/spin-up-kitty", methods=["POST"])
+@app.route("/spin-up-kitty", methods=["GET", "POST"])
 def spin_up_kitty():
-    return start_bot("./src/samples/foundational/06a-golden-kitty.py")
-
-@app.route("/spin-up-kitty", methods=["GET"])
-def quick_start_kitty():
-    return start_bot("./src/samples/foundational/06a-golden-kitty.py")
+    return start_bot("./src/samples/foundational/10-wake-word.py")
 
 
 @app.route("/healthz")

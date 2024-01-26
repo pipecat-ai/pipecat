@@ -1,3 +1,4 @@
+import aiohttp
 import argparse
 import asyncio
 import os
@@ -95,59 +96,60 @@ class ImageSyncAggregator(AIService):
         yield quiet_frame
 
 async def main(room_url:str, token):
-    global transport
-    global llm
-    global tts
+    async with aiohttp.ClientSession() as session:
+        global transport
+        global llm
+        global tts
 
-    transport = DailyTransportService(
-        room_url,
-        token,
-        "Santa Cat",
-        180,
-    )
-    transport.mic_enabled = True
-    transport.mic_sample_rate = 16000
-    transport.camera_enabled = True
-    transport.camera_width = 720
-    transport.camera_height = 1280
-
-    llm = AzureLLMService()
-    tts = ElevenLabsTTSService()
-    isa = ImageSyncAggregator()
-
-    @transport.event_handler("on_first_other_participant_joined")
-    async def on_first_other_participant_joined(transport):
-        await tts.say("Hi, I'm listening!", transport.send_queue)
-
-    async def handle_transcriptions():
-        messages = [
-            {"role": "system", "content": "You are Santa Cat, a cat that lives in Santa's workshop at the North Pole. You should be clever, and a bit sarcastic. You should also tell jokes every once in a while.  Your responses should only be a few sentences long."},
-        ]
-
-        tma_in = LLMContextAggregator(
-            messages, "user", transport.my_participant_id
+        transport = DailyTransportService(
+            room_url,
+            token,
+            "Santa Cat",
+            180,
         )
-        tma_out = LLMContextAggregator(
-            messages, "assistant", transport.my_participant_id
-        )
-        tf = TranscriptFilter(transport.my_participant_id)
-        ncf = NameCheckFilter(["Santa Cat", "Santa"])
-        await tts.run_to_queue(
-            transport.send_queue,
-            isa.run(
-                tma_out.run(
-                    llm.run(
-                        tma_in.run(
-                            ncf.run(
-                                tf.run(
-                                    transport.get_receive_frames()
+        transport.mic_enabled = True
+        transport.mic_sample_rate = 16000
+        transport.camera_enabled = True
+        transport.camera_width = 720
+        transport.camera_height = 1280
+
+        llm = AzureLLMService()
+        tts = ElevenLabsTTSService(session)
+        isa = ImageSyncAggregator()
+
+        @transport.event_handler("on_first_other_participant_joined")
+        async def on_first_other_participant_joined(transport):
+            await tts.say("Hi, I'm listening!", transport.send_queue)
+
+        async def handle_transcriptions():
+            messages = [
+                {"role": "system", "content": "You are Santa Cat, a cat that lives in Santa's workshop at the North Pole. You should be clever, and a bit sarcastic. You should also tell jokes every once in a while.  Your responses should only be a few sentences long."},
+            ]
+
+            tma_in = LLMContextAggregator(
+                messages, "user", transport.my_participant_id
+            )
+            tma_out = LLMContextAggregator(
+                messages, "assistant", transport.my_participant_id
+            )
+            tf = TranscriptFilter(transport.my_participant_id)
+            ncf = NameCheckFilter(["Santa Cat", "Santa"])
+            await tts.run_to_queue(
+                transport.send_queue,
+                isa.run(
+                    tma_out.run(
+                        llm.run(
+                            tma_in.run(
+                                ncf.run(
+                                    tf.run(
+                                        transport.get_receive_frames()
+                                    )
                                 )
                             )
                         )
                     )
                 )
             )
-        )
 
     async def starting_image():
         await transport.send_queue.put(quiet_frame)
