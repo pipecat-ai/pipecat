@@ -71,8 +71,8 @@ class DailyTransportService(EventHandler):
         self.story_started = False
         self.mic_enabled = False
         self.mic_sample_rate = 16000
-        self.camera_width = 960
-        self.camera_height = 960
+        self.camera_width = 1024
+        self.camera_height = 768
         self.camera_enabled = False
         self.speaker_enabled = speaker_enabled
         self.speaker_sample_rate = speaker_sample_rate
