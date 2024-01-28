@@ -16,6 +16,7 @@ CORS(app)
 
 print(f"I loaded an environment, and my FAL_KEY_ID is {os.getenv('FAL_KEY_ID')}")
 
+
 def start_bot(bot_path, args=None):
     daily_api_key = os.getenv("DAILY_API_KEY")
     api_path = os.getenv("DAILY_API_PATH") or "https://api.daily.co/v1"
@@ -77,7 +78,7 @@ def start_bot(bot_path, args=None):
         if res.status_code == 200:
             break
     print(f"Took {attempts} attempts to join room {room_name}")
-    
+
     # Additional client config
     config = {}
     if os.getenv("CLIENT_VAD_TIMEOUT_SEC"):
@@ -85,7 +86,7 @@ def start_bot(bot_path, args=None):
     else:
         config['vad_timeout_sec'] = 1.5
 
-    #return jsonify({"room_url": room_url, "token": meeting_token, "config": config}), 200
+    # return jsonify({"room_url": room_url, "token": meeting_token, "config": config}), 200
     return redirect(room_url, code=301)
 
 

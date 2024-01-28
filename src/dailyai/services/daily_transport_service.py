@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import itertools
 import logging
 import sys
 import threading
@@ -8,7 +9,7 @@ import types
 
 from functools import partial
 from queue import Queue, Empty
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Iterable
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
@@ -62,7 +63,8 @@ class DailyTransportService(EventHandler):
         # This queue is used to marshal frames from the async send queue to the thread that emits audio & video.
         # We need this to maintain the asynchronous behavior of asyncio queues -- to give async functions
         # a chance to run while waiting for queue items -- but also to maintain thread safety and have a threaded
-        # handler to send frames, to ensure that sending isn't subject to pauses in the async thread.
+        # handler to send frames, to ensure that sending isn't subject to pauses
+        # in the async thread.
         self.threadsafe_send_queue = Queue()
 
         self._is_interrupted = Event()
@@ -168,10 +170,9 @@ class DailyTransportService(EventHandler):
             )
             Daily.select_speaker_device("speaker")
 
-        self._image: bytes | None = None
-        self._images: list[bytes] | None = None
+        self._images = None
 
-        self._camera_thread = Thread(target=self.run_camera, daemon=True)
+        self._camera_thread = Thread(target=self._run_camera, daemon=True)
         self._camera_thread.start()
 
         self._logger.info("Starting frame consumer thread")
@@ -343,24 +344,18 @@ class DailyTransportService(EventHandler):
     def on_transcription_started(self, status):
         pass
 
-    def set_image(self, image: bytes):
-        self._image: bytes | None = image
-        self._images: list[bytes] | None = None
-    
-    def set_images(self, images: list[bytes], start_frame=0):
-        self._images: list[bytes] | None = images
-        self._image = None
-        self._current_frame = start_frame
-    
-    def run_camera(self):
+    def _set_image(self, image: bytes):
+        self._images = itertools.cycle([image])
+
+    def _set_images(self, images: list[bytes], start_frame=0):
+        self._images = itertools.cycle(images)
+
+    def _run_camera(self):
         try:
             while not self._stop_threads.is_set():
-                if self._image:
-                    self.camera.write_frame(self._image)
                 if self._images:
-                    this_frame = self._images[self._current_frame]
+                    this_frame = next(self._images)
                     self.camera.write_frame(this_frame)
-                    self._current_frame = (self._current_frame + 1) % len(self._images)
 
                 time.sleep(1.0 / 8)  # 8 fps
         except Exception as e:
@@ -402,9 +397,9 @@ class DailyTransportService(EventHandler):
                                     self.mic.write_frames(bytes(b[:l]))
                                     b = b[l:]
                             elif isinstance(frame, ImageQueueFrame):
-                                self.set_image(frame.image)
+                                self._set_image(frame.image)
                             elif isinstance(frame, SpriteQueueFrame):
-                                self.set_images(frame.images)
+                                self._set_images(frame.images)
                         elif len(b):
                             self.mic.write_frames(bytes(b))
                             b = bytearray()

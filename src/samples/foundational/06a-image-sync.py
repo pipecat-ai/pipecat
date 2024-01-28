@@ -16,7 +16,7 @@ from dailyai.services.fal_ai_services import FalImageGenService
 
 
 class ImageSyncAggregator(AIService):
-    def __init__(self, speaking_path:str, waiting_path:str):
+    def __init__(self, speaking_path: str, waiting_path: str):
         self._speaking_image = Image.open(speaking_path)
         self._speaking_image_bytes = self._speaking_image.tobytes()
 
@@ -27,6 +27,7 @@ class ImageSyncAggregator(AIService):
         yield ImageQueueFrame(None, self._speaking_image_bytes)
         yield frame
         yield ImageQueueFrame(None, self._waiting_image_bytes)
+
 
 async def main(room_url: str, token):
     global transport

@@ -7,21 +7,22 @@ import requests
 import time
 import urllib.parse
 
-from dotenv import load_dotenv
 from PIL import Image
 
-load_dotenv()
-
 from dailyai.services.daily_transport_service import DailyTransportService
-from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
+from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.services.fal_ai_services import FalImageGenService
-from dailyai.services.open_ai_services import OpenAIImageGenService
 from dailyai.queue_aggregators import LLMContextAggregator
-from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame, ImageQueueFrame, SpriteQueueFrame
+from dailyai.queue_frame import (
+    QueueFrame,
+    TextQueueFrame,
+    ImageQueueFrame,
+    SpriteQueueFrame,
+    TranscriptionQueueFrame,
+)
 from dailyai.services.ai_services import AIService
 
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator
 
 sprites = {}
 image_files = [
@@ -53,23 +54,30 @@ talking = [random.choice(talking_list) for x in range(30)]
 talking_frame = SpriteQueueFrame(images=talking)
 
 # TODO: Support "thinking" as soon as we get a valid transcript, while LLM is processing
-thinking_list = [sprites['sc-think-1.png'], sprites['sc-think-2.png'], sprites['sc-think-3.png'], sprites['sc-think-4.png']]
+thinking_list = [
+    sprites['sc-think-1.png'],
+    sprites['sc-think-2.png'],
+    sprites['sc-think-3.png'],
+    sprites['sc-think-4.png']]
 thinking_frame = SpriteQueueFrame(images=thinking_list)
+
 
 class TranscriptFilter(AIService):
     def __init__(self, bot_participant_id=None):
         self.bot_participant_id = bot_participant_id
 
-    async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if frame.participantId != self.bot_participant_id:
-            yield frame
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        if isinstance(frame, TranscriptionQueueFrame):
+            if frame.participantId != self.bot_participant_id:
+                yield frame
+
 
 class NameCheckFilter(AIService):
     def __init__(self, names=None):
         self.names = names
         self.sentence = ""
 
-    async def process_frame(self, frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         content: str = ""
 
         # TODO: split up transcription by participant
@@ -86,6 +94,7 @@ class NameCheckFilter(AIService):
                 out = self.sentence
                 self.sentence = ""
 
+
 class ImageSyncAggregator(AIService):
     def __init__(self):
         pass
@@ -95,7 +104,8 @@ class ImageSyncAggregator(AIService):
         yield frame
         yield quiet_frame
 
-async def main(room_url:str, token):
+
+async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
         global transport
         global llm
@@ -153,12 +163,9 @@ async def main(room_url:str, token):
 
         async def starting_image():
             await transport.send_queue.put(quiet_frame)
-            
+
         transport.transcription_settings["extra"]["punctuate"] = True
         await asyncio.gather(transport.run(), handle_transcriptions(), starting_image())
-
-
-
 
 
 if __name__ == "__main__":
