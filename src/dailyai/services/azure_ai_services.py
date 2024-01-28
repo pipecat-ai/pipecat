@@ -101,7 +101,7 @@ class AzureImageGenServiceREST(ImageGenService):
     def __init__(
             self,
             image_size: str,
-            aiohttp_session:aiohttp.ClientSession,
+            aiohttp_session: aiohttp.ClientSession,
             api_key=None,
             azure_endpoint=None,
             api_version=None,
