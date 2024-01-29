@@ -1,16 +1,12 @@
 import aiohttp
 import argparse
 import asyncio
-import requests
-import time
-import urllib.parse
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
-from dailyai.services.open_ai_services import OpenAIImageGenService
-from dailyai.queue_frame import QueueFrame, AudioQueueFrame, ImageQueueFrame
+from dailyai.queue_frame import AudioQueueFrame, ImageQueueFrame
 
 async def main(room_url:str):
     async with aiohttp.ClientSession() as session:
@@ -39,7 +35,7 @@ async def main(room_url:str):
         topic = "Are pokemon edible?"
         affirmative = "A woman dressed as a cowboy, outside on a ranch"
         negative = "Pikachu in a business suit"
-        
+
         topic = "Is a hot dog a sandwich?"
         affirmative = "A woman conservatively dressed as a librarian in a library surrounded by books"
         negative = "A cat dressed in a hot dog costume"
@@ -52,26 +48,28 @@ async def main(room_url:str):
         bot2_messages = [
             {"role": "system", "content": f"You are {negative}. You're in a debate, and the topic is: '{topic}'. You're arguing the negative.  Debate this with the user, only responding with a few sentences. Don't ever agree with the user."},
         ]
-        
+
         async def get_bot1_statement():
             # Run the LLMs synchronously for the back-and-forth
             bot1_msg = await llm.run_llm(bot1_messages)
             print(f"bot1_msg: {bot1_msg}")
-            bot1_messages.append({"role": "assistant", "content": bot1_msg})
-            bot2_messages.append({"role": "user", "content": bot1_msg})
+            if bot1_msg:
+                bot1_messages.append({"role": "assistant", "content": bot1_msg})
+                bot2_messages.append({"role": "user", "content": bot1_msg})
 
             all_audio = bytearray()
             async for audio in tts1.run_tts(bot1_msg):
                 all_audio.extend(audio)
 
             return all_audio
-        
+
         async def get_bot2_statement():
             # Run the LLMs synchronously for the back-and-forth
             bot2_msg = await llm.run_llm(bot2_messages)
             print(f"bot2_msg: {bot2_msg}")
-            bot2_messages.append({"role": "assistant", "content": bot2_msg})
-            bot1_messages.append({"role": "user", "content": bot2_msg})
+            if bot2_msg:
+                bot2_messages.append({"role": "assistant", "content": bot2_msg})
+                bot1_messages.append({"role": "user", "content": bot2_msg})
 
             all_audio = bytearray()
             async for audio in tts2.run_tts(bot2_msg):

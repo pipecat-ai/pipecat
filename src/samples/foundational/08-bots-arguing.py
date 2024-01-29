@@ -1,14 +1,10 @@
 import aiohttp
 import argparse
 import asyncio
-import requests
-import time
-import urllib.parse
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.queue_frame import QueueFrame
 
 async def main(room_url:str):
     async with aiohttp.ClientSession() as session:
@@ -43,15 +39,17 @@ async def main(room_url:str):
                 # Run the LLMs synchronously for the back-and-forth
                 bot1_msg = await llm.run_llm(bot1_messages)
                 print(f"bot1_msg: {bot1_msg}")
-                bot1_messages.append({"role": "assistant", "content": bot1_msg})
-                bot2_messages.append({"role": "user", "content": bot1_msg})
+                if bot1_msg:
+                    bot1_messages.append({"role": "assistant", "content": bot1_msg})
+                    bot2_messages.append({"role": "user", "content": bot1_msg})
 
                 await tts1.say(bot1_msg, transport.send_queue)
 
                 bot2_msg = await llm.run_llm(bot2_messages)
                 print(f"bot2_msg: {bot2_msg}")
-                bot2_messages.append({"role": "assistant", "content": bot2_msg})
-                bot1_messages.append({"role": "user", "content": bot2_msg})
+                if bot2_msg:
+                    bot2_messages.append({"role": "assistant", "content": bot2_msg})
+                    bot1_messages.append({"role": "user", "content": bot2_msg})
 
                 await tts2.say(bot2_msg, transport.send_queue)
 

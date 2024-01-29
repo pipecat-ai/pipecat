@@ -34,6 +34,7 @@ class LLMContextAggregator(AIService):
             bot_participant_id=None,
             complete_sentences=True,
             pass_through=True):
+        super().__init__()
         self.messages = messages
         self.bot_participant_id = bot_participant_id
         self.role = role
@@ -82,5 +83,5 @@ class LLMAssistantContextAggregator(LLMContextAggregator):
         self, messages: list[dict], bot_participant_id=None, complete_sentences=True
     ):
         super().__init__(
-            messages, "assistan", bot_participant_id, complete_sentences, pass_through=True
+            messages, "assistant", bot_participant_id, complete_sentences, pass_through=True
         )

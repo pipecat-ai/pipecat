@@ -40,11 +40,8 @@ async def main(room_url: str):
             )
         )
 
-        @transport.event_handler("on_participant_joined")
-        async def on_joined(transport, participant):
-            if participant["id"] == transport.my_participant_id:
-                return
-
+        @transport.event_handler("on_first_other_participant_joined")
+        async def on_first_other_participant_joined(transport):
             await azure_tts.say("My friend the LLM is now going to tell a joke about llamas.", transport.send_queue)
 
             async def buffer_to_send_queue():

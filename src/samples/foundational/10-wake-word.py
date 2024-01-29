@@ -73,7 +73,7 @@ class TranscriptFilter(AIService):
 
 
 class NameCheckFilter(AIService):
-    def __init__(self, names=None):
+    def __init__(self, names:list[str]):
         self.names = names
         self.sentence = ""
 
