@@ -391,10 +391,10 @@ class DailyTransportService(EventHandler):
                                 all_audio_frames.extend(chunk)
 
                                 b.extend(chunk)
-                                l = len(b) - (len(b) % smallest_write_size)
-                                if l:
-                                    self.mic.write_frames(bytes(b[:l]))
-                                    b = b[l:]
+                                truncated_length: int = len(b) - (len(b) % smallest_write_size)
+                                if truncated_length:
+                                    self.mic.write_frames(bytes(b[:truncated_length]))
+                                    b = b[truncated_length:]
                             elif isinstance(frame, ImageQueueFrame):
                                 self._set_image(frame.image)
                             elif isinstance(frame, SpriteQueueFrame):
@@ -406,7 +406,8 @@ class DailyTransportService(EventHandler):
                         # if there are leftover audio bytes, write them now; failing to do so
                         # can cause static in the audio stream.
                         if len(b):
-                            self.mic.write_frames(bytes(b))
+                            truncated_length = len(b) - (len(b) % 160)
+                            self.mic.write_frames(bytes(b[:truncated_length]))
                             b = bytearray()
 
                         if isinstance(frame, StartStreamQueueFrame):
