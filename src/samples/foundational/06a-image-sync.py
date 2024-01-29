@@ -1,6 +1,8 @@
 import argparse
 import asyncio
+import os
 from typing import AsyncGenerator
+import aiohttp
 import requests
 import time
 import urllib.parse
@@ -30,74 +32,71 @@ class ImageSyncAggregator(AIService):
 
 
 async def main(room_url: str, token):
-    global transport
-    global llm
-    global tts
-
-    transport = DailyTransportService(
-        room_url,
-        token,
-        "Respond bot",
-        5,
-    )
-    transport.camera_enabled = True
-    transport.camera_width = 1024
-    transport.camera_height = 1024
-    transport.mic_enabled = True
-    transport.mic_sample_rate = 16000
-
-    llm = AzureLLMService()
-    tts = AzureTTSService()
-    img = FalImageGenService(image_size="1024x1024")
-
-    async def get_images():
-        get_speaking_task = asyncio.create_task(
-            img.run_image_gen("An image of a cat speaking")
+    async with aiohttp.ClientSession() as aiohttp_session:
+        transport = DailyTransportService(
+            room_url,
+            token,
+            "Respond bot",
+            5,
         )
-        get_waiting_task = asyncio.create_task(
-            img.run_image_gen("An image of a cat waiting")
-        )
+        transport.camera_enabled = True
+        transport.camera_width = 1024
+        transport.camera_height = 1024
+        transport.mic_enabled = True
+        transport.mic_sample_rate = 16000
 
-        (speaking_data, waiting_data) = await asyncio.gather(
-            get_speaking_task, get_waiting_task
-        )
+        llm = AzureLLMService()
+        tts = AzureTTSService()
+        img = FalImageGenService(image_size="1024x1024", aiohttp_session=aiohttp_session)
 
-        return speaking_data, waiting_data
+        async def get_images():
+            get_speaking_task = asyncio.create_task(
+                img.run_image_gen("An image of a cat speaking")
+            )
+            get_waiting_task = asyncio.create_task(
+                img.run_image_gen("An image of a cat waiting")
+            )
 
-    @transport.event_handler("on_first_other_participant_joined")
-    async def on_first_other_participant_joined(transport):
-        await tts.say("Hi, I'm listening!", transport.send_queue)
+            (speaking_data, waiting_data) = await asyncio.gather(
+                get_speaking_task, get_waiting_task
+            )
 
-    async def handle_transcriptions():
-        messages = [
-            {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
-        ]
+            return speaking_data, waiting_data
 
-        tma_in = LLMUserContextAggregator(
-            messages, transport.my_participant_id
-        )
-        tma_out = LLMAssistantContextAggregator(
-            messages, transport.my_participant_id
-        )
-        image_sync_aggregator = ImageSyncAggregator(
-            "/Users/moishe/src/daily-ai-sdk/src/samples/foundational/speaking.png",
-            "/Users/moishe/src/daily-ai-sdk/src/samples/foundational/waiting.png",
-        )
-        await tts.run_to_queue(
-            transport.send_queue,
-            image_sync_aggregator.run(
-                tma_out.run(
-                    llm.run(
-                        tma_in.run(
-                            transport.get_receive_frames()
+        @transport.event_handler("on_first_other_participant_joined")
+        async def on_first_other_participant_joined(transport):
+            await tts.say("Hi, I'm listening!", transport.send_queue)
+
+        async def handle_transcriptions():
+            messages = [
+                {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
+            ]
+
+            tma_in = LLMUserContextAggregator(
+                messages, transport.my_participant_id
+            )
+            tma_out = LLMAssistantContextAggregator(
+                messages, transport.my_participant_id
+            )
+            image_sync_aggregator = ImageSyncAggregator(
+                os.path.join(os.path.dirname(__file__), "images", "speaking.png"),
+                os.path.join(os.path.dirname(__file__), "images", "waiting.png"),
+            )
+            await tts.run_to_queue(
+                transport.send_queue,
+                image_sync_aggregator.run(
+                    tma_out.run(
+                        llm.run(
+                            tma_in.run(
+                                transport.get_receive_frames()
+                            )
                         )
                     )
                 )
             )
-        )
 
-    transport.transcription_settings["extra"]["punctuate"] = True
-    await asyncio.gather(transport.run(), handle_transcriptions())
+        transport.transcription_settings["extra"]["punctuate"] = True
+        await asyncio.gather(transport.run(), handle_transcriptions())
 
 
 if __name__ == "__main__":
