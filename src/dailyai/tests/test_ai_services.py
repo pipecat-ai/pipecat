@@ -1,4 +1,3 @@
-from re import A
 import unittest
 
 from typing import AsyncGenerator, Generator

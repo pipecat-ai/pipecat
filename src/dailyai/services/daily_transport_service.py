@@ -2,14 +2,13 @@ import asyncio
 import inspect
 import itertools
 import logging
-import sys
 import threading
 import time
 import types
 
 from functools import partial
 from queue import Queue, Empty
-from typing import AsyncGenerator, Iterable
+from typing import AsyncGenerator
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
