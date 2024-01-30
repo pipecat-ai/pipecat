@@ -305,6 +305,9 @@ class DailyTransportService(EventHandler):
             t = Thread(target=self._receive_audio, daemon=True)
             t.start()
 
+    def dialout(self, number):
+        self.client.start_dialout({"phoneNumber": number})
+        
     def on_error(self, error):
         self._logger.error(f"on_error: {error}")
 
