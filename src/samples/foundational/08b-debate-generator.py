@@ -36,9 +36,9 @@ async def main(room_url:str):
         affirmative = "A woman dressed as a cowboy, outside on a ranch"
         negative = "Pikachu in a business suit"
 
-        topic = "Is a hot dog a sandwich?"
-        affirmative = "A woman conservatively dressed as a librarian in a library surrounded by books"
-        negative = "A cat dressed in a hot dog costume"
+        # topic = "Is a hot dog a sandwich?"
+        # affirmative = "A woman conservatively dressed as a librarian in a library surrounded by books"
+        # negative = "A cat dressed in a hot dog costume"
 
 
 
