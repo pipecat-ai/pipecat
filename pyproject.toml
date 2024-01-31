@@ -7,18 +7,17 @@ name = "daily_ai"
 version = "0.0.1"
 description = "Orchestrator for AI bots with Daily"
 dependencies = [
-    "daily-python",
-    "python-dotenv",
-    "Pillow",
-    "typing-extensions",
-    "openai",
-    "google-cloud-texttospeech",
-    "azure-cognitiveservices-speech",
-    "pyht",
-    "opentelemetry-sdk",
     "aiohttp",
+    "azure-cognitiveservices-speech",
+    "daily-python",
     "fal",
-    "faster_whisper"
+    "faster_whisper",
+    "google-cloud-texttospeech",
+    "openai",
+    "Pillow",
+    "pyht",
+    "python-dotenv",
+    "typing-extensions"
 ]
 
 [tool.setuptools.packages.find]

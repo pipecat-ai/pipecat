@@ -15,11 +15,11 @@ async def main(room_url: str, token):
         room_url,
         token,
         "Respond bot",
-        5,
+        duration_minutes=5,
     )
-    transport.mic_enabled = True
-    transport.mic_sample_rate = 16000
-    transport.camera_enabled = False
+    transport._mic_enabled = True
+    transport._mic_sample_rate = 16000
+    transport._camera_enabled = False
 
     llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
     tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
@@ -30,11 +30,14 @@ async def main(room_url: str, token):
 
     async def handle_transcriptions():
         messages = [
-            {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
+            {
+                "role": "system",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
+            },
         ]
 
-        tma_in = LLMUserContextAggregator(messages, transport.my_participant_id)
-        tma_out = LLMAssistantContextAggregator(messages, transport.my_participant_id)
+        tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
+        tma_out = LLMAssistantContextAggregator(messages, transport._my_participant_id)
         await tts.run_to_queue(
             transport.send_queue,
             tma_out.run(

@@ -22,17 +22,17 @@ async def main(room_url):
             room_url,
             None,
             "Show a still frame image",
-            meeting_duration_minutes,
+            duration_minutes=meeting_duration_minutes,
         )
-        transport.mic_enabled = False
-        transport.camera_enabled = True
-        transport.camera_width = 1024
-        transport.camera_height = 1024
+        transport._mic_enabled = False
+        transport._camera_enabled = True
+        transport._camera_width = 1024
+        transport._camera_height = 1024
 
         imagegen = FalImageGenService(image_size="1024x1024", aiohttp_session=session, key_id=os.getenv("FAL_KEY_ID"), key_secret=os.getenv("FAL_KEY_SECRET"))
         # imagegen = OpenAIImageGenService(aiohttp_session=session, api_key=os.getenv("OPENAI_DALLE_API_KEY"), image_size="1024x1024")
         # imagegen = AzureImageGenServiceREST(image_size="1024x1024", aiohttp_session=session, api_key=os.getenv("AZURE_DALLE_API_KEY"), endpoint=os.getenv("AZURE_DALLE_ENDPOINT"), model=os.getenv("AZURE_DALLE_MODEL"))
-        
+
         image_task = asyncio.create_task(
             imagegen.run_to_queue(
                 transport.send_queue, [

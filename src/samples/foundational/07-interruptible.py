@@ -16,12 +16,12 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Respond bot",
-            5,
+            duration_minutes=5,
         )
-        transport.mic_enabled = True
-        transport.mic_sample_rate = 16000
-        transport.camera_enabled = False
-        transport.start_transcription = True
+        transport._mic_enabled = True
+        transport._mic_sample_rate = 16000
+        transport._camera_enabled = False
+        transport._start_transcription = True
 
         llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
@@ -51,7 +51,7 @@ async def main(room_url: str, token):
                 frame_generator=transport.get_receive_frames,
                 runner=run_response,
                 interrupt=transport.interrupt,
-                my_participant_id=transport.my_participant_id,
+                my_participant_id=transport._my_participant_id,
                 llm_messages=messages,
             )
             await conversation_wrapper.run_conversation()

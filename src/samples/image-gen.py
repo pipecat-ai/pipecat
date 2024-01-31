@@ -23,11 +23,11 @@ async def main(room_url: str, token):
         "Imagebot",
         1,
     )
-    transport.mic_enabled = True
-    transport.camera_enabled = True
-    transport.mic_sample_rate = 16000
-    transport.camera_width = 1024
-    transport.camera_height = 1024
+    transport._mic_enabled = True
+    transport._camera_enabled = True
+    transport._mic_sample_rate = 16000
+    transport._camera_width = 1024
+    transport._camera_height = 1024
 
     llm = AzureLLMService()
     tts = AzureTTSService()
@@ -39,7 +39,7 @@ async def main(room_url: str, token):
         sentence = ""
         async for message in transport.get_transcriptions():
             print(f"transcription message: {message}")
-            if message["session_id"] == transport.my_participant_id:
+            if message["session_id"] == transport._my_participant_id:
                 continue
             finder = message["text"].find("start over")
             print(f"finder: {finder}")
