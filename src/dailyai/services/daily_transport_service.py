@@ -307,7 +307,10 @@ class DailyTransportService(EventHandler):
 
     def dialout(self, number):
         self.client.start_dialout({"phoneNumber": number})
-        
+
+    def start_recording(self):
+        self.client.start_recording()
+
     def on_error(self, error):
         self._logger.error(f"on_error: {error}")
 

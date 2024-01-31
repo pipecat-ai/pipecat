@@ -98,19 +98,17 @@ async def main(room_url: str, token, phone):
         await out_sound.run_to_queue(
             transport.send_queue,
             tts.run(
-                fl.run(
-                    tma_out.run(
-                        llm.run(
-                            fl2.run(
-                                in_sound.run(
-                                    tma_in.run(
-                                        transport.get_receive_frames()
-                                    )
+                tma_out.run(
+                    llm.run(
+                        fl2.run(
+                            in_sound.run(
+                                tma_in.run(
+                                    transport.get_receive_frames()
                                 )
                             )
                         )
                     )
-                )
+                )   
             )
         )
 
@@ -122,6 +120,7 @@ async def main(room_url: str, token, phone):
     async def on_call_state_updated(transport, state):
         if (state == "joined"):
             if (phone):
+                transport.start_recording()
                 transport.dialout(phone)
 
 
