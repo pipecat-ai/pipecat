@@ -40,11 +40,11 @@ async def main(room_url: str, token):
             "Respond bot",
             5,
         )
-        transport.camera_enabled = True
-        transport.camera_width = 1024
-        transport.camera_height = 1024
-        transport.mic_enabled = True
-        transport.mic_sample_rate = 16000
+        transport._camera_enabled = True
+        transport._camera_width = 1024
+        transport._camera_height = 1024
+        transport._mic_enabled = True
+        transport._mic_sample_rate = 16000
 
         llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
@@ -74,10 +74,10 @@ async def main(room_url: str, token):
             ]
 
             tma_in = LLMUserContextAggregator(
-                messages, transport.my_participant_id
+                messages, transport._my_participant_id
             )
             tma_out = LLMAssistantContextAggregator(
-                messages, transport.my_participant_id
+                messages, transport._my_participant_id
             )
             image_sync_aggregator = ImageSyncAggregator(
                 os.path.join(os.path.dirname(__file__), "assets", "speaking.png"),

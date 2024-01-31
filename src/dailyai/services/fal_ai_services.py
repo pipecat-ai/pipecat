@@ -3,11 +3,13 @@ import aiohttp
 import asyncio
 import io
 import os
-import json
 from PIL import Image
 
+from dailyai.services.ai_services import ImageGenService
 
-from dailyai.services.ai_services import LLMService, TTSService, ImageGenService
+
+from dailyai.services.ai_services import ImageGenService
+# Fal expects FAL_KEY_ID and FAL_KEY_SECRET to be set in the env
 
 
 class FalImageGenService(ImageGenService):
@@ -44,5 +46,3 @@ class FalImageGenService(ImageGenService):
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
             return (image_url, image.tobytes())
-
-        # return (image_url, dalle_im.tobytes())

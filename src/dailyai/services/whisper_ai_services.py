@@ -46,7 +46,7 @@ class WhisperSTTService(LocalSTTService):
             compute_type=self._compute_type)
         self._model = model
 
-    async def run_stt(self, audio: BinaryIO = None) -> str:
+    async def run_stt(self, audio: BinaryIO) -> str:
         """Transcribes given audio using Whisper"""
         segments, _ = await asyncio.to_thread(self._model.transcribe, audio)
         res: str = ""

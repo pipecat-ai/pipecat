@@ -113,13 +113,13 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Santa Cat",
-            180,
+            duration_minutes=3
         )
-        transport.mic_enabled = True
-        transport.mic_sample_rate = 16000
-        transport.camera_enabled = True
-        transport.camera_width = 720
-        transport.camera_height = 1280
+        transport._mic_enabled = True
+        transport._mic_sample_rate = 16000
+        transport._camera_enabled = True
+        transport._camera_width = 720
+        transport._camera_height = 1280
 
         llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="jBpfuIE2acCO8z3wKNLl")
@@ -135,12 +135,12 @@ async def main(room_url: str, token):
             ]
 
             tma_in = LLMUserContextAggregator(
-                messages, transport.my_participant_id
+                messages, transport._my_participant_id
             )
             tma_out = LLMAssistantContextAggregator(
-                messages, transport.my_participant_id
+                messages, transport._my_participant_id
             )
-            tf = TranscriptFilter(transport.my_participant_id)
+            tf = TranscriptFilter(transport._my_participant_id)
             ncf = NameCheckFilter(["Santa Cat", "Santa"])
             await tts.run_to_queue(
                 transport.send_queue,

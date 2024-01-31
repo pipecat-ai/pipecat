@@ -70,9 +70,9 @@ async def main(room_url: str, token, phone):
             "Respond bot",
             300,
         )
-        transport.mic_enabled = True
-        transport.mic_sample_rate = 16000
-        transport.camera_enabled = False
+        transport._mic_enabled = True
+        transport._mic_sample_rate = 16000
+        transport._camera_enabled = False
 
         llm = AzureLLMService()
         tts = AzureTTSService()
@@ -87,10 +87,10 @@ async def main(room_url: str, token, phone):
             ]
 
             tma_in = LLMContextAggregator(
-                messages, "user", transport.my_participant_id
+                messages, "user", transport._my_participant_id
             )
             tma_out = LLMContextAggregator(
-                messages, "assistant", transport.my_participant_id
+                messages, "assistant", transport._my_participant_id
             )
             out_sound = OutboundSoundEffectWrapper()
             in_sound = InboundSoundEffectWrapper()
@@ -109,14 +109,14 @@ async def main(room_url: str, token, phone):
                                 )
                             )
                         )
-                    )   
+                    )
                 )
             )
 
         @transport.event_handler("on_participant_joined")
         async def pax_joined(transport, pax):
             print(f"PARTICIPANT JOINED: {pax}")
-            
+
         @transport.event_handler("on_call_state_updated")
         async def on_call_state_updated(transport, state):
             if (state == "joined"):
