@@ -39,7 +39,7 @@ script_dir = os.path.dirname(__file__)
 
 for file in image_files:
     # Build the full path to the image file
-    full_path = os.path.join(script_dir, "images", file)
+    full_path = os.path.join(script_dir, "assets", file)
     # Get the filename without the extension to use as the dictionary key
     filename = os.path.splitext(os.path.basename(full_path))[0]
     # Open the image and convert it to bytes

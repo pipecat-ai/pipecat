@@ -79,8 +79,8 @@ async def main(room_url: str, token):
                 messages, transport.my_participant_id
             )
             image_sync_aggregator = ImageSyncAggregator(
-                os.path.join(os.path.dirname(__file__), "images", "speaking.png"),
-                os.path.join(os.path.dirname(__file__), "images", "waiting.png"),
+                os.path.join(os.path.dirname(__file__), "assets", "speaking.png"),
+                os.path.join(os.path.dirname(__file__), "assets", "waiting.png"),
             )
             await tts.run_to_queue(
                 transport.send_queue,

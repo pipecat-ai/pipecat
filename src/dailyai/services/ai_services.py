@@ -9,6 +9,7 @@ from dailyai.queue_frame import (
     EndStreamQueueFrame,
     ImageQueueFrame,
     LLMMessagesQueueFrame,
+    LLMResponseEndQueueFrame,
     QueueFrame,
     TextQueueFrame,
 )
@@ -89,6 +90,9 @@ class LLMService(AIService):
         if isinstance(frame, LLMMessagesQueueFrame):
             async for text_chunk in self.run_llm_async(frame.messages):
                 yield TextQueueFrame(text_chunk)
+            yield LLMResponseEndQueueFrame()
+        else:
+            yield frame
 
 
 class TTSService(AIService):
@@ -186,6 +190,18 @@ class STTService(AIService):
         text = await self.run_stt(content)
         yield TextQueueFrame(text)
 
+class FrameLogger(AIService):
+    def __init__(self, prefix="Frame", **kwargs):
+        super().__init__(**kwargs)
+        self.prefix = prefix
+
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        if isinstance(frame, (AudioQueueFrame, ImageQueueFrame)):
+            self.logger.info(f"{self.prefix}: {type(frame)}")
+        else:
+            print(f"{self.prefix}: {frame}")
+
+        yield frame
 
 @dataclass
 class AIServiceConfig:
