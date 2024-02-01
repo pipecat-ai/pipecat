@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import logging
 import os
 import wave
 import requests
@@ -8,10 +9,14 @@ import urllib.parse
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.queue_aggregators import LLMContextAggregator
+from dailyai.queue_aggregators import LLMContextAggregator, LLMUserContextAggregator, LLMAssistantContextAggregator
 from dailyai.services.ai_services import AIService, FrameLogger
 from dailyai.queue_frame import QueueFrame, AudioQueueFrame, LLMResponseEndQueueFrame, LLMMessagesQueueFrame
 from typing import AsyncGenerator
+
+logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s") # or whatever
+logger = logging.getLogger("dailyai")
+logger.setLevel(logging.DEBUG)
 
 sounds = {}
 sound_files = [
@@ -85,11 +90,11 @@ async def main(room_url: str, token):
             {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
         ]
 
-        tma_in = LLMContextAggregator(
-            messages, "user", transport.my_participant_id
+        tma_in = LLMUserContextAggregator(
+            messages, transport.my_participant_id
         )
-        tma_out = LLMContextAggregator(
-            messages, "assistant", transport.my_participant_id
+        tma_out = LLMAssistantContextAggregator(
+            messages, transport.my_participant_id
         )
         out_sound = OutboundSoundEffectWrapper()
         in_sound = InboundSoundEffectWrapper()

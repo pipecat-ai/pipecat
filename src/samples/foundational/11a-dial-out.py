@@ -67,7 +67,7 @@ async def main(room_url: str, token, phone):
         room_url,
         token,
         "Respond bot",
-        5,
+        300,
     )
     transport.mic_enabled = True
     transport.mic_sample_rate = 16000
