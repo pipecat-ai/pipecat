@@ -1,11 +1,13 @@
 import argparse
 import asyncio
-
 import aiohttp
+import os
 
 from dailyai.queue_frame import TextQueueFrame
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
+
+from samples.foundational.support.runner import configure
 
 local_joined = False
 participant_joined = False
@@ -25,7 +27,7 @@ async def main(room_url):
         transport.camera_width = 1024
         transport.camera_height = 1024
 
-        imagegen = FalImageGenService(image_size="1024x1024", aiohttp_session=session)
+        imagegen = FalImageGenService(image_size="1024x1024", aiohttp_session=session, key_id=os.getenv("FAL_KEY_ID"), key_secret=os.getenv("FAL_KEY_SECRET"))
         image_task = asyncio.create_task(
             imagegen.run_to_queue(
                 transport.send_queue, [
@@ -39,11 +41,5 @@ async def main(room_url):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
-    parser.add_argument(
-        "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
-    )
-
-    args, unknown = parser.parse_known_args()
-
-    asyncio.run(main(args.url))
+    (url, token) = configure()
+    asyncio.run(main(url))

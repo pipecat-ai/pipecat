@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 
 import aiohttp
 
@@ -8,6 +9,7 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
+from samples.foundational.support.runner import configure
 
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
@@ -20,8 +22,8 @@ async def main(room_url):
         )
         transport.mic_enabled = True
 
-        tts = ElevenLabsTTSService(session, voice_id="29vD33N1CtxCmqQRPOHJ")
-        llm = AzureLLMService()
+        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
+        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
 
         messages = [{
             "role": "system",
@@ -43,10 +45,5 @@ async def main(room_url):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
-    parser.add_argument(
-        "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
-    )
-
-    args, unknown = parser.parse_known_args()
-    asyncio.run(main(args.url))
+    (url, token) = configure()
+    asyncio.run(main(url))
