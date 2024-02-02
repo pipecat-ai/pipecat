@@ -1,11 +1,10 @@
-import argparse
 import asyncio
-
 import aiohttp
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
+from samples.foundational.support.runner import configure
 
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
@@ -45,11 +44,5 @@ async def main(room_url):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
-    parser.add_argument(
-        "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
-    )
-
-    args, unknown = parser.parse_known_args()
-
-    asyncio.run(main(args.url))
+    (url, token) = configure()
+    asyncio.run(main(url))
