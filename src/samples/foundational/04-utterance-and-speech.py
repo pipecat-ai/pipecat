@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 import re
 
 import aiohttp
@@ -9,6 +10,7 @@ from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.queue_frame import EndStreamQueueFrame, LLMMessagesQueueFrame
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
+from samples.foundational.support.runner import configure
 
 async def main(room_url: str):
     async with aiohttp.ClientSession() as session:
@@ -22,9 +24,9 @@ async def main(room_url: str):
         transport.mic_sample_rate = 16000
         transport.camera_enabled = False
 
-        llm = AzureLLMService()
-        azure_tts = AzureTTSService()
-        elevenlabs_tts = ElevenLabsTTSService(session, voice_id="ErXwobaYiN019PkySvjV")
+        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
+        azure_tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
+        elevenlabs_tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
 
         messages = [{"role": "system", "content": "tell the user a joke about llamas"}]
 
@@ -60,11 +62,5 @@ async def main(room_url: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
-    parser.add_argument(
-        "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
-    )
-
-    args, unknown = parser.parse_known_args()
-
-    asyncio.run(main(args.url))
+    (url, token) = configure()
+    asyncio.run(main(url))

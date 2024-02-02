@@ -17,10 +17,10 @@ from azure.cognitiveservices.speech import SpeechSynthesizer, SpeechConfig, Resu
 
 
 class AzureTTSService(TTSService):
-    def __init__(self, *, speech_key, speech_region):
+    def __init__(self, *, api_key, region):
         super().__init__()
 
-        self.speech_config = SpeechConfig(subscription=speech_key, region=speech_region)
+        self.speech_config = SpeechConfig(subscription=api_key, region=region)
         self.speech_synthesizer = SpeechSynthesizer(
             speech_config=self.speech_config, audio_config=None)
 
@@ -90,12 +90,12 @@ class AzureImageGenServiceREST(ImageGenService):
             image_size: str,
             aiohttp_session: aiohttp.ClientSession,
             api_key,
-            azure_endpoint,
+            endpoint,
             model):
         super().__init__(image_size=image_size)
 
         self._api_key = api_key
-        self._azure_endpoint = azure_endpoint
+        self._azure_endpoint = endpoint
         self._api_version = api_version
         self._model = model
         self._aiohttp_session = aiohttp_session
