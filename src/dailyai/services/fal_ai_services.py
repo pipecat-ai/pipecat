@@ -11,9 +11,11 @@ from dailyai.services.ai_services import LLMService, TTSService, ImageGenService
 
 
 class FalImageGenService(ImageGenService):
-    def __init__(self, image_size, aiohttp_session: aiohttp.ClientSession):
+    def __init__(self, *, image_size, aiohttp_session: aiohttp.ClientSession):
         super().__init__(image_size)
         self._aiohttp_session = aiohttp_session
+        # TODO-CB: Can we actually use this?
+        self._image_size = image_size
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         def get_image_url(sentence, size):

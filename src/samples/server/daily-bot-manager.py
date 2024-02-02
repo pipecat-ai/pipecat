@@ -21,7 +21,7 @@ def start_bot(bot_path, args=None):
     daily_api_key = os.getenv("DAILY_API_KEY")
     api_path = os.getenv("DAILY_API_PATH") or "https://api.daily.co/v1"
 
-    timeout = int(os.getenv("ROOM_TIMEOUT") or os.getenv("BOT_MAX_DURATION") or 300)
+    timeout = int(os.getenv("DAILY_ROOM_TIMEOUT") or os.getenv("DAILY_BOT_MAX_DURATION") or 300)
     exp = time.time() + timeout
     res = requests.post(
         f"{api_path}/rooms",
@@ -82,7 +82,7 @@ def start_bot(bot_path, args=None):
     # Additional client config
     config = {}
     if os.getenv("CLIENT_VAD_TIMEOUT_SEC"):
-        config['vad_timeout_sec'] = float(os.getenv("CLIENT_VAD_TIMEOUT_SEC"))
+        config['vad_timeout_sec'] = float(os.getenv("DAILY_CLIENT_VAD_TIMEOUT_SEC"))
     else:
         config['vad_timeout_sec'] = 1.5
 

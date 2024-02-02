@@ -17,11 +17,8 @@ from azure.cognitiveservices.speech import SpeechSynthesizer, SpeechConfig, Resu
 
 
 class AzureTTSService(TTSService):
-    def __init__(self, speech_key=None, speech_region=None):
+    def __init__(self, *, speech_key, speech_region):
         super().__init__()
-
-        speech_key = speech_key or os.getenv("AZURE_SPEECH_SERVICE_KEY")
-        speech_region = speech_region or os.getenv("AZURE_SPEECH_SERVICE_REGION")
 
         self.speech_config = SpeechConfig(subscription=speech_key, region=speech_region)
         self.speech_synthesizer = SpeechSynthesizer(
@@ -51,25 +48,13 @@ class AzureTTSService(TTSService):
 
 
 class AzureLLMService(LLMService):
-    def __init__(self, api_key=None, azure_endpoint=None, api_version=None, model=None):
+    def __init__(self, *, api_key, endpoint, api_version="2023-12-01-preview", model):
         super().__init__()
-        api_key = api_key or os.getenv("AZURE_CHATGPT_KEY")
+        self._model: str = model
 
-        azure_endpoint = azure_endpoint or os.getenv("AZURE_CHATGPT_ENDPOINT")
-        if not azure_endpoint:
-            raise Exception(
-                "No azure endpoint specified for Azure LLM, please set AZURE_CHATGPT_ENDPOINT in the environment or pass it to the AzureLLMService constructor")
-
-        model: str | None = model or os.getenv("AZURE_CHATGPT_DEPLOYMENT_ID")
-        if not model:
-            raise Exception(
-                "No model specified for Azure LLM, please set AZURE_CHATGPT_DEPLOYMENT_ID in the environment or pass it to the AzureLLMService constructor")
-        self.model: str = model
-
-        api_version = api_version or "2023-12-01-preview"
-        self.client = AsyncAzureOpenAI(
+        self._client = AsyncAzureOpenAI(
             api_key=api_key,
-            azure_endpoint=azure_endpoint,
+            azure_endpoint=endpoint,
             api_version=api_version,
         )
 
@@ -77,7 +62,7 @@ class AzureLLMService(LLMService):
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
-        chunks = await self.client.chat.completions.create(model=self.model, stream=True, messages=messages)
+        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages)
         async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue
@@ -89,7 +74,7 @@ class AzureLLMService(LLMService):
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
 
-        response = await self.client.chat.completions.create(model=self.model, stream=False, messages=messages)
+        response = await self._client.chat.completions.create(model=self._model, stream=False, messages=messages)
         if response and len(response.choices) > 0:
             return response.choices[0].message.content
         else:
@@ -100,17 +85,19 @@ class AzureImageGenServiceREST(ImageGenService):
 
     def __init__(
             self,
+            *,
+            api_version="2023-06-01-preview",
             image_size: str,
             aiohttp_session: aiohttp.ClientSession,
-            api_key=None,
-            azure_endpoint=None,
-            api_version=None,
-            model=None):
+            api_key,
+            azure_endpoint,
+            model):
         super().__init__(image_size=image_size)
-        self._api_key = api_key or os.getenv("AZURE_DALLE_KEY")
-        self._azure_endpoint = azure_endpoint or os.getenv("AZURE_DALLE_ENDPOINT")
-        self._api_version = api_version or "2023-06-01-preview"
-        self._model = model or os.getenv("AZURE_DALLE_DEPLOYMENT_ID")
+
+        self._api_key = api_key
+        self._azure_endpoint = azure_endpoint
+        self._api_version = api_version
+        self._model = model
         self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
