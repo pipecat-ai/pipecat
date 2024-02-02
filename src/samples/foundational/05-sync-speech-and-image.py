@@ -4,7 +4,7 @@ import aiohttp
 import os
 
 from dailyai.queue_frame import AudioQueueFrame, ImageQueueFrame
-from dailyai.services.azure_ai_services import AzureLLMService, AzureImageGenServiceREST
+from dailyai.services.azure_ai_services import AzureLLMService, AzureImageGenServiceREST, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
@@ -28,9 +28,11 @@ async def main(room_url):
         transport.camera_height = 1024
 
         llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="ErXwobaYiN019PkySvjV")
+        # tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="ErXwobaYiN019PkySvjV")
+        tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
+
         # dalle = FalImageGenService(image_size="1024x1024", aiohttp_session=session, key_id=os.getenv("FAL_KEY_ID"), key_secret=os.getenv("FAL_KEY_SECRET"))
-        # dalle = OpenAIImageGenService(aiohttp_session=session, api_key=os.getenv("OPENAI_API_KEY"), image_size="1024x1024")
+        # dalle = OpenAIImageGenService(aiohttp_session=session, api_key=os.getenv("OPENAI_DALLE_API_KEY"), image_size="1024x1024")
         dalle = AzureImageGenServiceREST(image_size="1024x1024", aiohttp_session=session, api_key=os.getenv("AZURE_DALLE_API_KEY"), endpoint=os.getenv("AZURE_DALLE_ENDPOINT"), model=os.getenv("AZURE_DALLE_MODEL"))
         
         # Get a complete audio chunk from the given text. Splitting this into its own
@@ -57,10 +59,11 @@ async def main(room_url):
             to_speak = f"{month}: {image_description}"
             audio_task = asyncio.create_task(get_all_audio(to_speak))
             image_task = asyncio.create_task(dalle.run_image_gen(image_description))
+            print(f"about to gather tasks for {month}")
             (audio, image_data) = await asyncio.gather(
                 audio_task, image_task
             )
-
+            print(f"about to return from get_month_data for {month}")
             return {
                 "month": month,
                 "text": image_description,
@@ -90,6 +93,7 @@ async def main(room_url):
             # is we'll have as little delay as possible before the first month, and
             # likely no delay between months, but the months won't display in order.
             for month_data_task in asyncio.as_completed(month_tasks):
+                print(f"")
                 data = await month_data_task
                 if data:
                     await transport.send_queue.put(

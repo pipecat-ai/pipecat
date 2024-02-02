@@ -29,9 +29,8 @@ class OpenAILLMService(LLMService):
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
 
-        response = await self.get_response(messages, stream=True)
-
-        for chunk in response:
+        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages)
+        async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue
 
@@ -42,7 +41,7 @@ class OpenAILLMService(LLMService):
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
 
-        response = await self.get_response(messages, stream=False)
+        response = await self._client.chat.completions.create(model=self._model, stream=False, messages=messages)
         if response and len(response.choices) > 0:
             return response.choices[0].message.content
         else:
@@ -61,6 +60,7 @@ class OpenAIImageGenService(ImageGenService):
     ):
         super().__init__(image_size=image_size)
         self._model = model
+        print(f"api key: {api_key}")
         self._client = AsyncOpenAI(api_key=api_key)
         self._aiohttp_session = aiohttp_session
 
