@@ -28,12 +28,12 @@ async def main(room_url):
         transport.camera_height = 1024
 
         llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-        # tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="ErXwobaYiN019PkySvjV")
-        tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
+        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="ErXwobaYiN019PkySvjV")
+        # tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
 
-        # dalle = FalImageGenService(image_size="1024x1024", aiohttp_session=session, key_id=os.getenv("FAL_KEY_ID"), key_secret=os.getenv("FAL_KEY_SECRET"))
+        dalle = FalImageGenService(image_size="1024x1024", aiohttp_session=session, key_id=os.getenv("FAL_KEY_ID"), key_secret=os.getenv("FAL_KEY_SECRET"))
         # dalle = OpenAIImageGenService(aiohttp_session=session, api_key=os.getenv("OPENAI_DALLE_API_KEY"), image_size="1024x1024")
-        dalle = AzureImageGenServiceREST(image_size="1024x1024", aiohttp_session=session, api_key=os.getenv("AZURE_DALLE_API_KEY"), endpoint=os.getenv("AZURE_DALLE_ENDPOINT"), model=os.getenv("AZURE_DALLE_MODEL"))
+        # dalle = AzureImageGenServiceREST(image_size="1024x1024", aiohttp_session=session, api_key=os.getenv("AZURE_DALLE_API_KEY"), endpoint=os.getenv("AZURE_DALLE_ENDPOINT"), model=os.getenv("AZURE_DALLE_MODEL"))
         
         # Get a complete audio chunk from the given text. Splitting this into its own
         # coroutine lets us ensure proper ordering of the audio chunks on the send queue.
@@ -78,23 +78,32 @@ async def main(room_url):
             "March",
             "April",
             "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
+            "June"
         ]
-
+        """
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+        """
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
             # This will play the months in the order they're completed. The benefit
             # is we'll have as little delay as possible before the first month, and
             # likely no delay between months, but the months won't display in order.
             for month_data_task in asyncio.as_completed(month_tasks):
-                print(f"")
-                data = await month_data_task
+                print(f"month_data_task: {month_data_task}")
+                try:
+                    data = await month_data_task
+                except Exception:
+                    print("OMG EXCEPTION!!!!")
                 if data:
                     await transport.send_queue.put(
                         [

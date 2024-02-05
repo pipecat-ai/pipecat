@@ -109,12 +109,14 @@ class AzureImageGenServiceREST(ImageGenService):
             "size": self.image_size,
             "n": 1,
         }
-        print(f"ok, about to do an azure dall-e post")
         async with self._aiohttp_session.post(
             url, headers=headers, json=body
         ) as submission:
+            print(f"submission: {submission}")
+            # We never get past this line, because this header isn't
+            # defined on a 429 response, but something is eating our exceptions!
             operation_location = submission.headers['operation-location']
-
+            print(f"submission status: {submission.status}")
             status = ""
             attempts_left = 120
             json_response = None
@@ -128,15 +130,12 @@ class AzureImageGenServiceREST(ImageGenService):
                     operation_location, headers=headers
                 )
                 json_response = await response.json()
-                print(f"azure dalle json response: {json_response}")
                 status = json_response["status"]
 
             image_url = json_response["result"]["data"][0]["url"] if json_response else None
             if not image_url:
                 raise Exception("Image generation failed")
-            print(f"azure dalle image url: {image_url}")
             # Load the image from the url
-            print(f"azure dalle aiohttp: {self._aiohttp_session}")
             async with self._aiohttp_session.get(image_url) as response:
                 image_stream = io.BytesIO(await response.content.read())
                 image = Image.open(image_stream)
