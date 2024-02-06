@@ -1,13 +1,16 @@
 import argparse
 import asyncio
+import os
 
 import aiohttp
 
 from dailyai.queue_frame import LLMMessagesQueueFrame
 from dailyai.services.daily_transport_service import DailyTransportService
-from dailyai.services.azure_ai_services import AzureLLMService
+from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-
+from dailyai.services.deepgram_ai_services import DeepgramTTSService
+from dailyai.services.open_ai_services import OpenAILLMService
+from samples.foundational.support.runner import configure
 
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
@@ -20,9 +23,12 @@ async def main(room_url):
         )
         transport.mic_enabled = True
 
-        tts = ElevenLabsTTSService(session, voice_id="29vD33N1CtxCmqQRPOHJ")
-        llm = AzureLLMService()
-
+        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
+        # tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
+        # tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv("DEEPGRAM_API_KEY"), voice=os.getenv("DEEPGRAM_VOICE"))
+        
+        # llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_CHATGPT_API_KEY"))
         messages = [{
             "role": "system",
             "content": "You are an LLM in a WebRTC session, and this is a 'hello world' demo. Say hello to the world."
@@ -43,10 +49,5 @@ async def main(room_url):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
-    parser.add_argument(
-        "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
-    )
-
-    args, unknown = parser.parse_known_args()
-    asyncio.run(main(args.url))
+    (url, token) = configure()
+    asyncio.run(main(url))

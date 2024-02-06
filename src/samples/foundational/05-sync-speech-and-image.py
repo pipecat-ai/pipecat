@@ -1,14 +1,16 @@
 import argparse
 import asyncio
-
 import aiohttp
+import os
 
 from dailyai.queue_frame import AudioQueueFrame, ImageQueueFrame
-from dailyai.services.azure_ai_services import AzureLLMService
+from dailyai.services.azure_ai_services import AzureLLMService, AzureImageGenServiceREST, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
+from dailyai.services.open_ai_services import OpenAIImageGenService
 
+from samples.foundational.support.runner import configure
 
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
@@ -25,11 +27,14 @@ async def main(room_url):
         transport.camera_width = 1024
         transport.camera_height = 1024
 
-        llm = AzureLLMService()
-        dalle = FalImageGenService(aiohttp_session=session, image_size="1024x1024")
-        tts = ElevenLabsTTSService(aiohttp_session=session, voice_id="ErXwobaYiN019PkySvjV")
-        # dalle = OpenAIImageGenService(image_size="1024x1024")
+        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
+        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="ErXwobaYiN019PkySvjV")
+        # tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
 
+        dalle = FalImageGenService(image_size="1024x1024", aiohttp_session=session, key_id=os.getenv("FAL_KEY_ID"), key_secret=os.getenv("FAL_KEY_SECRET"))
+        # dalle = OpenAIImageGenService(aiohttp_session=session, api_key=os.getenv("OPENAI_DALLE_API_KEY"), image_size="1024x1024")
+        # dalle = AzureImageGenServiceREST(image_size="1024x1024", aiohttp_session=session, api_key=os.getenv("AZURE_DALLE_API_KEY"), endpoint=os.getenv("AZURE_DALLE_ENDPOINT"), model=os.getenv("AZURE_DALLE_MODEL"))
+        
         # Get a complete audio chunk from the given text. Splitting this into its own
         # coroutine lets us ensure proper ordering of the audio chunks on the send queue.
         async def get_all_audio(text):
@@ -54,10 +59,11 @@ async def main(room_url):
             to_speak = f"{month}: {image_description}"
             audio_task = asyncio.create_task(get_all_audio(to_speak))
             image_task = asyncio.create_task(dalle.run_image_gen(image_description))
+            print(f"about to gather tasks for {month}")
             (audio, image_data) = await asyncio.gather(
                 audio_task, image_task
             )
-
+            print(f"about to return from get_month_data for {month}")
             return {
                 "month": month,
                 "text": image_description,
@@ -72,22 +78,32 @@ async def main(room_url):
             "March",
             "April",
             "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
+            "June"
         ]
-
+        """
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+        """
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
             # This will play the months in the order they're completed. The benefit
             # is we'll have as little delay as possible before the first month, and
             # likely no delay between months, but the months won't display in order.
             for month_data_task in asyncio.as_completed(month_tasks):
-                data = await month_data_task
+                print(f"month_data_task: {month_data_task}")
+                try:
+                    data = await month_data_task
+                except Exception:
+                    print("OMG EXCEPTION!!!!")
                 if data:
                     await transport.send_queue.put(
                         [
@@ -104,11 +120,5 @@ async def main(room_url):
         await transport.run()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
-    parser.add_argument(
-        "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
-    )
-
-    args, unknown = parser.parse_known_args()
-
-    asyncio.run(main(args.url))
+    (url, token) = configure()
+    asyncio.run(main(url))
