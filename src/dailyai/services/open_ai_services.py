@@ -13,26 +13,24 @@ from dailyai.services.ai_services import AIService, TTSService, LLMService, Imag
 
 
 class OpenAILLMService(LLMService):
-    def __init__(self, api_key=None, model=None):
+    def __init__(self, *, api_key, model="gpt-4"):
         super().__init__()
-        api_key = api_key or os.getenv("OPEN_AI_KEY")
-        self.model = model or os.getenv("OPEN_AI_LLM_MODEL") or "gpt-4"
-        self.client = AsyncOpenAI(api_key=api_key)
+        self._model = model
+        self._client = AsyncOpenAI(api_key=api_key)
 
     async def get_response(self, messages, stream):
-        return await self.client.chat.completions.create(
+        return await self._client.chat.completions.create(
             stream=stream,
             messages=messages,
-            model=self.model
+            model=self._model
         )
 
     async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
 
-        response = await self.get_response(messages, stream=True)
-
-        for chunk in response:
+        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages)
+        async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue
 
@@ -43,7 +41,7 @@ class OpenAILLMService(LLMService):
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
 
-        response = await self.get_response(messages, stream=False)
+        response = await self._client.chat.completions.create(model=self._model, stream=False, messages=messages)
         if response and len(response.choices) > 0:
             return response.choices[0].message.content
         else:
@@ -54,14 +52,15 @@ class OpenAIImageGenService(ImageGenService):
 
     def __init__(
         self,
+        *,
         image_size: str,
         aiohttp_session: aiohttp.ClientSession,
-        api_key=None,
-        model=None,
+        api_key,
+        model="dall-e-3",
     ):
         super().__init__(image_size=image_size)
-        api_key = api_key or os.getenv("OPEN_AI_KEY")
-        self._model = model or os.getenv("OPEN_AI_IMAGE_MODEL") or "dall-e-3"
+        self._model = model
+        print(f"api key: {api_key}")
         self._client = AsyncOpenAI(api_key=api_key)
         self._aiohttp_session = aiohttp_session
 

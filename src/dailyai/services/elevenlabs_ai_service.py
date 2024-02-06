@@ -12,14 +12,15 @@ class ElevenLabsTTSService(TTSService):
 
     def __init__(
         self,
+        *,
         aiohttp_session: aiohttp.ClientSession,
-        api_key=None,
-        voice_id=None,
+        api_key,
+        voice_id,
     ):
         super().__init__()
 
-        self._api_key = api_key or os.getenv("ELEVENLABS_API_KEY")
-        self._voice_id = voice_id or os.getenv("ELEVENLABS_VOICE_ID")
+        self._api_key = api_key
+        self._voice_id = voice_id
         self._aiohttp_session = aiohttp_session
 
     async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:

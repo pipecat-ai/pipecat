@@ -2,18 +2,22 @@ import fal
 import aiohttp
 import asyncio
 import io
+import os
 import json
 from PIL import Image
 
 
 from dailyai.services.ai_services import LLMService, TTSService, ImageGenService
-# Fal expects FAL_KEY_ID and FAL_KEY_SECRET to be set in the env
 
 
 class FalImageGenService(ImageGenService):
-    def __init__(self, image_size, aiohttp_session: aiohttp.ClientSession):
+    def __init__(self, *, image_size, aiohttp_session: aiohttp.ClientSession, key_id=None, key_secret=None):
         super().__init__(image_size)
         self._aiohttp_session = aiohttp_session
+        if key_id:
+            os.environ["FAL_KEY_ID"] = key_id
+        if key_secret:
+            os.environ["FAL_KEY_SECRET"] = key_secret
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         def get_image_url(sentence, size):
