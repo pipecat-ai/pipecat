@@ -11,18 +11,13 @@ from dailyai.services.ai_services import LLMService, TTSService, ImageGenService
 
 
 class FalImageGenService(ImageGenService):
-    def __init__(self, *, image_size, aiohttp_session: aiohttp.ClientSession, key_id, key_secret):
+    def __init__(self, *, image_size, aiohttp_session: aiohttp.ClientSession, key_id=None, key_secret=None):
         super().__init__(image_size)
         self._aiohttp_session = aiohttp_session
-        self._key_id = key_id
-        self._key_secret = key_secret
-        # Fal expects FAL_KEY_ID and FAL_KEY_SECRET to be set in the env
-        if not os.getenv("FAL_KEY_ID"):
+        if key_id:
             os.environ["FAL_KEY_ID"] = key_id
-        if not os.getenv("FAL_KEY_SECRET"):
+        if key_secret:
             os.environ["FAL_KEY_SECRET"] = key_secret
-        # TODO-CB: Can we actually use this?
-        self._image_size = image_size
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         def get_image_url(sentence, size):
