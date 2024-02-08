@@ -1,22 +1,16 @@
 import aiohttp
 import asyncio
-import logging
 import os
 import wave
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.queue_aggregators import LLMContextAggregator, LLMUserContextAggregator, LLMAssistantContextAggregator
+from dailyai.queue_aggregators import LLMContextAggregator
 from dailyai.services.ai_services import AIService, FrameLogger
 from dailyai.queue_frame import QueueFrame, AudioQueueFrame, LLMResponseEndQueueFrame, LLMMessagesQueueFrame
 from typing import AsyncGenerator
 
-from samples.foundational.support.runner import configure
-
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s") # or whatever
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.DEBUG)
+from examples.foundational.support.runner import configure
 
 sounds = {}
 sound_files = [
@@ -63,21 +57,25 @@ class InboundSoundEffectWrapper(AIService):
             yield frame
 
 
-async def main(room_url: str, token):
+async def main(room_url: str, token, phone):
     async with aiohttp.ClientSession() as session:
+
+        global transport
+        global llm
+        global tts
+
         transport = DailyTransportService(
             room_url,
             token,
             "Respond bot",
-            duration_minutes=5,
-            mic_enabled=True,
-            mic_sample_rate=16000,
-            camera_enabled=False
+            300,
         )
+        transport._mic_enabled = True
+        transport._mic_sample_rate = 16000
+        transport._camera_enabled = False
 
-        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="ErXwobaYiN019PkySvjV")
-
+        llm = AzureLLMService()
+        tts = AzureTTSService()
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
@@ -88,11 +86,11 @@ async def main(room_url: str, token):
                 {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
             ]
 
-            tma_in = LLMUserContextAggregator(
-                messages, transport._my_participant_id
+            tma_in = LLMContextAggregator(
+                messages, "user", transport._my_participant_id
             )
-            tma_out = LLMAssistantContextAggregator(
-                messages, transport._my_participant_id
+            tma_out = LLMContextAggregator(
+                messages, "assistant", transport._my_participant_id
             )
             out_sound = OutboundSoundEffectWrapper()
             in_sound = InboundSoundEffectWrapper()
@@ -101,14 +99,12 @@ async def main(room_url: str, token):
             await out_sound.run_to_queue(
                 transport.send_queue,
                 tts.run(
-                    fl.run(
-                        tma_out.run(
-                            llm.run(
-                                fl2.run(
-                                    in_sound.run(
-                                        tma_in.run(
-                                            transport.get_receive_frames()
-                                        )
+                    tma_out.run(
+                        llm.run(
+                            fl2.run(
+                                in_sound.run(
+                                    tma_in.run(
+                                        transport.get_receive_frames()
                                     )
                                 )
                             )
@@ -117,8 +113,20 @@ async def main(room_url: str, token):
                 )
             )
 
+        @transport.event_handler("on_participant_joined")
+        async def pax_joined(transport, pax):
+            print(f"PARTICIPANT JOINED: {pax}")
+
+        @transport.event_handler("on_call_state_updated")
+        async def on_call_state_updated(transport, state):
+            if (state == "joined"):
+                if (phone):
+                    transport.start_recording()
+                    transport.dialout(phone)
+
 
         transport.transcription_settings["extra"]["punctuate"] = True
+
         await asyncio.gather(transport.run(), handle_transcriptions())
 
 

@@ -16,7 +16,7 @@ from dailyai.services.ai_services import AIService
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMUserContextAggregator
 from dailyai.services.fal_ai_services import FalImageGenService
 
-from samples.foundational.support.runner import configure
+from examples.foundational.support.runner import configure
 
 class ImageSyncAggregator(AIService):
     def __init__(self, speaking_path: str, waiting_path: str):

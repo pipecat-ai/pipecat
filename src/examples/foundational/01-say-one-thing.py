@@ -5,7 +5,7 @@ import os
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
-from samples.foundational.support.runner import configure
+from examples.foundational.support.runner import configure
 
 async def main(room_url):
     async with aiohttp.ClientSession() as session:

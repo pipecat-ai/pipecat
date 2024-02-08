@@ -8,7 +8,7 @@ from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.open_ai_services import OpenAIImageGenService
 from dailyai.services.azure_ai_services import AzureImageGenServiceREST
 
-from samples.foundational.support.runner import configure
+from examples.foundational.support.runner import configure
 
 local_joined = False
 participant_joined = False

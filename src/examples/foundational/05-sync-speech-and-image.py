@@ -9,7 +9,7 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.open_ai_services import OpenAIImageGenService
 
-from samples.foundational.support.runner import configure
+from examples.foundational.support.runner import configure
 
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
