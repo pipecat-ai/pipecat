@@ -113,7 +113,8 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Santa Cat",
-            duration_minutes=3
+            duration_minutes=3,
+            start_transcription=True
         )
         transport._mic_enabled = True
         transport._mic_sample_rate = 16000
