@@ -20,13 +20,13 @@ async def main(room_url:str):
             room_url,
             None,
             "Respond bot",
-            600,
+            duration_minutes=10
         )
-        transport.mic_enabled = True
-        transport.mic_sample_rate = 16000
-        transport.camera_enabled = True
-        transport.camera_width = 1024
-        transport.camera_height = 1024
+        transport._mic_enabled = True
+        transport._mic_sample_rate = 16000
+        transport._camera_enabled = True
+        transport._camera_width = 1024
+        transport._camera_height = 1024
 
         llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         tts1 = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
