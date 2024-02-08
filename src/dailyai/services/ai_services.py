@@ -89,8 +89,10 @@ class LLMService(AIService):
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        print(f"got a frame to process: {frame}")
         if isinstance(frame, LLMMessagesQueueFrame):
             async for text_chunk in self.run_llm_async(frame.messages):
+                print(f"got a text chunk: {text_chunk}")
                 yield TextQueueFrame(text_chunk)
             yield LLMResponseEndQueueFrame()
         else:

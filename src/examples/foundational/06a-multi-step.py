@@ -8,7 +8,7 @@ from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
-from examples.foundational.support.runner import configure
+from samples.foundational.support.runner import configure
 from dailyai.queue_frame import LLMMessagesQueueFrame, TranscriptionQueueFrame, QueueFrame, TextQueueFrame
 from dailyai.services.ai_services import FrameLogger, AIService
 
@@ -22,6 +22,37 @@ class TranscriptFilter(AIService):
         if isinstance(frame, TranscriptionQueueFrame):
             if frame.participantId != self.bot_participant_id:
                 yield frame
+
+class ChecklistProcessor(AIService):
+    def __init__(self, messages, llm, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._current_step = 0
+        self._messages = messages
+        self._llm = llm
+        self._id = "You are Valerie, an agent for a company called Valorant Health. Your job is to help users get access to health care. You're talking to Chad Bailey, a 40 year old male who needs to see a doctor."
+        self._steps = [
+            "Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday. After the user has confirmed their identity, respond only with ABC.",
+            "Now that the user has confirmed their identity, ask them to describe what kind of doctor they need to see. When the user has responded with at least one kind of doctor, respond only with ABC.",
+            "Next, you need to ask the user what kind of health insurance they have. Once the user has told you what insurance company they use, respond only with ABC.",
+            "Tell the user goodbye.",
+            ""
+        ]
+        messages.append({"role": "system", "content": f"{self._id} {self._steps[0]}"})
+
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        if isinstance(frame, TextQueueFrame):
+            print(f"got a text frame: {frame.text}")
+        if isinstance(frame, TextQueueFrame) and frame.text == "ABC":
+            self._current_step += 1
+            # yield TextQueueFrame(f"We should move on to Step {self._current_step}.")
+            self._messages.append({"role": "system", "content": self._steps[self._current_step]})
+            yield LLMMessagesQueueFrame(self._messages)
+            print(f"past llmmessagesqueueframe yield")
+            async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages)):
+                print(f"yielding frame from llm.process_frame: {frame}")
+                yield frame
+        else:
+            yield frame
 
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
@@ -45,17 +76,6 @@ async def main(room_url: str, token):
         tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="EXAVITQu4vr4xnSDxMaL")
 
         messages = [
-            {"role": "system", "content": """You are Valerie, an agent for a company called Valorant Health. Your job is to help users get access to health care. You're talking to Chad Bailey, a 40 year old male who needs to see a doctor.
-
-You need to do three things, in this order:
-
-1. Confirm the user's identity.
-2. Find out what kinds of doctors the user needs to see.
-3. Get the name of their insurance company.
-
-Start by introducing yourself and asking the user to verify their identity by providing their date of birth. Once their identity is confirmed, move on to step 2, then to step 3.
-
-Once you have collected all of that information, respond with a JSON object containing the answers."""}
         ]
         tma_in = LLMUserContextAggregator(messages, transport.my_participant_id)
         tma_out = LLMAssistantContextAggregator(messages, transport.my_participant_id)
@@ -65,15 +85,18 @@ Once you have collected all of that information, respond with a JSON object cont
             tf = TranscriptFilter(transport.my_participant_id)
             await tts.run_to_queue(
                 transport.send_queue,
-                tma_out.run(
-                    llm.run(
-                        tma_in.run(
-                            tf.run(
-                                transport.get_receive_frames()
-                            )
-                        )         
+                checklist.run(
+                    tma_out.run(
+                        llm.run(
+                            tma_in.run(
+                                tf.run(
+                                    transport.get_receive_frames()
+                                )
+                            )         
+                        )
                     )
                 )
+                
             )
         
         
