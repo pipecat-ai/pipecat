@@ -13,10 +13,11 @@ async def main(room_url: str):
         room_url,
         None,
         "Transcription bot",
+        start_transcription=True
     )
-    transport.mic_enabled = False
-    transport.camera_enabled = False
-    transport.speaker_enabled = True
+    transport._mic_enabled = False
+    transport._camera_enabled = False
+    transport._speaker_enabled = True
     stt = WhisperSTTService()
     transcription_output_queue = asyncio.Queue()
 

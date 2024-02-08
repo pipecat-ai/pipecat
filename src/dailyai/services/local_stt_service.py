@@ -1,9 +1,10 @@
 import array
 import io
 import math
+import time
 from typing import AsyncGenerator
 import wave
-from dailyai.queue_frame import AudioQueueFrame, QueueFrame, TextQueueFrame
+from dailyai.queue_frame import AudioQueueFrame, QueueFrame, TranscriptionQueueFrame
 from dailyai.services.ai_services import STTService
 
 
@@ -59,7 +60,7 @@ class LocalSTTService(STTService):
             self._content.seek(0)
             text = await self.run_stt(self._content)
             self._new_wave()
-            yield TextQueueFrame(text)
+            yield TranscriptionQueueFrame(text, '', str(time.time()))
         # If we get this far, this is a frame of silence
         self._current_silence_frames += 1
 

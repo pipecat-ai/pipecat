@@ -19,16 +19,16 @@ async def main(room_url):
             room_url,
             None,
             "Say One Thing From an LLM",
-            meeting_duration_minutes,
+            duration_minutes=meeting_duration_minutes,
         )
-        transport.mic_enabled = True
+        transport._mic_enabled = True
 
         tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
         # tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
         # tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv("DEEPGRAM_API_KEY"), voice=os.getenv("DEEPGRAM_VOICE"))
-        
-        # llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_CHATGPT_API_KEY"))
+
+        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
+        #llm = OpenAILLMService(api_key=os.getenv("OPENAI_CHATGPT_API_KEY"))
         messages = [{
             "role": "system",
             "content": "You are an LLM in a WebRTC session, and this is a 'hello world' demo. Say hello to the world."

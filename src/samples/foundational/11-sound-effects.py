@@ -74,11 +74,11 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Respond bot",
-            5,
+            duration_minutes=5,
         )
-        transport.mic_enabled = True
-        transport.mic_sample_rate = 16000
-        transport.camera_enabled = False
+        transport._mic_enabled = True
+        transport._mic_sample_rate = 16000
+        transport._camera_enabled = False
 
         llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="ErXwobaYiN019PkySvjV")
@@ -94,10 +94,10 @@ async def main(room_url: str, token):
             ]
 
             tma_in = LLMUserContextAggregator(
-                messages, transport.my_participant_id
+                messages, transport._my_participant_id
             )
             tma_out = LLMAssistantContextAggregator(
-                messages, transport.my_participant_id
+                messages, transport._my_participant_id
             )
             out_sound = OutboundSoundEffectWrapper()
             in_sound = InboundSoundEffectWrapper()
@@ -121,7 +121,7 @@ async def main(room_url: str, token):
                     )
                 )
             )
-            
+
 
         transport.transcription_settings["extra"]["punctuate"] = True
         await asyncio.gather(transport.run(), handle_transcriptions())

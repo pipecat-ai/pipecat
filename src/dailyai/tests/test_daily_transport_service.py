@@ -46,9 +46,14 @@ class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
     @patch("dailyai.services.daily_transport_service.Daily")
     async def test_run_with_camera_and_mic(self, daily_mock, callclient_mock):
         from dailyai.services.daily_transport_service import DailyTransportService
-        transport = DailyTransportService("https://mock.daily.co/mock", "token", "bot", 0.01)
-        transport.mic_enabled = True
-        transport.camera_enabled = True
+        transport = DailyTransportService(
+            "https://mock.daily.co/mock",
+            "token",
+            "bot",
+            mic_enabled=True,
+            camera_enabled=True,
+            duration_minutes=0.01,
+        )
 
         mic = MagicMock()
         camera = MagicMock()

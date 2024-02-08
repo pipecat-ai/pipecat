@@ -1,6 +1,7 @@
 import asyncio
 import io
 import logging
+import time
 import wave
 
 from dailyai.queue_frame import (
@@ -12,6 +13,7 @@ from dailyai.queue_frame import (
     LLMResponseEndQueueFrame,
     QueueFrame,
     TextQueueFrame,
+    TranscriptionQueueFrame,
 )
 
 from abc import abstractmethod
@@ -188,7 +190,8 @@ class STTService(AIService):
         ww.close()
         content.seek(0)
         text = await self.run_stt(content)
-        yield TextQueueFrame(text)
+        yield TranscriptionQueueFrame(text, '', str(time.time()))
+
 
 class FrameLogger(AIService):
     def __init__(self, prefix="Frame", **kwargs):
@@ -202,10 +205,3 @@ class FrameLogger(AIService):
             print(f"{self.prefix}: {frame}")
 
         yield frame
-
-@dataclass
-class AIServiceConfig:
-    tts: TTSService
-    image: ImageGenService
-    llm: LLMService
-    stt: STTService
