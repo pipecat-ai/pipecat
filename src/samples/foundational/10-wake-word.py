@@ -105,16 +105,17 @@ class ImageSyncAggregator(AIService):
 
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
-        global transport
-        global llm
-        global tts
-
         transport = DailyTransportService(
             room_url,
             token,
             "Santa Cat",
             duration_minutes=3,
-            start_transcription=True
+            start_transcription=True,
+            mic_enabled=True,
+            mic_sample_rate=16000,
+            camera_enabled=True,
+            camera_width=720,
+            camera_height=1280
         )
         transport._mic_enabled = True
         transport._mic_sample_rate = 16000

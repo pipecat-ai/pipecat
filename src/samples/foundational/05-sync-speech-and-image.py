@@ -1,4 +1,3 @@
-import argparse
 import asyncio
 import aiohttp
 import os
@@ -20,12 +19,12 @@ async def main(room_url):
             None,
             "Month Narration Bot",
             duration_minutes=meeting_duration_minutes,
+            mic_enabled=True,
+            camera_enabled=True,
+            mic_sample_rate=16000,
+            camera_width=1024,
+            camera_height=1024
         )
-        transport._mic_enabled = True
-        transport._camera_enabled = True
-        transport._mic_sample_rate = 16000
-        transport._camera_width = 1024
-        transport._camera_height = 1024
 
         llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="ErXwobaYiN019PkySvjV")
