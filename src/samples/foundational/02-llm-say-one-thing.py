@@ -1,4 +1,3 @@
-import argparse
 import asyncio
 import os
 
@@ -20,8 +19,8 @@ async def main(room_url):
             None,
             "Say One Thing From an LLM",
             duration_minutes=meeting_duration_minutes,
+            mic_enabled=True
         )
-        transport._mic_enabled = True
 
         tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
         # tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))

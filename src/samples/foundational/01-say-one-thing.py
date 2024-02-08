@@ -23,8 +23,8 @@ async def main(room_url):
             None,
             "Say One Thing",
             meeting_duration_minutes,
+            mic_enabled=True
         )
-        transport._mic_enabled = True
         tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
 
         # Register an event handler so we can play the audio when the participant joins.
