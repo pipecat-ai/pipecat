@@ -1,4 +1,3 @@
-import argparse
 import asyncio
 import aiohttp
 import os
@@ -23,11 +22,11 @@ async def main(room_url):
             None,
             "Show a still frame image",
             duration_minutes=meeting_duration_minutes,
+            mic_enabled=False,
+            camera_enabled=True,
+            camera_width=1024,
+            camera_height=1024
         )
-        transport._mic_enabled = False
-        transport._camera_enabled = True
-        transport._camera_width = 1024
-        transport._camera_height = 1024
 
         imagegen = FalImageGenService(image_size="1024x1024", aiohttp_session=session, key_id=os.getenv("FAL_KEY_ID"), key_secret=os.getenv("FAL_KEY_SECRET"))
         # imagegen = OpenAIImageGenService(aiohttp_session=session, api_key=os.getenv("OPENAI_DALLE_API_KEY"), image_size="1024x1024")

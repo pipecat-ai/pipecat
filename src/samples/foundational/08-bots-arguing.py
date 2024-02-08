@@ -12,21 +12,17 @@ from samples.foundational.support.runner import configure
 
 async def main(room_url:str):
     async with aiohttp.ClientSession() as session:
-        global transport
-        global llm
-        global tts
-
         transport = DailyTransportService(
             room_url,
             None,
             "Respond bot",
-            duration_minutes=10
+            duration_minutes=10,
+            mic_enabled=True,
+            mic_sample_rate=16000,
+            camera_enabled=True,
+            camera_width=1024,
+            camera_height=1024
         )
-        transport._mic_enabled = True
-        transport._mic_sample_rate = 16000
-        transport._camera_enabled = True
-        transport._camera_width = 1024
-        transport._camera_height = 1024
 
         llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         tts1 = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
