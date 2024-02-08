@@ -65,20 +65,15 @@ class InboundSoundEffectWrapper(AIService):
 
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
-
-        global transport
-        global llm
-        global tts
-
         transport = DailyTransportService(
             room_url,
             token,
             "Respond bot",
             duration_minutes=5,
+            mic_enabled=True,
+            mic_sample_rate=16000,
+            camera_enabled=False
         )
-        transport._mic_enabled = True
-        transport._mic_sample_rate = 16000
-        transport._camera_enabled = False
 
         llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="ErXwobaYiN019PkySvjV")

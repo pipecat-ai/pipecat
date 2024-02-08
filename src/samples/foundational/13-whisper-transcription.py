@@ -6,18 +6,16 @@ from dailyai.services.whisper_ai_services import WhisperSTTService
 from samples.foundational.support.runner import configure
 
 async def main(room_url: str):
-    global transport
-    global stt
-
     transport = DailyTransportService(
         room_url,
         None,
         "Transcription bot",
-        start_transcription=True
+        start_transcription=True,
+        mic_enabled=False,
+        camera_enabled=False,
+        speaker_enabled=True
     )
-    transport._mic_enabled = False
-    transport._camera_enabled = False
-    transport._speaker_enabled = True
+
     stt = WhisperSTTService()
     transcription_output_queue = asyncio.Queue()
 

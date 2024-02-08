@@ -7,10 +7,6 @@ from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextA
 from samples.foundational.support.runner import configure
 
 async def main(room_url: str, token):
-    global transport
-    global llm
-    global tts
-
     transport = DailyTransportService(
         room_url,
         token,
