@@ -4,7 +4,7 @@ import os
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
-from samples.foundational.support.runner import configure
+from examples.foundational.support.runner import configure
 
 async def main(room_url: str, token):
     transport = DailyTransportService(

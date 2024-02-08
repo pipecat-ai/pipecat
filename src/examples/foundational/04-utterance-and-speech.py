@@ -8,7 +8,7 @@ from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.queue_frame import EndStreamQueueFrame, LLMMessagesQueueFrame
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
-from samples.foundational.support.runner import configure
+from examples.foundational.support.runner import configure
 
 async def main(room_url: str):
     async with aiohttp.ClientSession() as session:

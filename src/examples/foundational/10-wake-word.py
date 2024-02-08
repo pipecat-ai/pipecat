@@ -19,7 +19,7 @@ from dailyai.queue_frame import (
 )
 from dailyai.services.ai_services import AIService
 
-from samples.foundational.support.runner import configure
+from examples.foundational.support.runner import configure
 
 
 sprites = {}
