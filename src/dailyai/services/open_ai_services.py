@@ -13,30 +13,32 @@ from dailyai.services.ai_services import AIService, TTSService, LLMService, Imag
 
 
 class OpenAILLMService(LLMService):
-    def __init__(self, *, api_key, model="gpt-4"):
+    def __init__(self, *, api_key, model="gpt-4", tools=None):
         super().__init__()
         self._model = model
         self._client = AsyncOpenAI(api_key=api_key)
+        self._tools = tools
 
     async def get_response(self, messages, stream):
         return await self._client.chat.completions.create(
             stream=stream,
             messages=messages,
-            model=self._model
+            model=self._model,
+            tools=self._tools
         )
 
     async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
 
-        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages)
+        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages, tools=self._tools)
         async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue
-
             if chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
-
+            elif chunk.choices[0].delta.tool_calls:
+                yield chunk.choices[0].delta.tool_calls[0]
     async def run_llm(self, messages) -> str | None:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")

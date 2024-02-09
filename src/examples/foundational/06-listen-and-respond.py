@@ -34,10 +34,10 @@ async def main(room_url: str, token):
             token,
             "Respond bot",
             5,
+            mic_enabled=True,
+            mic_sample_rate=16000,
+            camera_enabled=False
         )
-        transport.mic_enabled = True
-        transport.mic_sample_rate = 16000
-        transport.camera_enabled = False
 
         # llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_CHATGPT_API_KEY"))
@@ -57,12 +57,12 @@ Start by introducing yourself and asking the user to verify their identity by pr
 
 Once you have collected all of that information, respond with a JSON object containing the answers."""}
         ]
-        tma_in = LLMUserContextAggregator(messages, transport.my_participant_id)
-        tma_out = LLMAssistantContextAggregator(messages, transport.my_participant_id)
-        checklist = ChecklistProcessor(messages, llm)
+        tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
+        tma_out = LLMAssistantContextAggregator(messages, transport._my_participant_id)
+        # checklist = ChecklistProcessor(messages, llm)
 
         async def handle_transcriptions():
-            tf = TranscriptFilter(transport.my_participant_id)
+            tf = TranscriptFilter(transport._my_participant_id)
             await tts.run_to_queue(
                 transport.send_queue,
                 tma_out.run(

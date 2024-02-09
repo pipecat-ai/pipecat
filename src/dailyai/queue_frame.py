@@ -22,6 +22,11 @@ class LLMResponseEndQueueFrame(QueueFrame):
     pass
 
 @dataclass()
+class LLMFunctionCallFrame(QueueFrame):
+    function_name: str
+    arguments: str
+
+@dataclass()
 class AudioQueueFrame(QueueFrame):
     data: bytes
 

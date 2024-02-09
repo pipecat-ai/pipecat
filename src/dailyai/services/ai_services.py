@@ -11,6 +11,7 @@ from dailyai.queue_frame import (
     ImageQueueFrame,
     LLMMessagesQueueFrame,
     LLMResponseEndQueueFrame,
+    LLMFunctionCallFrame,
     QueueFrame,
     TextQueueFrame,
     TranscriptionQueueFrame,
@@ -89,11 +90,24 @@ class LLMService(AIService):
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        print(f"got a frame to process: {frame}")
+        function_name = ""
+        arguments = ""
         if isinstance(frame, LLMMessagesQueueFrame):
             async for text_chunk in self.run_llm_async(frame.messages):
-                print(f"got a text chunk: {text_chunk}")
-                yield TextQueueFrame(text_chunk)
+                if isinstance(text_chunk, str):
+                    print(f"text")
+                    yield TextQueueFrame(text_chunk)
+                elif text_chunk.function:
+                    if text_chunk.function.name:
+                        function_name += text_chunk.function.name
+                    if text_chunk.function.arguments:
+                        arguments += text_chunk.function.arguments
+            print(f"out here, function_name is {function_name}, arguments is {arguments}")
+            if (function_name and arguments):
+                print("made it inside")
+                yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
+                function_name = ""
+                arguments = ""
             yield LLMResponseEndQueueFrame()
         else:
             yield frame
