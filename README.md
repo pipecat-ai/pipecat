@@ -2,7 +2,7 @@
 
 Build conversational, multi-modal AI apps with real-time voice and video, like this:
 
-_Demo Video_
+_Demo Video to come_
 
 With built-in support for many of the best AI platforms (or [add your own](/docs)):
 
@@ -14,22 +14,6 @@ With built-in support for many of the best AI platforms (or [add your own](/docs
 - Whisper local speech-to-text
 
 ## Step 1: Get Started
-
-Installation here. Also sign up for a Daily account, I guess? also we need an ENV
-
-Requires python 3.11 or later. Don't forget virtualenv
-
-pip install vs download and build?
-
-## Step 2: Build Things
-
-Once you've got the SDK working, head over to the [docs folder](/docs) to start building!
-
----
-
-# Old Readme
-
-This SDK can help you build applications that participate in WebRTC meetings and use various AI services to interact with other participants.
 
 ## Build/Install
 
@@ -66,23 +50,6 @@ Tou can run the simple sample like so:
 ```
 python src/examples/theoretical-to-real/01-say-one-thing.py -u <url of your Daily meeting> -k <your Daily API Key>
 ```
-
-Note that the sample uses Azure's TTS and LLM services. You'll need to set the following environment variables for the sample to work:
-
-```
-AZURE_SPEECH_SERVICE_KEY
-AZURE_SPEECH_SERVICE_REGION
-AZURE_CHATGPT_KEY
-AZURE_CHATGPT_ENDPOINT
-AZURE_CHATGPT_DEPLOYMENT_ID
-```
-
-If you have those environment variables stored in an .env file, you can quickly load them into your terminal's environment by running this:
-
-```bash
-export $(grep -v '^#' .env | xargs)
-```
-
 ## Overview
 
 The Daily AI SDK allows you to build applications that can participate in WebRTC sessions and interact with AI Services. Some examples of what you can build with this:
