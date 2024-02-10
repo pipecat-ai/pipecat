@@ -7,6 +7,7 @@ import requests
 from dotenv import load_dotenv
 load_dotenv()
 
+
 def configure():
     parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")
     parser.add_argument(
@@ -26,11 +27,11 @@ def configure():
     key = args.apikey or os.getenv("DAILY_API_KEY")
 
     if not url:
-        raise Exception("No Daily room specified. use the -u/--url option from the command line, or set DAILY_SAMPLE_ROOM_URL in your environment to specify a Daily room URL.")
-    
+        raise Exception(
+            "No Daily room specified. use the -u/--url option from the command line, or set DAILY_SAMPLE_ROOM_URL in your environment to specify a Daily room URL.")
+
     if not key:
         raise Exception("No Daily API key specified. use the -k/--apikey option from the command line, or set DAILY_API_KEY in your environment to specify a Daily API key, available from https://dashboard.daily.co/developers.")
-    
 
     # Create a meeting token for the given room with an expiration 1 hour in the future.
     room_name: str = urllib.parse.urlparse(url).path[1:]

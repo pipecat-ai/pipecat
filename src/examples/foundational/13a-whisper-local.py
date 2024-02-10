@@ -17,7 +17,7 @@ async def main(room_url: str):
         camera_enabled=False,
         speaker_enabled=True,
         duration_minutes=meeting_duration_minutes,
-        start_transcription = True
+        start_transcription=True
     )
     stt = WhisperSTTService()
     transcription_output_queue = asyncio.Queue()

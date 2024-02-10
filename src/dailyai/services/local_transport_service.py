@@ -22,11 +22,15 @@ class LocalTransportService(BaseTransportService):
 
     async def _write_frame_to_tkinter(self, frame: bytes):
         data = f"P6 {self._camera_width} {self._camera_height} 255 ".encode() + frame
-        photo = tk.PhotoImage(width=self._camera_width, height=self._camera_height, data=data, format="PPM")
+        photo = tk.PhotoImage(
+            width=self._camera_width,
+            height=self._camera_height,
+            data=data,
+            format="PPM")
         self._image_label.config(image=photo)
 
         # This holds a reference to the photo, preventing it from being garbage collected.
-        self._image_label.image = photo # type: ignore
+        self._image_label.image = photo  # type: ignore
 
     def write_frame_to_camera(self, frame: bytes):
         if self._camera_enabled and self._loop:
