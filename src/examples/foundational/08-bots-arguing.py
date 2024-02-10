@@ -10,7 +10,8 @@ from dailyai.queue_frame import AudioQueueFrame, ImageQueueFrame
 
 from examples.foundational.support.runner import configure
 
-async def main(room_url:str):
+
+async def main(room_url: str):
     async with aiohttp.ClientSession() as session:
         transport = DailyTransportService(
             room_url,
@@ -24,16 +25,30 @@ async def main(room_url:str):
             camera_height=1024
         )
 
-        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-        tts1 = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
-        tts2 = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="jBpfuIE2acCO8z3wKNLl")
-        dalle = FalImageGenService(image_size="1024x1024", aiohttp_session=session, key_id=os.getenv("FAL_KEY_ID"), key_secret=os.getenv("FAL_KEY_SECRET"))
+        llm = AzureLLMService(
+            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+            model=os.getenv("AZURE_CHATGPT_MODEL"))
+        tts1 = AzureTTSService(
+            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+            region=os.getenv("AZURE_SPEECH_REGION"))
+        tts2 = ElevenLabsTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id="jBpfuIE2acCO8z3wKNLl")
+        dalle = FalImageGenService(
+            image_size="1024x1024",
+            aiohttp_session=session,
+            key_id=os.getenv("FAL_KEY_ID"),
+            key_secret=os.getenv("FAL_KEY_SECRET"))
 
         bot1_messages = [
             {"role": "system", "content": "You are a stern librarian. You strongly believe that a hot dog is a sandwich. Start by stating this fact in a few sentences, then be prepared to debate this with the user. You shouldn't ever compromise on the fundamental truth that a hot dog is a sandwich. Your responses should only be a few sentences long."},
         ]
         bot2_messages = [
-            {"role": "system", "content": "You are a silly cat, and you strongly believe that a hot dog is not a sandwich. Debate this with the user, only responding with a few sentences. Don't ever accept that a hot dog is a sandwich."},
+            {
+                "role": "system",
+                "content": "You are a silly cat, and you strongly believe that a hot dog is not a sandwich. Debate this with the user, only responding with a few sentences. Don't ever accept that a hot dog is a sandwich."},
         ]
 
         async def get_bot1_statement():

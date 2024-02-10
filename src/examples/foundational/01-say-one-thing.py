@@ -7,6 +7,7 @@ from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 from examples.foundational.support.runner import configure
 
+
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
         # create a transport service object using environment variables for
@@ -25,7 +26,10 @@ async def main(room_url):
             meeting_duration_minutes,
             mic_enabled=True
         )
-        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
+        tts = ElevenLabsTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
 
         # Register an event handler so we can play the audio when the participant joins.
         @transport.event_handler("on_participant_joined")

@@ -28,7 +28,11 @@ async def main(room_url):
             camera_height=1024
         )
 
-        imagegen = FalImageGenService(image_size="1024x1024", aiohttp_session=session, key_id=os.getenv("FAL_KEY_ID"), key_secret=os.getenv("FAL_KEY_SECRET"))
+        imagegen = FalImageGenService(
+            image_size="1024x1024",
+            aiohttp_session=session,
+            key_id=os.getenv("FAL_KEY_ID"),
+            key_secret=os.getenv("FAL_KEY_SECRET"))
         # imagegen = OpenAIImageGenService(aiohttp_session=session, api_key=os.getenv("OPENAI_DALLE_API_KEY"), image_size="1024x1024")
         # imagegen = AzureImageGenServiceREST(image_size="1024x1024", aiohttp_session=session, api_key=os.getenv("AZURE_DALLE_API_KEY"), endpoint=os.getenv("AZURE_DALLE_ENDPOINT"), model=os.getenv("AZURE_DALLE_MODEL"))
 

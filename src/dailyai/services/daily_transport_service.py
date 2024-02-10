@@ -45,7 +45,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
         start_transcription: bool = False,
         **kwargs,
     ):
-        super().__init__(**kwargs) # This will call BaseTransportService.__init__ method, not EventHandler
+        super().__init__(**kwargs)  # This will call BaseTransportService.__init__ method, not EventHandler
 
         self._room_url: str = room_url
         self._bot_name: str = bot_name
