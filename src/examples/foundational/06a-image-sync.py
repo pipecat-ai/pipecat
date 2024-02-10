@@ -18,6 +18,7 @@ from dailyai.services.fal_ai_services import FalImageGenService
 
 from examples.foundational.support.runner import configure
 
+
 class ImageSyncAggregator(AIService):
     def __init__(self, speaking_path: str, waiting_path: str):
         self._speaking_image = Image.open(speaking_path)
@@ -46,9 +47,18 @@ async def main(room_url: str, token):
         transport._mic_enabled = True
         transport._mic_sample_rate = 16000
 
-        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-        tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
-        img = FalImageGenService(image_size="1024x1024", aiohttp_session=session, key_id=os.getenv("FAL_KEY_ID"), key_secret=os.getenv("FAL_KEY_SECRET"))
+        llm = AzureLLMService(
+            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+            model=os.getenv("AZURE_CHATGPT_MODEL"))
+        tts = AzureTTSService(
+            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+            region=os.getenv("AZURE_SPEECH_REGION"))
+        img = FalImageGenService(
+            image_size="1024x1024",
+            aiohttp_session=session,
+            key_id=os.getenv("FAL_KEY_ID"),
+            key_secret=os.getenv("FAL_KEY_SECRET"))
 
         async def get_images():
             get_speaking_task = asyncio.create_task(

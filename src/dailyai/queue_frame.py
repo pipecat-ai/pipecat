@@ -18,8 +18,10 @@ class StartStreamQueueFrame(ControlQueueFrame):
 class EndStreamQueueFrame(ControlQueueFrame):
     pass
 
+
 class LLMResponseEndQueueFrame(QueueFrame):
     pass
+
 
 @dataclass()
 class AudioQueueFrame(QueueFrame):

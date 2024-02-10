@@ -71,7 +71,7 @@ class TranscriptFilter(AIService):
 
 
 class NameCheckFilter(AIService):
-    def __init__(self, names:list[str]):
+    def __init__(self, names: list[str]):
         self.names = names
         self.sentence = ""
 
@@ -123,8 +123,14 @@ async def main(room_url: str, token):
         transport._camera_width = 720
         transport._camera_height = 1280
 
-        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="jBpfuIE2acCO8z3wKNLl")
+        llm = AzureLLMService(
+            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+            model=os.getenv("AZURE_CHATGPT_MODEL"))
+        tts = ElevenLabsTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id="jBpfuIE2acCO8z3wKNLl")
         isa = ImageSyncAggregator()
 
         @transport.event_handler("on_first_other_participant_joined")
