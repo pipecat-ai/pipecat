@@ -14,7 +14,7 @@ from typing import AsyncGenerator
 
 from examples.foundational.support.runner import configure
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s") # or whatever
+logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")  # or whatever
 logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
@@ -36,8 +36,6 @@ for file in sound_files:
         sounds[file] = audio_file.readframes(-1)
 
 
-
-
 class OutboundSoundEffectWrapper(AIService):
     def __init__(self):
         pass
@@ -49,6 +47,7 @@ class OutboundSoundEffectWrapper(AIService):
             yield frame
         else:
             yield frame
+
 
 class InboundSoundEffectWrapper(AIService):
     def __init__(self):
@@ -75,14 +74,20 @@ async def main(room_url: str, token):
             camera_enabled=False
         )
 
-        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id="ErXwobaYiN019PkySvjV")
-
+        llm = AzureLLMService(
+            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+            model=os.getenv("AZURE_CHATGPT_MODEL"))
+        tts = ElevenLabsTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id="ErXwobaYiN019PkySvjV")
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
             await tts.say("Hi, I'm listening!", transport.send_queue)
             await transport.send_queue.put(AudioQueueFrame(sounds["ding1.wav"]))
+
         async def handle_transcriptions():
             messages = [
                 {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
@@ -116,7 +121,6 @@ async def main(room_url: str, token):
                     )
                 )
             )
-
 
         transport.transcription_settings["extra"]["punctuate"] = True
         await asyncio.gather(transport.run(), handle_transcriptions())

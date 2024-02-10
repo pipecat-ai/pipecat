@@ -6,6 +6,7 @@ from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
 from examples.foundational.support.runner import configure
 
+
 async def main(room_url: str, token):
     transport = DailyTransportService(
         room_url,
@@ -15,11 +16,16 @@ async def main(room_url: str, token):
         start_transcription=True,
         mic_enabled=True,
         mic_sample_rate=16000,
-        camera_enabled = False
+        camera_enabled=False
     )
 
-    llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-    tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
+    llm = AzureLLMService(
+        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+        model=os.getenv("AZURE_CHATGPT_MODEL"))
+    tts = AzureTTSService(
+        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+        region=os.getenv("AZURE_SPEECH_REGION"))
 
     @transport.event_handler("on_first_other_participant_joined")
     async def on_first_other_participant_joined(transport):
