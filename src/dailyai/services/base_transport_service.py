@@ -16,6 +16,7 @@ from dailyai.queue_frame import (
     StartStreamQueueFrame,
 )
 
+
 class BaseTransportService():
 
     def __init__(
@@ -54,16 +55,20 @@ class BaseTransportService():
     async def run(self):
         self._prerun()
 
-        async_output_queue_marshal_task = asyncio.create_task(self._marshal_frames())
+        async_output_queue_marshal_task = asyncio.create_task(
+            self._marshal_frames())
 
-        self._camera_thread = threading.Thread(target=self._run_camera, daemon=True)
+        self._camera_thread = threading.Thread(
+            target=self._run_camera, daemon=True)
         self._camera_thread.start()
 
-        self._frame_consumer_thread = threading.Thread(target=self._frame_consumer, daemon=True)
+        self._frame_consumer_thread = threading.Thread(
+            target=self._frame_consumer, daemon=True)
         self._frame_consumer_thread.start()
 
         if self._speaker_enabled:
-            self._receive_audio_thread = threading.Thread(target=self._receive_audio, daemon=True)
+            self._receive_audio_thread = threading.Thread(
+                target=self._receive_audio, daemon=True)
             self._receive_audio_thread.start()
 
         try:
@@ -71,13 +76,16 @@ class BaseTransportService():
                 time.time() < self._expiration
                 and not self._stop_threads.is_set()
             ):
+                print(
+                    f"about to sleep; expire time TF: {time.time() < self._expiration}, stop_threads: {self._stop_threads.is_set()}")
                 await asyncio.sleep(1)
         except Exception as e:
-            self._logger.error(f"Exception {e}")
+            print(f"Exception {e}")
             raise e
 
         self._stop_threads.set()
 
+        print(f"ESQF: PAST base transport service while loop, about to stop things")
         await self.send_queue.put(EndStreamQueueFrame())
         await async_output_queue_marshal_task
         await self.send_queue.join()
@@ -145,7 +153,7 @@ class BaseTransportService():
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(frame), self._loop
                 )
-
+        print(f"ESQF: this is the only other endstreamqueueframe I can find")
         asyncio.run_coroutine_threadsafe(
             self.receive_queue.put(EndStreamQueueFrame()), self._loop
         )
@@ -186,6 +194,7 @@ class BaseTransportService():
                     raise Exception("Unknown type in output queue")
 
                 for frame in frames:
+                    print(f"GOT FRAME OF TYPE: {type(frame)}")
                     if isinstance(frame, EndStreamQueueFrame):
                         self._logger.info("Stopping frame consumer thread")
                         self._threadsafe_send_queue.task_done()
@@ -204,7 +213,8 @@ class BaseTransportService():
                                     len(b) % smallest_write_size
                                 )
                                 if truncated_length:
-                                    self.write_frame_to_mic(bytes(b[:truncated_length]))
+                                    self.write_frame_to_mic(
+                                        bytes(b[:truncated_length]))
                                     b = b[truncated_length:]
                             elif isinstance(frame, ImageQueueFrame):
                                 self._set_image(frame.image)
@@ -218,7 +228,8 @@ class BaseTransportService():
                         # can cause static in the audio stream.
                         if len(b):
                             truncated_length = len(b) - (len(b) % 160)
-                            self.write_frame_to_mic(bytes(b[:truncated_length]))
+                            self.write_frame_to_mic(
+                                bytes(b[:truncated_length]))
                             b = bytearray()
 
                         if isinstance(frame, StartStreamQueueFrame):
@@ -231,5 +242,6 @@ class BaseTransportService():
 
                 b = bytearray()
             except Exception as e:
-                self._logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
+                print(
+                    f"Exception in frame_consumer: {e}, {len(b)}")
                 raise e

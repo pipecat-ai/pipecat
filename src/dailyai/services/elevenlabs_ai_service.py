@@ -26,7 +26,8 @@ class ElevenLabsTTSService(TTSService):
     async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}/stream"
         payload = {"text": sentence, "model_id": "eleven_turbo_v2"}
-        querystring = {"output_format": "pcm_16000", "optimize_streaming_latency": 2}
+        querystring = {"output_format": "pcm_16000",
+                       "optimize_streaming_latency": 2}
         headers = {
             "xi-api-key": self._api_key,
             "Content-Type": "application/json",

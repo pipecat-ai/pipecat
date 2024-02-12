@@ -17,7 +17,8 @@ class CloudflareAIService(AIService):
 
     # base endpoint, used by the others
     def run(self, model, input):
-        response = requests.post(f"{self.api_base_url}{model}", headers=self.headers, json=input)
+        response = requests.post(
+            f"{self.api_base_url}{model}", headers=self.headers, json=input)
         return response.json()
 
     # https://developers.cloudflare.com/workers-ai/models/llm/

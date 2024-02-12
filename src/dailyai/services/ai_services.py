@@ -35,6 +35,7 @@ class AIService:
             await queue.put(frame)
 
         if add_end_of_stream:
+            print(f"ESQF: adding end of stream from run_to_queue")
             await queue.put(EndStreamQueueFrame())
 
     async def run(
@@ -89,20 +90,22 @@ class LLMService(AIService):
     async def run_llm(self, messages) -> str:
         pass
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: QueueFrame, tool_choice: str = None) -> AsyncGenerator[QueueFrame, None]:
         function_name = ""
         arguments = ""
         if isinstance(frame, LLMMessagesQueueFrame):
-            async for text_chunk in self.run_llm_async(frame.messages):
+            print(f"llm process_frame, messages: {frame.messages}")
+            async for text_chunk in self.run_llm_async(frame.messages, tool_choice):
                 if isinstance(text_chunk, str):
-                    print(f"text")
+                    print(f"text: {text_chunk}")
                     yield TextQueueFrame(text_chunk)
                 elif text_chunk.function:
                     if text_chunk.function.name:
                         function_name += text_chunk.function.name
                     if text_chunk.function.arguments:
                         arguments += text_chunk.function.arguments
-            print(f"out here, function_name is {function_name}, arguments is {arguments}")
+            print(
+                f"out here, function_name is {function_name}, arguments is {arguments}")
             if (function_name and arguments):
                 print("made it inside")
                 yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
@@ -131,6 +134,7 @@ class TTSService(AIService):
         yield bytes()
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        print(f"   TTS GOT FRAME: {type(frame)}")
         if not isinstance(frame, TextQueueFrame):
             yield frame
             return
@@ -145,6 +149,7 @@ class TTSService(AIService):
                 self.current_sentence = ""
 
         if text:
+            print(f"   IF TEXT TRUE")
             async for audio_chunk in self.run_tts(text):
                 yield AudioQueueFrame(audio_chunk)
 

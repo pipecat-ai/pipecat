@@ -27,11 +27,11 @@ class OpenAILLMService(LLMService):
             tools=self._tools
         )
 
-    async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
+    async def run_llm_async(self, messages, tool_choice=None) -> AsyncGenerator[str, None]:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
 
-        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages, tools=self._tools)
+        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages, tools=self._tools, tool_choice=tool_choice)
         async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue
@@ -39,6 +39,7 @@ class OpenAILLMService(LLMService):
                 yield chunk.choices[0].delta.content
             elif chunk.choices[0].delta.tool_calls:
                 yield chunk.choices[0].delta.tool_calls[0]
+
     async def run_llm(self, messages) -> str | None:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
