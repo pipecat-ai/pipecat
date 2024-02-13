@@ -76,6 +76,9 @@ class BaseTransportService():
         except Exception as e:
             self._logger.error(f"Exception {e}")
             raise e
+        finally:
+            # Do anything that must be done to clean up
+            self._post_run()
 
         self._stop_threads.set()
 
@@ -86,6 +89,9 @@ class BaseTransportService():
 
         if self._speaker_enabled:
             self._receive_audio_thread.join()
+
+    def _post_run(self):
+        pass
 
     def stop(self):
         self._stop_threads.set()

@@ -1,8 +1,8 @@
 import asyncio
 import inspect
 import logging
+import signal
 import threading
-import time
 import types
 
 from functools import partial
@@ -11,7 +11,7 @@ from dailyai.queue_frame import (
     TranscriptionQueueFrame,
 )
 
-from threading import Thread, Event
+from threading import Event
 
 from daily import (
     EventHandler,
@@ -193,6 +193,14 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
         if self._token and self._start_transcription:
             self.client.start_transcription(self.transcription_settings)
+
+        signal.signal(signal.SIGINT, self.process_interrupt_handler)
+
+    def process_interrupt_handler(self, signum, frame):
+        self._post_run()
+
+    def _post_run(self):
+        self.client.leave()
 
     def on_first_other_participant_joined(self):
         pass
