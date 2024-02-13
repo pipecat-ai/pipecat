@@ -98,11 +98,14 @@ class LLMService(AIService):
                     yield TextQueueFrame(text_chunk)
                 elif text_chunk.function:
                     if text_chunk.function.name:
-                        function_name += text_chunk.function.name
+                        # function_name += text_chunk.function.name
+                        yield LLMFunctionCallFrame(function_name=text_chunk.function.name, arguments=None)
                     if text_chunk.function.arguments:
-                        arguments += text_chunk.function.arguments
+                        # arguments += text_chunk.function.arguments
+                        yield LLMFunctionCallFrame(function_name=None, arguments=text_chunk.function.arguments)
+
             if (function_name and arguments):
-                yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
+                # yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
                 function_name = ""
                 arguments = ""
             yield LLMResponseEndQueueFrame()

@@ -1,5 +1,6 @@
 import aiohttp
 import asyncio
+import json
 import os
 from typing import AsyncGenerator
 
@@ -9,8 +10,12 @@ from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
 from examples.foundational.support.runner import configure
-from dailyai.queue_frame import LLMMessagesQueueFrame, TranscriptionQueueFrame, QueueFrame, TextQueueFrame, LLMFunctionCallFrame
+from dailyai.queue_frame import LLMMessagesQueueFrame, TranscriptionQueueFrame, QueueFrame, TextQueueFrame, LLMFunctionCallFrame, LLMResponseEndQueueFrame
 from dailyai.services.ai_services import FrameLogger, AIService
+
+
+import logging
+logging.basicConfig(level=logging.ERROR)
 
 tools = [
     {
@@ -23,7 +28,7 @@ tools = [
                 "properties": {
                     "birthday": {
                         "type": "string",
-                        "description": "The user's birthdate. Convert it to YYYY-MM-DD format."
+                        "description": "The user's birthdate, including the year. The user can provide it in any format, but convert it to YYYY-MM-DD format to call this function."
                     }
                 }
             }
@@ -113,7 +118,7 @@ tools = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "reasons": {
+                    "visit_reasons": {
                         "type": "array",
                         "items": {
                             "type": "object",
@@ -150,29 +155,85 @@ class ChecklistProcessor(AIService):
         self._current_step = 0
         self._messages = messages
         self._llm = llm
+        self._function_name = ""
+        self._arguments = ""
         self._id = "You are Jessica, an agent for a company called Tri-County Advanced Optimum Health Solution Specialists. Your job is to collect important information from the user before they visit a doctor. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor."
+
         self._steps = [
-            "Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday. When they answer with their birthday, call the verify_birthday function.",
-            "You've already confirmed the user's birthday, so don't call the verify_birthday function. Ask the user to list their current prescriptions. If the user responds with one or two prescriptions, ask them to confirm it's the complete list. Make sure each medication also includes the dosage. Once the user has provided all their prescriptions, call the list_prescriptions function.",
-            "Don't call the verify_birthday or list_prescription functions. Ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function.",
-            "Don't call the verify_birthday, list_allergies, or list_prescriptions functions. Ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function."
-            "Ask the user the reason for their doctor visit today. Once they answer, double-check to make sure they don't have any other health concerns. After that, call the list_visit_reasons function.",
-            "Now, thank the user and end the conversation.",
-            ""
+            {"prompt": "Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday, including the year. When they answer with their birthday, call the verify_birthday function.",
+                "run_async": False, "failed": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function."},
+            {"prompt": "You've already confirmed the user's birthday, so don't call the verify_birthday function. Ask the user to list their current prescriptions. If the user responds with one or two prescriptions, ask them to confirm it's the complete list. Make sure each medication also includes the dosage. Once the user has provided all their prescriptions, call the list_prescriptions function.", "run_async": True},
+            {"prompt": "Don't call the verify_birthday or list_prescription functions. Ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function.", "run_async": True},
+            {"prompt": "Don't call the verify_birthday, list_allergies, or list_prescriptions functions. Ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function.", "run_async": True},
+            {"prompt": "Ask the user the reason for their doctor visit today. Once they answer, double-check to make sure they don't have any other health concerns. After that, call the list_visit_reasons function.", "run_async": True},
+            {"prompt": "Now, thank the user and end the conversation.", "run_async": True},
+            {"prompt": "", "run_async": True}
         ]
         messages.append(
             {"role": "system", "content": f"{self._id} {self._steps[0]}"})
 
+    def verify_birthday(self, args):
+        return args['birthday'] == "1983-08-19"
+
+    def list_prescriptions(self, args):
+        print(f"Prescriptions: {args['prescriptions']}")
+
+    def list_allergies(self, args):
+        print(f"Allergies: {args['allergies']}")
+
+    def list_conditions(self, args):
+        print(f"Medical Conditions: {args['conditions']}")
+
+    def list_visit_reasons(self, args):
+        print(f"Visit Reasons: {args['visit_reasons']}")
+
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, LLMFunctionCallFrame):
+        this_step = self._steps[self._current_step]
+        if isinstance(frame, LLMFunctionCallFrame) and frame.function_name:
             print(f"FUNCTION CALL: {frame}")
-            self._current_step += 1
-            # yield TextQueueFrame(f"We should move on to Step {self._current_step}.")
-            self._messages.append({
-                "role": "system", "content": f"{self._id} {self._steps[self._current_step]}"})
-            yield LLMMessagesQueueFrame(self._messages)
-            async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages), tool_choice="none"):
-                yield frame
+            self._function_name = frame.function_name
+            if this_step['run_async']:
+                # Get the LLM talking about the next step before getting the rest
+                # of the function call completion
+                self._current_step += 1
+                # yield TextQueueFrame(f"We should move on to Step {self._current_step}.")
+                self._messages.append({
+                    "role": "system", "content": self._steps[self._current_step]['prompt']})
+                # yield LLMMessagesQueueFrame(self._messages)
+                yield LLMMessagesQueueFrame(self._messages)
+                async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages), tool_choice="none"):
+                    yield frame
+        elif isinstance(frame, LLMFunctionCallFrame) and frame.arguments:
+            self._arguments += frame.arguments
+        elif isinstance(frame, LLMResponseEndQueueFrame):
+            print(
+                f"got a response end. function_name is {self._function_name}, arguments is {self._arguments}")
+            if self._function_name and self._arguments:
+
+                fn = getattr(self, self._function_name)
+                print(f"fn is: {fn}")
+                result = fn(json.loads(self._arguments))
+                self._function_name = ""
+                self._arguments = ""
+                if not this_step['run_async']:
+                    if result:
+                        self._current_step += 1
+                        # yield TextQueueFrame(f"We should move on to Step {self._current_step}.")
+                        self._messages.append({
+                            "role": "system", "content": self._steps[self._current_step]['prompt']})
+                        # yield LLMMessagesQueueFrame(self._messages)
+                        yield LLMMessagesQueueFrame(self._messages)
+                        async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages), tool_choice="none"):
+                            yield frame
+                    else:
+                        self._messages.append({
+                            "role": "system", "content": this_step['failed']})
+                        # yield LLMMessagesQueueFrame(self._messages)
+                        yield LLMMessagesQueueFrame(self._messages)
+                        async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages), tool_choice="none"):
+                            yield frame
+                print(f"VERIFY RESULT: {result}")
+
         else:
             yield frame
 
@@ -209,18 +270,21 @@ async def main(room_url: str, token):
             messages, transport._my_participant_id)
         checklist = ChecklistProcessor(messages, llm)
         fl = FrameLogger("got transcript")
+        fl2 = FrameLogger("just above the checklist")
 
         async def handle_transcriptions():
             tf = TranscriptFilter(transport._my_participant_id)
             await tts.run_to_queue(
                 transport.send_queue,
-                checklist.run(
-                    tma_out.run(
-                        llm.run(
-                            tma_in.run(
-                                tf.run(
-                                    fl.run(
-                                        transport.get_receive_frames()
+                fl2.run(
+                    checklist.run(
+                        tma_out.run(
+                            llm.run(
+                                tma_in.run(
+                                    tf.run(
+                                        fl.run(
+                                            transport.get_receive_frames()
+                                        )
                                     )
                                 )
                             )

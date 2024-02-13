@@ -35,10 +35,10 @@ class OpenAILLMService(LLMService):
         async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue
-            if chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-            elif chunk.choices[0].delta.tool_calls:
+            if chunk.choices[0].delta.tool_calls:
                 yield chunk.choices[0].delta.tool_calls[0]
+            elif chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
 
     async def run_llm(self, messages) -> str | None:
         messages_for_log = json.dumps(messages)
