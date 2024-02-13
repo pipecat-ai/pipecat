@@ -49,7 +49,6 @@ class ChecklistProcessor(AIService):
             yield LLMMessagesQueueFrame(self._messages)
             print(f"past llmmessagesqueueframe yield")
             async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages)):
-                print(f"yielding frame from llm.process_frame: {frame}")
                 yield frame
         else:
             yield frame

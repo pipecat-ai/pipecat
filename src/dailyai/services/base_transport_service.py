@@ -76,16 +76,12 @@ class BaseTransportService():
                 time.time() < self._expiration
                 and not self._stop_threads.is_set()
             ):
-                print(
-                    f"about to sleep; expire time TF: {time.time() < self._expiration}, stop_threads: {self._stop_threads.is_set()}")
                 await asyncio.sleep(1)
         except Exception as e:
-            print(f"Exception {e}")
+            self._logger.error(f"Exception {e}")
             raise e
-
         self._stop_threads.set()
 
-        print(f"ESQF: PAST base transport service while loop, about to stop things")
         await self.send_queue.put(EndStreamQueueFrame())
         await async_output_queue_marshal_task
         await self.send_queue.join()
@@ -96,6 +92,7 @@ class BaseTransportService():
 
     def stop(self):
         self._stop_threads.set()
+        
 
     async def stop_when_done(self):
         await self._wait_for_send_queue_to_empty()
@@ -153,7 +150,6 @@ class BaseTransportService():
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(frame), self._loop
                 )
-        print(f"ESQF: this is the only other endstreamqueueframe I can find")
         asyncio.run_coroutine_threadsafe(
             self.receive_queue.put(EndStreamQueueFrame()), self._loop
         )
@@ -194,7 +190,6 @@ class BaseTransportService():
                     raise Exception("Unknown type in output queue")
 
                 for frame in frames:
-                    print(f"GOT FRAME OF TYPE: {type(frame)}")
                     if isinstance(frame, EndStreamQueueFrame):
                         self._logger.info("Stopping frame consumer thread")
                         self._threadsafe_send_queue.task_done()

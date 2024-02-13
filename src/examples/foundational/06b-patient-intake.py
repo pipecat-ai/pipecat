@@ -150,7 +150,7 @@ class ChecklistProcessor(AIService):
         self._current_step = 0
         self._messages = messages
         self._llm = llm
-        self._id = "You are Jessica, an agent for a company called Optimum Health Solution Specialists. Your job is to collect important information from the user before they visit a doctor. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor."
+        self._id = "You are Jessica, an agent for a company called Tri-County Advanced Optimum Health Solution Specialists. Your job is to collect important information from the user before they visit a doctor. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor."
         self._steps = [
             "Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday. When they answer with their birthday, call the verify_birthday function.",
             "You've already confirmed the user's birthday, so don't call the verify_birthday function. Ask the user to list their current prescriptions. If the user responds with one or two prescriptions, ask them to confirm it's the complete list. Make sure each medication also includes the dosage. Once the user has provided all their prescriptions, call the list_prescriptions function.",
@@ -165,19 +165,15 @@ class ChecklistProcessor(AIService):
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if isinstance(frame, LLMFunctionCallFrame):
-            print(f"GOT A FUNCTION CALL: {frame}")
+            print(f"FUNCTION CALL: {frame}")
             self._current_step += 1
             # yield TextQueueFrame(f"We should move on to Step {self._current_step}.")
             self._messages.append({
                 "role": "system", "content": f"{self._id} {self._steps[self._current_step]}"})
-            print(f"NEW MESSAGES ARRAY: {self._messages}")
             yield LLMMessagesQueueFrame(self._messages)
-            print(f"past llmmessagesqueueframe yield")
             async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages), tool_choice="none"):
-                print(f"yielding frame from llm.process_frame: {frame}")
                 yield frame
         else:
-            print(f"non LLM function call frame: {type(frame)}")
             yield frame
 
 
@@ -247,7 +243,10 @@ async def main(room_url: str, token):
             )
 
         transport.transcription_settings["extra"]["punctuate"] = True
-        await asyncio.gather(transport.run(), handle_transcriptions())
+        try:
+            await asyncio.gather(transport.run(), handle_transcriptions())
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            transport.stop()
 
 
 if __name__ == "__main__":
