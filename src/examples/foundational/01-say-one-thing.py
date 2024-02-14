@@ -27,6 +27,7 @@ async def main(room_url):
             meeting_duration_minutes,
             mic_enabled=True
         )
+
         """
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -42,6 +43,7 @@ async def main(room_url):
         # Register an event handler so we can play the audio when the participant joins.
         @transport.event_handler("on_participant_joined")
         async def on_participant_joined(transport, participant):
+            nonlocal tts
             if participant["info"]["isLocal"]:
                 return
 
@@ -54,6 +56,7 @@ async def main(room_url):
             await transport.stop_when_done()
 
         await transport.run()
+        del(tts)
 
 
 if __name__ == "__main__":
