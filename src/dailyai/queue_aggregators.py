@@ -70,15 +70,26 @@ class LLMContextAggregator(AIService):
                 if self._store:
                     self.messages.append(
                         {"role": self.role, "content": self.sentence})
+                    yield LLMMessagesQueueFrame(self.messages)
+                else:
+                    temp_messages = self.messages.copy()
+                    temp_messages.append(
+                        {"role": self.role, "content": self.sentence})
+                    yield LLMMessagesQueueFrame(temp_messages)
+
                 self.sentence = ""
-                yield LLMMessagesQueueFrame(self.messages)
         else:
             # type: ignore -- the linter thinks this isn't a TextQueueFrame, even
             # though we check it above
             if self._store:
                 self.messages.append(
                     {"role": self.role, "content": frame.text})
-            yield LLMMessagesQueueFrame(self.messages)
+                yield LLMMessagesQueueFrame(self.messages)
+            else:
+                temp_messages = self.messages.copy()
+                temp_messages.append(
+                    {"role": self.role, "content": frame.text})
+                yield LLMMessagesQueueFrame(temp_messages)
 
     async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
         # Send any dangling words that weren't finished with punctuation.

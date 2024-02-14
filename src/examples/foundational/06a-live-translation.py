@@ -3,8 +3,12 @@ import os
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
+from dailyai.services.ai_services import FrameLogger
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
 from examples.foundational.support.runner import configure
+
+import logging
+logging.basicConfig(level=logging.INFO)
 
 
 async def main(room_url: str, token):
@@ -42,17 +46,23 @@ async def main(room_url: str, token):
 
         tma_in = LLMUserContextAggregator(
             messages, transport._my_participant_id, store=False)
+        fl = FrameLogger("in to LLM")
         await tts.run_to_queue(
             transport.send_queue,
             llm.run(
-                tma_in.run(
-                    transport.get_receive_frames()
+                fl.run(
+                    tma_in.run(
+                        transport.get_receive_frames()
+                    )
                 )
             )
         )
 
     transport.transcription_settings["extra"]["punctuate"] = True
-    await asyncio.gather(transport.run(), handle_transcriptions())
+    try:
+        await asyncio.gather(transport.run(), handle_transcriptions())
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        transport.stop()
 
 
 if __name__ == "__main__":
