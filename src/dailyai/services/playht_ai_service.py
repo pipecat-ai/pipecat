@@ -1,36 +1,40 @@
 import io
-import os
 import struct
 from pyht import Client
-from dotenv import load_dotenv
 from pyht.client import TTSOptions
 from pyht.protos.api_pb2 import Format
 
-from services.ai_service import AIService
+from dailyai.services.ai_services import TTSService
 
 
-class PlayHTAIService(AIService):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+class PlayHTAIService(TTSService):
 
-        self.speech_key = os.getenv("PLAY_HT_KEY") or ''
-        self.user_id = os.getenv("PLAY_HT_USER_ID") or ''
+    def __init__(
+        self,
+        *,
+        api_key,
+        user_id,
+        voice_url
+    ):
+        super().__init__()
+
+        self.speech_key = api_key
+        self.user_id = user_id
 
         self.client = Client(
             user_id=self.user_id,
             api_key=self.speech_key,
         )
         self.options = TTSOptions(
-            voice="s3://voice-cloning-zero-shot/820da3d2-3a3b-42e7-844d-e68db835a206/sarah/manifest.json",
+            voice=voice_url,
             sample_rate=16000,
             quality="higher",
             format=Format.FORMAT_WAV)
 
-    def close(self):
-        super().close()
+    def __del__(self):
         self.client.close()
 
-    def run_tts(self, sentence):
+    async def run_tts(self, sentence):
         b = bytearray()
         in_header = True
         for chunk in self.client.tts(sentence, self.options):
