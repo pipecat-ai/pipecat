@@ -91,6 +91,8 @@ class BaseTransportService():
             self._receive_audio_thread.join()
 
     def _post_run(self):
+        # Note that this function must be idempotent! It can be called multiple times
+        # if, for example, a keyboard interrupt occurs.
         pass
 
     def stop(self):
