@@ -17,10 +17,11 @@ from azure.cognitiveservices.speech import SpeechSynthesizer, SpeechConfig, Resu
 
 
 class AzureTTSService(TTSService):
-    def __init__(self, *, api_key, region):
+    def __init__(self, *, api_key, region, voice="en-US-SaraNeural"):
         super().__init__()
 
         self.speech_config = SpeechConfig(subscription=api_key, region=region)
+        self._voice = voice
         self.speech_synthesizer = SpeechSynthesizer(
             speech_config=self.speech_config, audio_config=None)
 
@@ -28,7 +29,7 @@ class AzureTTSService(TTSService):
         self.logger.info("Running azure tts")
         ssml = "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' " \
             "xmlns:mstts='http://www.w3.org/2001/mstts'>" \
-            "<voice name='en-US-SaraNeural'>" \
+            f"<voice name='{self._voice}'>" \
             "<mstts:silence type='Sentenceboundary' value='20ms' />" \
             "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>" \
             "<prosody rate='1.05'>" \
@@ -42,9 +43,11 @@ class AzureTTSService(TTSService):
             yield result.audio_data[44:]
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details
-            self.logger.info("Speech synthesis canceled: {}".format(cancellation_details.reason))
+            self.logger.info("Speech synthesis canceled: {}".format(
+                cancellation_details.reason))
             if cancellation_details.reason == CancellationReason.Error:
-                self.logger.info("Error details: {}".format(cancellation_details.error_details))
+                self.logger.info("Error details: {}".format(
+                    cancellation_details.error_details))
 
 
 class AzureLLMService(LLMService):
@@ -102,7 +105,8 @@ class AzureImageGenServiceREST(ImageGenService):
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         url = f"{self._azure_endpoint}openai/images/generations:submit?api-version={self._api_version}"
-        headers = {"api-key": self._api_key, "Content-Type": "application/json"}
+        headers = {"api-key": self._api_key,
+                   "Content-Type": "application/json"}
         body = {
             # Enter your prompt text here
             "prompt": sentence,

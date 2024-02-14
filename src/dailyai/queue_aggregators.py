@@ -33,7 +33,8 @@ class LLMContextAggregator(AIService):
             role: str,
             bot_participant_id=None,
             complete_sentences=True,
-            pass_through=True):
+            pass_through=True,
+            store=True):
         super().__init__()
         self.messages = messages
         self.bot_participant_id = bot_participant_id
@@ -41,6 +42,7 @@ class LLMContextAggregator(AIService):
         self.sentence = ""
         self.complete_sentences = complete_sentences
         self.pass_through = pass_through
+        self._store = store
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         # We don't do anything with non-text frames, pass it along to next in the pipeline.
@@ -65,13 +67,17 @@ class LLMContextAggregator(AIService):
             # though we check it above
             self.sentence += frame.text
             if self.sentence.endswith((".", "?", "!")):
-                self.messages.append({"role": self.role, "content": self.sentence})
+                if self._store:
+                    self.messages.append(
+                        {"role": self.role, "content": self.sentence})
                 self.sentence = ""
                 yield LLMMessagesQueueFrame(self.messages)
         else:
             # type: ignore -- the linter thinks this isn't a TextQueueFrame, even
             # though we check it above
-            self.messages.append({"role": self.role, "content": frame.text})
+            if self._store:
+                self.messages.append(
+                    {"role": self.role, "content": frame.text})
             yield LLMMessagesQueueFrame(self.messages)
 
     async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
@@ -85,14 +91,16 @@ class LLMUserContextAggregator(LLMContextAggregator):
     def __init__(self,
                  messages: list[dict],
                  bot_participant_id=None,
-                 complete_sentences=True):
-        super().__init__(messages, "user", bot_participant_id, complete_sentences, pass_through=False)
+                 complete_sentences=True,
+                 store=True):
+        super().__init__(messages, "user", bot_participant_id,
+                         complete_sentences, pass_through=False, store=store)
 
 
 class LLMAssistantContextAggregator(LLMContextAggregator):
     def __init__(
-        self, messages: list[dict], bot_participant_id=None, complete_sentences=True
+        self, messages: list[dict], bot_participant_id=None, complete_sentences=True, store=True
     ):
         super().__init__(
-            messages, "assistant", bot_participant_id, complete_sentences, pass_through=True
+            messages, "assistant", bot_participant_id, complete_sentences, pass_through=True, store=store
         )
