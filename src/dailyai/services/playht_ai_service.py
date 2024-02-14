@@ -31,7 +31,7 @@ class PlayHTAIService(TTSService):
             quality="higher",
             format=Format.FORMAT_WAV)
 
-    def close(self):
+    def __del__(self):
         self.client.close()
 
     async def run_tts(self, sentence):
