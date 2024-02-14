@@ -199,10 +199,13 @@ class DailyTransportService(BaseTransportService, EventHandler):
         if self._token and self._start_transcription:
             self.client.start_transcription(self.transcription_settings)
 
-        # signal.signal(signal.SIGINT, self.process_interrupt_handler)
+        self.original_sigint_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, self.process_interrupt_handler)
 
     def process_interrupt_handler(self, signum, frame):
         self._post_run()
+        if callable(self.original_sigint_handler):
+            self.original_sigint_handler(signum, frame)
 
     def _post_run(self):
         self.client.leave()
