@@ -18,13 +18,21 @@ class StartStreamQueueFrame(ControlQueueFrame):
 class EndStreamQueueFrame(ControlQueueFrame):
     pass
 
+
 class LLMResponseEndQueueFrame(QueueFrame):
     pass
+
+
+@dataclass()
+class ChatMessageQueueFrame(QueueFrame):
+    message: str
+
 
 @dataclass()
 class LLMFunctionCallFrame(QueueFrame):
     function_name: str
     arguments: str
+
 
 @dataclass()
 class AudioQueueFrame(QueueFrame):

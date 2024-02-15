@@ -12,7 +12,7 @@ from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextA
 from examples.foundational.support.runner import configure
 from dailyai.queue_frame import LLMMessagesQueueFrame, TranscriptionQueueFrame, QueueFrame, TextQueueFrame, LLMFunctionCallFrame, LLMResponseEndQueueFrame, StartStreamQueueFrame
 from dailyai.services.ai_services import FrameLogger, AIService
-
+from dailyai.conversation_wrappers import InterruptibleConversationWrapper
 
 import logging
 logging.basicConfig(level=logging.ERROR)
@@ -272,27 +272,31 @@ async def main(room_url: str, token):
         fl = FrameLogger("got transcript")
         fl2 = FrameLogger("just above the checklist")
 
-        async def handle_transcriptions():
+        async def handle_transcriptions(user_speech, tma_in, tma_out):
             tf = TranscriptFilter(transport._my_participant_id)
             await tts.run_to_queue(
                 transport.send_queue,
-                fl2.run(
-                    checklist.run(
-                        tma_out.run(
-                            llm.run(
-                                tma_in.run(
-                                    tf.run(
-                                        fl.run(
-                                            transport.get_receive_frames()
-                                        )
-                                    )
-                                )
+                checklist.run(
+                    tma_out.run(
+                        llm.run(
+                            tma_in.run(
+                                [StartStreamQueueFrame(), TextQueueFrame(user_speech)]
                             )
                         )
                     )
                 )
-
             )
+
+        async def run_conversation():
+
+            conversation_wrapper = InterruptibleConversationWrapper(
+                frame_generator=transport.get_receive_frames,
+                runner=handle_transcriptions,
+                interrupt=transport.interrupt,
+                my_participant_id=transport._my_participant_id,
+                llm_messages=messages,
+            )
+            await conversation_wrapper.run_conversation()
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
@@ -308,7 +312,7 @@ async def main(room_url: str, token):
 
         transport.transcription_settings["extra"]["punctuate"] = True
         try:
-            await asyncio.gather(transport.run(), handle_transcriptions())
+            await asyncio.gather(transport.run(), run_conversation())
         except (asyncio.CancelledError, KeyboardInterrupt):
             transport.stop()
 

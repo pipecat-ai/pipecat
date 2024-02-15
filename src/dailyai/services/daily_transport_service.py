@@ -229,6 +229,12 @@ class DailyTransportService(BaseTransportService, EventHandler):
     """
 
     def on_app_message(self, message, sender):
+        print(f"app message: {message}")
+        if self._loop:
+            frame = TranscriptionQueueFrame(
+                message["message"], message["name"], message["date"])
+            asyncio.run_coroutine_threadsafe(
+                self.receive_queue.put(frame), self._loop)
         pass
 
     def on_transcription_message(self, message: dict):
@@ -251,6 +257,10 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
     def on_transcription_started(self, status):
         pass
+
+    def _send_chat_message(self, frame):
+        self.client.send_app_message(
+            {'message': frame.message, 'event': 'chat-msg', 'name': self._bot_name, 'date': time.time(), 'room': 'main-room'})
 
     def stop(self):
         super().stop()

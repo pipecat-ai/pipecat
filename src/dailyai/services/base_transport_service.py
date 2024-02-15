@@ -9,6 +9,7 @@ from typing import AsyncGenerator
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
+    ChatMessageQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
     QueueFrame,
@@ -92,7 +93,6 @@ class BaseTransportService():
 
     def stop(self):
         self._stop_threads.set()
-        
 
     async def stop_when_done(self):
         await self._wait_for_send_queue_to_empty()
@@ -215,6 +215,8 @@ class BaseTransportService():
                                 self._set_image(frame.image)
                             elif isinstance(frame, SpriteQueueFrame):
                                 self._set_images(frame.images)
+                            elif isinstance(frame, ChatMessageQueueFrame):
+                                self._send_chat_message(frame)
                         elif len(b):
                             self.write_frame_to_mic(bytes(b))
                             b = bytearray()

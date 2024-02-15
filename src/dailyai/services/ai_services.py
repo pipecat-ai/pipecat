@@ -12,6 +12,7 @@ from dailyai.queue_frame import (
     LLMMessagesQueueFrame,
     LLMResponseEndQueueFrame,
     LLMFunctionCallFrame,
+    ChatMessageQueueFrame,
     QueueFrame,
     TextQueueFrame,
     TranscriptionQueueFrame,
@@ -145,6 +146,7 @@ class TTSService(AIService):
                 self.current_sentence = ""
 
         if text:
+            yield ChatMessageQueueFrame(message=text)
             async for audio_chunk in self.run_tts(text):
                 yield AudioQueueFrame(audio_chunk)
 
