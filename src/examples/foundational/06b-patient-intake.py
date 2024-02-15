@@ -10,7 +10,7 @@ from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
 from examples.foundational.support.runner import configure
-from dailyai.queue_frame import LLMMessagesQueueFrame, TranscriptionQueueFrame, QueueFrame, TextQueueFrame, LLMFunctionCallFrame, LLMResponseEndQueueFrame
+from dailyai.queue_frame import LLMMessagesQueueFrame, TranscriptionQueueFrame, QueueFrame, TextQueueFrame, LLMFunctionCallFrame, LLMResponseEndQueueFrame, StartStreamQueueFrame
 from dailyai.services.ai_services import FrameLogger, AIService
 
 

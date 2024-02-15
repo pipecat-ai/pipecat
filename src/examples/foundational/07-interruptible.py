@@ -6,9 +6,11 @@ from dailyai.conversation_wrappers import InterruptibleConversationWrapper
 from dailyai.queue_frame import StartStreamQueueFrame, TextQueueFrame
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
+from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 from examples.foundational.support.runner import configure
+
 
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
@@ -23,8 +25,10 @@ async def main(room_url: str, token):
             camera_enabled=False,
         )
 
-        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-        tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
+        llm = OpenAILLMService(api_key=os.getenv(
+            "OPENAI_CHATGPT_API_KEY"), model="gpt-4", tools=None)
+        tts = AzureTTSService(api_key=os.getenv(
+            "AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
 
         async def run_response(user_speech, tma_in, tma_out):
             await tts.run_to_queue(
