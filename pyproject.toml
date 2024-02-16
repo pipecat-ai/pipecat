@@ -13,10 +13,14 @@ dependencies = [
     "fal",
     "faster_whisper",
     "google-cloud-texttospeech",
+    "numpy",
     "openai",
     "Pillow",
     "pyht",
     "python-dotenv",
+    "torch",
+    "torchaudio",
+    "pyaudio",
     "typing-extensions"
 ]
 

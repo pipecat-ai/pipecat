@@ -6,6 +6,12 @@ import queue
 import threading
 import time
 from typing import AsyncGenerator
+import numpy as np
+import pyaudio
+import torch
+import torchaudio
+from enum import Enum
+import datetime
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
@@ -14,7 +20,56 @@ from dailyai.queue_frame import (
     QueueFrame,
     SpriteQueueFrame,
     StartStreamQueueFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame
 )
+
+torch.set_num_threads(1)
+
+model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                              model='silero_vad',
+                              force_reload=False)
+
+(get_speech_timestamps,
+ save_audio,
+ read_audio,
+ VADIterator,
+ collect_chunks) = utils
+
+# Taken from utils_vad.py
+
+
+def validate(model,
+             inputs: torch.Tensor):
+    with torch.no_grad():
+        outs = model(inputs)
+    return outs
+
+# Provided by Alexander Veysov
+
+
+def int2float(sound):
+    abs_max = np.abs(sound).max()
+    sound = sound.astype('float32')
+    if abs_max > 0:
+        sound *= 1/32768
+    sound = sound.squeeze()  # depends on the use case
+    return sound
+
+
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+SAMPLE_RATE = 16000
+CHUNK = int(SAMPLE_RATE / 10)
+
+audio = pyaudio.PyAudio()
+
+
+class VADState(Enum):
+    QUIET = 1
+    STARTING = 2
+    SPEAKING = 3
+    STOPPING = 4
 
 
 class BaseTransportService():
@@ -31,6 +86,16 @@ class BaseTransportService():
         self._speaker_enabled = kwargs.get("speaker_enabled") or False
         self._speaker_sample_rate = kwargs.get("speaker_sample_rate") or 16000
         self._fps = kwargs.get("fps") or 8
+        self._vad_start_s = kwargs.get("vad_start_s") or 0.2
+        self._vad_stop_s = kwargs.get("vad_stop_s") or 1.2
+
+        self._vad_samples = 1536
+        vad_frame_s = self._vad_samples / SAMPLE_RATE
+        self._vad_start_frames = round(self._vad_start_s / vad_frame_s)
+        self._vad_stop_frames = round(self._vad_stop_s / vad_frame_s)
+        self._vad_starting_count = 0
+        self._vad_stopping_count = 0
+        self._vad_state = VADState.QUIET
 
         duration_minutes = kwargs.get("duration_minutes") or 10
         self._expiration = time.time() + duration_minutes * 60
@@ -41,6 +106,7 @@ class BaseTransportService():
         self._threadsafe_send_queue = queue.Queue()
 
         self._images = None
+        self._user_is_speaking = False
 
         try:
             self._loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
@@ -55,17 +121,25 @@ class BaseTransportService():
     async def run(self):
         self._prerun()
 
-        async_output_queue_marshal_task = asyncio.create_task(self._marshal_frames())
+        async_output_queue_marshal_task = asyncio.create_task(
+            self._marshal_frames())
 
-        self._camera_thread = threading.Thread(target=self._run_camera, daemon=True)
+        self._camera_thread = threading.Thread(
+            target=self._run_camera, daemon=True)
         self._camera_thread.start()
 
-        self._frame_consumer_thread = threading.Thread(target=self._frame_consumer, daemon=True)
+        self._frame_consumer_thread = threading.Thread(
+            target=self._frame_consumer, daemon=True)
         self._frame_consumer_thread.start()
 
         if self._speaker_enabled:
-            self._receive_audio_thread = threading.Thread(target=self._receive_audio, daemon=True)
-            self._receive_audio_thread.start()
+            # TODO-CB: This is interesting
+            # self._receive_audio_thread = threading.Thread(
+            #     target=self._receive_audio, daemon=True)
+            # self._receive_audio_thread.start()
+
+            self._vad_thread = threading.Thread(target=self._vad, daemon=True)
+            self._vad_thread.start()
 
         try:
             while (
@@ -121,6 +195,59 @@ class BaseTransportService():
     @abstractmethod
     def _prerun(self):
         pass
+
+    def _vad(self):
+        # CB: Starting silero VAD stuff
+        # TODO-CB: Probably need to force virtual speaker creation if we're
+        # going to build this in?
+        # TODO-CB: pyaudio installation
+        while not self._stop_threads.is_set():
+            audio_chunk = self.read_audio_frames(self._vad_samples)
+            audio_int16 = np.frombuffer(audio_chunk, np.int16)
+            audio_float32 = int2float(audio_int16)
+            new_confidence = model(
+                torch.from_numpy(audio_float32), 16000).item()
+            speaking = new_confidence > 0.5
+
+            if speaking:
+                match self._vad_state:
+                    case VADState.QUIET:
+                        self._vad_state = VADState.STARTING
+                        self._vad_starting_count = 1
+                    case VADState.STARTING:
+                        self._vad_starting_count += 1
+                    case VADState.STOPPING:
+                        self._vad_state = VADState.SPEAKING
+                        self._vad_stopping_count = 0
+            else:
+                match self._vad_state:
+                    case VADState.STARTING:
+                        self._vad_state = VADState.QUIET
+                        self._vad_starting_count = 0
+                    case VADState.SPEAKING:
+                        self._vad_state = VADState.STOPPING
+                        self._vad_stopping_count = 1
+                    case VADState.STOPPING:
+                        self._vad_stopping_count += 1
+
+            if self._vad_state == VADState.STARTING and self._vad_starting_count >= self._vad_start_frames:
+                print(
+                    f'{datetime.datetime.utcnow().isoformat()} queueing start frame')
+                asyncio.run_coroutine_threadsafe(
+                    self.receive_queue.put(
+                        UserStartedSpeakingFrame()), self._loop
+                )
+                self._vad_state = VADState.SPEAKING
+                self._vad_starting_count = 0
+            if self._vad_state == VADState.STOPPING and self._vad_stopping_count >= self._vad_stop_frames:
+                print(
+                    f'{datetime.datetime.utcnow().isoformat()} queueing stop frame')
+                asyncio.run_coroutine_threadsafe(
+                    self.receive_queue.put(
+                        UserStoppedSpeakingFrame()), self._loop
+                )
+                self._vad_state = VADState.QUIET
+                self._vad_stopping_count = 0
 
     async def _marshal_frames(self):
         while True:
@@ -213,7 +340,8 @@ class BaseTransportService():
                                     len(b) % smallest_write_size
                                 )
                                 if truncated_length:
-                                    self.write_frame_to_mic(bytes(b[:truncated_length]))
+                                    self.write_frame_to_mic(
+                                        bytes(b[:truncated_length]))
                                     b = b[truncated_length:]
                             elif isinstance(frame, ImageQueueFrame):
                                 self._set_image(frame.image)
@@ -227,7 +355,8 @@ class BaseTransportService():
                         # can cause static in the audio stream.
                         if len(b):
                             truncated_length = len(b) - (len(b) % 160)
-                            self.write_frame_to_mic(bytes(b[:truncated_length]))
+                            self.write_frame_to_mic(
+                                bytes(b[:truncated_length]))
                             b = bytearray()
 
                         if isinstance(frame, StartStreamQueueFrame):
@@ -240,5 +369,6 @@ class BaseTransportService():
 
                 b = bytearray()
             except Exception as e:
-                self._logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
+                self._logger.error(
+                    f"Exception in frame_consumer: {e}, {len(b)}")
                 raise e

@@ -1,18 +1,4 @@
-import asyncio
-import inspect
-import logging
-import signal
-import threading
-import types
-
-from functools import partial
-
-from dailyai.queue_frame import (
-    TranscriptionQueueFrame,
-)
-
-from threading import Event
-
+from dailyai.services.base_transport_service import BaseTransportService
 from daily import (
     EventHandler,
     CallClient,
@@ -21,8 +7,61 @@ from daily import (
     VirtualMicrophoneDevice,
     VirtualSpeakerDevice,
 )
+from threading import Event
+from dailyai.queue_frame import (
+    TranscriptionQueueFrame,
+)
+from functools import partial
+import types
+import pyaudio
+import torchaudio
+import asyncio
+import inspect
+import io
+import logging
+import numpy as np
+import signal
+import threading
+import torch
+torch.set_num_threads(1)
 
-from dailyai.services.base_transport_service import BaseTransportService
+model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                              model='silero_vad',
+                              force_reload=True)
+
+(get_speech_timestamps,
+ save_audio,
+ read_audio,
+ VADIterator,
+ collect_chunks) = utils
+
+# Taken from utils_vad.py
+
+
+def validate(model,
+             inputs: torch.Tensor):
+    with torch.no_grad():
+        outs = model(inputs)
+    return outs
+
+# Provided by Alexander Veysov
+
+
+def int2float(sound):
+    abs_max = np.abs(sound).max()
+    sound = sound.astype('float32')
+    if abs_max > 0:
+        sound *= 1/32768
+    sound = sound.squeeze()  # depends on the use case
+    return sound
+
+
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+SAMPLE_RATE = 16000
+CHUNK = int(SAMPLE_RATE / 10)
+
+audio = pyaudio.PyAudio()
 
 
 class DailyTransportService(BaseTransportService, EventHandler):
@@ -45,7 +84,8 @@ class DailyTransportService(BaseTransportService, EventHandler):
         start_transcription: bool = False,
         **kwargs,
     ):
-        super().__init__(**kwargs)  # This will call BaseTransportService.__init__ method, not EventHandler
+        # This will call BaseTransportService.__init__ method, not EventHandler
+        super().__init__(**kwargs)
 
         self._room_url: str = room_url
         self._bot_name: str = bot_name
@@ -80,7 +120,8 @@ class DailyTransportService(BaseTransportService, EventHandler):
             for handler in self._event_handlers[event_name]:
                 if inspect.iscoroutinefunction(handler):
                     if self._loop:
-                        asyncio.run_coroutine_threadsafe(handler(*args, **kwargs), self._loop)
+                        asyncio.run_coroutine_threadsafe(
+                            handler(*args, **kwargs), self._loop)
                     else:
                         raise Exception(
                             "No event loop to run coroutine. In order to use async event handlers, you must run the DailyTransportService in an asyncio event loop.")
@@ -92,7 +133,8 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
     def add_event_handler(self, event_name: str, handler):
         if not event_name.startswith("on_"):
-            raise Exception(f"Event handler {event_name} must start with 'on_'")
+            raise Exception(
+                f"Event handler {event_name} must start with 'on_'")
 
         methods = inspect.getmembers(self, predicate=inspect.ismethod)
         if event_name not in [method[0] for method in methods]:
@@ -105,7 +147,8 @@ class DailyTransportService(BaseTransportService, EventHandler):
                     handler, self)]
             setattr(self, event_name, partial(self._patch_method, event_name))
         else:
-            self._event_handlers[event_name].append(types.MethodType(handler, self))
+            self._event_handlers[event_name].append(
+                types.MethodType(handler, self))
 
     def event_handler(self, event_name: str):
         def decorator(handler):
@@ -149,7 +192,8 @@ class DailyTransportService(BaseTransportService, EventHandler):
             Daily.select_speaker_device("speaker")
 
         self.client.set_user_name(self._bot_name)
-        self.client.join(self._room_url, self._token, completion=self.call_joined)
+        self.client.join(self._room_url, self._token,
+                         completion=self.call_joined)
         self._my_participant_id = self.client.participants()["local"]["id"]
 
         self.client.update_inputs(
@@ -242,8 +286,10 @@ class DailyTransportService(BaseTransportService, EventHandler):
                 participantId = message["participantId"]
             elif "session_id" in message:
                 participantId = message["session_id"]
-            frame = TranscriptionQueueFrame(message["text"], participantId, message["timestamp"])
-            asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self._loop)
+            frame = TranscriptionQueueFrame(
+                message["text"], participantId, message["timestamp"])
+            asyncio.run_coroutine_threadsafe(
+                self.receive_queue.put(frame), self._loop)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
         pass

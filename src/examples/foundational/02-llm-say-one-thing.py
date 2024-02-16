@@ -20,7 +20,8 @@ async def main(room_url):
             None,
             "Say One Thing From an LLM",
             duration_minutes=meeting_duration_minutes,
-            mic_enabled=True
+            mic_enabled=True,
+            speaker_enabled=True
         )
 
         tts = ElevenLabsTTSService(

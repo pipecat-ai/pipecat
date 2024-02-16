@@ -23,6 +23,14 @@ class LLMResponseEndQueueFrame(QueueFrame):
     pass
 
 
+class UserStartedSpeakingFrame(QueueFrame):
+    pass
+
+
+class UserStoppedSpeakingFrame(QueueFrame):
+    pass
+
+
 @dataclass()
 class AudioQueueFrame(QueueFrame):
     data: bytes

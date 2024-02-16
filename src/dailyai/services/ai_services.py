@@ -2,6 +2,7 @@ import asyncio
 import io
 import logging
 import time
+import datetime
 import wave
 
 from dailyai.queue_frame import (
@@ -200,8 +201,9 @@ class FrameLogger(AIService):
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if isinstance(frame, (AudioQueueFrame, ImageQueueFrame)):
-            self.logger.info(f"{self.prefix}: {type(frame)}")
+            self.logger.info(
+                f"{datetime.datetime.utcnow().isoformat()} {self.prefix}: {type(frame)}")
         else:
-            print(f"{self.prefix}: {frame}")
+            print(f"{datetime.datetime.utcnow().isoformat()} {self.prefix}: {frame}")
 
         yield frame
