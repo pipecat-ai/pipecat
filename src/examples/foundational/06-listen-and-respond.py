@@ -9,6 +9,12 @@ from dailyai.services.ai_services import FrameLogger
 
 
 async def main(room_url: str, token):
+    context = [
+        {
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
+        },
+    ]
     transport = DailyTransportService(
         room_url,
         token,
@@ -18,7 +24,8 @@ async def main(room_url: str, token):
         mic_enabled=True,
         mic_sample_rate=16000,
         camera_enabled=False,
-        speaker_enabled=True
+        speaker_enabled=True,
+        context=context
     )
 
     llm = AzureLLMService(
@@ -35,17 +42,11 @@ async def main(room_url: str, token):
         await tts.say("Hi, I'm listening!", transport.send_queue)
 
     async def handle_transcriptions():
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
-            },
-        ]
 
         tma_in = LLMUserContextAggregator(
-            messages, transport._my_participant_id)
+            context, transport._my_participant_id)
         tma_out = LLMAssistantContextAggregator(
-            messages, transport._my_participant_id)
+            context, transport._my_participant_id)
         await tts.run_to_queue(
             transport.send_queue,
             tma_out.run(
@@ -60,6 +61,7 @@ async def main(room_url: str, token):
         )
 
     transport.transcription_settings["extra"]["punctuate"] = True
+    transport.transcription_settings["extra"]["endpointing"] = True
     await asyncio.gather(transport.run(), handle_transcriptions())
 
 

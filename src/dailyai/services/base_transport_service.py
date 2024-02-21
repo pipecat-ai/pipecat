@@ -1,5 +1,7 @@
 from abc import abstractmethod
 import asyncio
+import copy
+import functools
 import itertools
 import logging
 import queue
@@ -13,6 +15,9 @@ import torchaudio
 from enum import Enum
 import datetime
 
+from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable
+from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMUserContextAggregator
+
 from dailyai.queue_frame import (
     AudioQueueFrame,
     EndStreamQueueFrame,
@@ -20,6 +25,7 @@ from dailyai.queue_frame import (
     QueueFrame,
     SpriteQueueFrame,
     StartStreamQueueFrame,
+    TranscriptionQueueFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame
 )
@@ -88,6 +94,7 @@ class BaseTransportService():
         self._fps = kwargs.get("fps") or 8
         self._vad_start_s = kwargs.get("vad_start_s") or 0.2
         self._vad_stop_s = kwargs.get("vad_stop_s") or 1.2
+        self._context = kwargs.get("context") or []
 
         self._vad_samples = 1536
         vad_frame_s = self._vad_samples / SAMPLE_RATE
@@ -107,6 +114,7 @@ class BaseTransportService():
 
         self._images = None
         self._user_is_speaking = False
+        self._current_phrase = ""
 
         try:
             self._loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
@@ -117,6 +125,58 @@ class BaseTransportService():
         self._is_interrupted = threading.Event()
 
         self._logger: logging.Logger = logging.getLogger()
+
+    def update_messages(self, new_messages: list[dict[str, str]], task: asyncio.Task | None):
+        if task:
+            if not task.cancelled():
+                self._current_phrase = ""
+                self._messages = new_messages
+
+    async def speak_after_delay(self, user_speech, context):
+        print(f"starting to speak_after_delay, {user_speech}")
+        await asyncio.sleep(0)  # self._delay_before_speech_seconds
+        # TODO-CB: I think this needs to go
+        print(f"past asyncio sleep, context is {context}")
+        # TODO-CB: This exception for missing class gets eaten!
+        tma_in = LLMUserContextAggregator(
+            context, self._my_participant_id, complete_sentences=False
+        )
+        tma_out = LLMAssistantContextAggregator(
+            context, self._my_participant_id
+        )
+        print(f"about to call the runner, tma_in is {tma_in}")
+        await self._runner(user_speech, tma_in, tma_out)
+
+    async def run_conversation(self, runner: Iterable[QueueFrame]
+                               | AsyncIterable[QueueFrame]
+                               | asyncio.Queue[QueueFrame],
+                               ) -> AsyncGenerator[QueueFrame, None]:
+        current_response_task = None
+        self._runner = runner
+
+        async for frame in self.get_receive_frames():
+            print(f"got frame of type: {type(frame)}")
+            if isinstance(frame, EndStreamQueueFrame):
+                break
+            elif not isinstance(frame, TranscriptionQueueFrame):
+                continue
+
+            if frame.participantId == self._my_participant_id:
+                continue
+
+            if current_response_task:
+                current_response_task.cancel()
+                self.interrupt()
+
+            self._current_phrase += " " + frame.text
+            current_llm_context = copy.deepcopy(self._context)
+            current_response_task = asyncio.create_task(
+                self.speak_after_delay(
+                    self._current_phrase, current_llm_context)
+            )
+            current_response_task.add_done_callback(
+                functools.partial(self.update_messages, current_llm_context)
+            )
 
     async def run(self):
         self._prerun()
