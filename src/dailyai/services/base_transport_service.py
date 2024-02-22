@@ -158,8 +158,9 @@ class BaseTransportService():
                 break
             # elif not isinstance(frame, TranscriptionQueueFrame):
                 # continue
-
-            if hasattr(frame, 'participantId') and frame.participantId == self._my_participant_id:
+            # TODO-CB: Verify this is an accurate replacement
+            # if hasattr(frame, 'participantId') and frame.participantId == self._my_participant_id:
+            if not isinstance(frame, UserStoppedSpeakingFrame):
                 continue
 
             if current_response_task:

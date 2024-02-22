@@ -147,13 +147,17 @@ class TTSService(AIService):
 
         if text:
             async for audio_chunk in self.run_tts(text):
-                yield AudioQueueFrame(audio_chunk)
+                print(f"audio chunk size: {len(audio_chunk)}")
+                size = 8000
+                for i in range(0, len(audio_chunk), size):
+                    print(f"i is {i}")
+                    yield AudioQueueFrame(audio_chunk[i : i+size])
             yield TTSCompletedFrame(text)
 
     async def finalize(self):
         if self.current_sentence:
             async for audio_chunk in self.run_tts(self.current_sentence):
-                yield AudioQueueFrame(audio_chunk)
+               yield AudioQueueFrame(audio_chunk)
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue):
