@@ -14,7 +14,9 @@ from dailyai.queue_frame import (
     LLMResponseEndQueueFrame,
     QueueFrame,
     TextQueueFrame,
+    TTSCompletedFrame,
     TranscriptionQueueFrame,
+    UserStoppedSpeakingFrame
 )
 
 from abc import abstractmethod
@@ -81,6 +83,11 @@ class AIService:
 
 
 class LLMService(AIService):
+
+    def __init__(self, context):
+        super().__init__()
+        self._context = context
+
     @abstractmethod
     async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
         yield ""
@@ -90,8 +97,11 @@ class LLMService(AIService):
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, LLMMessagesQueueFrame):
-            async for text_chunk in self.run_llm_async(frame.messages):
+        print(f"##### process frame got a frame, {type(frame)}")
+        if isinstance(frame, UserStoppedSpeakingFrame):
+            print(
+                f"### Got a user stopped speaking frame, context is {self._context}")
+            async for text_chunk in self.run_llm_async(self._context):
                 yield TextQueueFrame(text_chunk)
             yield LLMResponseEndQueueFrame()
         else:
@@ -117,6 +127,12 @@ class TTSService(AIService):
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if not isinstance(frame, TextQueueFrame):
+            # We don't want transcription frames, which are a subclass
+            yield frame
+            return
+
+        # TODO-CB: Clean this up
+        if isinstance(frame, TranscriptionQueueFrame):
             yield frame
             return
 
@@ -132,6 +148,7 @@ class TTSService(AIService):
         if text:
             async for audio_chunk in self.run_tts(text):
                 yield AudioQueueFrame(audio_chunk)
+            yield TTSCompletedFrame(text)
 
     async def finalize(self):
         if self.current_sentence:

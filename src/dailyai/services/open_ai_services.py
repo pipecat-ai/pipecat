@@ -10,8 +10,8 @@ from dailyai.services.ai_services import LLMService, ImageGenService
 
 
 class OpenAILLMService(LLMService):
-    def __init__(self, *, api_key, model="gpt-4"):
-        super().__init__()
+    def __init__(self, *, api_key, model="gpt-4", context):
+        super().__init__(context)
         self._model = model
         self._client = AsyncOpenAI(api_key=api_key)
 

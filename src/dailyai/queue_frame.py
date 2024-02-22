@@ -51,6 +51,9 @@ class SpriteQueueFrame(QueueFrame):
 class TextQueueFrame(QueueFrame):
     text: str
 
+@dataclass()
+class TTSCompletedFrame(QueueFrame):
+    text: str
 
 @dataclass()
 class TranscriptionQueueFrame(TextQueueFrame):

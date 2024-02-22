@@ -26,6 +26,7 @@ from dailyai.queue_frame import (
     SpriteQueueFrame,
     StartStreamQueueFrame,
     TranscriptionQueueFrame,
+    TTSCompletedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame
 )
@@ -126,16 +127,21 @@ class BaseTransportService():
 
         self._logger: logging.Logger = logging.getLogger()
 
-    def update_messages(self, new_messages: list[dict[str, str]], task: asyncio.Task | None):
+    def update_messages(self, new_context: list[dict[str, str]], task: asyncio.Task | None):
         if task:
             if not task.cancelled():
                 self._current_phrase = ""
-                self._messages = new_messages
+                self._context = new_context
 
-    async def speak_after_delay(self, user_speech, context):
-        print(f"starting to speak_after_delay, {user_speech}")
-        await asyncio.sleep(0)  # self._delay_before_speech_seconds
-        # TODO-CB: I think this needs to go
+    def append_to_context(self, role, text):
+        last_context_item = self._context[-1]
+        if last_context_item and last_context_item['role'] == role:
+            last_context_item['content'] += f" {text}"
+        else:
+            self._context.append({"role": role, "content": text})
+
+    async def run_pipeline(self, frame, context):
+        print(f"starting to speak_after_delay, {frame}")
         print(f"past asyncio sleep, context is {context}")
         # TODO-CB: This exception for missing class gets eaten!
         tma_in = LLMUserContextAggregator(
@@ -145,7 +151,7 @@ class BaseTransportService():
             context, self._my_participant_id
         )
         print(f"about to call the runner, tma_in is {tma_in}")
-        await self._runner(user_speech, tma_in, tma_out)
+        await self._runner(frame, tma_in, tma_out)
 
     async def run_conversation(self, runner: Iterable[QueueFrame]
                                | AsyncIterable[QueueFrame]
@@ -158,21 +164,22 @@ class BaseTransportService():
             print(f"got frame of type: {type(frame)}")
             if isinstance(frame, EndStreamQueueFrame):
                 break
-            elif not isinstance(frame, TranscriptionQueueFrame):
-                continue
+            # elif not isinstance(frame, TranscriptionQueueFrame):
+                # continue
 
-            if frame.participantId == self._my_participant_id:
+            if hasattr(frame, 'participantId') and frame.participantId == self._my_participant_id:
                 continue
 
             if current_response_task:
+                # TODO-CB: Maybe not always interrupt? Are there frame types we can pass through?
                 current_response_task.cancel()
                 self.interrupt()
 
-            self._current_phrase += " " + frame.text
+            # self._current_phrase += " " + frame.text
             current_llm_context = copy.deepcopy(self._context)
             current_response_task = asyncio.create_task(
-                self.speak_after_delay(
-                    self._current_phrase, current_llm_context)
+                self.run_pipeline(
+                    frame, current_llm_context)
             )
             current_response_task.add_done_callback(
                 functools.partial(self.update_messages, current_llm_context)
@@ -292,16 +299,18 @@ class BaseTransportService():
 
             if self._vad_state == VADState.STARTING and self._vad_starting_count >= self._vad_start_frames:
                 print(
-                    f'{datetime.datetime.utcnow().isoformat()} queueing start frame')
+                    f'!!! {datetime.datetime.utcnow().isoformat()} queueing start frame')
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(
                         UserStartedSpeakingFrame()), self._loop
                 )
+                print(f"!!! VAD started, calling interrupt")
+                self.interrupt()
                 self._vad_state = VADState.SPEAKING
                 self._vad_starting_count = 0
             if self._vad_state == VADState.STOPPING and self._vad_stopping_count >= self._vad_stop_frames:
                 print(
-                    f'{datetime.datetime.utcnow().isoformat()} queueing stop frame')
+                    f'!!! {datetime.datetime.utcnow().isoformat()} queueing stop frame')
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(
                         UserStoppedSpeakingFrame()), self._loop
@@ -318,6 +327,7 @@ class BaseTransportService():
                 break
 
     def interrupt(self):
+        print(f"!!! setting interrupt")
         self._is_interrupted.set()
 
     async def get_receive_frames(self) -> AsyncGenerator[QueueFrame, None]:
@@ -389,10 +399,13 @@ class BaseTransportService():
 
                     # if interrupted, we just pull frames off the queue and discard them
                     if not self._is_interrupted.is_set():
+                        print(
+                            f"~~~ not interrupted so popping frame of type {type(frame)}")
                         if frame:
                             if isinstance(frame, AudioQueueFrame):
                                 chunk = frame.data
-
+                                print(
+                                    f"~~~ length of this chunk: {len(chunk)}")
                                 all_audio_frames.extend(chunk)
 
                                 b.extend(chunk)
@@ -407,12 +420,16 @@ class BaseTransportService():
                                 self._set_image(frame.image)
                             elif isinstance(frame, SpriteQueueFrame):
                                 self._set_images(frame.images)
+                            elif isinstance(frame, TTSCompletedFrame):
+                                self.append_to_context(
+                                    "assistant", frame.text)
                         elif len(b):
                             self.write_frame_to_mic(bytes(b))
                             b = bytearray()
                     else:
                         # if there are leftover audio bytes, write them now; failing to do so
                         # can cause static in the audio stream.
+                        print(f"!!! interrupted, flushing audio")
                         if len(b):
                             truncated_length = len(b) - (len(b) % 160)
                             self.write_frame_to_mic(
