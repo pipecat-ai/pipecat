@@ -140,18 +140,10 @@ class BaseTransportService():
         else:
             self._context.append({"role": role, "content": text})
 
-    async def run_pipeline(self, frame, context):
+    async def run_pipeline(self, frame):
         print(f"starting to speak_after_delay, {frame}")
-        print(f"past asyncio sleep, context is {context}")
         # TODO-CB: This exception for missing class gets eaten!
-        tma_in = LLMUserContextAggregator(
-            context, self._my_participant_id, complete_sentences=False
-        )
-        tma_out = LLMAssistantContextAggregator(
-            context, self._my_participant_id
-        )
-        print(f"about to call the runner, tma_in is {tma_in}")
-        await self._runner(frame, tma_in, tma_out)
+        await self._runner(frame)
 
     async def run_conversation(self, runner: Iterable[QueueFrame]
                                | AsyncIterable[QueueFrame]
@@ -176,13 +168,13 @@ class BaseTransportService():
                 self.interrupt()
 
             # self._current_phrase += " " + frame.text
-            current_llm_context = copy.deepcopy(self._context)
+           # current_llm_context = copy.deepcopy(self._context)
             current_response_task = asyncio.create_task(
                 self.run_pipeline(
-                    frame, current_llm_context)
+                    frame)
             )
             current_response_task.add_done_callback(
-                functools.partial(self.update_messages, current_llm_context)
+                functools.partial(self.update_messages, self._context)
             )
 
     async def run(self):

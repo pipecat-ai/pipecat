@@ -52,7 +52,7 @@ async def main(room_url: str, token):
         #     voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
         fl = FrameLogger("just outside the innermost layer")
 
-        async def run_response(in_frame, tma_in, tma_out):
+        async def run_response(in_frame):
             await tts.run_to_queue(
                 transport.send_queue,
                 # tma_out.run(
