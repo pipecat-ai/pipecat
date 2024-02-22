@@ -392,13 +392,9 @@ class BaseTransportService():
 
                     # if interrupted, we just pull frames off the queue and discard them
                     if not self._is_interrupted.is_set():
-                        print(
-                            f"~~~ not interrupted so popping frame of type {type(frame)}")
                         if frame:
                             if isinstance(frame, AudioQueueFrame):
                                 chunk = frame.data
-                                print(
-                                    f"~~~ length of this chunk: {len(chunk)}")
                                 all_audio_frames.extend(chunk)
 
                                 b.extend(chunk)

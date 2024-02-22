@@ -150,7 +150,6 @@ class TTSService(AIService):
                 print(f"audio chunk size: {len(audio_chunk)}")
                 size = 8000
                 for i in range(0, len(audio_chunk), size):
-                    print(f"i is {i}")
                     yield AudioQueueFrame(audio_chunk[i : i+size])
             yield TTSCompletedFrame(text)
 

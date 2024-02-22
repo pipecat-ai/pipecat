@@ -12,6 +12,7 @@ dependencies = [
     "daily-python",
     "fal",
     "faster_whisper",
+    "groq",
     "google-cloud-texttospeech",
     "numpy",
     "openai",

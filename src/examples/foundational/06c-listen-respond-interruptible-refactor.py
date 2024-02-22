@@ -9,6 +9,7 @@ from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.ai_services import FrameLogger
+from dailyai.services.groq_ai_services import GroqLLMService
 
 from examples.foundational.support.runner import configure
 
@@ -42,7 +43,7 @@ async def main(room_url: str, token):
         #     context=context)
         llm = OpenAILLMService(
             context=context, api_key=os.getenv("OPENAI_CHATGPT_API_KEY"))
-
+        llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), context=context)
         tts = AzureTTSService(
             api_key=os.getenv("AZURE_SPEECH_API_KEY"),
             region=os.getenv("AZURE_SPEECH_REGION"))
