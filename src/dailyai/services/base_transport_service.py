@@ -94,7 +94,7 @@ class BaseTransportService():
         self._speaker_sample_rate = kwargs.get("speaker_sample_rate") or 16000
         self._fps = kwargs.get("fps") or 8
         self._vad_start_s = kwargs.get("vad_start_s") or 0.2
-        self._vad_stop_s = kwargs.get("vad_stop_s") or 1.2
+        self._vad_stop_s = kwargs.get("vad_stop_s") or 0.5
         self._context = kwargs.get("context") or []
 
         self._vad_samples = 1536
