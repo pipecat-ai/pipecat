@@ -147,7 +147,6 @@ class TTSService(AIService):
 
         if text:
             async for audio_chunk in self.run_tts(text):
-                print(f"audio chunk size: {len(audio_chunk)}")
                 size = 8000
                 for i in range(0, len(audio_chunk), size):
                     yield AudioQueueFrame(audio_chunk[i : i+size])
