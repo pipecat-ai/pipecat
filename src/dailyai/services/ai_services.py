@@ -84,7 +84,7 @@ class AIService:
 
 class LLMService(AIService):
 
-    def __init__(self, context):
+    def __init__(self, context=None):
         super().__init__()
         self._context = context
 
@@ -97,11 +97,17 @@ class LLMService(AIService):
         pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        print(f"##### process frame got a frame, {type(frame)}")
         if isinstance(frame, UserStoppedSpeakingFrame):
-            print(
-                f"### Got a user stopped speaking frame, context is {self._context}")
+            # Then we're in conversation mode with VAD;
+            # use the global shared context for completion
             async for text_chunk in self.run_llm_async(self._context):
+                yield TextQueueFrame(text_chunk)
+            yield LLMResponseEndQueueFrame()
+        elif isinstance(frame, LLMMessagesQueueFrame):
+            # It's an LLMMessagesQueueFrame directly created in an
+            # example.
+            # TODO-CB: Clean this up?
+            async for text_chunk in self.run_llm_async(frame.messages):
                 yield TextQueueFrame(text_chunk)
             yield LLMResponseEndQueueFrame()
         else:

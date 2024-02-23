@@ -25,7 +25,6 @@ async def main(room_url: str, token):
         mic_sample_rate=16000,
         camera_enabled=False,
         speaker_enabled=True,
-        context=context
     )
 
     llm = AzureLLMService(

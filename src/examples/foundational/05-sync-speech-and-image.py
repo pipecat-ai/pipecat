@@ -69,11 +69,9 @@ async def main(room_url):
             to_speak = f"{month}: {image_description}"
             audio_task = asyncio.create_task(get_all_audio(to_speak))
             image_task = asyncio.create_task(dalle.run_image_gen(image_description))
-            print(f"about to gather tasks for {month}")
             (audio, image_data) = await asyncio.gather(
                 audio_task, image_task
             )
-            print(f"about to return from get_month_data for {month}")
             return {
                 "month": month,
                 "text": image_description,
@@ -109,11 +107,7 @@ async def main(room_url):
             # is we'll have as little delay as possible before the first month, and
             # likely no delay between months, but the months won't display in order.
             for month_data_task in asyncio.as_completed(month_tasks):
-                print(f"month_data_task: {month_data_task}")
-                try:
-                    data = await month_data_task
-                except Exception:
-                    print("OMG EXCEPTION!!!!")
+                data = await month_data_task
                 if data:
                     await transport.send_queue.put(
                         [

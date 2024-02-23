@@ -14,8 +14,6 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-print(f"I loaded an environment, and my FAL_KEY_ID is {os.getenv('FAL_KEY_ID')}")
-
 
 def start_bot(bot_path, args=None):
     daily_api_key = os.getenv("DAILY_API_KEY")

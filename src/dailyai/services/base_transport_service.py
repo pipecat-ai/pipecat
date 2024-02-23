@@ -134,14 +134,12 @@ class BaseTransportService():
                 self._context = new_context
 
     def append_to_context(self, role, text):
-        last_context_item = self._context[-1]
-        if last_context_item and last_context_item['role'] == role:
-            last_context_item['content'] += f" {text}"
+        if len(self._context) > 0 and self._context[-1] and self._context[-1]['role'] == role:
+            self._context[-1]['content'] += f" {text}"
         else:
             self._context.append({"role": role, "content": text})
 
     async def run_pipeline(self, frame):
-        print(f"starting to speak_after_delay, {frame}")
         # TODO-CB: This exception for missing class gets eaten!
         await self._runner(frame)
 
@@ -153,7 +151,6 @@ class BaseTransportService():
         self._runner = runner
 
         async for frame in self.get_receive_frames():
-            print(f"got frame of type: {type(frame)}")
             if isinstance(frame, EndStreamQueueFrame):
                 break
             # elif not isinstance(frame, TranscriptionQueueFrame):
@@ -222,7 +219,9 @@ class BaseTransportService():
         self._frame_consumer_thread.join()
 
         if self._speaker_enabled:
-            self._receive_audio_thread.join()
+            # TODO-CB: this was breaking example 2?
+            # self._receive_audio_thread.join()
+            pass
 
     def _post_run(self):
         # Note that this function must be idempotent! It can be called multiple times
@@ -291,19 +290,14 @@ class BaseTransportService():
                         self._vad_stopping_count += 1
 
             if self._vad_state == VADState.STARTING and self._vad_starting_count >= self._vad_start_frames:
-                print(
-                    f'!!! {datetime.datetime.utcnow().isoformat()} queueing start frame')
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(
                         UserStartedSpeakingFrame()), self._loop
                 )
-                print(f"!!! VAD started, calling interrupt")
                 self.interrupt()
                 self._vad_state = VADState.SPEAKING
                 self._vad_starting_count = 0
             if self._vad_state == VADState.STOPPING and self._vad_stopping_count >= self._vad_stop_frames:
-                print(
-                    f'!!! {datetime.datetime.utcnow().isoformat()} queueing stop frame')
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(
                         UserStoppedSpeakingFrame()), self._loop
@@ -320,7 +314,7 @@ class BaseTransportService():
                 break
 
     def interrupt(self):
-        print(f"!!! setting interrupt")
+        self._logger.debug("!!! Setting interrupta")
         self._is_interrupted.set()
 
     async def get_receive_frames(self) -> AsyncGenerator[QueueFrame, None]:
@@ -418,7 +412,6 @@ class BaseTransportService():
                     else:
                         # if there are leftover audio bytes, write them now; failing to do so
                         # can cause static in the audio stream.
-                        print(f"!!! interrupted, flushing audio")
                         if len(b):
                             truncated_length = len(b) - (len(b) % 160)
                             self.write_frame_to_mic(

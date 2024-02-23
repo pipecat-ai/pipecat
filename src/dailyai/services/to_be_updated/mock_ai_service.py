@@ -10,7 +10,7 @@ class MockAIService(AIService):
         super().__init__()
 
     def run_tts(self, sentence):
-        print("running tts", sentence)
+        self._logger.debug("running mock tts", sentence)
         time.sleep(2)
 
     def run_image_gen(self, sentence):

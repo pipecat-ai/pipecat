@@ -54,7 +54,6 @@ async def main(room_url: str):
         async def get_bot1_statement():
             # Run the LLMs synchronously for the back-and-forth
             bot1_msg = await llm.run_llm(bot1_messages)
-            print(f"bot1_msg: {bot1_msg}")
             if bot1_msg:
                 bot1_messages.append({"role": "assistant", "content": bot1_msg})
                 bot2_messages.append({"role": "user", "content": bot1_msg})
@@ -68,7 +67,6 @@ async def main(room_url: str):
         async def get_bot2_statement():
             # Run the LLMs synchronously for the back-and-forth
             bot2_msg = await llm.run_llm(bot2_messages)
-            print(f"bot2_msg: {bot2_msg}")
             if bot2_msg:
                 bot2_messages.append({"role": "assistant", "content": bot2_msg})
                 bot1_messages.append({"role": "user", "content": bot2_msg})
@@ -81,7 +79,6 @@ async def main(room_url: str):
 
         async def argue():
             for i in range(100):
-                print(f"In iteration {i}")
 
                 bot1_description = "A woman conservatively dressed as a librarian in a library surrounded by books, cartoon, serious, highly detailed"
 

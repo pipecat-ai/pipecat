@@ -34,15 +34,12 @@ async def main(room_url: str, token):
     img = FalImageGenService()
 
     async def handle_transcriptions():
-        print("handle_transcriptions got called")
-
         sentence = ""
         async for message in transport.get_transcriptions():
-            print(f"transcription message: {message}")
+            self._logger.debug(f"transcription message: {message}")
             if message["session_id"] == transport._my_participant_id:
                 continue
             finder = message["text"].find("start over")
-            print(f"finder: {finder}")
             if finder >= 0:
                 async for audio in tts.run_tts(f"Resetting."):
                     transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
@@ -50,7 +47,6 @@ async def main(room_url: str, token):
                 continue
             # todo: we could differentiate between transcriptions from different participants
             sentence += f" {message['text']}"
-            print(f"sentence is now: {sentence}")
             # TODO: Cache this audio
             phrase = random.choice(["OK.", "Got it.", "Sure.", "You bet.", "Sure thing."])
             async for audio in tts.run_tts(phrase):
@@ -65,7 +61,7 @@ async def main(room_url: str, token):
 
     @transport.event_handler("on_participant_joined")
     async def on_participant_joined(transport, participant):
-        print(f"participant joined: {participant['info']['userName']}")
+        self._logger.debug(f"participant joined: {participant['info']['userName']}")
         if participant["info"]["isLocal"]:
             return
         async for audio in tts.run_tts("Describe an image, and I'll create it."):

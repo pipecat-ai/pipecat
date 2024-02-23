@@ -113,10 +113,6 @@ async def main(room_url: str, token, phone):
                 )
             )
 
-        @transport.event_handler("on_participant_joined")
-        async def pax_joined(transport, pax):
-            print(f"PARTICIPANT JOINED: {pax}")
-
         @transport.event_handler("on_call_state_updated")
         async def on_call_state_updated(transport, state):
             if (state == "joined"):

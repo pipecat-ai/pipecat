@@ -281,7 +281,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
     def on_transcription_message(self, message: dict):
         if self._loop:
-            print(f"transcription: {message}")
+            self._logger.debug(f"transcription: {message}")
             participantId = ""
             if "participantId" in message:
                 participantId = message["participantId"]
