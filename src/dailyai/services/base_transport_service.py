@@ -94,7 +94,7 @@ class BaseTransportService():
         self._speaker_sample_rate = kwargs.get("speaker_sample_rate") or 16000
         self._fps = kwargs.get("fps") or 8
         self._vad_start_s = kwargs.get("vad_start_s") or 0.2
-        self._vad_stop_s = kwargs.get("vad_stop_s") or 0.5
+        self._vad_stop_s = kwargs.get("vad_stop_s") or 0.8
         self._context = kwargs.get("context") or []
 
         self._vad_samples = 1536
@@ -365,13 +365,19 @@ class BaseTransportService():
         self._logger.info("🎬 Starting frame consumer thread")
         b = bytearray()
         smallest_write_size = 3200
+        largest_write_size = 8000
         all_audio_frames = bytearray()
         while True:
             try:
                 frames_or_frame: QueueFrame | list[QueueFrame] = (
                     self._threadsafe_send_queue.get()
                 )
-                if isinstance(frames_or_frame, QueueFrame):
+                if isinstance(frames_or_frame, AudioQueueFrame) and len(frames_or_frame.data) > largest_write_size:
+                    # subdivide large audio frames to enable interruption
+                    frames = []
+                    for i in range(0, len(frames_or_frame.data), largest_write_size):
+                        frames.append(AudioQueueFrame(frames_or_frame.data[i : i+largest_write_size]))
+                elif isinstance(frames_or_frame, QueueFrame):
                     frames: list[QueueFrame] = [frames_or_frame]
                 elif isinstance(frames_or_frame, list):
                     frames: list[QueueFrame] = frames_or_frame
@@ -379,6 +385,7 @@ class BaseTransportService():
                     raise Exception("Unknown type in output queue")
 
                 for frame in frames:
+                    self._logger.debug(f"Transport frame consumer got frame: {type(frame)}")
                     if isinstance(frame, EndStreamQueueFrame):
                         self._logger.info("Stopping frame consumer thread")
                         self._threadsafe_send_queue.task_done()

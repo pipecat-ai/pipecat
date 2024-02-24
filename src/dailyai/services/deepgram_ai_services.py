@@ -9,8 +9,8 @@ from dailyai.services.ai_services import TTSService
 
 
 class DeepgramTTSService(TTSService):
-    def __init__(self, *, aiohttp_session, api_key, voice="alpha-asteria-en-v2"):
-        super().__init__()
+    def __init__(self, *, aiohttp_session, api_key, voice="alpha-asteria-en-v2", split_sentences=False):
+        super().__init__(split_sentences=split_sentences)
 
         self._voice = voice
         self._api_key = api_key

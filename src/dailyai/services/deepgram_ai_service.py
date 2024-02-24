@@ -12,9 +12,10 @@ class DeepgramAIService(TTSService):
         aiohttp_session: aiohttp.ClientSession,
         api_key,
         voice,
-        sample_rate=16000
+        sample_rate=16000,
+        split_sentences=False
     ):
-        super().__init__()
+        super().__init__(split_sentences=split_sentences)
 
         self._api_key = api_key
         self._voice = voice

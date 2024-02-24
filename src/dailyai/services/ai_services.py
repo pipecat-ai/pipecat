@@ -3,6 +3,7 @@ import io
 import logging
 import time
 import datetime
+import pysbd
 import wave
 
 from dailyai.queue_frame import (
@@ -100,8 +101,13 @@ class LLMService(AIService):
         if isinstance(frame, UserStoppedSpeakingFrame):
             # Then we're in conversation mode with VAD;
             # use the global shared context for completion
+            # but also yield the UserStoppedSpeakingFrame for downstream timing
+            yield frame
+            self.logger.debug("Starting LLM")
             async for text_chunk in self.run_llm_async(self._context):
+                self.logger.debug("Yielding LLM")
                 yield TextQueueFrame(text_chunk)
+            self.logger.debug("Finished LLM")
             yield LLMResponseEndQueueFrame()
         elif isinstance(frame, LLMMessagesQueueFrame):
             # It's an LLMMessagesQueueFrame directly created in an
@@ -115,9 +121,10 @@ class LLMService(AIService):
 
 
 class TTSService(AIService):
-    def __init__(self, aggregate_sentences=True):
+    def __init__(self, aggregate_sentences=True, split_sentences=False):
         super().__init__()
         self.aggregate_sentences: bool = aggregate_sentences
+        self.split_sentences: bool = split_sentences
         self.current_sentence: str = ""
 
     # Some TTS services require a specific sample rate. We default to 16k
@@ -141,22 +148,26 @@ class TTSService(AIService):
         if isinstance(frame, TranscriptionQueueFrame):
             yield frame
             return
-
-        text: str | None = None
-        if not self.aggregate_sentences:
-            text = frame.text
+        text = []
+        if self.split_sentences:
+            seg = pysbd.Segmenter(language="en", clean=False)
+            text = seg.segment(frame.text)
+            print(f"I split some text, and it's now {text}")
+        elif not self.aggregate_sentences:
+            text = [frame.text]
         else:
             self.current_sentence += frame.text
             if self.current_sentence.endswith((".", "?", "!")):
-                text = self.current_sentence
+                text = [self.current_sentence]
                 self.current_sentence = ""
 
-        if text:
-            async for audio_chunk in self.run_tts(text):
-                size = 8000
-                for i in range(0, len(audio_chunk), size):
-                    yield AudioQueueFrame(audio_chunk[i : i+size])
-            yield TTSCompletedFrame(text)
+        for sentence in text:
+            self.logger.debug(f"Starting TTS for: {sentence}")
+            async for audio_chunk in self.run_tts(sentence):
+                self.logger.debug("Yielding TTS")
+                yield AudioQueueFrame(audio_chunk)
+            self.logger.debug("Finished TTS")
+            yield TTSCompletedFrame(sentence)
 
     async def finalize(self):
         if self.current_sentence:

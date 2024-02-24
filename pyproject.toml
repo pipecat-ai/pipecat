@@ -18,6 +18,7 @@ dependencies = [
     "openai",
     "Pillow",
     "pyht",
+    "pysbd",
     "python-dotenv",
     "torch",
     "torchaudio",
