@@ -32,7 +32,8 @@ class FalImageGenService(ImageGenService):
             handler = fal.apps.submit(
                 "110602490-fast-sdxl",
                 arguments={
-                    "prompt": sentence
+                    "prompt": sentence,
+                    "seed": 23
                 },
             )
             for event in handler.iter_events():

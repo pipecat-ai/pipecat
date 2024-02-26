@@ -9,7 +9,7 @@ from daily import (
 )
 from threading import Event
 from dailyai.queue_frame import (
-    TranscriptionQueueFrame,
+    TranscriptionQueueFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame
 )
 from functools import partial
 import types
@@ -27,7 +27,7 @@ torch.set_num_threads(1)
 
 model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
                               model='silero_vad',
-                              force_reload=True)
+                              force_reload=False)
 
 (get_speech_timestamps,
  save_audio,
@@ -276,8 +276,26 @@ class DailyTransportService(BaseTransportService, EventHandler):
         if len(self.client.participants()) < self._min_others_count + 1:
             self._stop_threads.set()
 
+    async def insert_speech(self, text, sender, date):
+        await self.receive_queue.put(UserStartedSpeakingFrame())
+        await asyncio.sleep(0.3)
+
+        # frame = TranscriptionQueueFrame(text, sender, date)
+        # await self.receive_queue.put(frame)
+        self.on_transcription_message({
+            "text": text,
+            "participantId":  "cb65b845-aac0-4fc8-987d-2e7ce3c7d8f0",
+            "timestamp": date
+        })
+
+        await asyncio.sleep(0.3)
+        await self.receive_queue.put(UserStoppedSpeakingFrame())
+
     def on_app_message(self, message, sender):
-        pass
+        if self._loop:
+            print("APP MESSAGE", message)
+            asyncio.run_coroutine_threadsafe(
+                self.insert_speech(message["message"], sender, message["date"]), self._loop)
 
     def on_transcription_message(self, message: dict):
         if self._loop:

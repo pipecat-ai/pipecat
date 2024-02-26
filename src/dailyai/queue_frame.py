@@ -51,9 +51,17 @@ class SpriteQueueFrame(QueueFrame):
 class TextQueueFrame(QueueFrame):
     text: str
 
+
+@dataclass()
+class TextQueueOutOfBandFrame(TextQueueFrame):
+    outOfBand: bool = True
+
+
 @dataclass()
 class TTSCompletedFrame(QueueFrame):
     text: str
+    outOfBand: bool = False
+
 
 @dataclass()
 class TranscriptionQueueFrame(TextQueueFrame):

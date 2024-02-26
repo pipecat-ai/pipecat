@@ -14,6 +14,7 @@ import torch
 import torchaudio
 from enum import Enum
 import datetime
+import traceback
 
 from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMUserContextAggregator
@@ -133,8 +134,23 @@ class BaseTransportService():
                 self._current_phrase = ""
                 self._context = new_context
 
-    def append_to_context(self, role, text):
+    def append_to_context(self, role, chunk_or_text):
+        print("IN APPEND", chunk_or_text)
+        # if we get a non-string, append it to the context without further error checking
+        # unless the outOfBand property is True
+        if not isinstance(chunk_or_text, str):
+
+            if not chunk_or_text.get("outOfBand") == True:
+                self._context.append(chunk_or_text)
+            return
+
+        text = chunk_or_text
         last_context_item = self._context[-1]
+
+        print("TEXT", text)
+        print("LAST CONTEXT ITEM", last_context_item)
+        traceback.print_stack()
+
         if last_context_item and last_context_item['role'] == role:
             last_context_item['content'] += f" {text}"
         else:
@@ -153,7 +169,7 @@ class BaseTransportService():
         self._runner = runner
 
         async for frame in self.get_receive_frames():
-            print(f"got frame of type: {type(frame)}")
+            print(f"got frame of type: {type(frame)}, {frame}")
             if isinstance(frame, EndStreamQueueFrame):
                 break
             # elif not isinstance(frame, TranscriptionQueueFrame):
@@ -409,7 +425,7 @@ class BaseTransportService():
                                 self._set_image(frame.image)
                             elif isinstance(frame, SpriteQueueFrame):
                                 self._set_images(frame.images)
-                            elif isinstance(frame, TTSCompletedFrame):
+                            elif isinstance(frame, TTSCompletedFrame) and not frame.outOfBand:
                                 self.append_to_context(
                                     "assistant", frame.text)
                         elif len(b):
