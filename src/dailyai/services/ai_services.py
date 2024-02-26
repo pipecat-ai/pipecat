@@ -6,6 +6,7 @@ import datetime
 import wave
 
 from dailyai.queue_frame import (
+    QueueFrame,
     AudioQueueFrame,
     ControlQueueFrame,
     EndStreamQueueFrame,
@@ -101,8 +102,16 @@ class LLMService(AIService):
         if isinstance(frame, UserStoppedSpeakingFrame):
             print(
                 f"### Got a user stopped speaking frame, context is {self._context}")
-            async for text_chunk in self.run_llm_async(self._context):
-                yield TextQueueFrame(text_chunk)
+            async for chunk in self.run_llm_async(self._context):
+                # if we get a string, wrap it in a frame
+                if isinstance(chunk, str):
+                    yield TextQueueFrame(chunk)
+                # if we get a frame, pass it through
+                elif isinstance(chunk, QueueFrame):
+                    print(f"### Got a frame chunk: {chunk}")
+                    yield chunk
+                else:
+                    print(f"### Got an unknown chunk: {chunk}")
             yield LLMResponseEndQueueFrame()
         else:
             yield frame
@@ -149,13 +158,14 @@ class TTSService(AIService):
             async for audio_chunk in self.run_tts(text):
                 size = 8000
                 for i in range(0, len(audio_chunk), size):
-                    yield AudioQueueFrame(audio_chunk[i : i+size])
-            yield TTSCompletedFrame(text)
+                    yield AudioQueueFrame(audio_chunk[i: i+size])
+            print("### ABOUT TO YIELD TTS COMPLETED FRAME", frame)
+            yield TTSCompletedFrame(text, hasattr(frame, 'outOfBand') and frame.outOfBand)
 
     async def finalize(self):
         if self.current_sentence:
             async for audio_chunk in self.run_tts(self.current_sentence):
-               yield AudioQueueFrame(audio_chunk)
+                yield AudioQueueFrame(audio_chunk)
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue):

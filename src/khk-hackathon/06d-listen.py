@@ -37,20 +37,6 @@ Do not include the image model prompt in your response. The prompt must be passe
 as a parameter. 
 """
 
-do_not_respond_function = {
-    "name": "do_not_respond",
-    "description": "Call this function when the users are not talking to the robot.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "transcribed_text": {
-                "type": "string",
-                "description": "The transcribed text from the users."
-            }
-        }
-    }
-}
-
 change_appearance_function = {
     "name": "change_appearance",
     "description": "Call this function when the users want you to change your appearance.",
@@ -66,10 +52,6 @@ change_appearance_function = {
 }
 
 tools = [
-    {
-        "type": "function",
-        "function": do_not_respond_function
-    },
     {
         "type": "function",
         "function": change_appearance_function
