@@ -1,6 +1,6 @@
 import asyncio
 
-from dailyai.queue_frame import LLMMessagesQueueFrame, QueueFrame, TextQueueFrame, TranscriptionQueueFrame
+from dailyai.queue_frame import BotTranscriptionFrame, LLMMessagesQueueFrame, QueueFrame, TextQueueFrame, TranscriptionQueueFrame
 from dailyai.services.ai_services import AIService
 
 from typing import AsyncGenerator, List
@@ -29,57 +29,43 @@ class QueueTee:
 class LLMContextAggregator(AIService):
     def __init__(
             self,
-            messages: list[dict],
-            role: str,
+            context: list[dict],
             bot_participant_id=None,
-            complete_sentences=True,
-            pass_through=True):
+        ):
         super().__init__()
-        self.messages = messages
+        self._context = context
         self.bot_participant_id = bot_participant_id
-        self.role = role
-        self.sentence = ""
-        self.complete_sentences = complete_sentences
-        self.pass_through = pass_through
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         # We don't do anything with non-text frames, pass it along to next in the pipeline.
+        
+        self.logger.debug(f"aggregator got frame: {type(frame)}")
         if not isinstance(frame, TextQueueFrame):
             yield frame
             return
 
+        # TODO-CB: This should be a no-op now
         # Ignore transcription frames from the bot
         if isinstance(frame, TranscriptionQueueFrame):
             if frame.participantId == self.bot_participant_id:
                 return
-
-        # The common case for "pass through" is receiving frames from the LLM that we'll
-        # use to update the "assistant" LLM messages, but also passing the text frames
-        # along to a TTS service to be spoken to the user.
-        if self.pass_through:
-            yield frame
-
-        # TODO: split up transcription by participant
-        if self.complete_sentences:
-            # type: ignore -- the linter thinks this isn't a TextQueueFrame, even
-            # though we check it above
-            self.sentence += frame.text
-            if self.sentence.endswith((".", "?", "!")):
-                self.messages.append({"role": self.role, "content": self.sentence})
-                self.sentence = ""
-                yield LLMMessagesQueueFrame(self.messages)
+            else:
+                print(f"appending to user context")
+                self.append_to_context("user", frame.text)
+        elif isinstance(frame, BotTranscriptionFrame):
+            if frame.save_in_context == True:
+                print(f"appending to bot context")
+                self.append_to_context("assistant", frame.text)
+            else:
+                print("save in context false")
         else:
-            # type: ignore -- the linter thinks this isn't a TextQueueFrame, even
-            # though we check it above
-            self.messages.append({"role": self.role, "content": frame.text})
-            yield LLMMessagesQueueFrame(self.messages)
-
-    async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
-        # Send any dangling words that weren't finished with punctuation.
-        if self.complete_sentences and self.sentence:
-            self.messages.append({"role": self.role, "content": self.sentence})
-            yield LLMMessagesQueueFrame(self.messages)
-
+            yield frame
+    
+    def append_to_context(self, role, text):
+        if len(self._context) > 0 and self._context[-1] and self._context[-1]['role'] == role:
+            self._context[-1]['content'] += f" {text}"
+        else:
+            self._context.append({"role": role, "content": text})
 
 class LLMUserContextAggregator(LLMContextAggregator):
     def __init__(self,

@@ -3,11 +3,14 @@ import io
 import logging
 import time
 import datetime
+
+from numpy import true_divide
 import pysbd
 import wave
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
+    BotSpeechTextFrame,
     ControlQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
@@ -15,7 +18,7 @@ from dailyai.queue_frame import (
     LLMResponseEndQueueFrame,
     QueueFrame,
     TextQueueFrame,
-    TTSCompletedFrame,
+    BotTTSCompletedFrame,
     TranscriptionQueueFrame,
     UserStoppedSpeakingFrame
 )
@@ -65,8 +68,6 @@ class AIService:
             else:
                 raise Exception("Frames must be an iterable or async iterable")
 
-            async for output_frame in self.finalize():
-                yield output_frame
         except Exception as e:
             self.logger.error("Exception occurred while running AI service", e)
             raise e
@@ -152,7 +153,6 @@ class TTSService(AIService):
         if self.split_sentences:
             seg = pysbd.Segmenter(language="en", clean=False)
             text = seg.segment(frame.text)
-            print(f"I split some text, and it's now {text}")
         elif not self.aggregate_sentences:
             text = [frame.text]
         else:
@@ -160,14 +160,19 @@ class TTSService(AIService):
             if self.current_sentence.endswith((".", "?", "!")):
                 text = [self.current_sentence]
                 self.current_sentence = ""
-
+        
+        if isinstance(frame, BotSpeechTextFrame):
+            save_in_context = frame.save_in_context
+        else:
+            save_in_context = True
+        print(f"text is {text}")
         for sentence in text:
             self.logger.debug(f"Starting TTS for: {sentence}")
             async for audio_chunk in self.run_tts(sentence):
                 self.logger.debug("Yielding TTS")
                 yield AudioQueueFrame(audio_chunk)
             self.logger.debug("Finished TTS")
-            yield TTSCompletedFrame(sentence)
+            yield BotTTSCompletedFrame(sentence, save_in_context)
 
     async def finalize(self):
         if self.current_sentence:
@@ -175,8 +180,8 @@ class TTSService(AIService):
                yield AudioQueueFrame(audio_chunk)
 
     # Convenience function to send the audio for a sentence to the given queue
-    async def say(self, sentence, queue: asyncio.Queue):
-        await self.run_to_queue(queue, [TextQueueFrame(sentence)])
+    async def say(self, sentence, queue: asyncio.Queue, save_in_context=False):
+        await self.run_to_queue(queue, [BotSpeechTextFrame(sentence, save_in_context)])
 
 
 class ImageGenService(AIService):

@@ -20,13 +20,14 @@ from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMUserCont
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
+    BotTranscriptionFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
     QueueFrame,
     SpriteQueueFrame,
     StartStreamQueueFrame,
-    TranscriptionQueueFrame,
-    TTSCompletedFrame,
+    BotTranscriptionFrame,
+    BotTTSCompletedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame
 )
@@ -133,11 +134,7 @@ class BaseTransportService():
                 self._current_phrase = ""
                 self._context = new_context
 
-    def append_to_context(self, role, text):
-        if len(self._context) > 0 and self._context[-1] and self._context[-1]['role'] == role:
-            self._context[-1]['content'] += f" {text}"
-        else:
-            self._context.append({"role": role, "content": text})
+
 
     async def run_pipeline(self, frame):
         # TODO-CB: This exception for missing class gets eaten!
@@ -157,10 +154,10 @@ class BaseTransportService():
                 # continue
             # TODO-CB: Verify this is an accurate replacement
             # if hasattr(frame, 'participantId') and frame.participantId == self._my_participant_id:
-            if not isinstance(frame, UserStoppedSpeakingFrame):
-                continue
+            # if not isinstance(frame, UserStoppedSpeakingFrame):
+            #     continue
 
-            if current_response_task:
+            if current_response_task and isinstance(frame, UserStartedSpeakingFrame):
                 # TODO-CB: Maybe not always interrupt? Are there frame types we can pass through?
                 current_response_task.cancel()
                 self.interrupt()
@@ -385,7 +382,7 @@ class BaseTransportService():
                     raise Exception("Unknown type in output queue")
 
                 for frame in frames:
-                    self._logger.debug(f"Transport frame consumer got frame: {type(frame)}")
+                    # self._logger.debug(f"Transport frame consumer got frame: {type(frame)}")
                     if isinstance(frame, EndStreamQueueFrame):
                         self._logger.info("Stopping frame consumer thread")
                         self._threadsafe_send_queue.task_done()
@@ -410,9 +407,9 @@ class BaseTransportService():
                                 self._set_image(frame.image)
                             elif isinstance(frame, SpriteQueueFrame):
                                 self._set_images(frame.images)
-                            elif isinstance(frame, TTSCompletedFrame):
-                                self.append_to_context(
-                                    "assistant", frame.text)
+                            elif isinstance(frame, BotTTSCompletedFrame):
+                                asyncio.run_coroutine_threadsafe(
+                                    self.receive_queue.put(BotTranscriptionFrame(frame.text, frame.save_in_context)), self._loop)
                         elif len(b):
                             self.write_frame_to_mic(bytes(b))
                             b = bytearray()
