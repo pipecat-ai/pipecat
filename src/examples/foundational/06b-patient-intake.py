@@ -9,7 +9,7 @@ from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
-from examples.foundational.support.runner import configure
+from support.runner import configure
 from dailyai.queue_frame import LLMMessagesQueueFrame, TranscriptionQueueFrame, QueueFrame, TextQueueFrame, LLMFunctionCallFrame, LLMResponseEndQueueFrame, StartStreamQueueFrame
 from dailyai.services.ai_services import FrameLogger, AIService
 from dailyai.conversation_wrappers import InterruptibleConversationWrapper
@@ -162,7 +162,7 @@ class ChecklistProcessor(AIService):
         self._steps = [
             {"prompt": "Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday, including the year. When they answer with their birthday, call the verify_birthday function.",
                 "run_async": False, "failed": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function."},
-            {"prompt": "You've already confirmed the user's birthday, so don't call the verify_birthday function. Ask the user to list their current prescriptions. If the user responds with one or two prescriptions, ask them to confirm it's the complete list. Make sure each medication also includes the dosage. Once the user has provided all their prescriptions, call the list_prescriptions function.", "run_async": True},
+            {"prompt": "You've already confirmed the user's birthday, so don't call the verify_birthday function. Ask the user to list their current prescriptions. If the user responds with one or two prescriptions, ask them to confirm it's the complete list. Make sure each medication also includes the dosage. Once the user has provided all their prescriptions along with dosages, call the list_prescriptions function. Do not call list_prescriptions with any unknown dosages", "run_async": True},
             {"prompt": "Don't call the verify_birthday or list_prescription functions. Ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function.", "run_async": True},
             {"prompt": "Don't call the verify_birthday, list_allergies, or list_prescriptions functions. Ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function.", "run_async": True},
             {"prompt": "Ask the user the reason for their doctor visit today. Once they answer, double-check to make sure they don't have any other health concerns. After that, call the list_visit_reasons function.", "run_async": True},
@@ -309,7 +309,7 @@ async def main(room_url: str, token):
                     )
                 )
             )
-
+        transport.transcription_settings["extra"]["endpointing"] = True
         transport.transcription_settings["extra"]["punctuate"] = True
         try:
             await asyncio.gather(transport.run(), run_conversation())
