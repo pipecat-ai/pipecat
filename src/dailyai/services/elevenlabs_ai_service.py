@@ -12,12 +12,13 @@ class ElevenLabsTTSService(TTSService):
 
     def __init__(
         self,
-        *,
         aiohttp_session: aiohttp.ClientSession,
         api_key,
         voice_id,
+        *args,
+        **kwargs
     ):
-        super().__init__()
+        super().__init__(*args, **kwargs)
 
         self._api_key = api_key
         self._voice_id = voice_id

@@ -35,6 +35,8 @@ async def main(room_url):
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
         """
         tts = PlayHTAIService(
+            source=None,
+            sink=transport.send_queue,
             api_key=os.getenv("PLAY_HT_API_KEY"),
             user_id=os.getenv("PLAY_HT_USER_ID"),
             voice_url=os.getenv("PLAY_HT_VOICE_URL"),
@@ -48,8 +50,7 @@ async def main(room_url):
                 return
 
             await tts.say(
-                "Hello there, " + participant["info"]["userName"] + "!",
-                transport.send_queue,
+                "Hello there, " + participant["info"]["userName"] + "!"
             )
 
             # wait for the output queue to be empty, then leave the meeting

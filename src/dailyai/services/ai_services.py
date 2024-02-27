@@ -6,7 +6,6 @@ import wave
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
-    ControlQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
     LLMMessagesQueueFrame,
@@ -18,12 +17,68 @@ from dailyai.queue_frame import (
 
 from abc import abstractmethod
 from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable
-from dataclasses import dataclass
+
+class AbstractPipeService():
+    def __init__(self, source:asyncio.Queue[QueueFrame], sink:asyncio.Queue[QueueFrame]):
+        self.source: asyncio.Queue[QueueFrame] = source
+        self.sink: asyncio.Queue[QueueFrame] = sink
+        pass
+
+    @abstractmethod
+    async def process_queue(self):
+        pass
+
+class PipeService(AbstractPipeService):
+
+    def __init__(
+        self,
+        source: asyncio.Queue[QueueFrame] | AbstractPipeService | None=None,
+        sink: asyncio.Queue[QueueFrame] | AbstractPipeService | None=None,
+    ):
+        self.logger: logging.Logger = logging.getLogger("dailyai")
+
+        if not source:
+            source = asyncio.Queue()
+        elif isinstance(source, AbstractPipeService):
+            source = source.sink
+
+        if not sink:
+            sink = asyncio.Queue()
+        elif isinstance(sink, AbstractPipeService):
+            sink = sink.source
+
+        self.source = source
+        self.sink = sink
+
+    async def process_queue(self):
+        if not self.source:
+            return
+
+        while True:
+            frame = await self.source.get()
+            async for output_frame in self.process_frame(frame):
+                await self.sink.put(output_frame)
+                if isinstance(frame, EndStreamQueueFrame):
+                    print("end of stream", type(self))
+                    async for output_frame in self.finalize():
+                        await self.sink.put(output_frame)
+                    return
+
+    @abstractmethod
+    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        yield frame
+
+    @abstractmethod
+    async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
+        # This is a trick for the interpreter (and linter) to know that this is a generator.
+        if False:
+            yield QueueFrame()
 
 
-class AIService:
+class AIService(PipeService):
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.logger = logging.getLogger("dailyai")
 
     def stop(self):
@@ -67,17 +122,6 @@ class AIService:
             self.logger.error("Exception occurred while running AI service", e)
             raise e
 
-    @abstractmethod
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, ControlQueueFrame):
-            yield frame
-
-    @abstractmethod
-    async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
-        # This is a trick for the interpreter (and linter) to know that this is a generator.
-        if False:
-            yield QueueFrame()
-
 
 class LLMService(AIService):
     @abstractmethod
@@ -98,8 +142,8 @@ class LLMService(AIService):
 
 
 class TTSService(AIService):
-    def __init__(self, aggregate_sentences=True):
-        super().__init__()
+    def __init__(self, aggregate_sentences=True, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.aggregate_sentences: bool = aggregate_sentences
         self.current_sentence: str = ""
 
@@ -138,7 +182,10 @@ class TTSService(AIService):
                 yield AudioQueueFrame(audio_chunk)
 
     # Convenience function to send the audio for a sentence to the given queue
-    async def say(self, sentence, queue: asyncio.Queue):
+    async def say(self, sentence, queue: asyncio.Queue|None=None):
+        queue = queue or self.output_queue
+        if not queue:
+            raise Exception("No queue to send audio to")
         await self.run_to_queue(queue, [TextQueueFrame(sentence)])
 
 

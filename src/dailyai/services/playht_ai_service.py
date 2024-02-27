@@ -11,12 +11,13 @@ class PlayHTAIService(TTSService):
 
     def __init__(
         self,
-        *,
         api_key,
         user_id,
-        voice_url
+        voice_url,
+        *args,
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(*args, **kwargs)
 
         self.speech_key = api_key
         self.user_id = user_id
