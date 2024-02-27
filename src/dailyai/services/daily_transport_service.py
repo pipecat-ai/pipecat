@@ -205,7 +205,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
     def _post_run(self):
         self.client.leave()
 
-    def on_first_other_participant_joined(self):
+    def on_first_other_participant_joined(self, participant):
         pass
 
     def call_joined(self, join_data, client_error):
@@ -226,7 +226,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
     def on_participant_joined(self, participant):
         if not self._other_participant_has_joined and participant["id"] != self._my_participant_id:
             self._other_participant_has_joined = True
-            self.on_first_other_participant_joined()
+            self.on_first_other_participant_joined(participant)
 
     def on_participant_left(self, participant, reason):
         if len(self.client.participants()) < self._min_others_count + 1:

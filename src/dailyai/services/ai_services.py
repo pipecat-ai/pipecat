@@ -187,7 +187,7 @@ class TTSService(AIService):
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue|None=None):
-        queue = queue or self.output_queue
+        queue = queue or self.sink
         if not queue:
             raise Exception("No queue to send audio to")
         await self.run_to_queue(queue, [TextQueueFrame(sentence)])

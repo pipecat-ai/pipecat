@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 import os
+from dailyai.queue_frame import EndStreamQueueFrame
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
@@ -42,15 +43,14 @@ async def main(room_url):
         )
 
         # Register an event handler so we can play the audio when the participant joins.
-        @transport.event_handler("on_participant_joined")
-        async def on_participant_joined(transport, participant):
+        @transport.event_handler("on_first_other_participant_joined")
+        async def on_first_other_participant_joined(transport, participant):
             nonlocal tts
-            if participant["info"]["isLocal"]:
-                return
 
             await tts.say(
                 "Hello there, " + participant["info"]["userName"] + "!"
             )
+            await tts.sink.put(EndStreamQueueFrame())
 
             # wait for the output queue to be empty, then leave the meeting
             await transport.stop_when_done()
