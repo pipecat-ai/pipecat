@@ -149,47 +149,53 @@ class DailyTransportService(BaseTransportService, EventHandler):
             Daily.select_speaker_device("speaker")
 
         self.client.set_user_name(self._bot_name)
-        self.client.join(self._room_url, self._token, completion=self.call_joined)
+        self.client.join(
+            self._room_url,
+            self._token,
+            completion=self.call_joined,
+            client_settings={
+                "inputs": {
+                    "camera": {
+                        "isEnabled": True,
+                        "settings": {
+                            "deviceId": "camera",
+                        },
+                    },
+                    "microphone": {
+                        "isEnabled": True,
+                        "settings": {
+                            "deviceId": "mic",
+                            "customConstraints": {
+                                "autoGainControl": {"exact": False},
+                                "echoCancellation": {"exact": False},
+                                "noiseSuppression": {"exact": False},
+                            },
+                        },
+                    },
+                },
+                "publishing": {
+                    "camera": {
+                        "sendSettings": {
+                            "maxQuality": "low",
+                            "encodings": {
+                                "low": {
+                                    "maxBitrate": 250000,
+                                    "scaleResolutionDownBy": 1.333,
+                                    "maxFramerate": 8,
+                                }
+                            },
+                        }
+                    }
+                },
+            },
+        )
         self._my_participant_id = self.client.participants()["local"]["id"]
 
-        self.client.update_inputs(
-            {
-                "camera": {
-                    "isEnabled": True,
-                    "settings": {
-                        "deviceId": "camera",
-                    },
-                },
-                "microphone": {
-                    "isEnabled": True,
-                    "settings": {
-                        "deviceId": "mic",
-                        "customConstraints": {
-                            "autoGainControl": {"exact": False},
-                            "echoCancellation": {"exact": False},
-                            "noiseSuppression": {"exact": False},
-                        },
-                    },
-                },
+        self.client.update_subscription_profiles({
+            "base": {
+                "camera": "unsubscribed",
             }
-        )
-
-        self.client.update_publishing(
-            {
-                "camera": {
-                    "sendSettings": {
-                        "maxQuality": "low",
-                        "encodings": {
-                            "low": {
-                                "maxBitrate": 250000,
-                                "scaleResolutionDownBy": 1.333,
-                                "maxFramerate": 8,
-                            }
-                        },
-                    }
-                }
-            }
-        )
+        })
 
         if self._token and self._start_transcription:
             self.client.start_transcription(self.transcription_settings)
