@@ -35,7 +35,6 @@ async def main(room_url):
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
         """
         tts = PlayHTAIService(
-            source=None,
             sink=transport.send_queue,
             api_key=os.getenv("PLAY_HT_API_KEY"),
             user_id=os.getenv("PLAY_HT_USER_ID"),

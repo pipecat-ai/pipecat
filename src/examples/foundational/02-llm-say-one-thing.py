@@ -30,12 +30,11 @@ async def main(room_url):
         )
 
         tts = ElevenLabsTTSService(
-            source=llm,
             sink=transport.send_queue,
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
-        )
+        ).chain(llm)
 
         messages = [{
             "role": "system",

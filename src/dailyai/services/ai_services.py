@@ -50,6 +50,10 @@ class PipeService(AbstractPipeService):
         self.source = source
         self.sink = sink
 
+    def chain(self, service: AbstractPipeService) -> AbstractPipeService:
+        self.source = service.sink
+        return self
+
     async def process_queue(self):
         if not self.source:
             return
