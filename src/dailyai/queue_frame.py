@@ -58,3 +58,9 @@ class LLMMessagesQueueFrame(QueueFrame):
 class AppMessageQueueFrame(QueueFrame):
     message: Any
     participantId: str
+
+class UserStartedSpeakingFrame(QueueFrame):
+    pass
+    
+class UserStoppedSpeakingFrame(QueueFrame):
+    pass
