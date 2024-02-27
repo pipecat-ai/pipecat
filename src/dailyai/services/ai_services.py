@@ -146,7 +146,7 @@ class TTSService(AIService):
                 self.current_sentence = ""
 
         if text:
-            yield ChatMessageQueueFrame(message=text)
+            # yield ChatMessageQueueFrame(message=text)
             async for audio_chunk in self.run_tts(text):
                 yield AudioQueueFrame(audio_chunk)
 
