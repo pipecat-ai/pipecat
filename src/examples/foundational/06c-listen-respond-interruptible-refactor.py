@@ -50,16 +50,18 @@ async def main(room_url: str, token):
         #     model=os.getenv("AZURE_CHATGPT_MODEL"),
         #     context=context)
         llm = OpenAILLMService(
-            context=context, api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-3.5-turbo")
-        llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), model="mixtral-8x7b-32768", context=context)
-        tts = AzureTTSService(
-            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-            region=os.getenv("AZURE_SPEECH_REGION"))
-        # tts = ElevenLabsTTSService(
-        #     aiohttp_session=session,
-        #     api_key=os.getenv("ELEVENLABS_API_KEY"),
-        #     voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
-        # tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv("DEEPGRAM_API_KEY"), voice=os.getenv("DEEPGRAM_VOICE"), split_sentences=True)
+            context=context, api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview")
+        # llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), model="mixtral-8x7b-32768", context=context)
+        
+        # tts = AzureTTSService(
+        #     api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+        #     region=os.getenv("AZURE_SPEECH_REGION"))
+        tts = ElevenLabsTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
+        # tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv("DEEPGRAM_API_KEY"), voice=os.getenv("DEEPGRAM_VOICE"))
+        
         fl = FrameLogger("just outside the innermost layer")
         lca = LLMContextAggregator(context=context, bot_participant_id=transport._my_participant_id)
         
