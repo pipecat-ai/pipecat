@@ -18,11 +18,19 @@ from dailyai.queue_frame import (
 from abc import abstractmethod
 from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable
 
-class AbstractPipeService():
-    def __init__(self, source:asyncio.Queue[QueueFrame], sink:asyncio.Queue[QueueFrame]):
-        self.source: asyncio.Queue[QueueFrame] = source
-        self.sink: asyncio.Queue[QueueFrame] = sink
-        pass
+class AbstractPipeService:
+
+    def __init__(
+        self,
+    ):
+        self.source_queue: asyncio.Queue[QueueFrame] = asyncio.Queue()
+        self.sink_queue: asyncio.Queue[QueueFrame] = asyncio.Queue()
+
+    async def get(self) -> QueueFrame:
+        return await self.sink_queue.get()
+
+    async def put(self, frame: QueueFrame) -> None:
+        await self.source_queue.put(frame)
 
     @abstractmethod
     async def process_queue(self):
@@ -32,34 +40,20 @@ class PipeService(AbstractPipeService):
 
     def __init__(
         self,
-        source: asyncio.Queue[QueueFrame] | AbstractPipeService | None=None,
-        sink: asyncio.Queue[QueueFrame] | AbstractPipeService | None=None,
+        source: AbstractPipeService | None = None,
+        sink: AbstractPipeService | None = None,
     ):
+        super().__init__()
         self.logger: logging.Logger = logging.getLogger("dailyai")
-
-        if not source:
-            source = asyncio.Queue()
-        elif isinstance(source, AbstractPipeService):
-            source = source.sink
-
-        if not sink:
-            sink = asyncio.Queue()
-        elif isinstance(sink, AbstractPipeService):
-            sink = sink.source
-
         self.source = source
         self.sink = sink
-
-    def chain(self, service: AbstractPipeService) -> AbstractPipeService:
-        self.source = service.sink
-        return self
 
     async def process_queue(self):
         if not self.source:
             return
 
         while True:
-            frame = await self.source.get()
+            frame: QueueFrame = await self.source.get()
             async for output_frame in self.process_frame(frame):
                 await self.sink.put(output_frame)
                 if isinstance(frame, EndStreamQueueFrame):
