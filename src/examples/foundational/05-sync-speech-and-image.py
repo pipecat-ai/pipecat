@@ -105,6 +105,16 @@ async def main(room_url):
 
         await month_description_queue.put(EndStreamQueueFrame())
 
+        pipeline = [
+            llm,
+            [tee,
+             [tts,
+              [llm_aggregator_for_image, dalle]
+             ],
+            tts_image_gate],
+            transport,
+        ]
+
         await asyncio.gather(transport.run(), *[service.process_queue() for service in [llm, tts, dalle, tee, tts_image_gate, llm_aggregator_for_image]])
 
 if __name__ == "__main__":
