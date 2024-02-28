@@ -2,8 +2,9 @@ import asyncio
 from typing import Any, AsyncGenerator, Callable, Tuple
 import aiohttp
 import os
+from dailyai.queue_aggregators import QueueFrameAggregator, QueueMergeGateOnFirst, QueueTee
 
-from dailyai.queue_frame import AudioQueueFrame, EndStreamQueueFrame, ImageQueueFrame, LLMResponseEndQueueFrame, QueueFrame, TextQueueFrame
+from dailyai.queue_frame import AudioQueueFrame, EndStreamQueueFrame, ImageQueueFrame, LLMMessagesQueueFrame, LLMResponseEndQueueFrame, QueueFrame, TextQueueFrame
 from dailyai.services.ai_services import PipeService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureImageGenServiceREST, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
@@ -36,75 +37,13 @@ async def main(room_url):
                                       \ ImageGen /
         """
 
-        class QueueFork(PipeService):
-            def __init__(self, source:PipeService, sinks: list[asyncio.Queue[QueueFrame]]):
-                self.source = source
-                self.sinks = sinks
-
-            async def process_queue(self):
-                while True:
-                    frame = await self.source.get()
-                    for sink in self.sinks:
-                        await sink.put(frame)
-                    if isinstance(frame, EndStreamQueueFrame):
-                        break
-
-
-        class QueueGateOnFrame(PipeService):
-
-            def __init__(
-                self,
-                source: asyncio.Queue[QueueFrame],
-                sink: asyncio.Queue[QueueFrame],
-                aggregator: Callable[[Any, QueueFrame], Tuple[Any, QueueFrame | None]]
-            ):
-                self.source = source
-                self.sink = sink
-                self.aggregator = aggregator
-                self.accumulation = None
-
-            async def process_frame(
-                self, frame: QueueFrame
-            ) -> AsyncGenerator[QueueFrame, None]:
-                output_frame: QueueFrame | None = None
-                (self.aggregation, output_frame) = self.aggregator(
-                    self.aggregation, frame
-                )
-                if output_frame:
-                    yield output_frame
-
-        class QueueMergeGateOnFirst(PipeService):
-
-            def __init__(
-                self, queue_fork_service: QueueFork, sink: asyncio.Queue[QueueFrame]
-            ):
-                self.queue_fork_service = queue_fork_service
-                self.sink = sink
-
-            async def process_queue(self):
-                (frames): list[QueueFrame] = await asyncio.gather(
-                    *[source.get() for source in self.queue_fork_service.get_end_sinks()]
-                )
-                for idx, frame in enumerate(frames):
-                    await self.sink.put(frame)
-
-                    # if the first frame we got from a source is an EndStreamQueueFrame, remove that source
-                    if isinstance(frame, EndStreamQueueFrame):
-                        self.sources.pop(idx)
-
-                async def pass_through(sink, source):
-                    while True:
-                        frame = await source.get()
-                        await sink.put(frame)
-                        if isinstance(frame, EndStreamQueueFrame):
-                            break
-
-                await asyncio.gather(*[pass_through(self.sink, source) for source in self.sources])
-
+        month_description_queue: asyncio.Queue[QueueFrame] = asyncio.Queue()
         llm = AzureLLMService(
+            source_queue=month_description_queue,
             api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
             endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-            model=os.getenv("AZURE_CHATGPT_MODEL"))
+            model=os.getenv("AZURE_CHATGPT_MODEL"),
+        )
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -129,20 +68,29 @@ async def main(room_url):
             else:
                 return (accumulation, frame)
 
-        llm_image_gate = QueueGateOnFrame(llm.sink, dalle.source, aggregator)
-        fork_audio_image = QueueFork(llm.sink, [tts.source, llm_image_gate.source])
-        audio_image_gate = QueueMergeGateOnFirst([tts.sink, dalle.sink], transport.send_queue)
+        # This queue service takes chunks from LLM output and merges them into one text frame
+        # that will be used to prompt the image service.
+        llm_aggregator_for_image = QueueFrameAggregator(source_queue=llm.sink_queue, aggregator=aggregator, finalizer=lambda x: None)
 
-        # Get a complete audio chunk from the given text. Splitting this into its own
-        # coroutine lets us ensure proper ordering of the audio chunks on the send queue.
-        async def get_all_audio(text):
-            all_audio = bytearray()
-            async for audio in tts.run_tts(text):
-                all_audio.extend(audio)
+        # Set the source queue for the image service to the sink of the aggregator service
+        dalle.source_queue = llm_aggregator_for_image.sink_queue
 
-            return all_audio
+        # This queue service takes the output from the LLM and sends it to the TTS service and
+        # the aggregator for the image generation service.
+        tee = QueueTee(source_queue=llm.sink_queue, sinks=[tts, llm_aggregator_for_image])
 
-        async def get_month_data(month):
+        # This queue service takes input from the TTS service and the image service, and waits
+        # to forward any audio frames until the image generation is complete. It will send
+        # the image first, then the audio frames; this ensures that the image is shown before
+        # the audio associated with the image is played.
+        tts_image_gate = QueueMergeGateOnFirst([dalle.sink_queue, tts.sink_queue])
+
+        # We send the image of this queue service to the transport output.
+        tts_image_gate.sink_queue = transport.send_queue
+
+        # Queue up all the months in the LLM service source queue
+        months = ["January", "February"]
+        for month in months:
             messages = [
                 {
                     "role": "system",
@@ -150,72 +98,11 @@ async def main(room_url):
                 }
             ]
 
-            image_description = await llm.run_llm(messages)
-            if not image_description:
-                return
+            await month_description_queue.put(LLMMessagesQueueFrame(messages))
 
-            to_speak = f"{month}: {image_description}"
-            audio_task = asyncio.create_task(get_all_audio(to_speak))
-            image_task = asyncio.create_task(dalle.run_image_gen(image_description))
-            print(f"about to gather tasks for {month}")
-            (audio, image_data) = await asyncio.gather(
-                audio_task, image_task
-            )
-            print(f"about to return from get_month_data for {month}")
-            return {
-                "month": month,
-                "text": image_description,
-                "image_url": image_data[0],
-                "image": image_data[1],
-                "audio": audio,
-            }
+        await month_description_queue.put(EndStreamQueueFrame())
 
-        months: list[str] = [
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June"
-        ]
-        """
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-        """
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
-            # This will play the months in the order they're completed. The benefit
-            # is we'll have as little delay as possible before the first month, and
-            # likely no delay between months, but the months won't display in order.
-            for month_data_task in asyncio.as_completed(month_tasks):
-                print(f"month_data_task: {month_data_task}")
-                try:
-                    data = await month_data_task
-                except Exception:
-                    print("OMG EXCEPTION!!!!")
-                if data:
-                    await transport.send_queue.put(
-                        [
-                            ImageQueueFrame(data["image_url"], data["image"]),
-                            AudioQueueFrame(data["audio"]),
-                        ]
-                    )
-
-            # wait for the output queue to be empty, then leave the meeting
-            await transport.stop_when_done()
-
-        month_tasks = [asyncio.create_task(get_month_data(month)) for month in months]
-
-        await transport.run()
+        await asyncio.gather(transport.run(), *[service.process_queue() for service in [llm, tts, dalle, tee, tts_image_gate]])
 
 if __name__ == "__main__":
     (url, token) = configure()
