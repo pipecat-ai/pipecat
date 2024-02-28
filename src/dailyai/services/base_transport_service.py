@@ -88,7 +88,11 @@ class BaseTransportService():
         self._vad_start_s = kwargs.get("vad_start_s") or 0.2
         self._vad_stop_s = kwargs.get("vad_stop_s") or 0.8
         self._context = kwargs.get("context") or []
+        self._vad_enabled = kwargs.get("vad_enabled") or False
         
+        if self._vad_enabled and self._speaker_enabled:
+            raise Exception("Sorry, you can't use speaker_enabled and vad_enabled at the same time. Please set one to False.")
+            
         self._vad_samples = 1536
         vad_frame_s = self._vad_samples / SAMPLE_RATE
         self._vad_start_frames = round(self._vad_start_s / vad_frame_s)
@@ -130,9 +134,10 @@ class BaseTransportService():
         self._frame_consumer_thread.start()
 
         if self._speaker_enabled:
-            # TODO-CB: daily-python doesn't like these two listening at the same time
-            # self._receive_audio_thread = threading.Thread(target=self._receive_audio, daemon=True)
-            # self._receive_audio_thread.start()
+            self._receive_audio_thread = threading.Thread(target=self._receive_audio, daemon=True)
+            self._receive_audio_thread.start()
+        
+        if self._vad_enabled:
             self._vad_thread = threading.Thread(target=self._vad, daemon=True)
             self._vad_thread.start()
 
@@ -157,9 +162,11 @@ class BaseTransportService():
         self._frame_consumer_thread.join()
 
         if self._speaker_enabled:
-            # TODO-CB: This breaks example 2 with VAD on
-            # self._receive_audio_thread.join()
-            pass
+            self._receive_audio_thread.join()
+        
+        if self._vad_enabled:
+            self._vad_thread.join()
+            
 
     def _post_run(self):
         # Note that this function must be idempotent! It can be called multiple times
@@ -232,7 +239,7 @@ class BaseTransportService():
                     self.receive_queue.put(
                         UserStartedSpeakingFrame()), self._loop
                 )
-                self.interrupt()
+                # self.interrupt()
                 self._vad_state = VADState.SPEAKING
                 self._vad_starting_count = 0
             if self._vad_state == VADState.STOPPING and self._vad_stopping_count >= self._vad_stop_frames:

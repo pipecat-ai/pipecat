@@ -31,6 +31,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
     _speaker_enabled: bool
     _speaker_sample_rate: int
+    _vad_enabled: bool
 
     # This is necessary to override EventHandler's __new__ method.
     def __new__(cls, *args, **kwargs):
@@ -142,7 +143,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
                 "camera", width=self._camera_width, height=self._camera_height, color_format="RGB"
             )
 
-        if self._speaker_enabled:
+        if self._speaker_enabled or self._vad_enabled:
             self._speaker: VirtualSpeakerDevice = Daily.create_speaker_device(
                 "speaker", sample_rate=self._speaker_sample_rate, channels=1
             )
