@@ -176,13 +176,19 @@ class BaseTransportService():
         self._logger.info("🎬 Starting frame consumer thread")
         b = bytearray()
         smallest_write_size = 3200
+        largest_write_size = 8000
         all_audio_frames = bytearray()
         while True:
             try:
                 frames_or_frame: QueueFrame | list[QueueFrame] = (
                     self._threadsafe_send_queue.get()
                 )
-                if isinstance(frames_or_frame, QueueFrame):
+                if isinstance(frames_or_frame, AudioQueueFrame) and len(frames_or_frame.data) > largest_write_size:
+                    # subdivide large audio frames to enable interruption
+                    frames = []
+                    for i in range(0, len(frames_or_frame.data), largest_write_size):
+                        frames.append(AudioQueueFrame(frames_or_frame.data[i : i+largest_write_size]))
+                elif isinstance(frames_or_frame, QueueFrame):
                     frames: list[QueueFrame] = [frames_or_frame]
                 elif isinstance(frames_or_frame, list):
                     frames: list[QueueFrame] = frames_or_frame
@@ -190,6 +196,7 @@ class BaseTransportService():
                     raise Exception("Unknown type in output queue")
 
                 for frame in frames:
+                    print(f"got frame of type: {type(frame)}")
                     if isinstance(frame, EndStreamQueueFrame):
                         self._logger.info("Stopping frame consumer thread")
                         self._threadsafe_send_queue.task_done()

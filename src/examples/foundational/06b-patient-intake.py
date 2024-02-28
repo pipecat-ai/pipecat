@@ -7,6 +7,7 @@ from typing import AsyncGenerator
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.open_ai_services import OpenAILLMService
+from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
 from support.runner import configure
@@ -261,7 +262,8 @@ async def main(room_url: str, token):
         # tts = AzureTTSService(api_key=os.getenv(
         #     "AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
         tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv(
-            "ELEVENLABS_API_KEY"), voice_id="EXAVITQu4vr4xnSDxMaL")
+            "ELEVENLABS_API_KEY"), voice_id="XrExE9yKIg1WjnnlVkGX") # matilda
+        # tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv("DEEPGRAM_API_KEY"), voice=os.getenv("DEEPGRAM_VOICE")) 
         messages = [
         ]
         tma_in = LLMUserContextAggregator(
