@@ -14,11 +14,6 @@ from dailyai.services.ai_services import AIService, PipeService
 
 from typing import Any, AsyncGenerator, Callable, List, Tuple
 
-@dataclass
-class SinkAndQueuePair:
-    sink: PipeService
-    queue: asyncio.Queue
-
 
 class QueueTee(PipeService):
     def __init__(
@@ -26,11 +21,10 @@ class QueueTee(PipeService):
     ):
         super().__init__(*args, **kwargs)
 
-        self.sinks: List[SinkAndQueuePair] = []
+        self.sinks: List[PipeService] = []
         for sink in sinks:
-            pair = SinkAndQueuePair(sink, asyncio.Queue())
-            self.sinks.append(pair)
-            sink.source_queue = pair.queue
+            sink.source_queue = asyncio.Queue()
+            self.sinks.append(sink)
 
     async def process_queue(self):
         if not self.source_queue:
@@ -38,10 +32,10 @@ class QueueTee(PipeService):
 
         while True:
             frame: QueueFrame = await self.source_queue.get()
-            print("got frame")
             for sink in self.sinks:
-                print("putting frame in sink")
-                await sink.queue.put(frame)
+                if sink.source_queue:
+                    await sink.source_queue.put(frame)
+
             if isinstance(frame, EndStreamQueueFrame):
                 break
 
@@ -63,10 +57,6 @@ class QueueFrameAggregator(PipeService):
     async def process_frame(
         self, frame: QueueFrame
     ) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, ControlQueueFrame):
-            yield frame
-            return
-
         output_frame: QueueFrame | None = None
         (self.aggregation, output_frame) = self.aggregator(
             self.aggregation, frame
@@ -92,8 +82,6 @@ class QueueMergeGateOnFirst(PipeService):
             *[source_queue.get() for source_queue in self.source_queues]
         )
         for idx, frame in enumerate(frames):
-            print("frame", idx, frame)
-
             # if the frame we got from a source is an EndStreamQueueFrame, remove that source
             if isinstance(frame, EndStreamQueueFrame):
                 self.source_queues.pop(idx)

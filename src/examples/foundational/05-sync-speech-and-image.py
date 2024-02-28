@@ -32,9 +32,9 @@ async def main(room_url):
 
         """
 
-                                      / TTS      \
-        Month prompt -> LLM -> Fork ->            -> Gate -> Transport
-                                      \ ImageGen /
+                                      / TTS                   \
+        Month prompt -> LLM -> Fork ->                         -> Gate -> Transport
+                                      \ Aggregate -> ImageGen /
         """
 
         month_description_queue: asyncio.Queue[QueueFrame] = asyncio.Queue()
@@ -60,6 +60,9 @@ async def main(room_url):
         def aggregator(
             accumulation, frame: QueueFrame
         ) -> tuple[Any, QueueFrame | None]:
+            if not accumulation:
+                accumulation = ""
+
             if isinstance(frame, TextQueueFrame):
                 accumulation += frame.text
                 return (accumulation, None)
@@ -70,7 +73,7 @@ async def main(room_url):
 
         # This queue service takes chunks from LLM output and merges them into one text frame
         # that will be used to prompt the image service.
-        llm_aggregator_for_image = QueueFrameAggregator(source_queue=llm.sink_queue, aggregator=aggregator, finalizer=lambda x: None)
+        llm_aggregator_for_image = QueueFrameAggregator(aggregator=aggregator, finalizer=lambda x: None)
 
         # Set the source queue for the image service to the sink of the aggregator service
         dalle.source_queue = llm_aggregator_for_image.sink_queue
@@ -89,7 +92,7 @@ async def main(room_url):
         tts_image_gate.sink_queue = transport.send_queue
 
         # Queue up all the months in the LLM service source queue
-        months = ["January", "February"]
+        months = ["January"] #, "February"]
         for month in months:
             messages = [
                 {
@@ -102,7 +105,7 @@ async def main(room_url):
 
         await month_description_queue.put(EndStreamQueueFrame())
 
-        await asyncio.gather(transport.run(), *[service.process_queue() for service in [llm, tts, dalle, tee, tts_image_gate]])
+        await asyncio.gather(transport.run(), *[service.process_queue() for service in [llm, tts, dalle, tee, tts_image_gate, llm_aggregator_for_image]])
 
 if __name__ == "__main__":
     (url, token) = configure()

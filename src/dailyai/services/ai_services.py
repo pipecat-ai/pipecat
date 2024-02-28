@@ -47,7 +47,6 @@ class PipeService(AbstractPipeService):
             frame: QueueFrame = await self.source_queue.get()
             async for output_frame in self.process_frame(frame):
                 if isinstance(frame, EndStreamQueueFrame):
-                    print("end of stream", type(self))
                     async for final_frame in self.finalize():
                         await self.sink_queue.put(final_frame)
                     await self.sink_queue.put(output_frame)
