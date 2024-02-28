@@ -1,8 +1,8 @@
 import asyncio
 import inspect
 import logging
+import signal
 import threading
-import time
 import types
 
 from functools import partial
@@ -11,7 +11,7 @@ from dailyai.queue_frame import (
     TranscriptionQueueFrame,
 )
 
-from threading import Thread, Event
+from threading import Event
 
 from daily import (
     EventHandler,
@@ -31,6 +31,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
     _speaker_enabled: bool
     _speaker_sample_rate: int
+    _vad_enabled: bool
 
     # This is necessary to override EventHandler's __new__ method.
     def __new__(cls, *args, **kwargs):
@@ -45,8 +46,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
         start_transcription: bool = False,
         **kwargs,
     ):
-        # This will call BaseTransportService.__init__ method, not EventHandler
-        super().__init__(**kwargs)
+        super().__init__(**kwargs)  # This will call BaseTransportService.__init__ method, not EventHandler
 
         self._room_url: str = room_url
         self._bot_name: str = bot_name
@@ -146,58 +146,75 @@ class DailyTransportService(BaseTransportService, EventHandler):
                 "camera", width=self._camera_width, height=self._camera_height, color_format="RGB"
             )
 
-        if self._speaker_enabled:
+        if self._speaker_enabled or self._vad_enabled:
             self._speaker: VirtualSpeakerDevice = Daily.create_speaker_device(
                 "speaker", sample_rate=self._speaker_sample_rate, channels=1
             )
             Daily.select_speaker_device("speaker")
 
         self.client.set_user_name(self._bot_name)
-        self.client.join(self._room_url, self._token,
-                         completion=self.call_joined)
+
+        self.client.join(
+            self._room_url,
+            self._token,
+            completion=self.call_joined,
+            client_settings={
+                "inputs": {
+                    "camera": {
+                        "isEnabled": True,
+                        "settings": {
+                            "deviceId": "camera",
+                        },
+                    },
+                    "microphone": {
+                        "isEnabled": True,
+                        "settings": {
+                            "deviceId": "mic",
+                            "customConstraints": {
+                                "autoGainControl": {"exact": False},
+                                "echoCancellation": {"exact": False},
+                                "noiseSuppression": {"exact": False},
+                            },
+                        },
+                    },
+                },
+                "publishing": {
+                    "camera": {
+                        "sendSettings": {
+                            "maxQuality": "low",
+                            "encodings": {
+                                "low": {
+                                    "maxBitrate": 250000,
+                                    "scaleResolutionDownBy": 1.333,
+                                    "maxFramerate": 8,
+                                }
+                            },
+                        }
+                    }
+                },
+            },
+        )
         self._my_participant_id = self.client.participants()["local"]["id"]
 
-        self.client.update_inputs(
-            {
-                "camera": {
-                    "isEnabled": True,
-                    "settings": {
-                        "deviceId": "camera",
-                    },
-                },
-                "microphone": {
-                    "isEnabled": True,
-                    "settings": {
-                        "deviceId": "mic",
-                        "customConstraints": {
-                            "autoGainControl": {"exact": False},
-                            "echoCancellation": {"exact": False},
-                            "noiseSuppression": {"exact": False},
-                        },
-                    },
-                },
+        self.client.update_subscription_profiles({
+            "base": {
+                "camera": "unsubscribed",
             }
-        )
-
-        self.client.update_publishing(
-            {
-                "camera": {
-                    "sendSettings": {
-                        "maxQuality": "low",
-                        "encodings": {
-                            "low": {
-                                "maxBitrate": 250000,
-                                "scaleResolutionDownBy": 1.333,
-                                "maxFramerate": 8,
-                            }
-                        },
-                    }
-                }
-            }
-        )
+        })
 
         if self._token and self._start_transcription:
             self.client.start_transcription(self.transcription_settings)
+
+        self.original_sigint_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, self.process_interrupt_handler)
+
+    def process_interrupt_handler(self, signum, frame):
+        self._post_run()
+        if callable(self.original_sigint_handler):
+            self.original_sigint_handler(signum, frame)
+
+    def _post_run(self):
+        self.client.leave()
 
     def on_first_other_participant_joined(self):
         pass

@@ -2,10 +2,15 @@ from abc import abstractmethod
 import asyncio
 import itertools
 import logging
+import numpy as np
+import pyaudio
+import torch
+import torchaudio
 import queue
 import threading
 import time
 from typing import AsyncGenerator
+from enum import Enum
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
@@ -15,8 +20,57 @@ from dailyai.queue_frame import (
     QueueFrame,
     SpriteQueueFrame,
     StartStreamQueueFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame
 )
 
+
+torch.set_num_threads(1)
+
+model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                              model='silero_vad',
+                              force_reload=False)
+
+(get_speech_timestamps,
+ save_audio,
+ read_audio,
+ VADIterator,
+ collect_chunks) = utils
+
+# Taken from utils_vad.py
+
+
+def validate(model,
+             inputs: torch.Tensor):
+    with torch.no_grad():
+        outs = model(inputs)
+    return outs
+
+# Provided by Alexander Veysov
+
+
+def int2float(sound):
+    abs_max = np.abs(sound).max()
+    sound = sound.astype('float32')
+    if abs_max > 0:
+        sound *= 1/32768
+    sound = sound.squeeze()  # depends on the use case
+    return sound
+
+
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+SAMPLE_RATE = 16000
+CHUNK = int(SAMPLE_RATE / 10)
+
+audio = pyaudio.PyAudio()
+
+
+class VADState(Enum):
+    QUIET = 1
+    STARTING = 2
+    SPEAKING = 3
+    STOPPING = 4
 
 class BaseTransportService():
 
@@ -32,7 +86,23 @@ class BaseTransportService():
         self._speaker_enabled = kwargs.get("speaker_enabled") or False
         self._speaker_sample_rate = kwargs.get("speaker_sample_rate") or 16000
         self._fps = kwargs.get("fps") or 8
-
+        self._vad_start_s = kwargs.get("vad_start_s") or 0.2
+        self._vad_stop_s = kwargs.get("vad_stop_s") or 0.8
+        self._context = kwargs.get("context") or []
+        self._vad_enabled = kwargs.get("vad_enabled") or False
+        
+        if self._vad_enabled and self._speaker_enabled:
+            raise Exception("Sorry, you can't use speaker_enabled and vad_enabled at the same time. Please set one to False.")
+            
+        self._vad_samples = 1536
+        vad_frame_s = self._vad_samples / SAMPLE_RATE
+        self._vad_start_frames = round(self._vad_start_s / vad_frame_s)
+        self._vad_stop_frames = round(self._vad_stop_s / vad_frame_s)
+        self._vad_starting_count = 0
+        self._vad_stopping_count = 0
+        self._vad_state = VADState.QUIET
+        self._user_is_speaking = False
+        
         duration_minutes = kwargs.get("duration_minutes") or 10
         self._expiration = time.time() + duration_minutes * 60
 
@@ -71,6 +141,10 @@ class BaseTransportService():
             self._receive_audio_thread = threading.Thread(
                 target=self._receive_audio, daemon=True)
             self._receive_audio_thread.start()
+        
+        if self._vad_enabled:
+            self._vad_thread = threading.Thread(target=self._vad, daemon=True)
+            self._vad_thread.start()
 
         try:
             while (
@@ -81,6 +155,10 @@ class BaseTransportService():
         except Exception as e:
             self._logger.error(f"Exception {e}")
             raise e
+        finally:
+            # Do anything that must be done to clean up
+            self._post_run()
+
         self._stop_threads.set()
 
         await self.send_queue.put(EndStreamQueueFrame())
@@ -90,6 +168,15 @@ class BaseTransportService():
 
         if self._speaker_enabled:
             self._receive_audio_thread.join()
+        
+        if self._vad_enabled:
+            self._vad_thread.join()
+            
+
+    def _post_run(self):
+        # Note that this function must be idempotent! It can be called multiple times
+        # if, for example, a keyboard interrupt occurs.
+        pass
 
     def stop(self):
         self._stop_threads.set()
@@ -117,7 +204,57 @@ class BaseTransportService():
     @abstractmethod
     def _prerun(self):
         pass
-
+    
+    def _vad(self):
+        # CB: Starting silero VAD stuff
+        # TODO-CB: Probably need to force virtual speaker creation if we're
+        # going to build this in?
+        # TODO-CB: pyaudio installation
+        while not self._stop_threads.is_set():
+            audio_chunk = self.read_audio_frames(self._vad_samples)
+            audio_int16 = np.frombuffer(audio_chunk, np.int16)
+            audio_float32 = int2float(audio_int16)
+            new_confidence = model(
+                torch.from_numpy(audio_float32), 16000).item()
+            speaking = new_confidence > 0.5
+        
+            if speaking:
+                match self._vad_state:
+                    case VADState.QUIET:
+                        self._vad_state = VADState.STARTING
+                        self._vad_starting_count = 1
+                    case VADState.STARTING:
+                        self._vad_starting_count += 1
+                    case VADState.STOPPING:
+                        self._vad_state = VADState.SPEAKING
+                        self._vad_stopping_count = 0
+            else:
+                match self._vad_state:
+                    case VADState.STARTING:
+                        self._vad_state = VADState.QUIET
+                        self._vad_starting_count = 0
+                    case VADState.SPEAKING:
+                        self._vad_state = VADState.STOPPING
+                        self._vad_stopping_count = 1
+                    case VADState.STOPPING:
+                        self._vad_stopping_count += 1
+        
+            if self._vad_state == VADState.STARTING and self._vad_starting_count >= self._vad_start_frames:
+                asyncio.run_coroutine_threadsafe(
+                    self.receive_queue.put(
+                        UserStartedSpeakingFrame()), self._loop
+                )
+                # self.interrupt()
+                self._vad_state = VADState.SPEAKING
+                self._vad_starting_count = 0
+            if self._vad_state == VADState.STOPPING and self._vad_stopping_count >= self._vad_stop_frames:
+                asyncio.run_coroutine_threadsafe(
+                    self.receive_queue.put(
+                        UserStoppedSpeakingFrame()), self._loop
+                )
+                self._vad_state = VADState.QUIET
+                self._vad_stopping_count = 0
+            
     async def _marshal_frames(self):
         while True:
             frame: QueueFrame | list = await self.send_queue.get()

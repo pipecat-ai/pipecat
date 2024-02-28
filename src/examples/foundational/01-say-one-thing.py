@@ -4,8 +4,10 @@ import os
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
+from dailyai.services.playht_ai_service import PlayHTAIService
 
 from examples.foundational.support.runner import configure
+
 
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
@@ -25,11 +27,23 @@ async def main(room_url):
             meeting_duration_minutes,
             mic_enabled=True
         )
-        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
+
+        """
+        tts = ElevenLabsTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
+        """
+        tts = PlayHTAIService(
+            api_key=os.getenv("PLAY_HT_API_KEY"),
+            user_id=os.getenv("PLAY_HT_USER_ID"),
+            voice_url=os.getenv("PLAY_HT_VOICE_URL"),
+        )
 
         # Register an event handler so we can play the audio when the participant joins.
         @transport.event_handler("on_participant_joined")
         async def on_participant_joined(transport, participant):
+            nonlocal tts
             if participant["info"]["isLocal"]:
                 return
 
@@ -42,6 +56,7 @@ async def main(room_url):
             await transport.stop_when_done()
 
         await transport.run()
+        del(tts)
 
 
 if __name__ == "__main__":

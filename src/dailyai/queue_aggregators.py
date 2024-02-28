@@ -61,7 +61,8 @@ class LLMContextAggregator(AIService):
 
         # TODO: split up transcription by participant
         if self.complete_sentences:
-            # type: ignore -- the linter thinks this isn't a TextQueueFrame, even though we check it above
+            # type: ignore -- the linter thinks this isn't a TextQueueFrame, even
+            # though we check it above
             self.sentence += frame.text
             if self.sentence.endswith((".", "?", "!")):
                 self.messages.append(
@@ -71,10 +72,9 @@ class LLMContextAggregator(AIService):
                     print(f"{message['role']}: {message['content']}")
                 yield LLMMessagesQueueFrame(self.messages)
         else:
-            # type: ignore -- the linter thinks this isn't a TextQueueFrame, even though we check it above
+            # type: ignore -- the linter thinks this isn't a TextQueueFrame, even
+            # though we check it above
             self.messages.append({"role": self.role, "content": frame.text})
-            for message in self.messages:
-                print(f"{message['role']}: {message['content']}")
             yield LLMMessagesQueueFrame(self.messages)
 
     async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
@@ -91,8 +91,7 @@ class LLMUserContextAggregator(LLMContextAggregator):
                  messages: list[dict],
                  bot_participant_id=None,
                  complete_sentences=True):
-        super().__init__(messages, "user", bot_participant_id,
-                         complete_sentences, pass_through=False)
+        super().__init__(messages, "user", bot_participant_id, complete_sentences, pass_through=False)
 
 
 class LLMAssistantContextAggregator(LLMContextAggregator):

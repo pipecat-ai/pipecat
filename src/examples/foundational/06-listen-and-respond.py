@@ -88,9 +88,10 @@ Once you have collected all of that information, respond with a JSON object cont
                     )
                 )            
             )
-        
+        transport.transcription_settings["extra"]["endpointing"] = True
         transport.transcription_settings["extra"]["punctuate"] = True
         await asyncio.gather(transport.run(), handle_transcriptions())
+
 
 
 if __name__ == "__main__":

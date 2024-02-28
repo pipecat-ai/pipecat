@@ -25,10 +25,13 @@ async def main(room_url: str, token):
             camera_enabled=False,
         )
 
-        llm = OpenAILLMService(api_key=os.getenv(
-            "OPENAI_CHATGPT_API_KEY"), model="gpt-4", tools=None)
-        tts = AzureTTSService(api_key=os.getenv(
-            "AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
+        llm = AzureLLMService(
+            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+            model=os.getenv("AZURE_CHATGPT_MODEL"))
+        tts = AzureTTSService(
+            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+            region=os.getenv("AZURE_SPEECH_REGION"))
 
         async def run_response(user_speech, tma_in, tma_out):
             await tts.run_to_queue(

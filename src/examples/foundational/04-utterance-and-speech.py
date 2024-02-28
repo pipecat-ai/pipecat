@@ -10,6 +10,7 @@ from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 from examples.foundational.support.runner import configure
 
+
 async def main(room_url: str):
     async with aiohttp.ClientSession() as session:
         transport = DailyTransportService(
@@ -22,9 +23,17 @@ async def main(room_url: str):
             camera_enabled=False
         )
 
-        llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
-        azure_tts = AzureTTSService(api_key=os.getenv("AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
-        elevenlabs_tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
+        llm = AzureLLMService(
+            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+            model=os.getenv("AZURE_CHATGPT_MODEL"))
+        azure_tts = AzureTTSService(
+            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+            region=os.getenv("AZURE_SPEECH_REGION"))
+        elevenlabs_tts = ElevenLabsTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
 
         messages = [{"role": "system", "content": "tell the user a joke about llamas"}]
 

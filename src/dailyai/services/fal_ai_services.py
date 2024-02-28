@@ -13,7 +13,13 @@ from dailyai.services.ai_services import ImageGenService
 
 
 class FalImageGenService(ImageGenService):
-    def __init__(self, *, image_size, aiohttp_session: aiohttp.ClientSession, key_id=None, key_secret=None):
+    def __init__(
+            self,
+            *,
+            image_size,
+            aiohttp_session: aiohttp.ClientSession,
+            key_id=None,
+            key_secret=None):
         super().__init__(image_size)
         self._aiohttp_session = aiohttp_session
         if key_id:
