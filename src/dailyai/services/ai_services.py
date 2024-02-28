@@ -33,25 +33,27 @@ class PipeService(AbstractPipeService):
 
     def __init__(
         self,
-        source: AbstractPipeService | None = None,
+        source_queue: asyncio.Queue[QueueFrame] | None = None,
     ):
         super().__init__()
         self.logger: logging.Logger = logging.getLogger("dailyai")
-        self.source = source
+        self.source_queue = source_queue
 
     async def process_queue(self):
-        if not self.source:
+        if not self.source_queue:
             return
 
         while True:
-            frame: QueueFrame = await self.source.sink_queue.get()
+            frame: QueueFrame = await self.source_queue.get()
             async for output_frame in self.process_frame(frame):
-                await self.sink_queue.put(output_frame)
                 if isinstance(frame, EndStreamQueueFrame):
                     print("end of stream", type(self))
-                    async for output_frame in self.finalize():
-                        await self.sink_queue.put(output_frame)
+                    async for final_frame in self.finalize():
+                        await self.sink_queue.put(final_frame)
+                    await self.sink_queue.put(output_frame)
                     return
+
+                await self.sink_queue.put(output_frame)
 
     @abstractmethod
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:

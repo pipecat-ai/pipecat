@@ -1,22 +1,19 @@
 import asyncio
-from math import pi
 import unittest
 
-from unittest.mock import MagicMock, patch
-
-from dailyai.queue_frame import AudioQueueFrame, EndStreamQueueFrame, ImageQueueFrame, TextQueueFrame
+from dailyai.queue_frame import EndStreamQueueFrame, TextQueueFrame
 from dailyai.services.ai_services import PipeService
 
-class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
+class TestPipeService(unittest.IsolatedAsyncioTestCase):
     class IncomingPipeService(PipeService):
         def __init__(self):
             super().__init__()
             self.sink_queue = asyncio.Queue()
 
     async def test_pipe_chain(self):
-        pipe1 = TestDailyTransport.IncomingPipeService()
-        pipe2 = PipeService(pipe1)
-        pipe3 = PipeService(pipe2)
+        pipe1 = TestPipeService.IncomingPipeService()
+        pipe2 = PipeService(pipe1.sink_queue)
+        pipe3 = PipeService(pipe2.sink_queue)
 
         await pipe1.sink_queue.put(TextQueueFrame("test"))
         await pipe1.sink_queue.put(EndStreamQueueFrame())
