@@ -43,7 +43,7 @@ class AIService:
         frames: Iterable[QueueFrame]
         | AsyncIterable[QueueFrame]
         | asyncio.Queue[QueueFrame],
-    ) -> AsyncGenerator[QueueFrame, None]:
+    **kwargs) -> AsyncGenerator[QueueFrame, None]:
         try:
             if isinstance(frames, AsyncIterable):
                 async for frame in frames:

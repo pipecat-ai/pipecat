@@ -52,7 +52,7 @@ class LLMContextAggregator(AIService):
         if isinstance(frame, TranscriptionQueueFrame):
             if frame.participantId == self.bot_participant_id:
                 return
-
+        print(f"@@@ tma got a frame: {frame.text}")
         # The common case for "pass through" is receiving frames from the LLM that we'll
         # use to update the "assistant" LLM messages, but also passing the text frames
         # along to a TTS service to be spoken to the user.
@@ -68,8 +68,8 @@ class LLMContextAggregator(AIService):
                 self.messages.append(
                     {"role": self.role, "content": self.sentence})
                 self.sentence = ""
-                for message in self.messages:
-                    print(f"{message['role']}: {message['content']}")
+                # for message in self.messages:
+                #     print(f"{message['role']}: {message['content']}")
                 yield LLMMessagesQueueFrame(self.messages)
         else:
             # type: ignore -- the linter thinks this isn't a TextQueueFrame, even
@@ -81,8 +81,8 @@ class LLMContextAggregator(AIService):
         # Send any dangling words that weren't finished with punctuation.
         if self.complete_sentences and self.sentence:
             self.messages.append({"role": self.role, "content": self.sentence})
-            for message in self.messages:
-                print(f"{message['role']}: {message['content']}")
+            # for message in self.messages:
+            #     print(f"{message['role']}: {message['content']}")
             yield LLMMessagesQueueFrame(self.messages)
 
 

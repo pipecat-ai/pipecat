@@ -217,7 +217,6 @@ class BaseTransportService():
             new_confidence = model(
                 torch.from_numpy(audio_float32), 16000).item()
             speaking = new_confidence > 0.5
-        
             if speaking:
                 match self._vad_state:
                     case VADState.QUIET:
@@ -240,14 +239,16 @@ class BaseTransportService():
                         self._vad_stopping_count += 1
         
             if self._vad_state == VADState.STARTING and self._vad_starting_count >= self._vad_start_frames:
+                print("##### VAD START")
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(
                         UserStartedSpeakingFrame()), self._loop
                 )
-                # self.interrupt()
+                self.interrupt()
                 self._vad_state = VADState.SPEAKING
                 self._vad_starting_count = 0
             if self._vad_state == VADState.STOPPING and self._vad_stopping_count >= self._vad_stop_frames:
+                print("##### VAD STOP")
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(
                         UserStoppedSpeakingFrame()), self._loop
@@ -264,6 +265,7 @@ class BaseTransportService():
                 break
 
     def interrupt(self):
+        print(f"!!!!! INTERRUPT")
         self._is_interrupted.set()
 
     async def get_receive_frames(self) -> AsyncGenerator[QueueFrame, None]:
@@ -333,7 +335,6 @@ class BaseTransportService():
                     raise Exception("Unknown type in output queue")
 
                 for frame in frames:
-                    print(f"got frame of type: {type(frame)}")
                     if isinstance(frame, EndStreamQueueFrame):
                         self._logger.info("Stopping frame consumer thread")
                         self._threadsafe_send_queue.task_done()

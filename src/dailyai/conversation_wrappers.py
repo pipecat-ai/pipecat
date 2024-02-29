@@ -3,7 +3,7 @@ import copy
 import functools
 from typing import AsyncGenerator, Awaitable, Callable
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
-from dailyai.queue_frame import EndStreamQueueFrame, QueueFrame, TranscriptionQueueFrame
+from dailyai.queue_frame import EndStreamQueueFrame, QueueFrame, TranscriptionQueueFrame, UserStartedSpeakingFrame
 
 
 class InterruptibleConversationWrapper:
@@ -63,9 +63,10 @@ class InterruptibleConversationWrapper:
             if frame.participantId == self._my_participant_id:
                 continue
 
-            if current_response_task:
+            if current_response_task and isinstance(frame, UserStartedSpeakingFrame):
                 current_response_task.cancel()
                 self._interrupt()
+                
 
             self._current_phrase += " " + frame.text
             current_llm_messages = copy.deepcopy(self._messages)
