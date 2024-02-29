@@ -39,7 +39,7 @@ class LLMContextAggregator(AIService):
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         # We don't do anything with non-text frames, pass it along to next in the pipeline.
         
-        self.logger.debug(f"aggregator got frame: {type(frame)}")
+        print(f"aggregator got frame: {type(frame)}")
         if not isinstance(frame, TextQueueFrame):
             yield frame
             return

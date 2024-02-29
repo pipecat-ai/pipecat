@@ -287,6 +287,7 @@ class BaseTransportService():
                         self._vad_stopping_count += 1
 
             if self._vad_state == VADState.STARTING and self._vad_starting_count >= self._vad_start_frames:
+                print("@@@ VAD STARTED")
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(
                         UserStartedSpeakingFrame()), self._loop
@@ -295,6 +296,7 @@ class BaseTransportService():
                 self._vad_state = VADState.SPEAKING
                 self._vad_starting_count = 0
             if self._vad_state == VADState.STOPPING and self._vad_stopping_count >= self._vad_stop_frames:
+                print("@@@ VAD STOPPED")
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(
                         UserStoppedSpeakingFrame()), self._loop

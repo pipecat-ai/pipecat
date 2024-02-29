@@ -14,6 +14,7 @@ from dailyai.queue_frame import (
     ControlQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
+    LLMFunctionCallFrame,
     LLMMessagesQueueFrame,
     LLMResponseEndQueueFrame,
     QueueFrame,
@@ -98,25 +99,54 @@ class LLMService(AIService):
     async def run_llm(self, messages) -> str:
         pass
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: QueueFrame, tool_choice: str = None) -> AsyncGenerator[QueueFrame, None]:
         if isinstance(frame, UserStoppedSpeakingFrame):
             # Then we're in conversation mode with VAD;
             # use the global shared context for completion
             # but also yield the UserStoppedSpeakingFrame for downstream timing
             yield frame
             self.logger.debug("Starting LLM")
-            async for text_chunk in self.run_llm_async(self._context):
-                self.logger.debug("Yielding LLM")
-                yield TextQueueFrame(text_chunk)
-            self.logger.debug("Finished LLM")
+            function_name = ""
+            arguments = ""
+            async for text_chunk in self.run_llm_async(self._context, tool_choice):
+                if isinstance(text_chunk, str):
+                    yield TextQueueFrame(text_chunk)
+                elif text_chunk.function:
+                    if text_chunk.function.name:
+                        # function_name += text_chunk.function.name
+                        yield LLMFunctionCallFrame(function_name=text_chunk.function.name, arguments=None)
+                    if text_chunk.function.arguments:
+                        # arguments += text_chunk.function.arguments
+                        yield LLMFunctionCallFrame(function_name=None, arguments=text_chunk.function.arguments)
+        
+            if (function_name and arguments):
+                # yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
+                function_name = ""
+                arguments = ""
             yield LLMResponseEndQueueFrame()
         elif isinstance(frame, LLMMessagesQueueFrame):
             # It's an LLMMessagesQueueFrame directly created in an
             # example.
             # TODO-CB: Clean this up?
-            async for text_chunk in self.run_llm_async(frame.messages):
-                yield TextQueueFrame(text_chunk)
-            yield LLMResponseEndQueueFrame()
+            function_name = ""
+            arguments = ""
+            if isinstance(frame, LLMMessagesQueueFrame):
+                async for text_chunk in self.run_llm_async(frame.messages, tool_choice):
+                    if isinstance(text_chunk, str):
+                        yield TextQueueFrame(text_chunk)
+                    elif text_chunk.function:
+                        if text_chunk.function.name:
+                            # function_name += text_chunk.function.name
+                            yield LLMFunctionCallFrame(function_name=text_chunk.function.name, arguments=None)
+                        if text_chunk.function.arguments:
+                            # arguments += text_chunk.function.arguments
+                            yield LLMFunctionCallFrame(function_name=None, arguments=text_chunk.function.arguments)
+            
+                if (function_name and arguments):
+                    # yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
+                    function_name = ""
+                    arguments = ""
+                yield LLMResponseEndQueueFrame()
         else:
             yield frame
 
@@ -156,6 +186,7 @@ class TTSService(AIService):
         elif not self.aggregate_sentences:
             text = [frame.text]
         else:
+            print(f"### frame is {frame}, current sentence is {self.current_sentence}")
             self.current_sentence += frame.text
             if self.current_sentence.endswith((".", "?", "!")):
                 text = [self.current_sentence]

@@ -68,7 +68,6 @@ class TranscriptionQueueFrame(TextQueueFrame):
     participantId: str
     timestamp: str
 
-
 @dataclass()
 class LLMMessagesQueueFrame(QueueFrame):
     messages: list[dict[str, str]]  # TODO: define this more concretely!
@@ -77,3 +76,8 @@ class LLMMessagesQueueFrame(QueueFrame):
 class AppMessageQueueFrame(QueueFrame):
     message: Any
     participantId: str
+
+@dataclass()
+class LLMFunctionCallFrame(QueueFrame):
+    function_name: str
+    arguments: str

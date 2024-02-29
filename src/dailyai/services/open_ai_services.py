@@ -10,28 +10,39 @@ from dailyai.services.ai_services import LLMService, ImageGenService
 
 
 class OpenAILLMService(LLMService):
-    def __init__(self, *, api_key, model="gpt-4-turbo-preview", context=None):
-        super().__init__(context)
+    def __init__(self, *, api_key, model="gpt-4", tools=None, context=None):
+        super().__init__(context=context)
         self._model = model
+        self._tools = tools
         self._client = AsyncOpenAI(api_key=api_key)
 
     async def get_response(self, messages, stream):
         return await self._client.chat.completions.create(
             stream=stream,
             messages=messages,
-            model=self._model
+            model=self._model,
+            tools=self._tools
         )
 
-    async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
+    async def run_llm_async(self, messages, tool_choice=None) -> AsyncGenerator[str, None]:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
-
-        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages)
+        print("---")
+        print(f"tools: {self._tools}")
+        print("---")
+        print(f"messages: {messages_for_log}")
+        print("-----")
+        if self._tools:
+            tools = self._tools
+        else:
+            tools = None
+        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages, tools=tools, tool_choice=tool_choice)
         async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue
-
-            if chunk.choices[0].delta.content:
+            if chunk.choices[0].delta.tool_calls:
+                yield chunk.choices[0].delta.tool_calls[0]
+            elif chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
 
     async def run_llm(self, messages) -> str | None:
@@ -57,6 +68,7 @@ class OpenAIImageGenService(ImageGenService):
     ):
         super().__init__(image_size=image_size)
         self._model = model
+        print(f"api key: {api_key}")
         self._client = AsyncOpenAI(api_key=api_key)
         self._aiohttp_session = aiohttp_session
 
