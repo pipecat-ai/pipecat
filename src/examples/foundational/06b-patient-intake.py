@@ -443,7 +443,7 @@ async def main(room_url: str, token):
         fl = FrameLogger("got transcript")
         fl2 = FrameLogger("just above the checklist")
 
-        async def handle_transcriptions(user_speech, tma_in, tma_out):
+        async def run_response(user_speech, tma_in, tma_out):
             tf = TranscriptFilter(transport._my_participant_id)
             await tts.run_to_queue(
                 transport.send_queue,
@@ -457,17 +457,6 @@ async def main(room_url: str, token):
                     )
                 )
             )
-
-        async def run_conversation():
-
-            conversation_wrapper = InterruptibleConversationWrapper(
-                frame_generator=transport.get_receive_frames,
-                runner=handle_transcriptions,
-                interrupt=transport.interrupt,
-                my_participant_id=transport._my_participant_id,
-                llm_messages=messages,
-            )
-            await conversation_wrapper.run_conversation()
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
@@ -483,8 +472,9 @@ async def main(room_url: str, token):
         transport.transcription_settings["extra"]["endpointing"] = True
         transport.transcription_settings["extra"]["punctuate"] = True
         try:
-            await asyncio.gather(transport.run(), run_conversation())
+            await asyncio.gather(transport.run(), transport.run_conversation(run_response))
         except (asyncio.CancelledError, KeyboardInterrupt):
+            print('whoops')
             transport.stop()
 
 

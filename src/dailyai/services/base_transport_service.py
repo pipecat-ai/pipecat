@@ -1,5 +1,6 @@
 from abc import abstractmethod
 import asyncio
+import functools
 import itertools
 import logging
 import numpy as np
@@ -11,6 +12,7 @@ import threading
 import time
 from typing import AsyncGenerator
 from enum import Enum
+from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable
 
 from dailyai.queue_frame import (
     AudioQueueFrame,
@@ -122,6 +124,50 @@ class BaseTransportService():
         self._is_interrupted = threading.Event()
 
         self._logger: logging.Logger = logging.getLogger()
+    
+    def update_messages(self, new_context: list[dict[str, str]], task: asyncio.Task | None):
+        if task:
+            if not task.cancelled():
+                self._current_phrase = ""
+                self._context = new_context
+    
+    
+    
+    async def run_pipeline(self, frame):
+        # TODO-CB: This exception for missing class gets eaten!
+        await self._runner(frame)
+    
+    async def run_conversation(self, runner: Iterable[QueueFrame]
+                               | AsyncIterable[QueueFrame]
+                               | asyncio.Queue[QueueFrame],
+                               ) -> AsyncGenerator[QueueFrame, None]:
+        current_response_task = None
+        self._runner = runner
+    
+        async for frame in self.get_receive_frames():
+            if isinstance(frame, EndStreamQueueFrame):
+                break
+            # elif not isinstance(frame, TranscriptionQueueFrame):
+                # continue
+            # TODO-CB: Verify this is an accurate replacement
+            # if hasattr(frame, 'participantId') and frame.participantId == self._my_participant_id:
+            # if not isinstance(frame, UserStoppedSpeakingFrame):
+            #     continue
+    
+            if current_response_task and isinstance(frame, UserStartedSpeakingFrame):
+                # TODO-CB: Maybe not always interrupt? Are there frame types we can pass through?
+                current_response_task.cancel()
+                self.interrupt()
+    
+            # self._current_phrase += " " + frame.text
+           # current_llm_context = copy.deepcopy(self._context)
+            current_response_task = asyncio.create_task(
+                self.run_pipeline(
+                    frame)
+            )
+            current_response_task.add_done_callback(
+                functools.partial(self.update_messages, self._context)
+            )
 
     async def run(self):
         self._prerun()
