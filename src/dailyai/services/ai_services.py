@@ -23,7 +23,7 @@ class AbstractPipeService:
     def __init__(
         self,
     ):
-        self.sink_queue: asyncio.Queue[QueueFrame] = asyncio.Queue()
+        self.out_queue: asyncio.Queue[QueueFrame] = asyncio.Queue()
 
     @abstractmethod
     async def process_queue(self):
@@ -34,10 +34,12 @@ class PipeService(AbstractPipeService):
     def __init__(
         self,
         source_queue: asyncio.Queue[QueueFrame] | None = None,
+        out_queue: asyncio.Queue[QueueFrame] | None = None,
     ):
         super().__init__()
         self.logger: logging.Logger = logging.getLogger("dailyai")
-        self.source_queue = source_queue
+        self.source_queue: asyncio.Queue[QueueFrame] = source_queue or asyncio.Queue()
+        self.out_queue = out_queue or asyncio.Queue()
 
     async def process_queue(self):
         if not self.source_queue:
@@ -45,14 +47,15 @@ class PipeService(AbstractPipeService):
 
         while True:
             frame: QueueFrame = await self.source_queue.get()
+            print("got frame", frame.__class__.__name__)
             async for output_frame in self.process_frame(frame):
                 if isinstance(frame, EndStreamQueueFrame):
                     async for final_frame in self.finalize():
-                        await self.sink_queue.put(final_frame)
-                    await self.sink_queue.put(output_frame)
+                        await self.out_queue.put(final_frame)
+                    await self.out_queue.put(output_frame)
                     return
 
-                await self.sink_queue.put(output_frame)
+                await self.out_queue.put(output_frame)
 
     @abstractmethod
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
@@ -173,7 +176,7 @@ class TTSService(AIService):
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue|None=None):
-        queue = queue or self.sink
+        queue = queue or self.out_queue
         if not queue:
             raise Exception("No queue to send audio to")
         await self.run_to_queue(queue, [TextQueueFrame(sentence)])

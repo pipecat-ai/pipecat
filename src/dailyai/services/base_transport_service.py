@@ -82,8 +82,10 @@ class BaseTransportService():
 
         self._stop_threads.set()
 
+        if self.send_queue:
+            await self.send_queue.put(EndStreamQueueFrame())
         await async_output_queue_marshal_task
-        await self.send_queue.join()
+        #await self.send_queue.join()
         self._frame_consumer_thread.join()
 
         if self._speaker_enabled:

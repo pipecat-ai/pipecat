@@ -3,7 +3,6 @@ import asyncio
 from attr import dataclass
 
 from dailyai.queue_frame import (
-    ControlQueueFrame,
     EndStreamQueueFrame,
     LLMMessagesQueueFrame,
     QueueFrame,
@@ -17,14 +16,14 @@ from typing import Any, AsyncGenerator, Callable, List, Tuple
 
 class QueueTee(PipeService):
     def __init__(
-        self, sinks: list[PipeService], *args, **kwargs
+        self, out_services: list[PipeService], *args, **kwargs
     ):
         super().__init__(*args, **kwargs)
 
-        self.sinks: List[PipeService] = []
-        for sink in sinks:
-            sink.source_queue = asyncio.Queue()
-            self.sinks.append(sink)
+        self.out_services: List[PipeService] = []
+        for out_service in out_services:
+            out_service.source_queue = asyncio.Queue()
+            self.out_services.append(out_service)
 
     async def process_queue(self):
         if not self.source_queue:
@@ -32,9 +31,9 @@ class QueueTee(PipeService):
 
         while True:
             frame: QueueFrame = await self.source_queue.get()
-            for sink in self.sinks:
-                if sink.source_queue:
-                    await sink.source_queue.put(frame)
+            for out_service in self.out_services:
+                if out_service.source_queue:
+                    await out_service.source_queue.put(frame)
 
             if isinstance(frame, EndStreamQueueFrame):
                 break
@@ -86,21 +85,21 @@ class QueueMergeGateOnFirst(PipeService):
             if isinstance(frame, EndStreamQueueFrame):
                 self.source_queues.pop(idx)
             else:
-                await self.sink_queue.put(frame)
+                await self.out_queue.put(frame)
 
-        async def pass_through(sink, source):
+        async def pass_through(out_queue, source_queue):
             while True:
-                frame = await source.get()
+                frame = await source_queue.get()
                 if isinstance(frame, EndStreamQueueFrame):
                     break
                 else:
-                    await sink.put(frame)
+                    await out_queue.put(frame)
 
         await asyncio.gather(
-            *[pass_through(self.sink_queue, source) for source in self.source_queues]
+            *[pass_through(self.out_queue, source) for source in self.source_queues]
         )
 
-        await self.sink_queue.put(EndStreamQueueFrame())
+        await self.out_queue.put(EndStreamQueueFrame())
 
 
 class LLMContextAggregator(AIService):

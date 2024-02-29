@@ -76,20 +76,20 @@ async def main(room_url):
         llm_aggregator_for_image = QueueFrameAggregator(aggregator=aggregator, finalizer=lambda x: None)
 
         # Set the source queue for the image service to the sink of the aggregator service
-        dalle.source_queue = llm_aggregator_for_image.sink_queue
+        dalle.source_queue = llm_aggregator_for_image.out_queue
 
         # This queue service takes the output from the LLM and sends it to the TTS service and
         # the aggregator for the image generation service.
-        tee = QueueTee(source_queue=llm.sink_queue, sinks=[tts, llm_aggregator_for_image])
+        tee = QueueTee(source_queue=llm.out_queue, out_services=[tts, llm_aggregator_for_image])
 
         # This queue service takes input from the TTS service and the image service, and waits
         # to forward any audio frames until the image generation is complete. It will send
         # the image first, then the audio frames; this ensures that the image is shown before
         # the audio associated with the image is played.
-        tts_image_gate = QueueMergeGateOnFirst([dalle.sink_queue, tts.sink_queue])
+        tts_image_gate = QueueMergeGateOnFirst([dalle.out_queue, tts.out_queue])
 
         # We send the image of this queue service to the transport output.
-        tts_image_gate.sink_queue = transport.send_queue
+        tts_image_gate.out_queue = transport.send_queue
 
         # Queue up all the months in the LLM service source queue
         months = ["January"] #, "February"]
