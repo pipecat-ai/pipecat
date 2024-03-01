@@ -5,6 +5,7 @@ from attr import dataclass
 from dailyai.queue_frame import (
     EndStreamQueueFrame,
     LLMMessagesQueueFrame,
+    LLMResponseEndQueueFrame,
     QueueFrame,
     TextQueueFrame,
     TranscriptionQueueFrame,
@@ -15,9 +16,7 @@ from typing import Any, AsyncGenerator, Callable, List, Tuple
 
 
 class QueueTee(PipeService):
-    def __init__(
-        self, out_services: list[PipeService], *args, **kwargs
-    ):
+    def __init__(self, out_services: list[PipeService], *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.out_services: List[PipeService] = []
@@ -40,7 +39,6 @@ class QueueTee(PipeService):
 
 
 class QueueFrameAggregator(PipeService):
-
     def __init__(
         self,
         aggregator: Callable[[Any, QueueFrame], Tuple[Any, QueueFrame | None]],
@@ -57,9 +55,7 @@ class QueueFrameAggregator(PipeService):
         self, frame: QueueFrame
     ) -> AsyncGenerator[QueueFrame, None]:
         output_frame: QueueFrame | None = None
-        (self.aggregation, output_frame) = self.aggregator(
-            self.aggregation, frame
-        )
+        (self.aggregation, output_frame) = self.aggregator(self.aggregation, frame)
         if output_frame:
             yield output_frame
 
@@ -68,48 +64,56 @@ class QueueFrameAggregator(PipeService):
         if output_frame:
             yield output_frame
 
+
 class QueueMergeGateOnFirst(PipeService):
 
     def __init__(
-        self, source_queues: List[asyncio.Queue[QueueFrame]]
+        self,
+        source_queues: List[asyncio.Queue[QueueFrame]],
+        ungate_frame_class=LLMResponseEndQueueFrame,
     ):
         super().__init__()
         self.source_queues = source_queues
+        self.ungate_frame_class = ungate_frame_class
 
     async def process_queue(self):
-        (frames): list[QueueFrame] = await asyncio.gather(
-            *[source_queue.get() for source_queue in self.source_queues]
-        )
-        for idx, frame in enumerate(frames):
-            # if the frame we got from a source is an EndStreamQueueFrame, remove that source
-            if isinstance(frame, EndStreamQueueFrame):
-                self.source_queues.pop(idx)
-            else:
-                await self.out_queue.put(frame)
-
-        async def pass_through(out_queue, source_queue):
-            while True:
-                frame = await source_queue.get()
+        while len(self.source_queues) > 0:
+            (frames): list[QueueFrame] = await asyncio.gather(
+                *[source_queue.get() for source_queue in self.source_queues]
+            )
+            for idx, frame in enumerate(frames):
+                # if the frame we got from a source is an EndStreamQueueFrame, remove that source
                 if isinstance(frame, EndStreamQueueFrame):
-                    break
+                    self.source_queues.pop(idx)
                 else:
-                    await out_queue.put(frame)
+                    await self.out_queue.put(frame)
 
-        await asyncio.gather(
-            *[pass_through(self.out_queue, source) for source in self.source_queues]
-        )
+            async def pass_through(out_queue, source_queue):
+                while True:
+                    frame = await source_queue.get()
+                    if isinstance(frame, EndStreamQueueFrame) or isinstance(
+                        frame, self.ungate_frame_class
+                    ):
+                        break
+                    else:
+                        await out_queue.put(frame)
+
+            await asyncio.gather(
+                *[pass_through(self.out_queue, source) for source in self.source_queues]
+            )
 
         await self.out_queue.put(EndStreamQueueFrame())
 
 
 class LLMContextAggregator(AIService):
     def __init__(
-            self,
-            messages: list[dict],
-            role: str,
-            bot_participant_id=None,
-            complete_sentences=True,
-            pass_through=True):
+        self,
+        messages: list[dict],
+        role: str,
+        bot_participant_id=None,
+        complete_sentences=True,
+        pass_through=True,
+    ):
         super().__init__()
         self.messages = messages
         self.bot_participant_id = bot_participant_id
@@ -118,7 +122,9 @@ class LLMContextAggregator(AIService):
         self.complete_sentences = complete_sentences
         self.pass_through = pass_through
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(
+        self, frame: QueueFrame
+    ) -> AsyncGenerator[QueueFrame, None]:
         # We don't do anything with non-text frames, pass it along to next in the pipeline.
         if not isinstance(frame, TextQueueFrame):
             yield frame
@@ -158,11 +164,12 @@ class LLMContextAggregator(AIService):
 
 
 class LLMUserContextAggregator(LLMContextAggregator):
-    def __init__(self,
-                 messages: list[dict],
-                 bot_participant_id=None,
-                 complete_sentences=True):
-        super().__init__(messages, "user", bot_participant_id, complete_sentences, pass_through=False)
+    def __init__(
+        self, messages: list[dict], bot_participant_id=None, complete_sentences=True
+    ):
+        super().__init__(
+            messages, "user", bot_participant_id, complete_sentences, pass_through=False
+        )
 
 
 class LLMAssistantContextAggregator(LLMContextAggregator):
@@ -170,5 +177,9 @@ class LLMAssistantContextAggregator(LLMContextAggregator):
         self, messages: list[dict], bot_participant_id=None, complete_sentences=True
     ):
         super().__init__(
-            messages, "assistant", bot_participant_id, complete_sentences, pass_through=True
+            messages,
+            "assistant",
+            bot_participant_id,
+            complete_sentences,
+            pass_through=True,
         )

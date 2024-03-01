@@ -47,7 +47,6 @@ class PipeService(AbstractPipeService):
 
         while True:
             frame: QueueFrame = await self.source_queue.get()
-            print("got frame", frame.__class__.__name__)
             async for output_frame in self.process_frame(frame):
                 if isinstance(frame, EndStreamQueueFrame):
                     async for final_frame in self.finalize():

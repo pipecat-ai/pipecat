@@ -15,8 +15,8 @@ class TestPipeService(unittest.IsolatedAsyncioTestCase):
         pipe2 = PipeService(pipe1.out_queue)
         pipe3 = PipeService(pipe2.out_queue)
 
-        await pipe1.out_queue.put(TextQueueFrame("test"))
-        await pipe1.out_queue.put(EndStreamQueueFrame())
+        await pipe1.source_queue.put(TextQueueFrame("test"))
+        await pipe1.source_queue.put(EndStreamQueueFrame())
 
         await asyncio.gather(pipe1.process_queue(), pipe2.process_queue(), pipe3.process_queue())
 

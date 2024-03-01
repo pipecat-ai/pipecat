@@ -92,8 +92,9 @@ async def main(room_url):
         tts_image_gate.out_queue = transport.send_queue
 
         # Queue up all the months in the LLM service source queue
-        months = ["January"] #, "February"]
+        months = ["January", "February", "March", "April"]
         for month in months:
+            print(f"building pipeline for {month}")
             messages = [
                 {
                     "role": "system",
@@ -102,7 +103,6 @@ async def main(room_url):
             ]
 
             await month_description_queue.put(LLMMessagesQueueFrame(messages))
-
         await month_description_queue.put(EndStreamQueueFrame())
 
         pipeline = [
@@ -115,7 +115,7 @@ async def main(room_url):
             transport,
         ]
 
-        await asyncio.gather(transport.run(), *[service.process_queue() for service in [llm, tts, dalle, tee, tts_image_gate, llm_aggregator_for_image]])
+        await asyncio.gather(transport.run(),*[service.process_queue() for service in [llm, tts, dalle, tee, tts_image_gate, llm_aggregator_for_image]])
 
 if __name__ == "__main__":
     (url, token) = configure()
