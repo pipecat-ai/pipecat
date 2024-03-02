@@ -88,19 +88,25 @@ class QueueMergeGateOnFirst(PipeService):
                 else:
                     await self.out_queue.put(frame)
 
-            async def pass_through(out_queue, source_queue):
+            async def pass_through(out_queue, source_queue) -> bool:
                 while True:
                     frame = await source_queue.get()
                     if isinstance(frame, EndStreamQueueFrame) or isinstance(
                         frame, self.ungate_frame_class
                     ):
-                        break
+                        if isinstance(frame, EndStreamQueueFrame):
+                            return True
+                        return False
                     else:
                         await out_queue.put(frame)
 
-            await asyncio.gather(
+            remove_sources = await asyncio.gather(
                 *[pass_through(self.out_queue, source) for source in self.source_queues]
             )
+
+            for idx, remove in reversed(list(enumerate(remove_sources))):
+                if remove:
+                    self.source_queues.pop(idx)
 
         await self.out_queue.put(EndStreamQueueFrame())
 

@@ -19,8 +19,8 @@ class QueueTeeTest(unittest.IsolatedAsyncioTestCase):
         outpipe2 = PipeService()
         teepipe = QueueTee(source_queue=inpipe1.out_queue, out_services=[outpipe1, outpipe2])
 
-        originpipe.out_queue.put_nowait(TextQueueFrame("test"))
-        originpipe.out_queue.put_nowait(EndStreamQueueFrame())
+        originpipe.source_queue.put_nowait(TextQueueFrame("test"))
+        originpipe.source_queue.put_nowait(EndStreamQueueFrame())
 
         await asyncio.gather(*[pipe.process_queue() for pipe in [originpipe, inpipe1, outpipe1, outpipe2, teepipe]])
 
@@ -42,9 +42,11 @@ class QueueFrameAggregatorTest(unittest.IsolatedAsyncioTestCase):
                 accumulation = ""
             if isinstance(frame, TextQueueFrame):
                 accumulation += frame.text
-            if accumulation.endswith((".", "!", "?")):
-                return ("", TextQueueFrame(accumulation))
-            return (accumulation, None)
+                if accumulation.endswith((".", "!", "?")):
+                    return ("", TextQueueFrame(accumulation))
+                return (accumulation, None)
+            else:
+                return (accumulation, frame)
 
         def finalize_sentences(accumulation):
             return TextQueueFrame(accumulation)
@@ -56,13 +58,13 @@ class QueueFrameAggregatorTest(unittest.IsolatedAsyncioTestCase):
             finalizer=finalize_sentences,
         )
 
-        originpipe.out_queue.put_nowait(TextQueueFrame("testing, "))
-        originpipe.out_queue.put_nowait(TextQueueFrame("one."))
-        originpipe.out_queue.put_nowait(TextQueueFrame("two."))
-        originpipe.out_queue.put_nowait(TextQueueFrame("three."))
-        originpipe.out_queue.put_nowait(TextQueueFrame("can you "))
-        originpipe.out_queue.put_nowait(TextQueueFrame("hear me"))
-        originpipe.out_queue.put_nowait(EndStreamQueueFrame())
+        originpipe.source_queue.put_nowait(TextQueueFrame("testing, "))
+        originpipe.source_queue.put_nowait(TextQueueFrame("one."))
+        originpipe.source_queue.put_nowait(TextQueueFrame("two."))
+        originpipe.source_queue.put_nowait(TextQueueFrame("three."))
+        originpipe.source_queue.put_nowait(TextQueueFrame("can you "))
+        originpipe.source_queue.put_nowait(TextQueueFrame("hear me"))
+        originpipe.source_queue.put_nowait(EndStreamQueueFrame())
 
         await asyncio.gather(originpipe.process_queue(), aggregator_pipe.process_queue())
 
@@ -90,14 +92,16 @@ class QueueMergeGateOnFirstTest(unittest.IsolatedAsyncioTestCase):
 
         async def add_items_to_first_pipe():
             await evt.wait()
-            await pipe1.out_queue.put(TextQueueFrame("pipe1.1"))
-            await pipe1.out_queue.put(TextQueueFrame("pipe1.2"))
-            await pipe1.out_queue.put(EndStreamQueueFrame())
+            await pipe1.source_queue.put(TextQueueFrame("pipe1.1"))
+            await pipe1.source_queue.put(TextQueueFrame("pipe1.2"))
+            await pipe1.source_queue.put(EndStreamQueueFrame())
+            print("pipe1 done")
 
         async def add_items_to_second_pipe():
-            await pipe2.out_queue.put(TextQueueFrame("pipe2.1"))
+            await pipe2.source_queue.put(TextQueueFrame("pipe2.1"))
             evt.set()
-            await pipe2.out_queue.put(EndStreamQueueFrame())
+            await pipe2.source_queue.put(EndStreamQueueFrame())
+            print("pipe2 done")
 
         await asyncio.gather(
             *[pipe.process_queue() for pipe in [pipe1, pipe2, merge_pipe]],
