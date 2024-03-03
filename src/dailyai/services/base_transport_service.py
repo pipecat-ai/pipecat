@@ -5,14 +5,13 @@ import logging
 import numpy as np
 import pyaudio
 import torch
-import torchaudio
 import queue
 import threading
 import time
 from typing import AsyncGenerator
 from enum import Enum
 
-from dailyai.queue_frame import (
+from dailyai.pipeline.frames import (
     AudioQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
@@ -89,10 +88,10 @@ class BaseTransportService():
         self._vad_stop_s = kwargs.get("vad_stop_s") or 0.8
         self._context = kwargs.get("context") or []
         self._vad_enabled = kwargs.get("vad_enabled") or False
-        
+
         if self._vad_enabled and self._speaker_enabled:
             raise Exception("Sorry, you can't use speaker_enabled and vad_enabled at the same time. Please set one to False.")
-            
+
         self._vad_samples = 1536
         vad_frame_s = self._vad_samples / SAMPLE_RATE
         self._vad_start_frames = round(self._vad_start_s / vad_frame_s)
@@ -101,7 +100,7 @@ class BaseTransportService():
         self._vad_stopping_count = 0
         self._vad_state = VADState.QUIET
         self._user_is_speaking = False
-        
+
         duration_minutes = kwargs.get("duration_minutes") or 10
         self._expiration = time.time() + duration_minutes * 60
 
@@ -136,7 +135,7 @@ class BaseTransportService():
         if self._speaker_enabled:
             self._receive_audio_thread = threading.Thread(target=self._receive_audio, daemon=True)
             self._receive_audio_thread.start()
-        
+
         if self._vad_enabled:
             self._vad_thread = threading.Thread(target=self._vad, daemon=True)
             self._vad_thread.start()
@@ -163,10 +162,10 @@ class BaseTransportService():
 
         if self._speaker_enabled:
             self._receive_audio_thread.join()
-        
+
         if self._vad_enabled:
             self._vad_thread.join()
-            
+
 
     def _post_run(self):
         # Note that this function must be idempotent! It can be called multiple times
@@ -199,7 +198,7 @@ class BaseTransportService():
     @abstractmethod
     def _prerun(self):
         pass
-    
+
     def _vad(self):
         # CB: Starting silero VAD stuff
         # TODO-CB: Probably need to force virtual speaker creation if we're
@@ -212,7 +211,7 @@ class BaseTransportService():
             new_confidence = model(
                 torch.from_numpy(audio_float32), 16000).item()
             speaking = new_confidence > 0.5
-        
+
             if speaking:
                 match self._vad_state:
                     case VADState.QUIET:
@@ -233,7 +232,7 @@ class BaseTransportService():
                         self._vad_stopping_count = 1
                     case VADState.STOPPING:
                         self._vad_stopping_count += 1
-        
+
             if self._vad_state == VADState.STARTING and self._vad_starting_count >= self._vad_start_frames:
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(
@@ -249,7 +248,7 @@ class BaseTransportService():
                 )
                 self._vad_state = VADState.QUIET
                 self._vad_stopping_count = 0
-            
+
     async def _marshal_frames(self):
         while True:
             frame: QueueFrame | list = await self.send_queue.get()

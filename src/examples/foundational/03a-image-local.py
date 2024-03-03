@@ -4,7 +4,7 @@ import os
 
 import tkinter as tk
 
-from dailyai.queue_frame import TextQueueFrame
+from dailyai.pipeline.frames import TextQueueFrame
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.local_transport_service import LocalTransportService
 

@@ -2,8 +2,8 @@ import asyncio
 import copy
 import functools
 from typing import AsyncGenerator, Awaitable, Callable
-from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
-from dailyai.queue_frame import EndStreamQueueFrame, QueueFrame, TranscriptionQueueFrame
+from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
+from dailyai.pipeline.frames import EndStreamQueueFrame, QueueFrame, TranscriptionQueueFrame
 
 
 class InterruptibleConversationWrapper:

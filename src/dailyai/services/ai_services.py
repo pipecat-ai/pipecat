@@ -3,8 +3,9 @@ import io
 import logging
 import time
 import wave
+from dailyai.pipeline.frame_processor import FrameProcessor
 
-from dailyai.queue_frame import (
+from dailyai.pipeline.frames import (
     AudioQueueFrame,
     ControlQueueFrame,
     EndStreamQueueFrame,
@@ -17,11 +18,9 @@ from dailyai.queue_frame import (
 )
 
 from abc import abstractmethod
-from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable
-from dataclasses import dataclass
+from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable, List
 
-
-class AIService:
+class AIService(FrameProcessor):
 
     def __init__(self):
         self.logger = logging.getLogger("dailyai")
@@ -66,17 +65,6 @@ class AIService:
         except Exception as e:
             self.logger.error("Exception occurred while running AI service", e)
             raise e
-
-    @abstractmethod
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, ControlQueueFrame):
-            yield frame
-
-    @abstractmethod
-    async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
-        # This is a trick for the interpreter (and linter) to know that this is a generator.
-        if False:
-            yield QueueFrame()
 
 
 class LLMService(AIService):

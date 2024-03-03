@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 import wave
-from dailyai.queue_frame import EndStreamQueueFrame, TranscriptionQueueFrame
+from dailyai.pipeline.frames import EndStreamQueueFrame, TranscriptionQueueFrame
 
 from dailyai.services.local_transport_service import LocalTransportService
 from dailyai.services.whisper_ai_services import WhisperSTTService
