@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 import os
 
-from dailyai.queue_frame import AudioQueueFrame, ImageQueueFrame
+from dailyai.pipeline.frames import AudioQueueFrame, ImageQueueFrame
 from dailyai.services.azure_ai_services import AzureLLMService, AzureImageGenServiceREST, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.daily_transport_service import DailyTransportService

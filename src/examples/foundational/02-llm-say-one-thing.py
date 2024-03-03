@@ -3,7 +3,7 @@ import os
 
 import aiohttp
 
-from dailyai.queue_frame import LLMMessagesQueueFrame
+from dailyai.pipeline.frames import LLMMessagesQueueFrame
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService

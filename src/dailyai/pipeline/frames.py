@@ -1,10 +1,10 @@
-from enum import Enum
 from dataclasses import dataclass
 from typing import Any
 
 
 class QueueFrame:
-    pass
+    def __eq__(self, other):
+        return isinstance(other, self.__class__)
 
 
 class ControlQueueFrame(QueueFrame):
@@ -16,6 +16,10 @@ class StartStreamQueueFrame(ControlQueueFrame):
 
 
 class EndStreamQueueFrame(ControlQueueFrame):
+    pass
+
+
+class LLMResponseStartQueueFrame(QueueFrame):
     pass
 
 
@@ -61,6 +65,6 @@ class AppMessageQueueFrame(QueueFrame):
 
 class UserStartedSpeakingFrame(QueueFrame):
     pass
-    
+
 class UserStoppedSpeakingFrame(QueueFrame):
     pass

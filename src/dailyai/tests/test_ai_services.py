@@ -3,7 +3,7 @@ import unittest
 from typing import AsyncGenerator, Generator
 
 from dailyai.services.ai_services import AIService
-from dailyai.queue_frame import EndStreamQueueFrame, QueueFrame, TextQueueFrame
+from dailyai.pipeline.frames import EndStreamQueueFrame, QueueFrame, TextQueueFrame
 
 
 class SimpleAIService(AIService):

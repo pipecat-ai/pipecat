@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 import os
 
-from dailyai.queue_frame import TextQueueFrame
+from dailyai.pipeline.frames import TextQueueFrame
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.open_ai_services import OpenAIImageGenService

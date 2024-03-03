@@ -4,7 +4,7 @@ import math
 import time
 from typing import AsyncGenerator
 import wave
-from dailyai.queue_frame import AudioQueueFrame, QueueFrame, TranscriptionQueueFrame
+from dailyai.pipeline.frames import AudioQueueFrame, QueueFrame, TranscriptionQueueFrame
 from dailyai.services.ai_services import STTService
 
 

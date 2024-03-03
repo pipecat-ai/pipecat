@@ -4,7 +4,7 @@ import os
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.ai_services import FrameLogger
-from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
+from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
 from support.runner import configure
 
 
@@ -59,7 +59,7 @@ async def main(room_url: str, token):
 
                 )
             )
-        
+
     transport.transcription_settings["extra"]["endpointing"] = True
     transport.transcription_settings["extra"]["punctuate"] = True
     await asyncio.gather(transport.run(), handle_transcriptions())
