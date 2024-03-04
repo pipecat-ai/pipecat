@@ -170,8 +170,18 @@ class ParallelPipeline(FrameProcessor):
 
         await asyncio.gather(*[pipeline.run_pipeline() for pipeline in self.pipelines])
 
+        seen_ids = set()
         while not self.sink.empty():
             frame = await self.sink.get()
+
+            # de-dup frames. Because the convention is to yield a frame that isn't processed,
+            # each pipeline will likely yield the same frame, so we will end up with _n_ copies
+            # of unprocessed frames where _n_ is the number of parallel pipes that don't
+            # process that frame.
+            if id(frame) in seen_ids:
+                continue
+            seen_ids.add(id(frame))
+
             # Skip passing along EndParallelPipeQueueFrame, because we use them for our own flow control.
             if not isinstance(frame, EndParallelPipeQueueFrame):
                 yield frame
