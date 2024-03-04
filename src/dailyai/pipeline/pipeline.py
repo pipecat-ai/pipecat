@@ -4,6 +4,12 @@ from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import EndParallelPipeQueueFrame, EndStreamQueueFrame, QueueFrame
 
+"""
+This class manages a pipe of FrameProcessors, and runs them in sequence. The "source"
+and "sink" queues are managed by the caller. You can use this class stand-alone to
+perform specialized processing, or you can use the Transport's run_pipeline method to
+instantiate and run a pipeline with the Transport's sink and source queues.
+"""
 
 class Pipeline:
     def __init__(
