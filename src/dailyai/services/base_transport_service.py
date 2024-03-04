@@ -18,6 +18,7 @@ from dailyai.pipeline.frames import (
     QueueFrame,
     SpriteQueueFrame,
     StartStreamQueueFrame,
+    TranscriptionQueueFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame
 )
@@ -108,6 +109,8 @@ class BaseTransportService():
         self.send_queue = asyncio.Queue()
         self.receive_queue = asyncio.Queue()
 
+        self.completed_queue = asyncio.Queue()
+
         self._threadsafe_send_queue = queue.Queue()
 
         self._images = None
@@ -167,21 +170,54 @@ class BaseTransportService():
         if self._vad_enabled:
             self._vad_thread.join()
 
-    async def run_pipeline(self, pipeline:Pipeline, allow_interruptions=True):
+    async def run_uninterruptible_pipeline(self, pipeline:Pipeline):
         pipeline.set_sink(self.send_queue)
-        if not allow_interruptions:
-            pipeline.set_source(self.receive_queue)
-            await pipeline.run_pipeline()
-        else:
-            source_queue = asyncio.Queue()
-            pipeline.set_source(source_queue)
-            pipeline.set_sink(self.send_queue)
-            pipeline_task = asyncio.create_task(pipeline.run_pipeline())
+        pipeline.set_source(self.receive_queue)
+        await pipeline.run_pipeline()
 
-            async for frame in self.get_receive_frames():
+    async def run_interruptible_pipeline(self, pipeline:Pipeline, allow_interruptions=True, pre_processor=None, post_processor=None):
+        pipeline.set_sink(self.send_queue)
+        source_queue = asyncio.Queue()
+        pipeline.set_source(source_queue)
+        pipeline.set_sink(self.send_queue)
+        pipeline_task = asyncio.create_task(pipeline.run_pipeline())
+
+        async def yield_frame(frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+            yield frame
+
+        async def post_process(post_processor):
+            if not post_processor:
+                return
+
+            while True:
+                frame = await self.completed_queue.get()
+                print("post-processing frame: ", frame.__class__.__name__)
+                await post_processor.process_frame(frame)
+
+                if isinstance(frame, EndStreamQueueFrame):
+                    break
+
+        post_process_task = asyncio.create_task(post_process(post_processor))
+
+        async for frame in self.get_receive_frames():
+            print("Got frame: ", frame.__class__.__name__)
+            if isinstance(frame, UserStartedSpeakingFrame):
+                pipeline_task.cancel()
+                self.interrupt()
+                pipeline_task = asyncio.create_task(pipeline.run_pipeline())
+
+            if pre_processor:
+                frame_generator = pre_processor.process_frame(frame)
+            else:
+                frame_generator = yield_frame(frame)
+
+            async for frame in frame_generator:
                 await source_queue.put(frame)
 
+            if isinstance(frame, EndStreamQueueFrame):
+                break
 
+        await asyncio.gather(pipeline_task, post_process_task)
 
     def _post_run(self):
         # Note that this function must be idempotent! It can be called multiple times
@@ -341,6 +377,10 @@ class BaseTransportService():
                     if isinstance(frame, EndStreamQueueFrame):
                         self._logger.info("Stopping frame consumer thread")
                         self._threadsafe_send_queue.task_done()
+                        if self._loop:
+                            asyncio.run_coroutine_threadsafe(
+                                self.completed_queue.put(frame), self._loop
+                            )
                         return
 
                     # if interrupted, we just pull frames off the queue and discard them
@@ -365,6 +405,11 @@ class BaseTransportService():
                         elif len(b):
                             self.write_frame_to_mic(bytes(b))
                             b = bytearray()
+
+                        if self._loop:
+                            asyncio.run_coroutine_threadsafe(
+                                self.completed_queue.put(frame), self._loop
+                            )
                     else:
                         # if there are leftover audio bytes, write them now; failing to do so
                         # can cause static in the audio stream.
