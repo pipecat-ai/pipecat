@@ -14,7 +14,7 @@ class TestDailyPipeline(unittest.IsolatedAsyncioTestCase):
 
         outgoing_queue = asyncio.Queue()
         incoming_queue = asyncio.Queue()
-        pipeline = Pipeline(incoming_queue, outgoing_queue, [aggregator])
+        pipeline = Pipeline([aggregator], incoming_queue, outgoing_queue)
 
         await incoming_queue.put(TextQueueFrame("Hello, "))
         await incoming_queue.put(TextQueueFrame("world."))
@@ -33,7 +33,9 @@ class TestDailyPipeline(unittest.IsolatedAsyncioTestCase):
         outgoing_queue = asyncio.Queue()
         incoming_queue = asyncio.Queue()
         pipeline = Pipeline(
-            incoming_queue, outgoing_queue, [add_space, sentence_aggregator, to_upper]
+            [add_space, sentence_aggregator, to_upper],
+            incoming_queue,
+            outgoing_queue
         )
 
         sentence = "Hello, world. It's me, a pipeline."

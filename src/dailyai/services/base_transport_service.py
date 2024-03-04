@@ -21,6 +21,7 @@ from dailyai.pipeline.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame
 )
+from dailyai.pipeline.pipeline import Pipeline
 
 torch.set_num_threads(1)
 
@@ -165,6 +166,21 @@ class BaseTransportService():
 
         if self._vad_enabled:
             self._vad_thread.join()
+
+    async def run_pipeline(self, pipeline:Pipeline, allow_interruptions=True):
+        pipeline.set_sink(self.send_queue)
+        if not allow_interruptions:
+            pipeline.set_source(self.receive_queue)
+            await pipeline.run_pipeline()
+        else:
+            source_queue = asyncio.Queue()
+            pipeline.set_source(source_queue)
+            pipeline.set_sink(self.send_queue)
+            pipeline_task = asyncio.create_task(pipeline.run_pipeline())
+
+            async for frame in self.get_receive_frames():
+                await source_queue.put(frame)
+
 
 
     def _post_run(self):

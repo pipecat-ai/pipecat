@@ -12,20 +12,32 @@ instantiate and run a pipeline with the Transport's sink and source queues.
 """
 
 class Pipeline:
+
     def __init__(
         self,
-        source: asyncio.Queue,
-        sink: asyncio.Queue[QueueFrame],
         processors: List[FrameProcessor],
+        source: asyncio.Queue | None = None,
+        sink: asyncio.Queue[QueueFrame] | None = None,
     ):
-        self.source: asyncio.Queue[QueueFrame] = source
-        self.sink: asyncio.Queue[QueueFrame] = sink
         self.processors = processors
+        self.source: asyncio.Queue[QueueFrame] | None = source
+        self.sink: asyncio.Queue[QueueFrame] | None = sink
+
+    def set_source(self, source: asyncio.Queue[QueueFrame]):
+        self.source = source
+
+    def set_sink(self, sink: asyncio.Queue[QueueFrame]):
+        self.sink = sink
 
     async def get_next_source_frame(self) -> AsyncGenerator[QueueFrame, None]:
+        if self.source is None:
+            raise ValueError("Source queue not set")
         yield await self.source.get()
 
     async def run_pipeline(self):
+        if self.source is None or self.sink is None:
+            raise ValueError("Source or sink queue not set")
+
         try:
             while True:
                 frame_generators = [self.get_next_source_frame()]
