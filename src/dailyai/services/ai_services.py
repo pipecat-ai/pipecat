@@ -12,6 +12,7 @@ from dailyai.pipeline.frames import (
     ImageQueueFrame,
     LLMMessagesQueueFrame,
     LLMResponseEndQueueFrame,
+    LLMResponseStartQueueFrame,
     QueueFrame,
     TextQueueFrame,
     TranscriptionQueueFrame,
@@ -78,6 +79,7 @@ class LLMService(AIService):
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if isinstance(frame, LLMMessagesQueueFrame):
+            yield LLMResponseStartQueueFrame()
             async for text_chunk in self.run_llm_async(frame.messages):
                 yield TextQueueFrame(text_chunk)
             yield LLMResponseEndQueueFrame()

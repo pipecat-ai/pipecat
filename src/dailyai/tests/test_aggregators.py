@@ -3,7 +3,7 @@ import functools
 import unittest
 
 from dailyai.pipeline.aggregators import (
-    GatedAccumulator,
+    GatedAggregator,
     ParallelPipeline,
     SentenceAggregator,
     StatelessTextTransformer,
@@ -43,7 +43,7 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(expected_sentences, [])
 
     async def test_gated_accumulator(self):
-        gated_accumulator = GatedAccumulator(
+        gated_aggregator = GatedAggregator(
             gate_open_fn=lambda frame: isinstance(frame, ImageQueueFrame),
             gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartQueueFrame),
             start_open=False,
@@ -69,7 +69,7 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
             LLMResponseEndQueueFrame(),
         ]
         for frame in frames:
-            async for out_frame in gated_accumulator.process_frame(frame):
+            async for out_frame in gated_aggregator.process_frame(frame):
                 self.assertEqual(out_frame, expected_output_frames.pop(0))
         self.assertEqual(expected_output_frames, [])
 

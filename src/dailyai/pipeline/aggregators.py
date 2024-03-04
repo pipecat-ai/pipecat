@@ -9,6 +9,7 @@ from dailyai.pipeline.frames import (
     EndParallelPipeQueueFrame,
     EndStreamQueueFrame,
     LLMMessagesQueueFrame,
+    LLMResponseEndQueueFrame,
     QueueFrame,
     TextQueueFrame,
     TranscriptionQueueFrame,
@@ -16,7 +17,7 @@ from dailyai.pipeline.frames import (
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import AIService
 
-from typing import AsyncGenerator, Coroutine, List
+from typing import AsyncGenerator, Coroutine, List, Text
 
 
 class LLMContextAggregator(AIService):
@@ -122,6 +123,23 @@ class SentenceAggregator(FrameProcessor):
             yield frame
 
 
+class LLMFullResponseAggregator(FrameProcessor):
+    def __init__(self):
+        self.aggregation = ""
+
+    async def process_frame(
+        self, frame: QueueFrame
+    ) -> AsyncGenerator[QueueFrame, None]:
+        if isinstance(frame, TextQueueFrame):
+            self.aggregation += frame.text
+        elif isinstance(frame, LLMResponseEndQueueFrame):
+            yield TextQueueFrame(self.aggregation)
+            self.aggregation = ""
+        else:
+            yield frame
+
+
+
 class StatelessTextTransformer(FrameProcessor):
     def __init__(self, transform_fn):
         self.transform_fn = transform_fn
@@ -158,7 +176,7 @@ class ParallelPipeline(FrameProcessor):
             if not isinstance(frame, EndParallelPipeQueueFrame):
                 yield frame
 
-class GatedAccumulator(FrameProcessor):
+class GatedAggregator(FrameProcessor):
     def __init__(self, gate_open_fn, gate_close_fn, start_open):
         self.gate_open_fn = gate_open_fn
         self.gate_close_fn = gate_close_fn
