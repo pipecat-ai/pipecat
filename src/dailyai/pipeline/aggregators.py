@@ -139,7 +139,6 @@ class LLMFullResponseAggregator(FrameProcessor):
             yield frame
 
 
-
 class StatelessTextTransformer(FrameProcessor):
     def __init__(self, transform_fn):
         self.transform_fn = transform_fn
@@ -159,7 +158,11 @@ class ParallelPipeline(FrameProcessor):
         self.sources = [asyncio.Queue() for _ in pipeline_definitions]
         self.sink: asyncio.Queue[QueueFrame] = asyncio.Queue()
         self.pipelines: list[Pipeline] = [
-            Pipeline(source, self.sink, pipeline_definition)
+            Pipeline(
+                pipeline_definition,
+                source,
+                self.sink,
+            )
             for source, pipeline_definition in zip(self.sources, pipeline_definitions)
         ]
 

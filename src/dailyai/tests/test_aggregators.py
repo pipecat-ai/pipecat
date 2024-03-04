@@ -87,9 +87,14 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
         source = asyncio.Queue()
         sink = asyncio.Queue()
         pipeline = Pipeline(
+            [
+                ParallelPipeline(
+                    [[pipe1_annotation], [sentence_aggregator, pipe2_annotation]]
+                ),
+                add_dots,
+            ],
             source,
             sink,
-            [ParallelPipeline([[pipe1_annotation], [sentence_aggregator, pipe2_annotation]]), add_dots],
         )
 
         frames = [
