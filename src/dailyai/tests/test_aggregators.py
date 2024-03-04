@@ -1,11 +1,22 @@
 import asyncio
-from doctest import OutputChecker
-from typing import Text
+import functools
 import unittest
 
-import llm
-from dailyai.pipeline.aggregators import GatedAccumulator, SentenceAggregator, StatelessTextTransformer
-from dailyai.pipeline.frames import AudioQueueFrame, EndStreamQueueFrame, ImageQueueFrame, LLMResponseEndQueueFrame, LLMResponseStartQueueFrame, TextQueueFrame
+from dailyai.pipeline.aggregators import (
+    GatedAccumulator,
+    ParallelPipeline,
+    SentenceAggregator,
+    StatelessTextTransformer,
+)
+from dailyai.pipeline.frames import (
+    AudioQueueFrame,
+    EndStreamQueueFrame,
+    ImageQueueFrame,
+    LLMResponseEndQueueFrame,
+    LLMResponseStartQueueFrame,
+    QueueFrame,
+    TextQueueFrame,
+)
 
 from dailyai.pipeline.pipeline import Pipeline
 
@@ -63,4 +74,42 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(expected_output_frames, [])
 
     async def test_parallel_pipeline(self):
-        pass
+
+        async def slow_add(sleep_time:float, name:str, x: str):
+            await asyncio.sleep(sleep_time)
+            return ":".join([x, name])
+
+        pipe1_annotation = StatelessTextTransformer(functools.partial(slow_add, 0.1, 'pipe1'))
+        pipe2_annotation = StatelessTextTransformer(functools.partial(slow_add, 0.2, 'pipe2'))
+        sentence_aggregator = SentenceAggregator()
+        add_dots = StatelessTextTransformer(lambda x: x + ".")
+
+        source = asyncio.Queue()
+        sink = asyncio.Queue()
+        pipeline = Pipeline(
+            source,
+            sink,
+            [ParallelPipeline([[pipe1_annotation], [sentence_aggregator, pipe2_annotation]]), add_dots],
+        )
+
+        frames = [
+            TextQueueFrame("Hello, "),
+            TextQueueFrame("world."),
+            EndStreamQueueFrame()
+        ]
+
+        expected_output_frames: list[QueueFrame] = [
+            TextQueueFrame(text='Hello, :pipe1.'),
+            TextQueueFrame(text='world.:pipe1.'),
+            TextQueueFrame(text='Hello, world.:pipe2.'),
+            EndStreamQueueFrame()
+        ]
+
+        for frame in frames:
+            await source.put(frame)
+
+        await pipeline.run_pipeline()
+
+        while not sink.empty():
+            frame = await sink.get()
+            self.assertEqual(frame, expected_output_frames.pop(0))
