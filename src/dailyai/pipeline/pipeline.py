@@ -39,12 +39,12 @@ class Pipeline:
                 for frame_generator in frame_generators:
                     async for frame in frame_generator:
                         await self.sink.put(frame)
-                    if isinstance(
-                        frame, EndStreamQueueFrame
-                    ) or isinstance(
-                        frame, EndParallelPipeQueueFrame
-                    ):
-                        return
+                        if isinstance(
+                            frame, EndStreamQueueFrame
+                        ) or isinstance(
+                            frame, EndParallelPipeQueueFrame
+                        ):
+                            return
         except asyncio.CancelledError:
             # this means there's been an interruption, do any cleanup necessary here.
             for processor in self.processors:
