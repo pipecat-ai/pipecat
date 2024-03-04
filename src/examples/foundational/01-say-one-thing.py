@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 import os
-from dailyai.queue_frame import EndStreamQueueFrame
+from dailyai.queue_frame import EndStreamQueueFrame, TextQueueFrame
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
@@ -30,6 +30,7 @@ async def main(room_url):
         )
 
         tts = ElevenLabsTTSService(
+            source_queue=asyncio.Queue(),
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
@@ -42,22 +43,26 @@ async def main(room_url):
         )
         """
 
-        tts.sink = transport.send_queue
+        tts.sink_queue = transport.send_queue
 
         # Register an event handler so we can play the audio when the participant joins.
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport, participant):
             nonlocal tts
 
-            await tts.say(
-                "Hello there, " + participant["info"]["userName"] + "!"
+            # todo: update the tts.say() convenience method to use the new queue architecture
+            await tts.source_queue.put(
+                TextQueueFrame("Hello there, " +
+                               participant["info"]["userName"] + "!")
             )
+            await tts.source_queue.put(EndStreamQueueFrame())
 
             # wait for the output queue to be empty, then leave the meeting
-            await transport.stop_when_done()
-            # question: how do we exit the script?
+            # todo: commented out because it seems to exit a little early, before
+            # the audio is finished playing
+            # await transport.stop_when_done()
 
-        await transport.run()
+        await asyncio.gather(transport.run(), tts.process_queue())
 
 if __name__ == "__main__":
     (url, token) = configure()

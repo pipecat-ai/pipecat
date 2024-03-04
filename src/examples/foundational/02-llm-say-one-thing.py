@@ -24,33 +24,34 @@ async def main(room_url):
         )
 
         llm = AzureLLMService(
+            source_queue=asyncio.Queue(),
             api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
             endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
             model=os.getenv("AZURE_CHATGPT_MODEL"),
         )
 
         tts = ElevenLabsTTSService(
-            sink=transport.send_queue,
+
+            source_queue=llm.sink_queue,  # this should really be a sentence aggregator?
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
-        ).chain(llm)
+        )
 
-        messages = [{
-            "role": "system",
-            "content": "You are an LLM in a WebRTC session, and this is a 'hello world' demo. Say hello to the world."
-        }]
-        await llm.source.put(LLMMessagesQueueFrame(messages))
-        await llm.source.put(EndStreamQueueFrame())
-
-        tts_task = asyncio.gather(llm.process_queue(), tts.process_queue())
+        tts.sink_queue = transport.send_queue
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
-            await tts_task
-            await transport.stop_when_done()
+        async def on_first_other_participant_joined(transport, participant):
+            messages = [{
+                "role": "system",
+                "content": "You are an LLM in a WebRTC session, and this is a 'hello world' demo. Say hello to the world."
+            }]
+            await llm.source_queue.put(LLMMessagesQueueFrame(messages))
+            await llm.source_queue.put(EndStreamQueueFrame())
+            # todo: commented out because it exits before audio plays
+            # await transport.stop_when_done()
 
-        await transport.run()
+        await asyncio.gather(transport.run(), llm.process_queue(), tts.process_queue())
 
 
 if __name__ == "__main__":
