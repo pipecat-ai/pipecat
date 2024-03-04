@@ -7,7 +7,6 @@ from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
     AudioQueueFrame,
-    ControlQueueFrame,
     EndStreamQueueFrame,
     ImageQueueFrame,
     LLMMessagesQueueFrame,
