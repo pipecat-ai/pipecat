@@ -18,6 +18,9 @@ class StartStreamQueueFrame(ControlQueueFrame):
 class EndStreamQueueFrame(ControlQueueFrame):
     pass
 
+class EndParallelPipeQueueFrame(ControlQueueFrame):
+    pass
+
 
 class LLMResponseStartQueueFrame(QueueFrame):
     pass

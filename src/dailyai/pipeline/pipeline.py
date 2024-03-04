@@ -2,7 +2,7 @@ import asyncio
 from typing import AsyncGenerator, List
 from dailyai.pipeline.frame_processor import FrameProcessor
 
-from dailyai.pipeline.frames import EndStreamQueueFrame, QueueFrame
+from dailyai.pipeline.frames import EndParallelPipeQueueFrame, EndStreamQueueFrame, QueueFrame
 
 
 class Pipeline:
@@ -33,7 +33,11 @@ class Pipeline:
                 for frame_generator in frame_generators:
                     async for frame in frame_generator:
                         await self.sink.put(frame)
-                    if isinstance(frame, EndStreamQueueFrame):
+                    if isinstance(
+                        frame, EndStreamQueueFrame
+                    ) or isinstance(
+                        frame, EndParallelPipeQueueFrame
+                    ):
                         return
         except asyncio.CancelledError:
             # this means there's been an interruption, do any cleanup necessary here.

@@ -6,6 +6,7 @@ from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
     ControlQueueFrame,
+    EndParallelPipeQueueFrame,
     EndStreamQueueFrame,
     LLMMessagesQueueFrame,
     QueueFrame,
@@ -15,7 +16,7 @@ from dailyai.pipeline.frames import (
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import AIService
 
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, Coroutine, List
 
 
 class LLMContextAggregator(AIService):
@@ -127,7 +128,11 @@ class StatelessTextTransformer(FrameProcessor):
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if isinstance(frame, TextQueueFrame):
-            yield TextQueueFrame(self.transform_fn(frame.text))
+            result = self.transform_fn(frame.text)
+            if isinstance(result, Coroutine):
+                result = await result
+
+            yield TextQueueFrame(result)
         else:
             yield frame
 
@@ -141,20 +146,16 @@ class ParallelPipeline(FrameProcessor):
         ]
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        # Short circuit, because we use EndStreamQueueFrame for our own internal process control.
-        if isinstance(frame, EndStreamQueueFrame):
-            yield frame
-
         for source in self.sources:
             await source.put(frame)
-            await source.put(EndStreamQueueFrame())
+            await source.put(EndParallelPipeQueueFrame())
 
         await asyncio.gather(*[pipeline.run_pipeline() for pipeline in self.pipelines])
 
         while not self.sink.empty():
             frame = await self.sink.get()
-            # Skip passing along EndStreamQueueFrames, because we use them for our own flow control.
-            if not isinstance(frame, EndStreamQueueFrame):
+            # Skip passing along EndParallelPipeQueueFrame, because we use them for our own flow control.
+            if not isinstance(frame, EndParallelPipeQueueFrame):
                 yield frame
 
 class GatedAccumulator(FrameProcessor):
