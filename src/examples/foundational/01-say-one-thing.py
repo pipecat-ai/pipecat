@@ -29,7 +29,6 @@ async def main(room_url):
             mic_enabled=True
         )
 
-        """
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
@@ -41,6 +40,9 @@ async def main(room_url):
             user_id=os.getenv("PLAY_HT_USER_ID"),
             voice_url=os.getenv("PLAY_HT_VOICE_URL"),
         )
+        """
+
+        tts.sink = transport.send_queue
 
         # Register an event handler so we can play the audio when the participant joins.
         @transport.event_handler("on_first_other_participant_joined")
@@ -50,14 +52,12 @@ async def main(room_url):
             await tts.say(
                 "Hello there, " + participant["info"]["userName"] + "!"
             )
-            await tts.sink.put(EndStreamQueueFrame())
 
             # wait for the output queue to be empty, then leave the meeting
             await transport.stop_when_done()
+            # question: how do we exit the script?
 
         await transport.run()
-        del(tts)
-
 
 if __name__ == "__main__":
     (url, token) = configure()
