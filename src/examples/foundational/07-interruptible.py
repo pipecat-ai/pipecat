@@ -1,15 +1,12 @@
 import asyncio
 import aiohttp
 import os
-from dailyai.conversation_wrappers import InterruptibleConversationWrapper
 from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMUserContextAggregator
 
-from dailyai.pipeline.frames import StartStreamQueueFrame, TextQueueFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import FrameLogger
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 from examples.foundational.support.runner import configure
 
