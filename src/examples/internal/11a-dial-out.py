@@ -5,9 +5,9 @@ import wave
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.queue_aggregators import LLMContextAggregator
+from dailyai.pipeline.aggregators import LLMContextAggregator
 from dailyai.services.ai_services import AIService, FrameLogger
-from dailyai.queue_frame import QueueFrame, AudioQueueFrame, LLMResponseEndQueueFrame, LLMMessagesQueueFrame
+from dailyai.pipeline.frames import QueueFrame, AudioQueueFrame, LLMResponseEndQueueFrame, LLMMessagesQueueFrame
 from typing import AsyncGenerator
 
 from examples.foundational.support.runner import configure

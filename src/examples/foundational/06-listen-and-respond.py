@@ -1,11 +1,12 @@
 import asyncio
 import os
+from dailyai.pipeline.pipeline import Pipeline
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.ai_services import FrameLogger
-from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
-from support.runner import configure
+from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMUserContextAggregator
+from examples.foundational.support.runner import configure
 
 
 async def main(room_url: str, token):
@@ -44,22 +45,18 @@ async def main(room_url: str, token):
 
         tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
         tma_out = LLMAssistantContextAggregator(messages, transport._my_participant_id)
-        await tts.run_to_queue(
-            transport.send_queue,
-            tma_out.run(
-                fl2.run(
-                    llm.run(
-                    tma_in.run(
-                        fl.run(
-                            transport.get_receive_frames()
-                            )
-                        )
-                    )
-                )
+        pipeline = Pipeline(
+            processors=[
+                fl,
+                tma_in,
+                llm,
+                fl2,
+                tma_out,
+                tts
+            ],
+        )
+        await transport.run_pipeline(pipeline)
 
-                )
-            )
-        
     transport.transcription_settings["extra"]["endpointing"] = True
     transport.transcription_settings["extra"]["punctuate"] = True
     await asyncio.gather(transport.run(), handle_transcriptions())

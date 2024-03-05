@@ -7,7 +7,7 @@ import types
 
 from functools import partial
 
-from dailyai.queue_frame import (
+from dailyai.pipeline.frames import (
     TranscriptionQueueFrame,
 )
 

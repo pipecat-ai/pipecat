@@ -9,8 +9,8 @@ from PIL import Image
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.queue_aggregators import LLMUserContextAggregator, LLMAssistantContextAggregator
-from dailyai.queue_frame import (
+from dailyai.pipeline.aggregators import LLMUserContextAggregator, LLMAssistantContextAggregator
+from dailyai.pipeline.frames import (
     QueueFrame,
     TextQueueFrame,
     ImageQueueFrame,

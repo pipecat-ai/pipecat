@@ -6,7 +6,7 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
-from dailyai.queue_frame import AudioQueueFrame, ImageQueueFrame
+from dailyai.pipeline.frames import AudioQueueFrame, ImageQueueFrame
 
 from examples.foundational.support.runner import configure
 
