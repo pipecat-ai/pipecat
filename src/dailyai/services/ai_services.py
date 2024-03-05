@@ -186,7 +186,6 @@ class TTSService(AIService):
         elif not self.aggregate_sentences:
             text = [frame.text]
         else:
-            print(f"### frame is {frame}, current sentence is {self.current_sentence}")
             self.current_sentence += frame.text
             if self.current_sentence.endswith((".", "?", "!")):
                 text = [self.current_sentence]
@@ -196,7 +195,6 @@ class TTSService(AIService):
             save_in_context = frame.save_in_context
         else:
             save_in_context = True
-        print(f"text is {text}")
         for sentence in text:
             self.logger.debug(f"Starting TTS for: {sentence}")
             async for audio_chunk in self.run_tts(sentence):

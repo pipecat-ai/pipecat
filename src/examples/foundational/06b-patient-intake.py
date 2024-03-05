@@ -3,8 +3,10 @@ import asyncio
 import json
 import random
 import os
+import re
 import wave
 from typing import AsyncGenerator
+from PIL import Image
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
@@ -13,7 +15,7 @@ from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
 from support.runner import configure
-from dailyai.queue_frame import LLMMessagesQueueFrame, TranscriptionQueueFrame, QueueFrame, TextQueueFrame, LLMFunctionCallFrame, LLMResponseEndQueueFrame, StartStreamQueueFrame, AudioQueueFrame
+from dailyai.queue_frame import LLMMessagesQueueFrame, TranscriptionQueueFrame, QueueFrame, TextQueueFrame, LLMFunctionCallFrame, LLMResponseEndQueueFrame, StartStreamQueueFrame, AudioQueueFrame, SpriteQueueFrame, ImageQueueFrame
 from dailyai.services.ai_services import FrameLogger, AIService
 from dailyai.conversation_wrappers import InterruptibleConversationWrapper
 
@@ -37,7 +39,26 @@ for file in sound_files:
     # Open the image and convert it to bytes
     with wave.open(full_path) as audio_file:
         sounds[file] = audio_file.readframes(-1)
-        
+
+sprites = []
+image_files = []
+for x in range(1, 26):
+    image_files.append(f"robot{x}.png")
+
+for file in image_files:
+    # Build the full path to the image file
+    full_path = os.path.join(script_dir, "assets", file)
+    # Get the filename without the extension to use as the dictionary key
+    filename = os.path.splitext(os.path.basename(full_path))[0]
+    # Open the image and convert it to bytes
+    with Image.open(full_path) as img:
+        sprites.append(img.tobytes())
+
+# When the bot isn't talking, show a static image of the robot listening
+quiet_frame = ImageQueueFrame("", sprites[0])
+# When the bot is talking, build an animation from the sprites
+talking_frame = SpriteQueueFrame(images=sprites)
+
 tools = [
     {
         "type": "function",
@@ -162,8 +183,8 @@ steps = [
         "prompt": "Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday, including the year. When they answer with their birthday, call the verify_birthday function.",
         "run_async": False,
         "failed": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function.", "tools": [{
-                "type": "function",
-                "function": {
+            "type": "function",
+            "function": {
                     "name": "verify_birthday",
                     "description": "Use this function to verify the user has provided their correct birthday.",
                     "parameters": {
@@ -175,14 +196,14 @@ steps = [
                             }
                         }
                     }
-                }
-            }]},
+            }
+        }]},
     {
         "prompt": "Next, thank the user for confirming their identity, then ask the user to list their current prescriptions. Each prescription needs to have a medication name and a dosage. Do not call the list_prescriptions function with any unknown dosages.",
         "run_async": True,
         "tools": [{
-                "type": "function",
-                "function": {
+            "type": "function",
+            "function": {
                     "name": "list_prescriptions",
                     "description": "Once the user has provided a list of their prescription medications, call this function.",
                     "parameters": {
@@ -206,8 +227,8 @@ steps = [
                             }
                         }
                     }
-                }
-            }]
+            }
+        }]
     },
     {
         "prompt": "Next, ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function.",
@@ -270,7 +291,7 @@ steps = [
         ],
     },
     {
-        "prompt": "Finally, ask the user the reason for their doctor visit today. Once they answer, double-check to make sure they don't have any other health concerns. After that, call the list_visit_reasons function.",
+        "prompt": "Finally, ask the user the reason for their doctor visit today. Once they answer, call the list_visit_reasons function.",
         "run_async": True,
         "tools": [
             {
@@ -299,16 +320,17 @@ steps = [
             }
         ]
     },
-    {"prompt": "Now, thank the user and end the conversation.", "run_async": True, "tools": []},
+    {"prompt": "Now, thank the user and end the conversation.",
+        "run_async": True, "tools": []},
     {"prompt": "", "run_async": True, "tools": []}
 ]
 current_step = 0
+
 
 class TranscriptFilter(AIService):
     def __init__(self, bot_participant_id=None):
         super().__init__()
         self.bot_participant_id = bot_participant_id
-        print(f"Filtering transcripts from : {self.bot_participant_id}")
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         if isinstance(frame, TranscriptionQueueFrame):
@@ -324,26 +346,30 @@ class ChecklistProcessor(AIService):
         self._tools = tools
         self._function_name = ""
         self._arguments = ""
-        self._id = "You are Jessica, an agent for a company called Tri-County Advanced Optimum Health Solution Specialists. Your job is to collect important information from the user before they visit a doctor. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor. Don't make assumptions about what values to plug into functions. Ask for clarification if a user response is ambiguous."
-        self._acks = [ "One sec.", "Let me confirm that.", "Thanks.", "OK."]
+        self._id = "You are Jessica, an agent for a company called Tri-County Health Services. Your job is to collect important information from the user before their doctor visit. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor. Don't make assumptions about what values to plug into functions. Ask for clarification if a user response is ambiguous."
+        self._acks = ["One sec.", "Let me confirm that.", "Thanks.", "OK."]
 
         messages.append(
             {"role": "system", "content": f"{self._id} {steps[0]['prompt']}"})
 
     def verify_birthday(self, args):
-        return args['birthday'] == "1983-08-19"
+        return args['birthday'] == "1983-01-01"
 
     def list_prescriptions(self, args):
-        print(f"Prescriptions: {args['prescriptions']}")
+        # print(f"--- Prescriptions: {args['prescriptions']}\n")
+        pass
 
     def list_allergies(self, args):
-        print(f"Allergies: {args['allergies']}")
+        # print(f"--- Allergies: {args['allergies']}\n")
+        pass
 
     def list_conditions(self, args):
-        print(f"Medical Conditions: {args['conditions']}")
+        # print(f"--- Medical Conditions: {args['conditions']}")
+        pass
 
     def list_visit_reasons(self, args):
-        print(f"Visit Reasons: {args['visit_reasons']}")
+        # print(f"Visit Reasons: {args['visit_reasons']}")
+        pass
 
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         global current_step
@@ -352,7 +378,7 @@ class ChecklistProcessor(AIService):
         self._tools.clear()
         self._tools.extend(this_step['tools'])
         if isinstance(frame, LLMFunctionCallFrame) and frame.function_name:
-            print(f"FUNCTION CALL: {frame}")
+            print(f"... Preparing function call: {frame.function_name}")
             self._function_name = frame.function_name
             if this_step['run_async']:
                 # Get the LLM talking about the next step before getting the rest
@@ -367,18 +393,19 @@ class ChecklistProcessor(AIService):
                     yield frame
             else:
                 # Insert a quick response while we run the function
-                yield AudioQueueFrame(sounds["clack-short-quiet.wav"])
+                # yield AudioQueueFrame(sounds["clack-short-quiet.wav"])
+                pass
         elif isinstance(frame, LLMFunctionCallFrame) and frame.arguments:
             self._arguments += frame.arguments
         elif isinstance(frame, LLMResponseEndQueueFrame):
-            print(
-                f"%%% got a response end. function_name is {self._function_name}, arguments is {self._arguments}")
-            print(f"%%%% messages is {self._messages}")
 
             if self._function_name and self._arguments:
-
+                print(
+                    f"--> Calling function: {self._function_name} with arguments:")
+                pretty_json = re.sub("\n", "\n    ", json.dumps(
+                    json.loads(self._arguments), indent=2))
+                print(f"--> {pretty_json}\n")
                 fn = getattr(self, self._function_name)
-                print(f"fn is: {fn}")
                 result = fn(json.loads(self._arguments))
                 self._function_name = ""
                 self._arguments = ""
@@ -399,7 +426,7 @@ class ChecklistProcessor(AIService):
                         yield LLMMessagesQueueFrame(self._messages)
                         async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages), tool_choice="none"):
                             yield frame
-                print(f"VERIFY RESULT: {result}")
+                    print(f"<-- Verify result: {result}\n")
 
         else:
             yield frame
@@ -423,20 +450,23 @@ async def main(room_url: str, token):
             speaker_enabled=True
         )
         # TODO-CB: Go back to vad_enabled
-        
+
         messages = []
         tools = []
 
-        # llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
+        # llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv(
+        #     "AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"), tools=tools, context=messages)
         llm = OpenAILLMService(api_key=os.getenv(
-            "OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview", tools=tools, context=messages)
+            "OPENAI_CHATGPT_API_KEY"), model="gpt-4-1106-preview", tools=tools, context=messages)  # gpt-4-1106-preview
         # tts = AzureTTSService(api_key=os.getenv(
         #     "AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
-        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv(
-            "ELEVENLABS_API_KEY"), voice_id="XrExE9yKIg1WjnnlVkGX") # matilda
-        # tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv("DEEPGRAM_API_KEY"), voice=os.getenv("DEEPGRAM_VOICE")) 
+        # tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv(
+        #     "ELEVENLABS_API_KEY"), voice_id="XrExE9yKIg1WjnnlVkGX") # matilda
+        tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv(
+            "DEEPGRAM_API_KEY"), voice="aura-asteria-en")
 
-        lca = LLMContextAggregator(context=messages, bot_participant_id=transport._my_participant_id)
+        lca = LLMContextAggregator(
+            context=messages, bot_participant_id=transport._my_participant_id)
 
         checklist = ChecklistProcessor(messages, llm, tools)
         fl = FrameLogger("got transcript")
@@ -460,11 +490,10 @@ async def main(room_url: str, token):
             fl = FrameLogger("first other participant")
             await tts.run_to_queue(
                 transport.send_queue,
-                fl.run(
-                    lca.run(
-                        llm.run([LLMMessagesQueueFrame(messages)]),
-                    )
+                lca.run(
+                    llm.run([LLMMessagesQueueFrame(messages)]),
                 )
+
             )
         transport.transcription_settings["extra"]["endpointing"] = True
         transport.transcription_settings["extra"]["punctuate"] = True

@@ -14,7 +14,6 @@ class GroqLLMService(LLMService):
         self._client = AsyncGroq()
 
     async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
-        print(f"messages: {messages}")
         try:
             resp = await self._client.chat.completions.create(messages=messages, model=self._model)
 

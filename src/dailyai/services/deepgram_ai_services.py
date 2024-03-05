@@ -1,6 +1,7 @@
 import aiohttp
 import asyncio
 import os
+import time
 
 import requests
 
@@ -21,10 +22,12 @@ class DeepgramTTSService(TTSService):
 
     async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
         self.logger.info(f"Running deepgram tts for {sentence}")
-        base_url = "https://api.beta.deepgram.com/v1/speak"
+        base_url = "https://api.deepgram.com/v1/speak"
         request_url = f"{base_url}?model={self._voice}&encoding=linear16&container=none&sample_rate=16000"
         headers = {"authorization": f"token {self._api_key}"}
         body = {"text": sentence}
+        start_time = time.time()
         async with self._aiohttp_session.post(request_url, headers=headers, json=body) as r:
+            self.logger.info(f"=== Deepgram TTS TTFB: {time.time() - start_time}")
             async for data in r.content:
                 yield data

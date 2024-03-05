@@ -39,7 +39,6 @@ class LLMContextAggregator(AIService):
     async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
         # We don't do anything with non-text frames, pass it along to next in the pipeline.
         
-        print(f"aggregator got frame: {type(frame)}")
         if not isinstance(frame, TextQueueFrame):
             yield frame
             return
@@ -50,11 +49,9 @@ class LLMContextAggregator(AIService):
             if frame.participantId == self.bot_participant_id:
                 return
             else:
-                print(f"appending to user context")
                 self.append_to_context("user", frame.text)
         elif isinstance(frame, BotTranscriptionFrame):
             if frame.save_in_context == True:
-                print(f"appending to bot context")
                 self.append_to_context("assistant", frame.text)
             else:
                 print("save in context false")

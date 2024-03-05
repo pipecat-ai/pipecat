@@ -1,6 +1,7 @@
 import aiohttp
 from PIL import Image
 import io
+import time
 from openai import AsyncOpenAI
 
 import json
@@ -27,16 +28,13 @@ class OpenAILLMService(LLMService):
     async def run_llm_async(self, messages, tool_choice=None) -> AsyncGenerator[str, None]:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
-        print("---")
-        print(f"tools: {self._tools}")
-        print("---")
-        print(f"messages: {messages_for_log}")
-        print("-----")
         if self._tools:
             tools = self._tools
         else:
             tools = None
+        start_time = time.time()
         chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages, tools=tools, tool_choice=tool_choice)
+        self.logger.info(f"=== OpenAI LLM TTFB: {time.time() - start_time}")
         async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue

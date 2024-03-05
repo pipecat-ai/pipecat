@@ -290,6 +290,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
             frame = TranscriptionQueueFrame(
                 message["text"], participantId, message["timestamp"])
             if self._my_participant_id and participantId != self._my_participant_id:
+                self._logger.info(f"*** Transcription received: {message['text']}")
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(frame), self._loop)
 
