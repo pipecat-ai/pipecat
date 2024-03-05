@@ -8,12 +8,12 @@ import time
 import urllib.parse
 
 from PIL import Image
-from dailyai.queue_frame import ImageQueueFrame, QueueFrame
+from dailyai.pipeline.frames import ImageQueueFrame, QueueFrame
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.ai_services import AIService
-from dailyai.queue_aggregators import LLMAssistantContextAggregator, LLMUserContextAggregator
+from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMUserContextAggregator
 from dailyai.services.fal_ai_services import FalImageGenService
 
 from examples.foundational.support.runner import configure

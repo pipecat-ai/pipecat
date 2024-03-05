@@ -2,10 +2,11 @@ import asyncio
 import os
 
 import aiohttp
+from dailyai.pipeline.pipeline import Pipeline
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.queue_frame import EndStreamQueueFrame, LLMMessagesQueueFrame
+from dailyai.pipeline.frames import EndStreamQueueFrame, LLMMessagesQueueFrame
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 from examples.foundational.support.runner import configure
@@ -41,13 +42,10 @@ async def main(room_url: str):
         # will run in parallel with generating and speaking the audio for static text, so there's no delay to
         # speak the LLM response.
         buffer_queue = asyncio.Queue()
-        llm_response_task = asyncio.create_task(
-            elevenlabs_tts.run_to_queue(
-                buffer_queue,
-                llm.run([LLMMessagesQueueFrame(messages)]),
-                True,
-            )
-        )
+        source_queue = asyncio.Queue()
+        pipeline = Pipeline(source = source_queue, sink=buffer_queue, processors=[llm, elevenlabs_tts])
+        source_queue.put_nowait(LLMMessagesQueueFrame(messages))
+        pipeline_run_task = pipeline.run_pipeline()
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
@@ -61,7 +59,7 @@ async def main(room_url: str):
                     if isinstance(frame, EndStreamQueueFrame):
                         break
 
-            await asyncio.gather(llm_response_task, buffer_to_send_queue())
+            await asyncio.gather(pipeline_run_task, buffer_to_send_queue())
 
             await transport.stop_when_done()
 

@@ -7,7 +7,7 @@ import random
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.queue_frame import QueueFrame, FrameType
+from dailyai.pipeline.frames import QueueFrame, FrameType
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 

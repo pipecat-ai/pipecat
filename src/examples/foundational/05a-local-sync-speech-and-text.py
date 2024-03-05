@@ -4,7 +4,7 @@ import asyncio
 import tkinter as tk
 import os
 
-from dailyai.queue_frame import AudioQueueFrame, ImageQueueFrame
+from dailyai.pipeline.frames import AudioQueueFrame, ImageQueueFrame
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
