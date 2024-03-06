@@ -9,7 +9,7 @@ from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.pipeline.aggregators import LLMContextAggregator, LLMUserContextAggregator, LLMAssistantContextAggregator
 from dailyai.services.ai_services import AIService, FrameLogger
-from dailyai.pipeline.frames import QueueFrame, AudioQueueFrame, LLMResponseEndQueueFrame, LLMMessagesQueueFrame
+from dailyai.pipeline.frames import Frame, AudioFrame, LLMResponseEndFrame, LLMMessagesQueueFrame
 from typing import AsyncGenerator
 
 from examples.foundational.support.runner import configure
@@ -40,9 +40,9 @@ class OutboundSoundEffectWrapper(AIService):
     def __init__(self):
         pass
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, LLMResponseEndQueueFrame):
-            yield AudioQueueFrame(sounds["ding1.wav"])
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, LLMResponseEndFrame):
+            yield AudioFrame(sounds["ding1.wav"])
             # In case anything else up the stack needs it
             yield frame
         else:
@@ -53,9 +53,9 @@ class InboundSoundEffectWrapper(AIService):
     def __init__(self):
         pass
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, LLMMessagesQueueFrame):
-            yield AudioQueueFrame(sounds["ding2.wav"])
+            yield AudioFrame(sounds["ding2.wav"])
             # In case anything else up the stack needs it
             yield frame
         else:
@@ -86,7 +86,7 @@ async def main(room_url: str, token):
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
             await tts.say("Hi, I'm listening!", transport.send_queue)
-            await transport.send_queue.put(AudioQueueFrame(sounds["ding1.wav"]))
+            await transport.send_queue.put(AudioFrame(sounds["ding1.wav"]))
 
         async def handle_transcriptions():
             messages = [

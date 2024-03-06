@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from typing import AsyncGenerator
 
-from dailyai.pipeline.frames import ControlQueueFrame, QueueFrame
+from dailyai.pipeline.frames import ControlFrame, Frame
 
 """
 This is the base class for all frame processors. Frame processors consume a frame
@@ -20,16 +20,16 @@ be closed, del'd, etc.
 class FrameProcessor:
     @abstractmethod
     async def process_frame(
-        self, frame: QueueFrame
-    ) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, ControlQueueFrame):
+        self, frame: Frame
+    ) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, ControlFrame):
             yield frame
 
     @abstractmethod
-    async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
+    async def finalize(self) -> AsyncGenerator[Frame, None]:
         # This is a trick for the interpreter (and linter) to know that this is a generator.
         if False:
-            yield QueueFrame()
+            yield Frame()
 
     @abstractmethod
     async def interrupted(self) -> None:
