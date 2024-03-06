@@ -40,24 +40,6 @@ for file in sound_files:
     with wave.open(full_path) as audio_file:
         sounds[file] = audio_file.readframes(-1)
 
-sprites = []
-image_files = []
-for x in range(1, 26):
-    image_files.append(f"robot{x}.png")
-
-for file in image_files:
-    # Build the full path to the image file
-    full_path = os.path.join(script_dir, "assets", file)
-    # Get the filename without the extension to use as the dictionary key
-    filename = os.path.splitext(os.path.basename(full_path))[0]
-    # Open the image and convert it to bytes
-    with Image.open(full_path) as img:
-        sprites.append(img.tobytes())
-
-# When the bot isn't talking, show a static image of the robot listening
-quiet_frame = ImageQueueFrame("", sprites[0])
-# When the bot is talking, build an animation from the sprites
-talking_frame = SpriteQueueFrame(images=sprites)
 
 tools = [
     {
@@ -460,10 +442,10 @@ async def main(room_url: str, token):
             "OPENAI_CHATGPT_API_KEY"), model="gpt-4-1106-preview", tools=tools, context=messages)  # gpt-4-1106-preview
         # tts = AzureTTSService(api_key=os.getenv(
         #     "AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
-        # tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv(
-        #     "ELEVENLABS_API_KEY"), voice_id="XrExE9yKIg1WjnnlVkGX") # matilda
-        tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv(
-            "DEEPGRAM_API_KEY"), voice="aura-asteria-en")
+        tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv(
+            "ELEVENLABS_API_KEY"), voice_id="XrExE9yKIg1WjnnlVkGX")  # matilda
+        # tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv(
+        #     "DEEPGRAM_API_KEY"), voice="aura-asteria-en")
 
         lca = LLMContextAggregator(
             context=messages, bot_participant_id=transport._my_participant_id)
