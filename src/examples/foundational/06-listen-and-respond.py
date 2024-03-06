@@ -55,7 +55,7 @@ async def main(room_url: str, token):
                 tts
             ],
         )
-        await transport.run_pipeline(pipeline)
+        await transport.run_uninterruptible_pipeline(pipeline)
 
     transport.transcription_settings["extra"]["endpointing"] = True
     transport.transcription_settings["extra"]["punctuate"] = True

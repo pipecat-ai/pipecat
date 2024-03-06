@@ -9,13 +9,13 @@ from dailyai.pipeline.aggregators import (
     StatelessTextTransformer,
 )
 from dailyai.pipeline.frames import (
-    AudioQueueFrame,
-    EndStreamQueueFrame,
-    ImageQueueFrame,
-    LLMResponseEndQueueFrame,
-    LLMResponseStartQueueFrame,
-    QueueFrame,
-    TextQueueFrame,
+    AudioFrame,
+    EndFrame,
+    ImageFrame,
+    LLMResponseEndFrame,
+    LLMResponseStartFrame,
+    Frame,
+    TextFrame,
 )
 
 from dailyai.pipeline.pipeline import Pipeline
@@ -27,46 +27,46 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
         expected_sentences = ["Hello, world.", " How are you?", " I am fine "]
         aggregator = SentenceAggregator()
         for word in sentence.split(" "):
-            async for sentence in aggregator.process_frame(TextQueueFrame(word + " ")):
-                self.assertIsInstance(sentence, TextQueueFrame)
-                if isinstance(sentence, TextQueueFrame):
+            async for sentence in aggregator.process_frame(TextFrame(word + " ")):
+                self.assertIsInstance(sentence, TextFrame)
+                if isinstance(sentence, TextFrame):
                     self.assertEqual(sentence.text, expected_sentences.pop(0))
 
-        async for sentence in aggregator.process_frame(EndStreamQueueFrame()):
+        async for sentence in aggregator.process_frame(EndFrame()):
             if len(expected_sentences):
-                self.assertIsInstance(sentence, TextQueueFrame)
-                if isinstance(sentence, TextQueueFrame):
+                self.assertIsInstance(sentence, TextFrame)
+                if isinstance(sentence, TextFrame):
                     self.assertEqual(sentence.text, expected_sentences.pop(0))
             else:
-                self.assertIsInstance(sentence, EndStreamQueueFrame)
+                self.assertIsInstance(sentence, EndFrame)
 
         self.assertEqual(expected_sentences, [])
 
     async def test_gated_accumulator(self):
         gated_aggregator = GatedAggregator(
-            gate_open_fn=lambda frame: isinstance(frame, ImageQueueFrame),
-            gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartQueueFrame),
+            gate_open_fn=lambda frame: isinstance(frame, ImageFrame),
+            gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartFrame),
             start_open=False,
         )
 
         frames = [
-            LLMResponseStartQueueFrame(),
-            TextQueueFrame("Hello, "),
-            TextQueueFrame("world."),
-            AudioQueueFrame(b"hello"),
-            ImageQueueFrame("image", b"image"),
-            AudioQueueFrame(b"world"),
-            LLMResponseEndQueueFrame(),
+            LLMResponseStartFrame(),
+            TextFrame("Hello, "),
+            TextFrame("world."),
+            AudioFrame(b"hello"),
+            ImageFrame("image", b"image"),
+            AudioFrame(b"world"),
+            LLMResponseEndFrame(),
         ]
 
         expected_output_frames = [
-            ImageQueueFrame("image", b"image"),
-            LLMResponseStartQueueFrame(),
-            TextQueueFrame("Hello, "),
-            TextQueueFrame("world."),
-            AudioQueueFrame(b"hello"),
-            AudioQueueFrame(b"world"),
-            LLMResponseEndQueueFrame(),
+            ImageFrame("image", b"image"),
+            LLMResponseStartFrame(),
+            TextFrame("Hello, "),
+            TextFrame("world."),
+            AudioFrame(b"hello"),
+            AudioFrame(b"world"),
+            LLMResponseEndFrame(),
         ]
         for frame in frames:
             async for out_frame in gated_aggregator.process_frame(frame):
@@ -98,16 +98,16 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
         )
 
         frames = [
-            TextQueueFrame("Hello, "),
-            TextQueueFrame("world."),
-            EndStreamQueueFrame()
+            TextFrame("Hello, "),
+            TextFrame("world."),
+            EndFrame()
         ]
 
-        expected_output_frames: list[QueueFrame] = [
-            TextQueueFrame(text='Hello, :pipe1.'),
-            TextQueueFrame(text='world.:pipe1.'),
-            TextQueueFrame(text='Hello, world.:pipe2.'),
-            EndStreamQueueFrame()
+        expected_output_frames: list[Frame] = [
+            TextFrame(text='Hello, :pipe1.'),
+            TextFrame(text='world.:pipe1.'),
+            TextFrame(text='Hello, world.:pipe2.'),
+            EndFrame()
         ]
 
         for frame in frames:

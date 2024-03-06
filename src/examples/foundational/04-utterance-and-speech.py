@@ -6,7 +6,7 @@ from dailyai.pipeline.pipeline import Pipeline
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.pipeline.frames import EndStreamQueueFrame, LLMMessagesQueueFrame
+from dailyai.pipeline.frames import EndFrame, LLMMessagesQueueFrame
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 from examples.foundational.support.runner import configure
@@ -56,7 +56,7 @@ async def main(room_url: str):
                     frame = await buffer_queue.get()
                     await transport.send_queue.put(frame)
                     buffer_queue.task_done()
-                    if isinstance(frame, EndStreamQueueFrame):
+                    if isinstance(frame, EndFrame):
                         break
 
             await asyncio.gather(pipeline_run_task, buffer_to_send_queue())

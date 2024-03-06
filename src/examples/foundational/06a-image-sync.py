@@ -8,7 +8,7 @@ import time
 import urllib.parse
 
 from PIL import Image
-from dailyai.pipeline.frames import ImageQueueFrame, QueueFrame
+from dailyai.pipeline.frames import ImageFrame, Frame
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
@@ -27,10 +27,10 @@ class ImageSyncAggregator(AIService):
         self._waiting_image = Image.open(waiting_path)
         self._waiting_image_bytes = self._waiting_image.tobytes()
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        yield ImageQueueFrame(None, self._speaking_image_bytes)
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        yield ImageFrame(None, self._speaking_image_bytes)
         yield frame
-        yield ImageQueueFrame(None, self._waiting_image_bytes)
+        yield ImageFrame(None, self._waiting_image_bytes)
 
 
 async def main(room_url: str, token):
