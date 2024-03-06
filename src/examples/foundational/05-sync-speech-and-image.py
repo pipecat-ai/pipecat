@@ -4,7 +4,7 @@ import aiohttp
 import os
 from dailyai.pipeline.aggregators import GatedAggregator, LLMFullResponseAggregator, ParallelPipeline, SentenceAggregator
 
-from dailyai.pipeline.frames import AudioQueueFrame, EndStreamQueueFrame, ImageQueueFrame, LLMMessagesQueueFrame, LLMResponseStartQueueFrame
+from dailyai.pipeline.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesQueueFrame, LLMResponseStartFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.azure_ai_services import AzureLLMService, AzureImageGenServiceREST, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
@@ -56,11 +56,11 @@ async def main(room_url):
             ]
             await source_queue.put(LLMMessagesQueueFrame(messages))
 
-        await source_queue.put(EndStreamQueueFrame())
+        await source_queue.put(EndFrame())
 
         gated_aggregator = GatedAggregator(
-            gate_open_fn=lambda frame: isinstance(frame, ImageQueueFrame),
-            gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartQueueFrame),
+            gate_open_fn=lambda frame: isinstance(frame, ImageFrame),
+            gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartFrame),
             start_open=False,
         )
 

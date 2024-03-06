@@ -5,13 +5,13 @@ from tblib import Frame
 from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
-    ControlQueueFrame,
-    EndParallelPipeQueueFrame,
-    EndStreamQueueFrame,
+    ControlFrame,
+    EndPipeFrame,
+    EndFrame,
     LLMMessagesQueueFrame,
-    LLMResponseEndQueueFrame,
-    QueueFrame,
-    TextQueueFrame,
+    LLMResponseEndFrame,
+    Frame,
+    TextFrame,
     TranscriptionQueueFrame,
 )
 from dailyai.pipeline.pipeline import Pipeline
@@ -38,10 +38,10 @@ class LLMContextAggregator(AIService):
         self.pass_through = pass_through
 
     async def process_frame(
-        self, frame: QueueFrame
-    ) -> AsyncGenerator[QueueFrame, None]:
+        self, frame: Frame
+    ) -> AsyncGenerator[Frame, None]:
         # We don't do anything with non-text frames, pass it along to next in the pipeline.
-        if not isinstance(frame, TextQueueFrame):
+        if not isinstance(frame, TextFrame):
             yield frame
             return
 
@@ -71,7 +71,7 @@ class LLMContextAggregator(AIService):
             self.messages.append({"role": self.role, "content": frame.text})
             yield LLMMessagesQueueFrame(self.messages)
 
-    async def finalize(self) -> AsyncGenerator[QueueFrame, None]:
+    async def finalize(self) -> AsyncGenerator[Frame, None]:
         # Send any dangling words that weren't finished with punctuation.
         if self.complete_sentences and self.sentence:
             self.messages.append({"role": self.role, "content": self.sentence})
@@ -106,18 +106,18 @@ class SentenceAggregator(FrameProcessor):
         self.aggregation = ""
 
     async def process_frame(
-        self, frame: QueueFrame
-    ) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, TextQueueFrame):
+        self, frame: Frame
+    ) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, TextFrame):
             m = re.search("(.*[?.!])(.*)", frame.text)
             if m:
-                yield TextQueueFrame(self.aggregation + m.group(1))
+                yield TextFrame(self.aggregation + m.group(1))
                 self.aggregation = m.group(2)
             else:
                 self.aggregation += frame.text
-        elif isinstance(frame, EndStreamQueueFrame):
+        elif isinstance(frame, EndFrame):
             if self.aggregation:
-                yield TextQueueFrame(self.aggregation)
+                yield TextFrame(self.aggregation)
             yield frame
         else:
             yield frame
@@ -128,12 +128,12 @@ class LLMFullResponseAggregator(FrameProcessor):
         self.aggregation = ""
 
     async def process_frame(
-        self, frame: QueueFrame
-    ) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, TextQueueFrame):
+        self, frame: Frame
+    ) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, TextFrame):
             self.aggregation += frame.text
-        elif isinstance(frame, LLMResponseEndQueueFrame):
-            yield TextQueueFrame(self.aggregation)
+        elif isinstance(frame, LLMResponseEndFrame):
+            yield TextFrame(self.aggregation)
             self.aggregation = ""
         else:
             yield frame
@@ -143,20 +143,20 @@ class StatelessTextTransformer(FrameProcessor):
     def __init__(self, transform_fn):
         self.transform_fn = transform_fn
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, TextQueueFrame):
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, TextFrame):
             result = self.transform_fn(frame.text)
             if isinstance(result, Coroutine):
                 result = await result
 
-            yield TextQueueFrame(result)
+            yield TextFrame(result)
         else:
             yield frame
 
 class ParallelPipeline(FrameProcessor):
     def __init__(self, pipeline_definitions: List[List[FrameProcessor]]):
         self.sources = [asyncio.Queue() for _ in pipeline_definitions]
-        self.sink: asyncio.Queue[QueueFrame] = asyncio.Queue()
+        self.sink: asyncio.Queue[Frame] = asyncio.Queue()
         self.pipelines: list[Pipeline] = [
             Pipeline(
                 pipeline_definition,
@@ -166,10 +166,10 @@ class ParallelPipeline(FrameProcessor):
             for source, pipeline_definition in zip(self.sources, pipeline_definitions)
         ]
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         for source in self.sources:
             await source.put(frame)
-            await source.put(EndParallelPipeQueueFrame())
+            await source.put(EndPipeFrame())
 
         await asyncio.gather(*[pipeline.run_pipeline() for pipeline in self.pipelines])
 
@@ -186,7 +186,7 @@ class ParallelPipeline(FrameProcessor):
             seen_ids.add(id(frame))
 
             # Skip passing along EndParallelPipeQueueFrame, because we use them for our own flow control.
-            if not isinstance(frame, EndParallelPipeQueueFrame):
+            if not isinstance(frame, EndPipeFrame):
                 yield frame
 
 class GatedAggregator(FrameProcessor):
@@ -194,9 +194,9 @@ class GatedAggregator(FrameProcessor):
         self.gate_open_fn = gate_open_fn
         self.gate_close_fn = gate_close_fn
         self.gate_open = start_open
-        self.accumulator: List[QueueFrame] = []
+        self.accumulator: List[Frame] = []
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if self.gate_open:
             if self.gate_close_fn(frame):
                 self.gate_open = False

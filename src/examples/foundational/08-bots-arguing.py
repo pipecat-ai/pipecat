@@ -6,7 +6,7 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
-from dailyai.pipeline.frames import AudioQueueFrame, ImageQueueFrame
+from dailyai.pipeline.frames import AudioFrame, ImageFrame
 
 from examples.foundational.support.runner import configure
 
@@ -90,8 +90,8 @@ async def main(room_url: str):
                 )
                 await transport.send_queue.put(
                     [
-                        ImageQueueFrame(None, image_data1[1]),
-                        AudioQueueFrame(audio1),
+                        ImageFrame(None, image_data1[1]),
+                        AudioFrame(audio1),
                     ]
                 )
 
@@ -102,8 +102,8 @@ async def main(room_url: str):
                 )
                 await transport.send_queue.put(
                     [
-                        ImageQueueFrame(None, image_data2[1]),
-                        AudioQueueFrame(audio2),
+                        ImageFrame(None, image_data2[1]),
+                        AudioFrame(audio2),
                     ]
                 )
 

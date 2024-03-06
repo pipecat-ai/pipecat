@@ -28,7 +28,6 @@ async def main(room_url):
             mic_enabled=True
         )
 
-        """
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
@@ -39,6 +38,7 @@ async def main(room_url):
             user_id=os.getenv("PLAY_HT_USER_ID"),
             voice_url=os.getenv("PLAY_HT_VOICE_URL"),
         )
+        """
 
         # Register an event handler so we can play the audio when the participant joins.
         @transport.event_handler("on_participant_joined")

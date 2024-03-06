@@ -4,7 +4,7 @@ import asyncio
 import tkinter as tk
 import os
 
-from dailyai.pipeline.frames import AudioQueueFrame, ImageQueueFrame
+from dailyai.pipeline.frames import AudioFrame, ImageFrame
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
@@ -103,8 +103,8 @@ async def main(room_url):
                 if data:
                     await transport.send_queue.put(
                         [
-                            ImageQueueFrame(data["image_url"], data["image"]),
-                            AudioQueueFrame(data["audio"]),
+                            ImageFrame(data["image_url"], data["image"]),
+                            AudioFrame(data["audio"]),
                         ]
                     )
 

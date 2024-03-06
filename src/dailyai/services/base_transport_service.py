@@ -12,12 +12,12 @@ from typing import AsyncGenerator
 from enum import Enum
 
 from dailyai.pipeline.frames import (
-    AudioQueueFrame,
-    EndStreamQueueFrame,
-    ImageQueueFrame,
-    QueueFrame,
-    SpriteQueueFrame,
-    StartStreamQueueFrame,
+    AudioFrame,
+    EndFrame,
+    ImageFrame,
+    Frame,
+    SpriteFrame,
+    StartFrame,
     TranscriptionQueueFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame
@@ -159,7 +159,7 @@ class BaseTransportService():
 
         self._stop_threads.set()
 
-        await self.send_queue.put(EndStreamQueueFrame())
+        await self.send_queue.put(EndFrame())
         await async_output_queue_marshal_task
         await self.send_queue.join()
         self._frame_consumer_thread.join()
@@ -182,7 +182,7 @@ class BaseTransportService():
         pipeline.set_sink(self.send_queue)
         pipeline_task = asyncio.create_task(pipeline.run_pipeline())
 
-        async def yield_frame(frame:QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+        async def yield_frame(frame:Frame) -> AsyncGenerator[Frame, None]:
             yield frame
 
         async def post_process(post_processor):
@@ -194,7 +194,7 @@ class BaseTransportService():
                 print("post-processing frame: ", frame.__class__.__name__)
                 await post_processor.process_frame(frame)
 
-                if isinstance(frame, EndStreamQueueFrame):
+                if isinstance(frame, EndFrame):
                     break
 
         post_process_task = asyncio.create_task(post_process(post_processor))
@@ -214,7 +214,7 @@ class BaseTransportService():
             async for frame in frame_generator:
                 await source_queue.put(frame)
 
-            if isinstance(frame, EndStreamQueueFrame):
+            if isinstance(frame, EndFrame):
                 break
 
         await asyncio.gather(pipeline_task, post_process_task)
@@ -303,20 +303,20 @@ class BaseTransportService():
 
     async def _marshal_frames(self):
         while True:
-            frame: QueueFrame | list = await self.send_queue.get()
+            frame: Frame | list = await self.send_queue.get()
             self._threadsafe_send_queue.put(frame)
             self.send_queue.task_done()
-            if isinstance(frame, EndStreamQueueFrame):
+            if isinstance(frame, EndFrame):
                 break
 
     def interrupt(self):
         self._is_interrupted.set()
 
-    async def get_receive_frames(self) -> AsyncGenerator[QueueFrame, None]:
+    async def get_receive_frames(self) -> AsyncGenerator[Frame, None]:
         while True:
             frame = await self.receive_queue.get()
             yield frame
-            if isinstance(frame, EndStreamQueueFrame):
+            if isinstance(frame, EndFrame):
                 break
 
     def _receive_audio(self):
@@ -329,13 +329,13 @@ class BaseTransportService():
         while not self._stop_threads.is_set():
             buffer = self.read_audio_frames(desired_frame_count)
             if len(buffer) > 0:
-                frame = AudioQueueFrame(buffer)
+                frame = AudioFrame(buffer)
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(frame), self._loop
                 )
 
         asyncio.run_coroutine_threadsafe(
-            self.receive_queue.put(EndStreamQueueFrame()), self._loop
+            self.receive_queue.put(EndFrame()), self._loop
         )
 
     def _set_image(self, image: bytes):
@@ -363,18 +363,18 @@ class BaseTransportService():
         all_audio_frames = bytearray()
         while True:
             try:
-                frames_or_frame: QueueFrame | list[QueueFrame] = (
+                frames_or_frame: Frame | list[Frame] = (
                     self._threadsafe_send_queue.get()
                 )
-                if isinstance(frames_or_frame, QueueFrame):
-                    frames: list[QueueFrame] = [frames_or_frame]
+                if isinstance(frames_or_frame, Frame):
+                    frames: list[Frame] = [frames_or_frame]
                 elif isinstance(frames_or_frame, list):
-                    frames: list[QueueFrame] = frames_or_frame
+                    frames: list[Frame] = frames_or_frame
                 else:
                     raise Exception("Unknown type in output queue")
 
                 for frame in frames:
-                    if isinstance(frame, EndStreamQueueFrame):
+                    if isinstance(frame, EndFrame):
                         self._logger.info("Stopping frame consumer thread")
                         self._threadsafe_send_queue.task_done()
                         if self._loop:
@@ -386,7 +386,7 @@ class BaseTransportService():
                     # if interrupted, we just pull frames off the queue and discard them
                     if not self._is_interrupted.is_set():
                         if frame:
-                            if isinstance(frame, AudioQueueFrame):
+                            if isinstance(frame, AudioFrame):
                                 chunk = frame.data
 
                                 all_audio_frames.extend(chunk)
@@ -398,9 +398,9 @@ class BaseTransportService():
                                 if truncated_length:
                                     self.write_frame_to_mic(bytes(b[:truncated_length]))
                                     b = b[truncated_length:]
-                            elif isinstance(frame, ImageQueueFrame):
+                            elif isinstance(frame, ImageFrame):
                                 self._set_image(frame.image)
-                            elif isinstance(frame, SpriteQueueFrame):
+                            elif isinstance(frame, SpriteFrame):
                                 self._set_images(frame.images)
                         elif len(b):
                             self.write_frame_to_mic(bytes(b))
@@ -418,7 +418,7 @@ class BaseTransportService():
                             self.write_frame_to_mic(bytes(b[:truncated_length]))
                             b = bytearray()
 
-                        if isinstance(frame, StartStreamQueueFrame):
+                        if isinstance(frame, StartFrame):
                             self._is_interrupted.clear()
 
                 self._threadsafe_send_queue.task_done()
