@@ -92,7 +92,8 @@ class BaseTransportService():
         self._vad_enabled = kwargs.get("vad_enabled") or False
 
         if self._vad_enabled and self._speaker_enabled:
-            raise Exception("Sorry, you can't use speaker_enabled and vad_enabled at the same time. Please set one to False.")
+            raise Exception(
+                "Sorry, you can't use speaker_enabled and vad_enabled at the same time. Please set one to False.")
 
         self._vad_samples = 1536
         vad_frame_s = self._vad_samples / SAMPLE_RATE
@@ -128,16 +129,20 @@ class BaseTransportService():
     async def run(self):
         self._prerun()
 
-        async_output_queue_marshal_task = asyncio.create_task(self._marshal_frames())
+        async_output_queue_marshal_task = asyncio.create_task(
+            self._marshal_frames())
 
-        self._camera_thread = threading.Thread(target=self._run_camera, daemon=True)
+        self._camera_thread = threading.Thread(
+            target=self._run_camera, daemon=True)
         self._camera_thread.start()
 
-        self._frame_consumer_thread = threading.Thread(target=self._frame_consumer, daemon=True)
+        self._frame_consumer_thread = threading.Thread(
+            target=self._frame_consumer, daemon=True)
         self._frame_consumer_thread.start()
 
         if self._speaker_enabled:
-            self._receive_audio_thread = threading.Thread(target=self._receive_audio, daemon=True)
+            self._receive_audio_thread = threading.Thread(
+                target=self._receive_audio, daemon=True)
             self._receive_audio_thread.start()
 
         if self._vad_enabled:
@@ -170,19 +175,19 @@ class BaseTransportService():
         if self._vad_enabled:
             self._vad_thread.join()
 
-    async def run_uninterruptible_pipeline(self, pipeline:Pipeline):
+    async def run_uninterruptible_pipeline(self, pipeline: Pipeline):
         pipeline.set_sink(self.send_queue)
         pipeline.set_source(self.receive_queue)
         await pipeline.run_pipeline()
 
-    async def run_interruptible_pipeline(self, pipeline:Pipeline, allow_interruptions=True, pre_processor=None, post_processor=None):
+    async def run_interruptible_pipeline(self, pipeline: Pipeline, allow_interruptions=True, pre_processor=None, post_processor=None):
         pipeline.set_sink(self.send_queue)
         source_queue = asyncio.Queue()
         pipeline.set_source(source_queue)
         pipeline.set_sink(self.send_queue)
         pipeline_task = asyncio.create_task(pipeline.run_pipeline())
 
-        async def yield_frame(frame:Frame) -> AsyncGenerator[Frame, None]:
+        async def yield_frame(frame: Frame) -> AsyncGenerator[Frame, None]:
             yield frame
 
         async def post_process(post_processor):
@@ -317,6 +322,7 @@ class BaseTransportService():
                 break
 
     def interrupt(self):
+        self._logger.debug("!!! Interrupting")
         self._is_interrupted.set()
 
     async def get_receive_frames(self) -> AsyncGenerator[Frame, None]:
@@ -367,13 +373,20 @@ class BaseTransportService():
         self._logger.info("🎬 Starting frame consumer thread")
         b = bytearray()
         smallest_write_size = 3200
+        largest_write_size = 8000
         all_audio_frames = bytearray()
         while True:
             try:
                 frames_or_frame: Frame | list[Frame] = (
                     self._threadsafe_send_queue.get()
                 )
-                if isinstance(frames_or_frame, Frame):
+                if isinstance(frames_or_frame, AudioFrame) and len(frames_or_frame.data) > largest_write_size:
+                    # subdivide large audio frames to enable interruption
+                    frames = []
+                    for i in range(0, len(frames_or_frame.data), largest_write_size):
+                        frames.append(AudioFrame(
+                            frames_or_frame.data[i: i+largest_write_size]))
+                elif isinstance(frames_or_frame, Frame):
                     frames: list[Frame] = [frames_or_frame]
                 elif isinstance(frames_or_frame, list):
                     frames: list[Frame] = frames_or_frame
@@ -395,7 +408,6 @@ class BaseTransportService():
                         if frame:
                             if isinstance(frame, AudioFrame):
                                 chunk = frame.data
-
                                 all_audio_frames.extend(chunk)
 
                                 b.extend(chunk)
@@ -403,7 +415,8 @@ class BaseTransportService():
                                     len(b) % smallest_write_size
                                 )
                                 if truncated_length:
-                                    self.write_frame_to_mic(bytes(b[:truncated_length]))
+                                    self.write_frame_to_mic(
+                                        bytes(b[:truncated_length]))
                                     b = b[truncated_length:]
                             elif isinstance(frame, ImageFrame):
                                 self._set_image(frame.image)
@@ -422,7 +435,8 @@ class BaseTransportService():
                         # can cause static in the audio stream.
                         if len(b):
                             truncated_length = len(b) - (len(b) % 160)
-                            self.write_frame_to_mic(bytes(b[:truncated_length]))
+                            self.write_frame_to_mic(
+                                bytes(b[:truncated_length]))
                             b = bytearray()
 
                         if isinstance(frame, StartFrame):
@@ -435,5 +449,6 @@ class BaseTransportService():
 
                 b = bytearray()
             except Exception as e:
-                self._logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
+                self._logger.error(
+                    f"Exception in frame_consumer: {e}, {len(b)}")
                 raise e
