@@ -199,12 +199,19 @@ class BaseTransportService():
 
         post_process_task = asyncio.create_task(post_process(post_processor))
 
+        started = False
+
         async for frame in self.get_receive_frames():
             print("Got frame: ", frame.__class__.__name__)
             if isinstance(frame, UserStartedSpeakingFrame):
                 pipeline_task.cancel()
                 self.interrupt()
                 pipeline_task = asyncio.create_task(pipeline.run_pipeline())
+                started = False
+                continue
+
+            if not started:
+                await self.send_queue.put(StartFrame())
 
             if pre_processor:
                 frame_generator = pre_processor.process_frame(frame)
