@@ -7,7 +7,7 @@ import random
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.pipeline.frames import QueueFrame, FrameType
+from dailyai.pipeline.frames import Frame, FrameType
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
@@ -45,7 +45,7 @@ async def main(room_url: str, token):
             print(f"finder: {finder}")
             if finder >= 0:
                 async for audio in tts.run_tts(f"Resetting."):
-                    transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
+                    transport.output_queue.put(Frame(FrameType.AUDIO_FRAME, audio))
                 sentence = ""
                 continue
             # todo: we could differentiate between transcriptions from different participants
@@ -54,12 +54,12 @@ async def main(room_url: str, token):
             # TODO: Cache this audio
             phrase = random.choice(["OK.", "Got it.", "Sure.", "You bet.", "Sure thing."])
             async for audio in tts.run_tts(phrase):
-                transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
+                transport.output_queue.put(Frame(FrameType.AUDIO_FRAME, audio))
             img_result = img.run_image_gen(sentence, "1024x1024")
             awaited_img = await asyncio.gather(img_result)
             transport.output_queue.put(
                 [
-                    QueueFrame(FrameType.IMAGE_FRAME, awaited_img[0][1]),
+                    Frame(FrameType.IMAGE_FRAME, awaited_img[0][1]),
                 ]
             )
 
@@ -72,7 +72,7 @@ async def main(room_url: str, token):
             audio_generator = tts.run_tts(
                 f"Hello, {participant['info']['userName']}! Describe an image and I'll create it. To start over, just say 'start over'.")
             async for audio in audio_generator:
-                transport.output_queue.put(QueueFrame(FrameType.AUDIO_FRAME, audio))
+                transport.output_queue.put(Frame(FrameType.AUDIO_FRAME, audio))
 
     transport.transcription_settings["extra"]["punctuate"] = False
     transport.transcription_settings["extra"]["endpointing"] = False

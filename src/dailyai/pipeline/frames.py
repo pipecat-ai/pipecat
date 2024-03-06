@@ -2,72 +2,73 @@ from dataclasses import dataclass
 from typing import Any
 
 
-class QueueFrame:
+class Frame:
+    pass
+
+class ControlFrame(Frame):
+    # Control frames should contain no instance data, so
+    # equality is based solely on the class.
     def __eq__(self, other):
-        return isinstance(other, self.__class__)
+        return type(other) == self.__class__
 
 
-class ControlQueueFrame(QueueFrame):
+class StartFrame(ControlFrame):
     pass
 
 
-class StartStreamQueueFrame(ControlQueueFrame):
+class EndFrame(ControlFrame):
+    pass
+
+class EndPipeFrame(ControlFrame):
     pass
 
 
-class EndStreamQueueFrame(ControlQueueFrame):
-    pass
-
-class EndParallelPipeQueueFrame(ControlQueueFrame):
+class LLMResponseStartFrame(ControlFrame):
     pass
 
 
-class LLMResponseStartQueueFrame(QueueFrame):
-    pass
-
-
-class LLMResponseEndQueueFrame(QueueFrame):
+class LLMResponseEndFrame(ControlFrame):
     pass
 
 
 @dataclass()
-class AudioQueueFrame(QueueFrame):
+class AudioFrame(Frame):
     data: bytes
 
 
 @dataclass()
-class ImageQueueFrame(QueueFrame):
+class ImageFrame(Frame):
     url: str | None
     image: bytes
 
 
 @dataclass()
-class SpriteQueueFrame(QueueFrame):
+class SpriteFrame(Frame):
     images: list[bytes]
 
 
 @dataclass()
-class TextQueueFrame(QueueFrame):
+class TextFrame(Frame):
     text: str
 
 
 @dataclass()
-class TranscriptionQueueFrame(TextQueueFrame):
+class TranscriptionQueueFrame(TextFrame):
     participantId: str
     timestamp: str
 
 
 @dataclass()
-class LLMMessagesQueueFrame(QueueFrame):
+class LLMMessagesQueueFrame(Frame):
     messages: list[dict[str, str]]  # TODO: define this more concretely!
 
 
-class AppMessageQueueFrame(QueueFrame):
+class AppMessageQueueFrame(Frame):
     message: Any
     participantId: str
 
-class UserStartedSpeakingFrame(QueueFrame):
+class UserStartedSpeakingFrame(Frame):
     pass
 
-class UserStoppedSpeakingFrame(QueueFrame):
+class UserStoppedSpeakingFrame(Frame):
     pass

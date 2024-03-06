@@ -2,7 +2,7 @@ import asyncio
 from typing import AsyncGenerator, List
 from dailyai.pipeline.frame_processor import FrameProcessor
 
-from dailyai.pipeline.frames import EndParallelPipeQueueFrame, EndStreamQueueFrame, QueueFrame
+from dailyai.pipeline.frames import EndPipeFrame, EndFrame, Frame
 
 """
 This class manages a pipe of FrameProcessors, and runs them in sequence. The "source"
@@ -17,19 +17,19 @@ class Pipeline:
         self,
         processors: List[FrameProcessor],
         source: asyncio.Queue | None = None,
-        sink: asyncio.Queue[QueueFrame] | None = None,
+        sink: asyncio.Queue[Frame] | None = None,
     ):
         self.processors = processors
-        self.source: asyncio.Queue[QueueFrame] | None = source
-        self.sink: asyncio.Queue[QueueFrame] | None = sink
+        self.source: asyncio.Queue[Frame] | None = source
+        self.sink: asyncio.Queue[Frame] | None = sink
 
-    def set_source(self, source: asyncio.Queue[QueueFrame]):
+    def set_source(self, source: asyncio.Queue[Frame]):
         self.source = source
 
-    def set_sink(self, sink: asyncio.Queue[QueueFrame]):
+    def set_sink(self, sink: asyncio.Queue[Frame]):
         self.sink = sink
 
-    async def get_next_source_frame(self) -> AsyncGenerator[QueueFrame, None]:
+    async def get_next_source_frame(self) -> AsyncGenerator[Frame, None]:
         if self.source is None:
             raise ValueError("Source queue not set")
         yield await self.source.get()
@@ -52,9 +52,9 @@ class Pipeline:
                     async for frame in frame_generator:
                         await self.sink.put(frame)
                         if isinstance(
-                            frame, EndStreamQueueFrame
+                            frame, EndFrame
                         ) or isinstance(
-                            frame, EndParallelPipeQueueFrame
+                            frame, EndPipeFrame
                         ):
                             return
         except asyncio.CancelledError:

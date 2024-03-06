@@ -4,7 +4,7 @@ import os
 
 import tkinter as tk
 
-from dailyai.pipeline.frames import TextQueueFrame
+from dailyai.pipeline.frames import TextFrame
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.local_transport_service import LocalTransportService
 
@@ -34,7 +34,7 @@ async def main():
         )
         image_task = asyncio.create_task(
             imagegen.run_to_queue(
-                transport.send_queue, [TextQueueFrame("a cat in the style of picasso")]
+                transport.send_queue, [TextFrame("a cat in the style of picasso")]
             )
         )
 

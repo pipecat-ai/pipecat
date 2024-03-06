@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 import wave
-from dailyai.pipeline.frames import EndStreamQueueFrame, TranscriptionQueueFrame
+from dailyai.pipeline.frames import EndFrame, TranscriptionQueueFrame
 
 from dailyai.services.local_transport_service import LocalTransportService
 from dailyai.services.whisper_ai_services import WhisperSTTService
@@ -30,7 +30,7 @@ async def main(room_url: str):
             print("got item from queue", item)
             if isinstance(item, TranscriptionQueueFrame):
                 print(item.text)
-            elif isinstance(item, EndStreamQueueFrame):
+            elif isinstance(item, EndFrame):
                 break
         print("handle_transcription done")
 
@@ -38,7 +38,7 @@ async def main(room_url: str):
         await stt.run_to_queue(
             transcription_output_queue, transport.get_receive_frames()
         )
-        await transcription_output_queue.put(EndStreamQueueFrame())
+        await transcription_output_queue.put(EndFrame())
         print("handle speaker done.")
 
     async def run_until_done():

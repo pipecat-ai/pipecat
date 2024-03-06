@@ -6,14 +6,14 @@ import wave
 from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
-    AudioQueueFrame,
-    EndStreamQueueFrame,
-    ImageQueueFrame,
+    AudioFrame,
+    EndFrame,
+    ImageFrame,
     LLMMessagesQueueFrame,
-    LLMResponseEndQueueFrame,
-    LLMResponseStartQueueFrame,
-    QueueFrame,
-    TextQueueFrame,
+    LLMResponseEndFrame,
+    LLMResponseStartFrame,
+    Frame,
+    TextFrame,
     TranscriptionQueueFrame,
 )
 
@@ -33,14 +33,14 @@ class AIService(FrameProcessor):
             await queue.put(frame)
 
         if add_end_of_stream:
-            await queue.put(EndStreamQueueFrame())
+            await queue.put(EndFrame())
 
     async def run(
         self,
-        frames: Iterable[QueueFrame]
-        | AsyncIterable[QueueFrame]
-        | asyncio.Queue[QueueFrame],
-    ) -> AsyncGenerator[QueueFrame, None]:
+        frames: Iterable[Frame]
+        | AsyncIterable[Frame]
+        | asyncio.Queue[Frame],
+    ) -> AsyncGenerator[Frame, None]:
         try:
             if isinstance(frames, AsyncIterable):
                 async for frame in frames:
@@ -55,7 +55,7 @@ class AIService(FrameProcessor):
                     frame = await frames.get()
                     async for output_frame in self.process_frame(frame):
                         yield output_frame
-                    if isinstance(frame, EndStreamQueueFrame):
+                    if isinstance(frame, EndFrame):
                         break
             else:
                 raise Exception("Frames must be an iterable or async iterable")
@@ -76,12 +76,12 @@ class LLMService(AIService):
     async def run_llm(self, messages) -> str:
         pass
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, LLMMessagesQueueFrame):
-            yield LLMResponseStartQueueFrame()
+            yield LLMResponseStartFrame()
             async for text_chunk in self.run_llm_async(frame.messages):
-                yield TextQueueFrame(text_chunk)
-            yield LLMResponseEndQueueFrame()
+                yield TextFrame(text_chunk)
+            yield LLMResponseEndFrame()
         else:
             yield frame
 
@@ -103,8 +103,8 @@ class TTSService(AIService):
         # yield empty bytes here, so linting can infer what this method does
         yield bytes()
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if not isinstance(frame, TextQueueFrame):
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if not isinstance(frame, TextFrame):
             yield frame
             return
 
@@ -119,16 +119,16 @@ class TTSService(AIService):
 
         if text:
             async for audio_chunk in self.run_tts(text):
-                yield AudioQueueFrame(audio_chunk)
+                yield AudioFrame(audio_chunk)
 
     async def finalize(self):
         if self.current_sentence:
             async for audio_chunk in self.run_tts(self.current_sentence):
-                yield AudioQueueFrame(audio_chunk)
+                yield AudioFrame(audio_chunk)
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue):
-        await self.run_to_queue(queue, [TextQueueFrame(sentence)])
+        await self.run_to_queue(queue, [TextFrame(sentence)])
 
 
 class ImageGenService(AIService):
@@ -141,13 +141,13 @@ class ImageGenService(AIService):
     async def run_image_gen(self, sentence: str) -> tuple[str, bytes]:
         pass
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if not isinstance(frame, TextQueueFrame):
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if not isinstance(frame, TextFrame):
             yield frame
             return
 
         (url, image_data) = await self.run_image_gen(frame.text)
-        yield ImageQueueFrame(url, image_data)
+        yield ImageFrame(url, image_data)
 
 
 class STTService(AIService):
@@ -164,9 +164,9 @@ class STTService(AIService):
         """Returns transcript as a string"""
         pass
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         """Processes a frame of audio data, either buffering or transcribing it."""
-        if not isinstance(frame, AudioQueueFrame):
+        if not isinstance(frame, AudioFrame):
             return
 
         data = frame.data
@@ -187,8 +187,8 @@ class FrameLogger(AIService):
         super().__init__(**kwargs)
         self.prefix = prefix
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
-        if isinstance(frame, (AudioQueueFrame, ImageQueueFrame)):
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, (AudioFrame, ImageFrame)):
             self.logger.info(f"{self.prefix}: {type(frame)}")
         else:
             print(f"{self.prefix}: {frame}")

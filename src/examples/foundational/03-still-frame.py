@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 import os
 
-from dailyai.pipeline.frames import TextQueueFrame
+from dailyai.pipeline.frames import TextFrame
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.open_ai_services import OpenAIImageGenService
@@ -39,7 +39,7 @@ async def main(room_url):
         image_task = asyncio.create_task(
             imagegen.run_to_queue(
                 transport.send_queue, [
-                    TextQueueFrame("a cat in the style of picasso")]))
+                    TextFrame("a cat in the style of picasso")]))
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):

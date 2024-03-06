@@ -4,7 +4,7 @@ import math
 import time
 from typing import AsyncGenerator
 import wave
-from dailyai.pipeline.frames import AudioQueueFrame, QueueFrame, TranscriptionQueueFrame
+from dailyai.pipeline.frames import AudioFrame, Frame, TranscriptionQueueFrame
 from dailyai.services.ai_services import STTService
 
 
@@ -39,9 +39,9 @@ class LocalSTTService(STTService):
         ww.setframerate(self._frame_rate)
         self._wave = ww
 
-    async def process_frame(self, frame: QueueFrame) -> AsyncGenerator[QueueFrame, None]:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         """Processes a frame of audio data, either buffering or transcribing it."""
-        if not isinstance(frame, AudioQueueFrame):
+        if not isinstance(frame, AudioFrame):
             return
 
         data = frame.data
