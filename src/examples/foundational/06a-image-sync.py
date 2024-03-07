@@ -8,15 +8,18 @@ import time
 import urllib.parse
 
 from PIL import Image
-from dailyai.pipeline.frames import ImageFrame, Frame
+from dailyai.pipeline.frames import ImageFrame, SpriteFrame, Frame
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.services.ai_services import AIService
+from dailyai.services.ai_services import AIService, FrameLogger
 from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMUserContextAggregator
 from dailyai.services.fal_ai_services import FalImageGenService
 
-from examples.foundational.support.runner import configure
+from support.runner import configure
+
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 
 class ImageSyncAggregator(AIService):
@@ -26,11 +29,33 @@ class ImageSyncAggregator(AIService):
 
         self._waiting_image = Image.open(waiting_path)
         self._waiting_image_bytes = self._waiting_image.tobytes()
+        sprites = []
+        image_files = []
+        for x in range(1, 26):
+            image_files.append(f"robot{x}.jpg")
+
+        for file in image_files:
+            # Build the full path to the image file
+            full_path = os.path.join(os.path.dirname(__file__), "assets", file)
+            # Get the filename without the extension to use as the dictionary key
+            filename = os.path.splitext(os.path.basename(full_path))[0]
+            # Open the image and convert it to bytes
+            print(f"opening file {file}")
+            with Image.open(full_path) as img:
+                sprites.append(img.tobytes())
+
+        # When the bot isn't talking, show a static image of the robot listening
+        self._quiet_frame = ImageFrame("", sprites[0])
+        # When the bot is talking, build an animation from the sprites
+        self._talking_frame = SpriteFrame(images=sprites)
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        yield ImageFrame(None, self._speaking_image_bytes)
+        print(f"yielding talking frame")
+        yield self._talking_frame
+        print("yielding frame")
         yield frame
-        yield ImageFrame(None, self._waiting_image_bytes)
+        print("yielding quiet frame")
+        yield self._quiet_frame
 
 
 async def main(room_url: str, token):
@@ -43,9 +68,10 @@ async def main(room_url: str, token):
         )
         transport._camera_enabled = True
         transport._camera_width = 1024
-        transport._camera_height = 1024
+        transport._camera_height = 576
         transport._mic_enabled = True
         transport._mic_sample_rate = 16000
+        transport._fps = 10
 
         llm = AzureLLMService(
             api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
@@ -90,17 +116,21 @@ async def main(room_url: str, token):
                 messages, transport._my_participant_id
             )
             image_sync_aggregator = ImageSyncAggregator(
-                os.path.join(os.path.dirname(__file__), "assets", "speaking.png"),
-                os.path.join(os.path.dirname(__file__), "assets", "waiting.png"),
+                os.path.join(os.path.dirname(__file__),
+                             "assets", "speaking.png"),
+                os.path.join(os.path.dirname(__file__),
+                             "assets", "waiting.png"),
             )
+            fl = FrameLogger("Inner")
             await tts.run_to_queue(
                 transport.send_queue,
                 image_sync_aggregator.run(
                     tma_out.run(
                         llm.run(
-                            tma_in.run(
+                            fl.run(tma_in.run(
                                 transport.get_receive_frames()
-                            )
+                            ))
+
                         )
                     )
                 )
