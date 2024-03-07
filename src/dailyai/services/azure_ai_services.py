@@ -2,6 +2,7 @@ import aiohttp
 import asyncio
 import io
 import json
+import time
 from openai import AsyncAzureOpenAI
 
 import os
@@ -48,8 +49,8 @@ class AzureTTSService(TTSService):
 
 
 class AzureLLMService(LLMService):
-    def __init__(self, *, api_key, endpoint, api_version="2023-12-01-preview", model):
-        super().__init__()
+    def __init__(self, *, api_key, endpoint, api_version="2023-12-01-preview", model, tools=None):
+        super().__init__(tools=tools)
         self._model: str = model
 
         self._client = AsyncAzureOpenAI(
@@ -58,16 +59,22 @@ class AzureLLMService(LLMService):
             api_version=api_version,
         )
 
-    async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
+    async def run_llm_async(self, messages, tool_choice=None) -> AsyncGenerator[str, None]:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via azure: {messages_for_log}")
-
-        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages)
+        if self._tools:
+            tools = self._tools
+        else:
+            tools = None
+        start_time = time.time()
+        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages, tools=tools, tool_choice=tool_choice)
+        self.logger.info(f"=== Azure OpenAI LLM TTFB: {time.time() - start_time}")
         async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue
-
-            if chunk.choices[0].delta.content:
+            if chunk.choices[0].delta.tool_calls:
+                yield chunk.choices[0].delta.tool_calls[0]
+            elif chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
 
     async def run_llm(self, messages) -> str | None:
