@@ -14,7 +14,7 @@ from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator
+from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator, UserResponseAggregator, LLMResponseAggregator
 from support.runner import configure
 from dailyai.pipeline.frames import LLMMessagesQueueFrame, TranscriptionQueueFrame, Frame, TextFrame, LLMFunctionCallFrame, LLMResponseEndFrame, StartFrame, AudioFrame, SpriteFrame, ImageFrame
 from dailyai.services.ai_services import FrameLogger, AIService
@@ -40,125 +40,6 @@ for file in sound_files:
     with wave.open(full_path) as audio_file:
         sounds[file] = audio_file.readframes(-1)
 
-
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "verify_birthday",
-            "description": "Use this function to verify the user has provided their correct birthday.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "birthday": {
-                        "type": "string",
-                        "description": "The user's birthdate, including the year. The user can provide it in any format, but convert it to YYYY-MM-DD format to call this function."
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_prescriptions",
-            "description": "Once the user has provided a list of their prescription medications, call this function.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prescriptions": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {
-                                    "type": "string",
-                                    "description": "The medication's name"
-                                },
-                                "dosage": {
-                                    "type": "string",
-                                    "description": "The prescription's dosage"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_allergies",
-            "description": "Once the user has provided a list of their allergies, call this function.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "allergies": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {
-                                    "type": "string",
-                                    "description": "What the user is allergic to"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_conditions",
-            "description": "Once the user has provided a list of their medical conditions, call this function.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "conditions": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {
-                                    "type": "string",
-                                    "description": "The user's medical condition"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_visit_reasons",
-            "description": "Once the user has provided a list of the reasons they are visiting a doctor today, call this function.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "visit_reasons": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {
-                                    "type": "string",
-                                    "description": "The user's reason for visiting the doctor"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-]
 
 steps = [
     {
@@ -449,8 +330,6 @@ async def main(room_url: str, token):
 
         # lca = LLMContextAggregator(
         #     messages=messages, bot_participant_id=transport._my_participant_id)
-        tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
-        tma_out = LLMAssistantContextAggregator(messages, transport._my_participant_id)
         checklist = ChecklistProcessor(messages, llm, tools)
         fl = FrameLogger("FRAME LOGGER 1:")
         fl2 = FrameLogger("FRAME LOGGER 2:")
@@ -458,11 +337,10 @@ async def main(room_url: str, token):
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
             fl = FrameLogger("first other participant")
+            # TODO-CB: Make sure this message gets into the context somehow
             await tts.run_to_queue(
                 transport.send_queue,
-                tma_in.run(
                     llm.run([LLMMessagesQueueFrame(messages)]),
-                )
 
             )
         
@@ -470,15 +348,18 @@ async def main(room_url: str, token):
             pipeline = Pipeline(
                 processors=[
                     fl,
-                    tma_in,
                     llm,
                     fl2,
                     checklist,
-                    tma_out,
                     tts
                 ]
             )
-            await transport.run_interruptible_pipeline(pipeline)
+            await transport.run_interruptible_pipeline(pipeline,
+                post_processor=LLMResponseAggregator(
+                    messages
+                ),
+                pre_processor=UserResponseAggregator(messages)
+                )
 
 
         transport.transcription_settings["extra"]["endpointing"] = True

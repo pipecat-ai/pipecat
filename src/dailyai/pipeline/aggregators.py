@@ -14,34 +14,65 @@ from dailyai.pipeline.frames import (
     LLMResponseStartFrame,
     TextFrame,
     TranscriptionQueueFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame
 )
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import AIService
 
 from typing import AsyncGenerator, Coroutine, List, Text
 
-class LLMResponseAggregator(FrameProcessor):
-    def __init__(self, messages: list[dict]):
+class ResponseAggregator(FrameProcessor):
+    def __init__(self, *, messages: list[dict], role: str, start_frame, end_frame, accumulator_frame, pass_through=True):
         self.aggregation = ""
         self.aggregating = False
         self.messages = messages
+        self._role = role
+        self._start_frame = start_frame
+        self._end_frame = end_frame
+        self._accumulator_frame = accumulator_frame
+        self._pass_through = pass_through
 
     async def process_frame(
         self, frame: Frame
     ) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, LLMResponseStartFrame):
+        print(f"!!! aggregator got frame of type: {type(frame)}")
+        if isinstance(frame, self._start_frame):
+            print(f"!!! starting to aggregate for {self._role}")
             self.aggregating = True
-        elif isinstance(frame, LLMResponseEndFrame):
+        elif isinstance(frame, self._end_frame):
+            print(f"!!! stopping aggregation for {self._role}")
             self.aggregating = False
-            self.messages.append({"role": "assistant", "content": self.aggregation})
+            self.messages.append({"role": self._role, "content": self.aggregation})
             self.aggregation = ""
             yield LLMMessagesQueueFrame(self.messages)
-        elif isinstance(frame, TextFrame) and self.aggregating:
-            self.aggregation += frame.text
-            yield frame
+        elif isinstance(frame, self._accumulator_frame) and self.aggregating:
+            self.aggregation += f" {frame.text}"
+            if self._pass_through:
+                yield frame
         else:
             yield frame
 
+class LLMResponseAggregator(ResponseAggregator):
+    def __init__(self, messages: list[dict]):
+        super().__init__(
+            messages=messages,
+            role="assistant",
+            start_frame=LLMResponseStartFrame,
+            end_frame=LLMResponseEndFrame,
+            accumulator_frame=TextFrame
+        )
+
+class UserResponseAggregator(ResponseAggregator):
+    def __init__(self, messages: list[dict]):
+        super().__init__(
+            messages=messages,
+            role="user",
+            start_frame=UserStartedSpeakingFrame,
+            end_frame=UserStoppedSpeakingFrame,
+            accumulator_frame=TranscriptionQueueFrame,
+            pass_through=False
+        )
 
 class LLMContextAggregator(AIService):
     def __init__(

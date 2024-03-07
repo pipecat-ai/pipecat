@@ -84,39 +84,13 @@ class LLMService(AIService):
         pass
 
     async def process_frame(self, frame: Frame, tool_choice: str = None) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, UserStoppedSpeakingFrame):
-            # Then we're in conversation mode with VAD;
-            # use the global shared context for completion
-            # but also yield the UserStoppedSpeakingFrame for downstream timing
-            yield frame
-            self.logger.debug("Starting LLM")
-            function_name = ""
-            arguments = ""
-            print(f"!!! The new way,self messages is {self._messages}")
-            async for text_chunk in self.run_llm_async(self._messages, tool_choice):
-                if isinstance(text_chunk, str):
-                    yield TextFrame(text_chunk)
-                elif text_chunk.function:
-                    if text_chunk.function.name:
-                        # function_name += text_chunk.function.name
-                        yield LLMFunctionCallFrame(function_name=text_chunk.function.name, arguments=None)
-                    if text_chunk.function.arguments:
-                        # arguments += text_chunk.function.arguments
-                        yield LLMFunctionCallFrame(function_name=None, arguments=text_chunk.function.arguments)
-
-            if (function_name and arguments):
-                # yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
-                function_name = ""
-                arguments = ""
-            yield LLMResponseEndFrame()
-        elif isinstance(frame, LLMMessagesQueueFrame):
+        if isinstance(frame, LLMMessagesQueueFrame):
             # It's an LLMMessagesQueueFrame directly created in an
             # example.
             # TODO-CB: Clean this up?
             function_name = ""
             arguments = ""
             if isinstance(frame, LLMMessagesQueueFrame):
-                print(f"!!! We're doing it the old way")
                 async for text_chunk in self.run_llm_async(frame.messages, tool_choice):
                     if isinstance(text_chunk, str):
                         yield TextFrame(text_chunk)
