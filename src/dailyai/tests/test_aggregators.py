@@ -1,4 +1,5 @@
 import asyncio
+import doctest
 import functools
 import unittest
 
@@ -118,3 +119,10 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
         while not sink.empty():
             frame = await sink.get()
             self.assertEqual(frame, expected_output_frames.pop(0))
+
+
+def load_tests(loader, tests, ignore):
+    """ Run doctests on the aggregators module. """
+    from dailyai.pipeline import aggregators
+    tests.addTests(doctest.DocTestSuite(aggregators))
+    return tests

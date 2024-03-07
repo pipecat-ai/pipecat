@@ -4,11 +4,12 @@ import re
 from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
-    EndPipeFrame,
     EndFrame,
+    EndPipeFrame,
+    Frame,
+    ImageFrame,
     LLMMessagesQueueFrame,
     LLMResponseEndFrame,
-    Frame,
     LLMResponseStartFrame,
     TextFrame,
     TranscriptionQueueFrame,
@@ -18,7 +19,7 @@ from dailyai.pipeline.frames import (
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import AIService
 
-from typing import AsyncGenerator, Coroutine, List, Text
+from typing import AsyncGenerator, Coroutine, List
 
 class ResponseAggregator(FrameProcessor):
     def __init__(self, *, messages: list[dict], role: str, start_frame, end_frame, accumulator_frame, pass_through=True):
@@ -261,6 +262,23 @@ class StatelessTextTransformer(FrameProcessor):
             yield frame
 
 class ParallelPipeline(FrameProcessor):
+    """ Run multiple pipelines in parallel.
+
+    This class takes frames from its source queue and sends them to each
+    sub-pipeline. Each sub-pipeline emits its frames into this class's
+    sink queue. No guarantees are made about the ordering of frames in
+    the sink queue (that is, no sub-pipeline has higher priority than
+    any other, frames are put on the sink in the order they're emitted
+    by the sub-pipelines).
+
+    After each frame is taken from this class's source queue and placed
+    in each sub-pipeline's source queue, an EndPipeFrame is put on each
+    sub-pipeline's source queue. This indicates to the sub-pipe runner
+    that it should exit.
+
+    Since frame handlers pass through unhandled frames by convention, this
+    class de-dupes frames in its sink before yielding them.
+    """
     def __init__(self, pipeline_definitions: List[List[FrameProcessor]]):
         self.sources = [asyncio.Queue() for _ in pipeline_definitions]
         self.sink: asyncio.Queue[Frame] = asyncio.Queue()
@@ -297,6 +315,30 @@ class ParallelPipeline(FrameProcessor):
                 yield frame
 
 class GatedAggregator(FrameProcessor):
+    """Accumulate frames, with custom functions to start and stop accumulation.
+    Yields gate-opening frame before any accumulated frames, then ensuing frames
+    until and not including the gate-closed frame.
+
+    >>> async def print_frames(aggregator, frame):
+    ...     async for frame in aggregator.process_frame(frame):
+    ...         if isinstance(frame, TextFrame):
+    ...             print(frame.text)
+    ...         else:
+    ...             print(frame.__class__.__name__)
+
+    >>> aggregator = GatedAggregator(
+    ...     gate_close_fn=lambda x: isinstance(x, LLMResponseStartFrame),
+    ...     gate_open_fn=lambda x: isinstance(x, ImageFrame),
+    ...     start_open=False)
+    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello")))
+    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello again.")))
+    >>> asyncio.run(print_frames(aggregator, ImageFrame(url='', image=bytes([]))))
+    ImageFrame
+    Hello
+    Hello again.
+    >>> asyncio.run(print_frames(aggregator, TextFrame("Goodbye.")))
+    Goodbye.
+    """
     def __init__(self, gate_open_fn, gate_close_fn, start_open):
         self.gate_open_fn = gate_open_fn
         self.gate_close_fn = gate_close_fn
