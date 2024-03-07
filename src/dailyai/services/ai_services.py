@@ -12,9 +12,11 @@ from dailyai.pipeline.frames import (
     LLMMessagesQueueFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
+    LLMFunctionCallFrame,
     Frame,
     TextFrame,
     TranscriptionQueueFrame,
+    UserStoppedSpeakingFrame
 )
 
 from abc import abstractmethod
@@ -65,6 +67,11 @@ class AIService(FrameProcessor):
 
 
 class LLMService(AIService):
+    def __init__(self, messages=None, tools=None):
+        super().__init__()
+        self._tools = tools
+        self._messages = messages
+
     @abstractmethod
     async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
         yield ""
@@ -73,12 +80,27 @@ class LLMService(AIService):
     async def run_llm(self, messages) -> str:
         pass
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame, tool_choice: str = None) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, LLMMessagesQueueFrame):
-            yield LLMResponseStartFrame()
-            async for text_chunk in self.run_llm_async(frame.messages):
-                yield TextFrame(text_chunk)
-            yield LLMResponseEndFrame()
+            function_name = ""
+            arguments = ""
+            if isinstance(frame, LLMMessagesQueueFrame):
+                yield LLMResponseStartFrame()
+                async for text_chunk in self.run_llm_async(frame.messages, tool_choice):
+                    if isinstance(text_chunk, str):
+                        yield TextFrame(text_chunk)
+                    elif text_chunk.function:
+                        if text_chunk.function.name:
+                            # function_name += text_chunk.function.name
+                            yield LLMFunctionCallFrame(function_name=text_chunk.function.name, arguments=None)
+                        if text_chunk.function.arguments:
+                            # arguments += text_chunk.function.arguments
+                            yield LLMFunctionCallFrame(function_name=None, arguments=text_chunk.function.arguments)
+
+                if (function_name and arguments):
+                    function_name = ""
+                    arguments = ""
+                yield LLMResponseEndFrame()
         else:
             yield frame
 
@@ -129,7 +151,7 @@ class TTSService(AIService):
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue):
-        await self.run_to_queue(queue, [TextFrame(sentence)])
+        await self.run_to_queue(queue, [LLMResponseStartFrame(), TextFrame(sentence), LLMResponseEndFrame()])
 
 
 class ImageGenService(AIService):

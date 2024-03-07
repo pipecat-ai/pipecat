@@ -249,8 +249,9 @@ class DailyTransportService(BaseTransportService, EventHandler):
                 participantId = message["participantId"]
             elif "session_id" in message:
                 participantId = message["session_id"]
-            frame = TranscriptionQueueFrame(message["text"], participantId, message["timestamp"])
-            asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self._loop)
+            if self._my_participant_id and participantId != self._my_participant_id:
+                frame = TranscriptionQueueFrame(message["text"], participantId, message["timestamp"])
+                asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self._loop)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
         pass
