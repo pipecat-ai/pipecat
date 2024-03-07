@@ -112,11 +112,9 @@ class AzureImageGenServiceREST(ImageGenService):
         async with self._aiohttp_session.post(
             url, headers=headers, json=body
         ) as submission:
-            print(f"submission: {submission}")
             # We never get past this line, because this header isn't
             # defined on a 429 response, but something is eating our exceptions!
             operation_location = submission.headers['operation-location']
-            print(f"submission status: {submission.status}")
             status = ""
             attempts_left = 120
             json_response = None
@@ -139,5 +137,4 @@ class AzureImageGenServiceREST(ImageGenService):
             async with self._aiohttp_session.get(image_url) as response:
                 image_stream = io.BytesIO(await response.content.read())
                 image = Image.open(image_stream)
-                print("i got an image file!")
                 return (image_url, image.tobytes())

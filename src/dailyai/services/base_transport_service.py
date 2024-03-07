@@ -10,6 +10,7 @@ import threading
 import time
 from typing import AsyncGenerator
 from enum import Enum
+from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
     AudioFrame,
@@ -180,7 +181,13 @@ class BaseTransportService():
         pipeline.set_source(self.receive_queue)
         await pipeline.run_pipeline()
 
-    async def run_interruptible_pipeline(self, pipeline: Pipeline, allow_interruptions=True, pre_processor=None, post_processor=None):
+    async def run_interruptible_pipeline(
+        self,
+        pipeline: Pipeline,
+        allow_interruptions=True,
+        pre_processor=None,
+        post_processor: FrameProcessor | None = None,
+    ):
         pipeline.set_sink(self.send_queue)
         source_queue = asyncio.Queue()
         pipeline.set_source(source_queue)
@@ -190,24 +197,24 @@ class BaseTransportService():
         async def yield_frame(frame: Frame) -> AsyncGenerator[Frame, None]:
             yield frame
 
-        async def post_process(post_processor):
-            if not post_processor:
-                return
-
+        async def post_process(post_processor: FrameProcessor):
             while True:
                 frame = await self.completed_queue.get()
-                print("post-processing frame: ", frame.__class__.__name__)
-                await post_processor.process_frame(frame)
+
+                # We ignore the output of the post_processor's process frame;
+                # this is called to update the post-processor's state.
+                async for frame in post_processor.process_frame(frame):
+                    pass
 
                 if isinstance(frame, EndFrame):
                     break
 
-        post_process_task = asyncio.create_task(post_process(post_processor))
+        if post_processor:
+            post_process_task = asyncio.create_task(post_process(post_processor))
 
         started = False
 
         async for frame in self.get_receive_frames():
-            print("Got frame: ", frame.__class__.__name__)
             if isinstance(frame, UserStartedSpeakingFrame):
                 pipeline_task.cancel()
                 self.interrupt()
@@ -425,11 +432,6 @@ class BaseTransportService():
                         elif len(b):
                             self.write_frame_to_mic(bytes(b))
                             b = bytearray()
-
-                        if self._loop:
-                            asyncio.run_coroutine_threadsafe(
-                                self.completed_queue.put(frame), self._loop
-                            )
                     else:
                         # if there are leftover audio bytes, write them now; failing to do so
                         # can cause static in the audio stream.
@@ -441,6 +443,11 @@ class BaseTransportService():
 
                         if isinstance(frame, StartFrame):
                             self._is_interrupted.clear()
+
+                    if self._loop:
+                        asyncio.run_coroutine_threadsafe(
+                            self.completed_queue.put(frame), self._loop
+                        )
 
                 self._threadsafe_send_queue.task_done()
             except queue.Empty:
