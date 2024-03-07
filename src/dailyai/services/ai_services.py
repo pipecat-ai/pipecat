@@ -82,9 +82,6 @@ class LLMService(AIService):
 
     async def process_frame(self, frame: Frame, tool_choice: str = None) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, LLMMessagesQueueFrame):
-            # It's an LLMMessagesQueueFrame directly created in an
-            # example.
-            # TODO-CB: Clean this up?
             function_name = ""
             arguments = ""
             if isinstance(frame, LLMMessagesQueueFrame):
