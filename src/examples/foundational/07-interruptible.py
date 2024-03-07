@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 import os
-from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMResponseAggregator, LLMUserContextAggregator
+from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMResponseAggregator, LLMUserContextAggregator, UserResponseAggregator
 
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import FrameLogger
@@ -49,8 +49,8 @@ async def main(room_url: str, token):
                 post_processor=LLMResponseAggregator(
                     messages
                 ),
-                pre_processor=LLMUserContextAggregator(
-                    messages, transport._my_participant_id, complete_sentences=False
+                pre_processor=UserResponseAggregator(
+                    messages
                 ),
             )
 

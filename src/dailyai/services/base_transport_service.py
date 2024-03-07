@@ -220,7 +220,6 @@ class BaseTransportService():
                 self.interrupt()
                 pipeline_task = asyncio.create_task(pipeline.run_pipeline())
                 started = False
-                continue
 
             if not started:
                 await self.send_queue.put(StartFrame())
