@@ -28,12 +28,6 @@ class FrameProcessor:
         yield frame
 
     @abstractmethod
-    async def finalize(self) -> AsyncGenerator[Frame, None]:
-        # This is a trick for the interpreter (and linter) to know that this is a generator.
-        if False:
-            yield Frame()
-
-    @abstractmethod
     async def interrupted(self) -> None:
         """Handle any cleanup if the pipeline was interrupted."""
         pass
