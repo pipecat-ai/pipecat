@@ -5,6 +5,7 @@ from typing import Any
 class Frame:
     pass
 
+
 class ControlFrame(Frame):
     # Control frames should contain no instance data, so
     # equality is based solely on the class.
@@ -18,6 +19,7 @@ class StartFrame(ControlFrame):
 
 class EndFrame(ControlFrame):
     pass
+
 
 class EndPipeFrame(ControlFrame):
     pass
@@ -53,6 +55,21 @@ class TextFrame(Frame):
 
 
 @dataclass()
+class BotSpeechTextFrame(TextFrame):
+    save_in_context: bool
+
+
+@dataclass()
+class BotTTSCompletedFrame(BotSpeechTextFrame):
+    pass
+
+
+@dataclass()
+class BotTranscriptionFrame(BotSpeechTextFrame):
+    pass
+
+
+@dataclass()
 class TranscriptionQueueFrame(TextFrame):
     participantId: str
     timestamp: str
@@ -67,8 +84,10 @@ class AppMessageQueueFrame(Frame):
     message: Any
     participantId: str
 
+
 class UserStartedSpeakingFrame(Frame):
     pass
+
 
 class UserStoppedSpeakingFrame(Frame):
     pass

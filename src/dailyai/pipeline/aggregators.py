@@ -49,7 +49,21 @@ class LLMContextAggregator(AIService):
         if isinstance(frame, TranscriptionQueueFrame):
             if frame.participantId == self.bot_participant_id:
                 return
+            else:
+                self.append_to_context("user", frame.text)
+        elif isinstance(frame, BotTranscriptionFrame):
+            if frame.save_in_context == True:
+                self.append_to_context("assistant", frame.text)
+            else:
+                print("save in context false")
+        else:
+            yield frame
 
+    def append_to_context(self, role, text):
+        if len(self._context) > 0 and self._context[-1] and self._context[-1]['role'] == role:
+            self._context[-1]['content'] += f" {text}"
+        else:
+            self._context.append({"role": role, "content": text})
         # The common case for "pass through" is receiving frames from the LLM that we'll
         # use to update the "assistant" LLM messages, but also passing the text frames
         # along to a TTS service to be spoken to the user.
@@ -62,7 +76,8 @@ class LLMContextAggregator(AIService):
             # though we check it above
             self.sentence += frame.text
             if self.sentence.endswith((".", "?", "!")):
-                self.messages.append({"role": self.role, "content": self.sentence})
+                self.messages.append(
+                    {"role": self.role, "content": self.sentence})
                 self.sentence = ""
                 yield LLMMessagesQueueFrame(self.messages)
         else:
@@ -153,6 +168,7 @@ class StatelessTextTransformer(FrameProcessor):
         else:
             yield frame
 
+
 class ParallelPipeline(FrameProcessor):
     def __init__(self, pipeline_definitions: List[List[FrameProcessor]]):
         self.sources = [asyncio.Queue() for _ in pipeline_definitions]
@@ -188,6 +204,7 @@ class ParallelPipeline(FrameProcessor):
             # Skip passing along EndParallelPipeQueueFrame, because we use them for our own flow control.
             if not isinstance(frame, EndPipeFrame):
                 yield frame
+
 
 class GatedAggregator(FrameProcessor):
     def __init__(self, gate_open_fn, gate_close_fn, start_open):
