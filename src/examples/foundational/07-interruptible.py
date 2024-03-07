@@ -8,7 +8,7 @@ from dailyai.services.ai_services import FrameLogger
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 
-from examples.foundational.support.runner import configure
+from support.runner import configure
 
 
 async def main(room_url: str, token):
@@ -22,6 +22,7 @@ async def main(room_url: str, token):
             mic_enabled=True,
             mic_sample_rate=16000,
             camera_enabled=False,
+            vad_enabled=True,
         )
 
         llm = AzureLLMService(
