@@ -57,7 +57,6 @@ class OpenAIImageGenService(ImageGenService):
     ):
         super().__init__(image_size=image_size)
         self._model = model
-        print(f"api key: {api_key}")
         self._client = AsyncOpenAI(api_key=api_key)
         self._aiohttp_session = aiohttp_session
 

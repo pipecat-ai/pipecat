@@ -104,6 +104,12 @@ class TTSService(AIService):
         yield bytes()
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, EndFrame):
+            if self.current_sentence:
+                async for audio_chunk in self.run_tts(self.current_sentence):
+                    yield AudioFrame(audio_chunk)
+            yield frame
+
         if not isinstance(frame, TextFrame):
             yield frame
             return
@@ -121,10 +127,8 @@ class TTSService(AIService):
             async for audio_chunk in self.run_tts(text):
                 yield AudioFrame(audio_chunk)
 
-    async def finalize(self):
-        if self.current_sentence:
-            async for audio_chunk in self.run_tts(self.current_sentence):
-                yield AudioFrame(audio_chunk)
+            # note we pass along the text frame *after* the audio, so the text frame is completed after the audio is processed.
+            yield TextFrame(text)
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue):

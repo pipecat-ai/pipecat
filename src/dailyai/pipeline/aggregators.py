@@ -11,6 +11,7 @@ from dailyai.pipeline.frames import (
     LLMMessagesQueueFrame,
     LLMResponseEndFrame,
     Frame,
+    LLMResponseStartFrame,
     TextFrame,
     TranscriptionQueueFrame,
 )
@@ -18,6 +19,28 @@ from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import AIService
 
 from typing import AsyncGenerator, Coroutine, List, Text
+
+class LLMResponseAggregator(FrameProcessor):
+    def __init__(self, messages: list[dict]):
+        self.aggregation = ""
+        self.aggregating = False
+        self.messages = messages
+
+    async def process_frame(
+        self, frame: Frame
+    ) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, LLMResponseStartFrame):
+            self.aggregating = True
+        elif isinstance(frame, LLMResponseEndFrame):
+            self.aggregating = False
+            self.messages.append({"role": "assistant", "content": self.aggregation})
+            self.aggregation = ""
+            yield LLMMessagesQueueFrame(self.messages)
+        elif isinstance(frame, TextFrame) and self.aggregating:
+            self.aggregation += frame.text
+            yield frame
+        else:
+            yield frame
 
 
 class LLMContextAggregator(AIService):
