@@ -70,10 +70,11 @@ class AIService(FrameProcessor):
 
 
 class LLMService(AIService):
-    def __init__(self, tools=None):
+    def __init__(self, messages=None, tools=None):
         super().__init__()
         self._tools = tools
-        
+        self._messages = messages
+
     @abstractmethod
     async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
         yield ""
@@ -91,7 +92,8 @@ class LLMService(AIService):
             self.logger.debug("Starting LLM")
             function_name = ""
             arguments = ""
-            async for text_chunk in self.run_llm_async(self._context, tool_choice):
+            print(f"!!! The new way,self messages is {self._messages}")
+            async for text_chunk in self.run_llm_async(self._messages, tool_choice):
                 if isinstance(text_chunk, str):
                     yield TextFrame(text_chunk)
                 elif text_chunk.function:
@@ -114,6 +116,7 @@ class LLMService(AIService):
             function_name = ""
             arguments = ""
             if isinstance(frame, LLMMessagesQueueFrame):
+                print(f"!!! We're doing it the old way")
                 async for text_chunk in self.run_llm_async(frame.messages, tool_choice):
                     if isinstance(text_chunk, str):
                         yield TextFrame(text_chunk)

@@ -20,7 +20,7 @@ from dailyai.pipeline.frames import LLMMessagesQueueFrame, TranscriptionQueueFra
 from dailyai.services.ai_services import FrameLogger, AIService
 
 import logging
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.DEBUG)
 
 sounds = {}
 sound_files = [
@@ -423,13 +423,13 @@ async def main(room_url: str, token):
         transport = DailyTransportService(
             room_url,
             token,
-            "Respond bot",
+            "Intake Bot",
             5,
             mic_enabled=True,
             mic_sample_rate=16000,
             camera_enabled=False,
             start_transcription=True,
-            speaker_enabled=True
+            vad_enabled=True
         )
         # TODO-CB: Go back to vad_enabled
 
@@ -452,8 +452,8 @@ async def main(room_url: str, token):
         tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
         tma_out = LLMAssistantContextAggregator(messages, transport._my_participant_id)
         checklist = ChecklistProcessor(messages, llm, tools)
-        fl = FrameLogger("got transcript")
-        fl2 = FrameLogger("just above the checklist")
+        fl = FrameLogger("FRAME LOGGER 1:")
+        fl2 = FrameLogger("FRAME LOGGER 2:")
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):

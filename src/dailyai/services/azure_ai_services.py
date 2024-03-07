@@ -49,8 +49,8 @@ class AzureTTSService(TTSService):
 
 
 class AzureLLMService(LLMService):
-    def __init__(self, *, api_key, endpoint, api_version="2023-12-01-preview", model, tools=None):
-        super().__init__(tools=tools)
+    def __init__(self, *, api_key, endpoint, api_version="2023-12-01-preview", model, tools=None, messages=None):
+        super().__init__(tools=tools, messages=messages)
         self._model: str = model
 
         self._client = AsyncAzureOpenAI(
