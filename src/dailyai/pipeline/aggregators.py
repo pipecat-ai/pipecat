@@ -35,12 +35,9 @@ class ResponseAggregator(FrameProcessor):
     async def process_frame(
         self, frame: Frame
     ) -> AsyncGenerator[Frame, None]:
-        print(f"!!! aggregator got frame of type: {type(frame)}")
         if isinstance(frame, self._start_frame):
-            print(f"!!! starting to aggregate for {self._role}")
             self.aggregating = True
         elif isinstance(frame, self._end_frame):
-            print(f"!!! stopping aggregation for {self._role}")
             self.aggregating = False
             self.messages.append({"role": self._role, "content": self.aggregation})
             self.aggregation = ""

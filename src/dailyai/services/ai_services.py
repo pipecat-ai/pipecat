@@ -88,6 +88,7 @@ class LLMService(AIService):
             function_name = ""
             arguments = ""
             if isinstance(frame, LLMMessagesQueueFrame):
+                yield LLMResponseStartFrame()
                 async for text_chunk in self.run_llm_async(frame.messages, tool_choice):
                     if isinstance(text_chunk, str):
                         yield TextFrame(text_chunk)
@@ -154,7 +155,7 @@ class TTSService(AIService):
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue):
-        await self.run_to_queue(queue, [TextFrame(sentence)])
+        await self.run_to_queue(queue, [LLMResponseStartFrame(), TextFrame(sentence), LLMResponseEndFrame()])
 
 
 class ImageGenService(AIService):

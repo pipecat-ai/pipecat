@@ -320,7 +320,7 @@ async def main(room_url: str, token):
         # llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv(
         #     "AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         llm = OpenAILLMService(api_key=os.getenv(
-            "OPENAI_CHATGPT_API_KEY"), model="gpt-4-1106-preview")  # gpt-4-1106-preview
+            "OPENAI_CHATGPT_API_KEY"), model="gpt-4-1106-preview", tools=tools)  # gpt-4-1106-preview
         # tts = AzureTTSService(api_key=os.getenv(
         #     "AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
         tts = ElevenLabsTTSService(aiohttp_session=session, api_key=os.getenv(
