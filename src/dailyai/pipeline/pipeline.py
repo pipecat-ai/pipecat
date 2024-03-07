@@ -48,6 +48,16 @@ class Pipeline:
             raise ValueError("Source queue not set")
         yield await self.source.get()
 
+    async def run_pipeline_recursively(
+        self, initial_frame: Frame, processors: List[FrameProcessor]
+    ) -> AsyncGenerator[Frame, None]:
+        if processors:
+            async for frame in processors[0].process_frame(initial_frame):
+                async for final_frame in self.run_pipeline_recursively(frame, processors[1:]):
+                    yield final_frame
+        else:
+            yield initial_frame
+
     async def run_pipeline(self):
         """ Run the pipeline. Take each frame from the source queue, pass it to
         the first frame_processor, pass the output of that frame_processor to the
@@ -65,23 +75,12 @@ class Pipeline:
 
         try:
             while True:
-                frame_generators = [self.get_next_source_frame()]
-                for processor in self.processors:
-                    next_frame_generators = []
-                    for frame_generator in frame_generators:
-                        async for frame in frame_generator:
-                            next_frame_generators.append(processor.process_frame(frame))
-                    frame_generators = next_frame_generators
+                initial_frame = await self.source.get()
+                async for frame in self.run_pipeline_recursively(initial_frame, self.processors):
+                    await self.sink.put(frame)
 
-                for frame_generator in frame_generators:
-                    async for frame in frame_generator:
-                        await self.sink.put(frame)
-                        if isinstance(
-                            frame, EndFrame
-                        ) or isinstance(
-                            frame, EndPipeFrame
-                        ):
-                            return
+                if isinstance(initial_frame, EndFrame) or isinstance(initial_frame, EndPipeFrame):
+                    break
         except asyncio.CancelledError:
             # this means there's been an interruption, do any cleanup necessary here.
             for processor in self.processors:
