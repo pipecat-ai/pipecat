@@ -98,7 +98,6 @@ class LLMService(AIService):
                             yield LLMFunctionCallFrame(function_name=None, arguments=text_chunk.function.arguments)
 
                 if (function_name and arguments):
-                    # yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
                     function_name = ""
                     arguments = ""
                 yield LLMResponseEndFrame()
