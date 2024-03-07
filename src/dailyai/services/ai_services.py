@@ -59,9 +59,6 @@ class AIService(FrameProcessor):
                         break
             else:
                 raise Exception("Frames must be an iterable or async iterable")
-
-            async for output_frame in self.finalize():
-                yield output_frame
         except Exception as e:
             self.logger.error("Exception occurred while running AI service", e)
             raise e
@@ -108,7 +105,7 @@ class TTSService(AIService):
             if self.current_sentence:
                 async for audio_chunk in self.run_tts(self.current_sentence):
                     yield AudioFrame(audio_chunk)
-            yield frame
+                yield TextFrame(self.current_sentence)
 
         if not isinstance(frame, TextFrame):
             yield frame
