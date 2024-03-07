@@ -1,11 +1,9 @@
 import asyncio
 import re
 
-from tblib import Frame
 from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
-    ControlFrame,
     EndPipeFrame,
     EndFrame,
     LLMMessagesQueueFrame,
@@ -125,13 +123,6 @@ class LLMContextAggregator(AIService):
             self.messages.append({"role": self.role, "content": frame.text})
             yield LLMMessagesQueueFrame(self.messages)
 
-    async def finalize(self) -> AsyncGenerator[Frame, None]:
-        # Send any dangling words that weren't finished with punctuation.
-        if self.complete_sentences and self.sentence:
-            self.messages.append({"role": self.role, "content": self.sentence})
-            yield LLMMessagesQueueFrame(self.messages)
-
-
 class LLMUserContextAggregator(LLMContextAggregator):
     def __init__(
         self, messages: list[dict], bot_participant_id=None, complete_sentences=True
@@ -155,7 +146,22 @@ class LLMAssistantContextAggregator(LLMContextAggregator):
 
 
 class SentenceAggregator(FrameProcessor):
+    """This frame processor aggregates text frames into complete sentences.
 
+    Frame input/output:
+        TextFrame("Hello,") -> None
+        TextFrame(" world.") -> TextFrame("Hello world.")
+
+    Doctest:
+    >>> async def print_frames(aggregator, frame):
+    ...     async for frame in aggregator.process_frame(frame):
+    ...         print(frame.text)
+
+    >>> aggregator = SentenceAggregator()
+    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello,")))
+    >>> asyncio.run(print_frames(aggregator, TextFrame(" world.")))
+    Hello, world.
+    """
     def __init__(self):
         self.aggregation = ""
 
@@ -178,6 +184,41 @@ class SentenceAggregator(FrameProcessor):
 
 
 class LLMFullResponseAggregator(FrameProcessor):
+    """This class aggregates Text frames until it receives a
+    LLMResponseEndFrame, then emits the concatenated text as
+    a single text frame.
+
+    given the following frames:
+
+        TextFrame("Hello,")
+        TextFrame(" world.")
+        TextFrame(" I am")
+        TextFrame(" an LLM.")
+        LLMResponseEndFrame()]
+
+    this processor will yield nothing for the first 4 frames, then
+
+        TextFrame("Hello, world. I am an LLM.")
+        LLMResponseEndFrame()
+
+    when passed the last frame.
+
+    >>> async def print_frames(aggregator, frame):
+    ...     async for frame in aggregator.process_frame(frame):
+    ...         if isinstance(frame, TextFrame):
+    ...             print(frame.text)
+    ...         else:
+    ...             print(frame.__class__.__name__)
+
+    >>> aggregator = LLMFullResponseAggregator()
+    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello,")))
+    >>> asyncio.run(print_frames(aggregator, TextFrame(" world.")))
+    >>> asyncio.run(print_frames(aggregator, TextFrame(" I am")))
+    >>> asyncio.run(print_frames(aggregator, TextFrame(" an LLM.")))
+    >>> asyncio.run(print_frames(aggregator, LLMResponseEndFrame()))
+    Hello, world. I am an LLM.
+    LLMResponseEndFrame
+    """
     def __init__(self):
         self.aggregation = ""
 
@@ -188,12 +229,24 @@ class LLMFullResponseAggregator(FrameProcessor):
             self.aggregation += frame.text
         elif isinstance(frame, LLMResponseEndFrame):
             yield TextFrame(self.aggregation)
+            yield frame
             self.aggregation = ""
         else:
             yield frame
 
 
 class StatelessTextTransformer(FrameProcessor):
+    """This processor calls the given function on any text in a text frame.
+
+    >>> async def print_frames(aggregator, frame):
+    ...     async for frame in aggregator.process_frame(frame):
+    ...         print(frame.text)
+
+    >>> aggregator = StatelessTextTransformer(lambda x: x.upper())
+    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello")))
+    HELLO
+    """
+
     def __init__(self, transform_fn):
         self.transform_fn = transform_fn
 
