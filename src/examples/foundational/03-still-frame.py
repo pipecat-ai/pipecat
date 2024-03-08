@@ -1,5 +1,6 @@
 import asyncio
 import aiohttp
+import logging
 import os
 
 from dailyai.pipeline.frames import TextFrame
@@ -10,6 +11,9 @@ from dailyai.services.azure_ai_services import AzureImageGenServiceREST
 
 from examples.support.runner import configure
 
+logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
+logger = logging.getLogger("dailyai")
+logger.setLevel(logging.DEBUG)
 local_joined = False
 participant_joined = False
 
@@ -25,21 +29,23 @@ async def main(room_url):
             mic_enabled=False,
             camera_enabled=True,
             camera_width=1024,
-            camera_height=1024
+            camera_height=1024,
         )
 
         imagegen = FalImageGenService(
             image_size="1024x1024",
             aiohttp_session=session,
             key_id=os.getenv("FAL_KEY_ID"),
-            key_secret=os.getenv("FAL_KEY_SECRET"))
+            key_secret=os.getenv("FAL_KEY_SECRET"),
+        )
         # imagegen = OpenAIImageGenService(aiohttp_session=session, api_key=os.getenv("OPENAI_DALLE_API_KEY"), image_size="1024x1024")
         # imagegen = AzureImageGenServiceREST(image_size="1024x1024", aiohttp_session=session, api_key=os.getenv("AZURE_DALLE_API_KEY"), endpoint=os.getenv("AZURE_DALLE_ENDPOINT"), model=os.getenv("AZURE_DALLE_MODEL"))
 
         image_task = asyncio.create_task(
             imagegen.run_to_queue(
-                transport.send_queue, [
-                    TextFrame("a cat in the style of picasso")]))
+                transport.send_queue, [TextFrame("a cat in the style of picasso")]
+            )
+        )
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):

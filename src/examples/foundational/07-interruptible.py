@@ -1,14 +1,23 @@
 import asyncio
 import aiohttp
+import logging
 import os
-from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMResponseAggregator, LLMUserContextAggregator, UserResponseAggregator
+from dailyai.pipeline.aggregators import (
+    LLMAssistantContextAggregator,
+    LLMResponseAggregator,
+    LLMUserContextAggregator,
+    UserResponseAggregator,
+)
 
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import FrameLogger
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
+from examples.support.runner import configure
 
-from support.runner import configure
+logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
+logger = logging.getLogger("dailyai")
+logger.setLevel(logging.DEBUG)
 
 
 async def main(room_url: str, token):
@@ -28,10 +37,12 @@ async def main(room_url: str, token):
         llm = AzureLLMService(
             api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
             endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-            model=os.getenv("AZURE_CHATGPT_MODEL"))
+            model=os.getenv("AZURE_CHATGPT_MODEL"),
+        )
         tts = AzureTTSService(
             api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-            region=os.getenv("AZURE_SPEECH_REGION"))
+            region=os.getenv("AZURE_SPEECH_REGION"),
+        )
 
         pipeline = Pipeline([FrameLogger(), llm, FrameLogger(), tts])
 
@@ -41,17 +52,16 @@ async def main(room_url: str, token):
 
         async def run_conversation():
             messages = [
-                {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
+                {
+                    "role": "system",
+                    "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
+                },
             ]
 
             await transport.run_interruptible_pipeline(
                 pipeline,
-                post_processor=LLMResponseAggregator(
-                    messages
-                ),
-                pre_processor=UserResponseAggregator(
-                    messages
-                ),
+                post_processor=LLMResponseAggregator(messages),
+                pre_processor=UserResponseAggregator(messages),
             )
 
         transport.transcription_settings["extra"]["punctuate"] = False
