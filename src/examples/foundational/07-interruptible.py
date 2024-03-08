@@ -12,7 +12,8 @@ from dailyai.pipeline.aggregators import (
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import FrameLogger
 from dailyai.services.daily_transport_service import DailyTransportService
-from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
+from dailyai.services.open_ai_services import OpenAILLMService
+from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from examples.support.runner import configure
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
@@ -34,14 +35,14 @@ async def main(room_url: str, token):
             vad_enabled=True,
         )
 
-        llm = AzureLLMService(
-            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
-            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-            model=os.getenv("AZURE_CHATGPT_MODEL"),
+        tts = ElevenLabsTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         )
-        tts = AzureTTSService(
-            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-            region=os.getenv("AZURE_SPEECH_REGION"),
+
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
         )
 
         pipeline = Pipeline([FrameLogger(), llm, FrameLogger(), tts])
