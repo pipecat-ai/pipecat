@@ -8,6 +8,9 @@ import wave
 from typing import AsyncGenerator
 from PIL import Image
 
+import sys
+print('\n'.join(sys.path))
+
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
@@ -15,7 +18,7 @@ from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator, UserResponseAggregator, LLMResponseAggregator
-from support.runner import configure
+from examples.support.runner import configure
 from dailyai.pipeline.frames import LLMMessagesQueueFrame, TranscriptionQueueFrame, Frame, TextFrame, LLMFunctionCallFrame, LLMFunctionStartFrame, LLMResponseEndFrame, StartFrame, AudioFrame, SpriteFrame, ImageFrame
 from dailyai.services.ai_services import FrameLogger, AIService
 
