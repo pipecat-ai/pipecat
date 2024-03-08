@@ -12,11 +12,11 @@ from dailyai.pipeline.frames import (
     LLMMessagesQueueFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
+    LLMFunctionStartFrame,
     LLMFunctionCallFrame,
     Frame,
     TextFrame,
-    TranscriptionQueueFrame,
-    UserStoppedSpeakingFrame
+    TranscriptionQueueFrame
 )
 
 from abc import abstractmethod
@@ -87,17 +87,24 @@ class LLMService(AIService):
             if isinstance(frame, LLMMessagesQueueFrame):
                 yield LLMResponseStartFrame()
                 async for text_chunk in self.run_llm_async(frame.messages, tool_choice):
+                    # We're streaming the LLM response and returning individual TextFrames for each chunk because
+                    # we want to enable quick TTS. But if the LLM response is a function call, we don't need to yield
+                    # each chunk because the function call is only useful as a single frame. Instead, we'll emit a
+                    # LLMFunctionStartFrame to let downstream services know a function call is coming, then we'll
+                    # collect the function arguments and return the entire call in a single LLMFunctionCallFrame.
                     if isinstance(text_chunk, str):
                         yield TextFrame(text_chunk)
                     elif text_chunk.function:
                         if text_chunk.function.name:
-                            # function_name += text_chunk.function.name
-                            yield LLMFunctionCallFrame(function_name=text_chunk.function.name, arguments=None)
+                            function_name += text_chunk.function.name
+                            yield LLMFunctionStartFrame(function_name=text_chunk.function.name)
                         if text_chunk.function.arguments:
-                            # arguments += text_chunk.function.arguments
-                            yield LLMFunctionCallFrame(function_name=None, arguments=text_chunk.function.arguments)
+                            # Keep iterating through the response to collect all the argument fragments and
+                            # yield a complete LLMFunctionCallFrame after run_llm_async completes
+                            arguments += text_chunk.function.arguments
 
                 if (function_name and arguments):
+                    yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
                     function_name = ""
                     arguments = ""
                 yield LLMResponseEndFrame()

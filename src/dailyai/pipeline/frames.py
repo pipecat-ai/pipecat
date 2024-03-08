@@ -74,6 +74,9 @@ class UserStoppedSpeakingFrame(Frame):
     pass
 
 @dataclass()
+class LLMFunctionStartFrame(Frame):
+    function_name: str
+@dataclass()
 class LLMFunctionCallFrame(Frame):
     function_name: str
     arguments: str
