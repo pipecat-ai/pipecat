@@ -14,7 +14,7 @@ from typing import AsyncGenerator
 
 from examples.support.runner import configure
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")  # or whatever
+logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 

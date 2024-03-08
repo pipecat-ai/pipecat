@@ -1,10 +1,15 @@
 import argparse
 import asyncio
+import logging
 import wave
 from dailyai.pipeline.frames import EndFrame, TranscriptionQueueFrame
 
 from dailyai.services.local_transport_service import LocalTransportService
 from dailyai.services.whisper_ai_services import WhisperSTTService
+
+logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
+logger = logging.getLogger("dailyai")
+logger.setLevel(logging.DEBUG)
 
 
 async def main(room_url: str):
@@ -17,7 +22,7 @@ async def main(room_url: str):
         camera_enabled=False,
         speaker_enabled=True,
         duration_minutes=meeting_duration_minutes,
-        start_transcription=True
+        start_transcription=True,
     )
     stt = WhisperSTTService()
     transcription_output_queue = asyncio.Queue()

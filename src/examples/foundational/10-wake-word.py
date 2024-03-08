@@ -1,15 +1,18 @@
 import aiohttp
 import asyncio
+import logging
 import os
 import random
 from typing import AsyncGenerator
-
 from PIL import Image
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.pipeline.aggregators import LLMUserContextAggregator, LLMAssistantContextAggregator
+from dailyai.pipeline.aggregators import (
+    LLMUserContextAggregator,
+    LLMAssistantContextAggregator,
+)
 from dailyai.pipeline.frames import (
     Frame,
     TextFrame,
@@ -18,19 +21,21 @@ from dailyai.pipeline.frames import (
     TranscriptionQueueFrame,
 )
 from dailyai.services.ai_services import AIService
-
 from examples.support.runner import configure
 
+logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
+logger = logging.getLogger("dailyai")
+logger.setLevel(logging.DEBUG)
 
 sprites = {}
 image_files = [
-    'sc-default.png',
-    'sc-talk.png',
-    'sc-listen-1.png',
-    'sc-think-1.png',
-    'sc-think-2.png',
-    'sc-think-3.png',
-    'sc-think-4.png'
+    "sc-default.png",
+    "sc-talk.png",
+    "sc-listen-1.png",
+    "sc-think-1.png",
+    "sc-think-2.png",
+    "sc-think-3.png",
+    "sc-think-4.png",
 ]
 
 script_dir = os.path.dirname(__file__)
@@ -47,16 +52,17 @@ for file in image_files:
 # When the bot isn't talking, show a static image of the cat listening
 quiet_frame = ImageFrame("", sprites["sc-listen-1.png"])
 # When the bot is talking, build an animation from two sprites
-talking_list = [sprites['sc-default.png'], sprites['sc-talk.png']]
+talking_list = [sprites["sc-default.png"], sprites["sc-talk.png"]]
 talking = [random.choice(talking_list) for x in range(30)]
 talking_frame = SpriteFrame(images=talking)
 
 # TODO: Support "thinking" as soon as we get a valid transcript, while LLM is processing
 thinking_list = [
-    sprites['sc-think-1.png'],
-    sprites['sc-think-2.png'],
-    sprites['sc-think-3.png'],
-    sprites['sc-think-4.png']]
+    sprites["sc-think-1.png"],
+    sprites["sc-think-2.png"],
+    sprites["sc-think-3.png"],
+    sprites["sc-think-4.png"],
+]
 thinking_frame = SpriteFrame(images=thinking_list)
 
 
@@ -115,7 +121,7 @@ async def main(room_url: str, token):
             mic_sample_rate=16000,
             camera_enabled=True,
             camera_width=720,
-            camera_height=1280
+            camera_height=1280,
         )
         transport._mic_enabled = True
         transport._mic_sample_rate = 16000
@@ -126,25 +132,31 @@ async def main(room_url: str, token):
         llm = AzureLLMService(
             api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
             endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-            model=os.getenv("AZURE_CHATGPT_MODEL"))
+            model=os.getenv("AZURE_CHATGPT_MODEL"),
+        )
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id="jBpfuIE2acCO8z3wKNLl")
+            voice_id="jBpfuIE2acCO8z3wKNLl",
+        )
         isa = ImageSyncAggregator()
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            await tts.say("Hi! If you want to talk to me, just say 'hey Santa Cat'.", transport.send_queue)
+            await tts.say(
+                "Hi! If you want to talk to me, just say 'hey Santa Cat'.",
+                transport.send_queue,
+            )
 
         async def handle_transcriptions():
             messages = [
-                {"role": "system", "content": "You are Santa Cat, a cat that lives in Santa's workshop at the North Pole. You should be clever, and a bit sarcastic. You should also tell jokes every once in a while.  Your responses should only be a few sentences long."},
+                {
+                    "role": "system",
+                    "content": "You are Santa Cat, a cat that lives in Santa's workshop at the North Pole. You should be clever, and a bit sarcastic. You should also tell jokes every once in a while.  Your responses should only be a few sentences long.",
+                },
             ]
 
-            tma_in = LLMUserContextAggregator(
-                messages, transport._my_participant_id
-            )
+            tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
             tma_out = LLMAssistantContextAggregator(
                 messages, transport._my_participant_id
             )
@@ -155,16 +167,10 @@ async def main(room_url: str, token):
                 isa.run(
                     tma_out.run(
                         llm.run(
-                            tma_in.run(
-                                ncf.run(
-                                    tf.run(
-                                        transport.get_receive_frames()
-                                    )
-                                )
-                            )
+                            tma_in.run(ncf.run(tf.run(transport.get_receive_frames())))
                         )
                     )
-                )
+                ),
             )
 
         async def starting_image():

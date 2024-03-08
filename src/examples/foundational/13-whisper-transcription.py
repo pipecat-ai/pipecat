@@ -1,9 +1,13 @@
 import asyncio
+import logging
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.whisper_ai_services import WhisperSTTService
-
 from examples.support.runner import configure
+
+logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
+logger = logging.getLogger("dailyai")
+logger.setLevel(logging.DEBUG)
 
 
 async def main(room_url: str):
@@ -14,7 +18,7 @@ async def main(room_url: str):
         start_transcription=True,
         mic_enabled=False,
         camera_enabled=False,
-        speaker_enabled=True
+        speaker_enabled=True,
     )
 
     stt = WhisperSTTService()
@@ -28,9 +32,9 @@ async def main(room_url: str):
 
     async def handle_speaker():
         await stt.run_to_queue(
-            transcription_output_queue,
-            transport.get_receive_frames()
+            transcription_output_queue, transport.get_receive_frames()
         )
+
     await asyncio.gather(transport.run(), handle_speaker(), handle_transcription())
 
 

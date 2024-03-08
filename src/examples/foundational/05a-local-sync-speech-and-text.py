@@ -1,6 +1,7 @@
 import aiohttp
 import argparse
 import asyncio
+import logging
 import tkinter as tk
 import os
 
@@ -9,6 +10,10 @@ from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.local_transport_service import LocalTransportService
+
+logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
+logger = logging.getLogger("dailyai")
+logger.setLevel(logging.DEBUG)
 
 
 async def main(room_url):
@@ -67,9 +72,7 @@ async def main(room_url):
             to_speak = f"{month}: {image_description}"
             audio_task = asyncio.create_task(get_all_audio(to_speak))
             image_task = asyncio.create_task(dalle.run_image_gen(image_description))
-            (audio, image_data) = await asyncio.gather(
-                audio_task, image_task
-            )
+            (audio, image_data) = await asyncio.gather(audio_task, image_task)
 
             return {
                 "month": month,
@@ -122,6 +125,7 @@ async def main(room_url):
         month_tasks = [asyncio.create_task(get_month_data(month)) for month in months]
 
         await asyncio.gather(transport.run(), show_images(), run_tk())
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
