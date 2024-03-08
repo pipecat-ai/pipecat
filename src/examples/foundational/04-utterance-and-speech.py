@@ -44,7 +44,8 @@ async def main(room_url: str):
         buffer_queue = asyncio.Queue()
         source_queue = asyncio.Queue()
         pipeline = Pipeline(source = source_queue, sink=buffer_queue, processors=[llm, elevenlabs_tts])
-        source_queue.put_nowait(LLMMessagesQueueFrame(messages))
+        await source_queue.put(LLMMessagesQueueFrame(messages))
+        await source_queue.put(EndFrame())
         pipeline_run_task = pipeline.run_pipeline()
 
         @transport.event_handler("on_first_other_participant_joined")
