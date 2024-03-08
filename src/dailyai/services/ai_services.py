@@ -138,7 +138,6 @@ class TTSService(AIService):
             text = frame.text
         else:
             self.current_sentence += frame.text
-            print(f"current sentence: {self.current_sentence}")
             if self.current_sentence.endswith((".", "?", "!")):
                 text = self.current_sentence
                 self.current_sentence = ""
