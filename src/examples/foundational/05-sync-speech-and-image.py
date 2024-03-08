@@ -2,17 +2,37 @@ import asyncio
 from re import S
 import aiohttp
 import os
-from dailyai.pipeline.aggregators import GatedAggregator, LLMFullResponseAggregator, ParallelPipeline, SentenceAggregator
+import logging
 
-from dailyai.pipeline.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesQueueFrame, LLMResponseStartFrame
+from dailyai.pipeline.aggregators import (
+    GatedAggregator,
+    LLMFullResponseAggregator,
+    ParallelPipeline,
+    SentenceAggregator,
+)
+from dailyai.pipeline.frames import (
+    AudioFrame,
+    EndFrame,
+    ImageFrame,
+    LLMMessagesQueueFrame,
+    LLMResponseStartFrame,
+)
 from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.azure_ai_services import AzureLLMService, AzureImageGenServiceREST, AzureTTSService
+from dailyai.services.azure_ai_services import (
+    AzureLLMService,
+    AzureImageGenServiceREST,
+    AzureTTSService,
+)
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.open_ai_services import OpenAIImageGenService
 
 from examples.support.runner import configure
+
+logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
+logger = logging.getLogger("dailyai")
+logger.setLevel(logging.DEBUG)
 
 
 async def main(room_url):
@@ -27,23 +47,26 @@ async def main(room_url):
             camera_enabled=True,
             mic_sample_rate=16000,
             camera_width=1024,
-            camera_height=1024
+            camera_height=1024,
         )
 
         llm = AzureLLMService(
             api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
             endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-            model=os.getenv("AZURE_CHATGPT_MODEL"))
+            model=os.getenv("AZURE_CHATGPT_MODEL"),
+        )
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id="ErXwobaYiN019PkySvjV")
+            voice_id="ErXwobaYiN019PkySvjV",
+        )
 
         dalle = FalImageGenService(
             image_size="1024x1024",
             aiohttp_session=session,
             key_id=os.getenv("FAL_KEY_ID"),
-            key_secret=os.getenv("FAL_KEY_SECRET"))
+            key_secret=os.getenv("FAL_KEY_SECRET"),
+        )
 
         source_queue = asyncio.Queue()
 
@@ -100,6 +123,7 @@ async def main(room_url):
             await transport.stop_when_done()
 
         await transport.run()
+
 
 if __name__ == "__main__":
     (url, token) = configure()
