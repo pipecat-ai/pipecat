@@ -212,6 +212,16 @@ class ChecklistProcessor(AIService):
         self._id = "You are Jessica, an agent for a company called Tri-County Health Services. Your job is to collect important information from the user before their doctor visit. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor. Don't make assumptions about what values to plug into functions. Ask for clarification if a user response is ambiguous."
         self._acks = ["One sec.", "Let me confirm that.", "Thanks.", "OK."]
 
+        # Create an allowlist of functions that the LLM can call
+        self._functions = [
+            "verify_birthday",
+            "list_prescriptions",
+            "list_allergies",
+            "list_conditions",
+            "list_visit_reasons"
+
+        ]
+        
         messages.append(
             {"role": "system", "content": f"{self._id} {steps[0]['prompt']}"})
 
@@ -247,10 +257,8 @@ class ChecklistProcessor(AIService):
                 # Get the LLM talking about the next step before getting the rest
                 # of the function call completion
                 current_step += 1
-                # yield TextFrame(f"We should move on to Step {current_step}.")
                 self._messages.append({
                     "role": "system", "content": steps[current_step]['prompt']})
-                # yield LLMMessagesQueueFrame(self._messages)
                 yield LLMMessagesQueueFrame(self._messages)
                 async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages), tool_choice="none"):
                     yield frame
@@ -268,6 +276,8 @@ class ChecklistProcessor(AIService):
                 pretty_json = re.sub("\n", "\n    ", json.dumps(
                     json.loads(self._arguments), indent=2))
                 print(f"--> {pretty_json}\n")
+                if not self._function_name in self._functions:
+                    raise Exception(f"The LLM tried to call a function named {self._function_name}, which isn't in the list of known functions. Please check your prompt and/or self._functions.")
                 fn = getattr(self, self._function_name)
                 result = fn(json.loads(self._arguments))
                 self._function_name = ""
@@ -275,17 +285,14 @@ class ChecklistProcessor(AIService):
                 if not this_step['run_async']:
                     if result:
                         current_step += 1
-                        # yield TextFrame(f"We should move on to Step {current_step}.")
                         self._messages.append({
                             "role": "system", "content": steps[current_step]['prompt']})
-                        # yield LLMMessagesQueueFrame(self._messages)
                         yield LLMMessagesQueueFrame(self._messages)
                         async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages), tool_choice="none"):
                             yield frame
                     else:
                         self._messages.append({
                             "role": "system", "content": this_step['failed']})
-                        # yield LLMMessagesQueueFrame(self._messages)
                         yield LLMMessagesQueueFrame(self._messages)
                         async for frame in llm.process_frame(LLMMessagesQueueFrame(self._messages), tool_choice="none"):
                             yield frame
