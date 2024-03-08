@@ -47,7 +47,20 @@ async def main(room_url):
 
         source_queue = asyncio.Queue()
 
-        for month in ["January", "February"]:
+        for month in [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ]:
             messages = [
                 {
                     "role": "system",

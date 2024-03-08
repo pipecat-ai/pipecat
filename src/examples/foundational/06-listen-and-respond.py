@@ -51,8 +51,8 @@ async def main(room_url: str, token):
                 tma_in,
                 llm,
                 fl2,
+                tts,
                 tma_out,
-                tts
             ],
         )
         await transport.run_uninterruptible_pipeline(pipeline)
