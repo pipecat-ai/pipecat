@@ -81,7 +81,10 @@ class DailyTransportService(BaseTransportService, EventHandler):
             for handler in self._event_handlers[event_name]:
                 if inspect.iscoroutinefunction(handler):
                     if self._loop:
-                        asyncio.run_coroutine_threadsafe(handler(*args, **kwargs), self._loop)
+                        future = asyncio.run_coroutine_threadsafe(handler(*args, **kwargs), self._loop)
+
+                        # wait for the coroutine to finish. This will also raise any exceptions raised by the coroutine.
+                        future.result()
                     else:
                         raise Exception(
                             "No event loop to run coroutine. In order to use async event handlers, you must run the DailyTransportService in an asyncio event loop.")
