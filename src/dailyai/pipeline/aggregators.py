@@ -19,10 +19,22 @@ from dailyai.pipeline.frames import (
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import AIService
 
-from typing import AsyncGenerator, Coroutine, List
+from typing import AsyncGenerator, Callable, Coroutine, List
+
+from dailyai.services.openai_llm_context import OpenAILLMContext
 
 class ResponseAggregator(FrameProcessor):
-    def __init__(self, *, messages: list[dict], role: str, start_frame, end_frame, accumulator_frame, pass_through=True):
+
+    def __init__(
+        self,
+        *,
+        messages: list[dict] | None,
+        role: str,
+        start_frame,
+        end_frame,
+        accumulator_frame,
+        pass_through=True,
+    ):
         self.aggregation = ""
         self.aggregating = False
         self.messages = messages
@@ -35,6 +47,9 @@ class ResponseAggregator(FrameProcessor):
     async def process_frame(
         self, frame: Frame
     ) -> AsyncGenerator[Frame, None]:
+        if not self.messages:
+            return
+
         if isinstance(frame, self._start_frame):
             self.aggregating = True
         elif isinstance(frame, self._end_frame):
@@ -69,6 +84,7 @@ class UserResponseAggregator(ResponseAggregator):
             accumulator_frame=TranscriptionQueueFrame,
             pass_through=False
         )
+
 
 class LLMContextAggregator(AIService):
     def __init__(
