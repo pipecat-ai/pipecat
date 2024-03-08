@@ -12,7 +12,7 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.open_ai_services import OpenAIImageGenService
 
-from examples.foundational.support.runner import configure
+from examples.support.runner import configure
 
 
 async def main(room_url):
