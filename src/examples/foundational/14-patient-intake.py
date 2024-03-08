@@ -16,11 +16,11 @@ from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.pipeline.aggregators import LLMAssistantContextAggregator, LLMContextAggregator, LLMUserContextAggregator, UserResponseAggregator, LLMResponseAggregator
 from support.runner import configure
-from dailyai.pipeline.frames import LLMMessagesQueueFrame, TranscriptionQueueFrame, Frame, TextFrame, LLMFunctionCallFrame, LLMResponseEndFrame, StartFrame, AudioFrame, SpriteFrame, ImageFrame
+from dailyai.pipeline.frames import LLMMessagesQueueFrame, TranscriptionQueueFrame, Frame, TextFrame, LLMFunctionCallFrame, LLMFunctionStartFrame, LLMResponseEndFrame, StartFrame, AudioFrame, SpriteFrame, ImageFrame
 from dailyai.services.ai_services import FrameLogger, AIService
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 sounds = {}
 sound_files = [
@@ -207,8 +207,6 @@ class ChecklistProcessor(AIService):
         self._messages = messages
         self._llm = llm
         self._tools = tools
-        self._function_name = ""
-        self._arguments = ""
         self._id = "You are Jessica, an agent for a company called Tri-County Health Services. Your job is to collect important information from the user before their doctor visit. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor. Don't make assumptions about what values to plug into functions. Ask for clarification if a user response is ambiguous."
         self._acks = ["One sec.", "Let me confirm that.", "Thanks.", "OK."]
 
@@ -250,7 +248,7 @@ class ChecklistProcessor(AIService):
         # TODO-CB: forcing a global here :/
         self._tools.clear()
         self._tools.extend(this_step['tools'])
-        if isinstance(frame, LLMFunctionCallFrame) and frame.function_name:
+        if isinstance(frame, LLMFunctionStartFrame):
             print(f"... Preparing function call: {frame.function_name}")
             self._function_name = frame.function_name
             if this_step['run_async']:
@@ -266,22 +264,19 @@ class ChecklistProcessor(AIService):
                 # Insert a quick response while we run the function
                 # yield AudioFrame(sounds["clack-short-quiet.wav"])
                 pass
-        elif isinstance(frame, LLMFunctionCallFrame) and frame.arguments:
-            self._arguments += frame.arguments
-        elif isinstance(frame, LLMResponseEndFrame):
+        elif isinstance(frame, LLMFunctionCallFrame):
 
-            if self._function_name and self._arguments:
+            if frame.function_name and frame.arguments:
                 print(
-                    f"--> Calling function: {self._function_name} with arguments:")
+                    f"--> Calling function: {frame.function_name} with arguments:")
                 pretty_json = re.sub("\n", "\n    ", json.dumps(
-                    json.loads(self._arguments), indent=2))
+                    json.loads(frame.arguments), indent=2))
                 print(f"--> {pretty_json}\n")
-                if not self._function_name in self._functions:
-                    raise Exception(f"The LLM tried to call a function named {self._function_name}, which isn't in the list of known functions. Please check your prompt and/or self._functions.")
-                fn = getattr(self, self._function_name)
-                result = fn(json.loads(self._arguments))
-                self._function_name = ""
-                self._arguments = ""
+                if not frame.function_name in self._functions:
+                    raise Exception(f"The LLM tried to call a function named {frame.function_name}, which isn't in the list of known functions. Please check your prompt and/or self._functions.")
+                fn = getattr(self, frame.function_name)
+                result = fn(json.loads(frame.arguments))
+
                 if not this_step['run_async']:
                     if result:
                         current_step += 1
