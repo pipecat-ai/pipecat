@@ -19,11 +19,13 @@ class OLLamaLLMService(LLMService):
             model=self._model
         )
 
-    async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
+    async def run_llm_async(self, messages, tool_choice=None) -> AsyncGenerator[str, None]:
         messages_for_log = json.dumps(messages)
         self.logger.debug(f"Generating chat via openai: {messages_for_log}")
 
-        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages)
+        chunks = await self._client.chat.completions.create(
+            model=self._model, stream=True, messages=messages
+        )
         async for chunk in chunks:
             if len(chunk.choices) == 0:
                 continue
@@ -33,7 +35,7 @@ class OLLamaLLMService(LLMService):
 
     async def run_llm(self, messages) -> str | None:
         messages_for_log = json.dumps(messages)
-        self.logger.debug(f"Generating chat via openai: {messages_for_log}")
+        self.logger.debug(f"Generating chat via ollama: {messages_for_log}")
 
         response = await self._client.chat.completions.create(model=self._model, stream=False, messages=messages)
         if response and len(response.choices) > 0:
