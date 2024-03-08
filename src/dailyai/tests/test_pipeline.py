@@ -1,5 +1,4 @@
 import asyncio
-from doctest import OutputChecker
 import unittest
 from dailyai.pipeline.aggregators import SentenceAggregator, StatelessTextTransformer
 from dailyai.pipeline.frames import EndFrame, TextFrame
