@@ -328,7 +328,7 @@ class BaseTransportService():
                 break
 
     def interrupt(self):
-        self._logger.debug("!!! Interrupting")
+        self._logger.debug("### Interrupting")
         self._is_interrupted.set()
 
     async def get_receive_frames(self) -> AsyncGenerator[Frame, None]:
