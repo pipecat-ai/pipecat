@@ -18,15 +18,10 @@ from dailyai.pipeline.frames import (
     LLMResponseStartFrame,
 )
 from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.azure_ai_services import (
-    AzureLLMService,
-    AzureImageGenServiceREST,
-    AzureTTSService,
-)
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
-from dailyai.services.open_ai_services import OpenAIImageGenService
+from dailyai.services.open_ai_services import OpenAILLMService
 
 from examples.support.runner import configure
 
@@ -50,15 +45,14 @@ async def main(room_url):
             camera_height=1024,
         )
 
-        llm = AzureLLMService(
-            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
-            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-            model=os.getenv("AZURE_CHATGPT_MODEL"),
-        )
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id="ErXwobaYiN019PkySvjV",
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        )
+
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
         )
 
         dalle = FalImageGenService(
