@@ -44,19 +44,22 @@ async def main(room_url):
         @transport.event_handler("on_participant_joined")
         async def on_participant_joined(transport, participant):
             nonlocal tts
-            if participant["info"]["isLocal"]:
-                return
+            try:
+                if participant["info"]["isLocal"]:
+                    return
 
-            await tts.say(
-                "Hello there, " + participant["info"]["userName"] + "!",
-                transport.send_queue,
-            )
+                await tts.say(
+                    "Hello there, " + participant["info"]["userName"] + "!",
+                    transport.send_queue,
+                )
+            except Exception as e:
+                print("Exception while speaking:", e)
 
             # wait for the output queue to be empty, then leave the meeting
             await transport.stop_when_done()
 
         await transport.run()
-        del(tts)
+        del (tts)
 
 
 if __name__ == "__main__":
