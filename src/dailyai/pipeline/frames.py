@@ -1,5 +1,7 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, List
+
+from dailyai.services.openai_llm_context import OpenAILLMContext
 
 
 class Frame:
@@ -79,7 +81,12 @@ class TranscriptionQueueFrame(TextFrame):
 
 @dataclass()
 class LLMMessagesQueueFrame(Frame):
-    messages: list[dict[str, str]]  # TODO: define this more concretely!
+    messages: List[dict]
+
+
+@dataclass()
+class OpenAILLMContextFrame(Frame):
+    context: OpenAILLMContext
 
 
 class AppMessageQueueFrame(Frame):
