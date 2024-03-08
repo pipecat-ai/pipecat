@@ -12,7 +12,7 @@ from dailyai.services.ai_services import AIService, FrameLogger
 from dailyai.pipeline.frames import Frame, AudioFrame, LLMResponseEndFrame, LLMMessagesQueueFrame
 from typing import AsyncGenerator
 
-from examples.foundational.support.runner import configure
+from examples.support.runner import configure
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")  # or whatever
 logger = logging.getLogger("dailyai")

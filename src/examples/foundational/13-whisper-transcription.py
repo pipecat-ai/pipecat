@@ -3,7 +3,7 @@ import asyncio
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.whisper_ai_services import WhisperSTTService
 
-from examples.foundational.support.runner import configure
+from examples.support.runner import configure
 
 
 async def main(room_url: str):

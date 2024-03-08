@@ -6,7 +6,7 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.playht_ai_service import PlayHTAIService
 
-from examples.foundational.support.runner import configure
+from examples.support.runner import configure
 
 
 async def main(room_url):

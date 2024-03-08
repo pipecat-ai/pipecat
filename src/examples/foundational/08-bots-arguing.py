@@ -8,7 +8,7 @@ from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.pipeline.frames import AudioFrame, ImageFrame
 
-from examples.foundational.support.runner import configure
+from examples.support.runner import configure
 
 
 async def main(room_url: str):

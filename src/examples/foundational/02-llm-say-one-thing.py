@@ -9,7 +9,7 @@ from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.open_ai_services import OpenAILLMService
-from examples.foundational.support.runner import configure
+from examples.support.runner import configure
 
 
 async def main(room_url):

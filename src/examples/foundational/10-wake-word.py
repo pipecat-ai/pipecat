@@ -19,7 +19,7 @@ from dailyai.pipeline.frames import (
 )
 from dailyai.services.ai_services import AIService
 
-from examples.foundational.support.runner import configure
+from examples.support.runner import configure
 
 
 sprites = {}
