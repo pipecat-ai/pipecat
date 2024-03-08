@@ -7,7 +7,7 @@ from typing import AsyncGenerator
 from PIL import Image
 
 from dailyai.services.daily_transport_service import DailyTransportService
-from dailyai.services.azure_ai_services import AzureLLMService
+from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.pipeline.aggregators import (
     LLMUserContextAggregator,
@@ -129,11 +129,10 @@ async def main(room_url: str, token):
         transport._camera_width = 720
         transport._camera_height = 1280
 
-        llm = AzureLLMService(
-            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
-            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-            model=os.getenv("AZURE_CHATGPT_MODEL"),
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
         )
+
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),

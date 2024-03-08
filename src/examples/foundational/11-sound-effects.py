@@ -5,11 +5,20 @@ import os
 import wave
 
 from dailyai.services.daily_transport_service import DailyTransportService
-from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
+from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.pipeline.aggregators import LLMContextAggregator, LLMUserContextAggregator, LLMAssistantContextAggregator
+from dailyai.pipeline.aggregators import (
+    LLMContextAggregator,
+    LLMUserContextAggregator,
+    LLMAssistantContextAggregator,
+)
 from dailyai.services.ai_services import AIService, FrameLogger
-from dailyai.pipeline.frames import Frame, AudioFrame, LLMResponseEndFrame, LLMMessagesQueueFrame
+from dailyai.pipeline.frames import (
+    Frame,
+    AudioFrame,
+    LLMResponseEndFrame,
+    LLMMessagesQueueFrame,
+)
 from typing import AsyncGenerator
 
 from examples.support.runner import configure
@@ -19,10 +28,7 @@ logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
 sounds = {}
-sound_files = [
-    'ding1.wav',
-    'ding2.wav'
-]
+sound_files = ["ding1.wav", "ding2.wav"]
 
 script_dir = os.path.dirname(__file__)
 
@@ -71,17 +77,18 @@ async def main(room_url: str, token):
             duration_minutes=5,
             mic_enabled=True,
             mic_sample_rate=16000,
-            camera_enabled=False
+            camera_enabled=False,
         )
 
-        llm = AzureLLMService(
-            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
-            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-            model=os.getenv("AZURE_CHATGPT_MODEL"))
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
+        )
+
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id="ErXwobaYiN019PkySvjV")
+            voice_id="ErXwobaYiN019PkySvjV",
+        )
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
@@ -90,12 +97,13 @@ async def main(room_url: str, token):
 
         async def handle_transcriptions():
             messages = [
-                {"role": "system", "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way."},
+                {
+                    "role": "system",
+                    "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
+                },
             ]
 
-            tma_in = LLMUserContextAggregator(
-                messages, transport._my_participant_id
-            )
+            tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
             tma_out = LLMAssistantContextAggregator(
                 messages, transport._my_participant_id
             )
@@ -111,15 +119,13 @@ async def main(room_url: str, token):
                             llm.run(
                                 fl2.run(
                                     in_sound.run(
-                                        tma_in.run(
-                                            transport.get_receive_frames()
-                                        )
+                                        tma_in.run(transport.get_receive_frames())
                                     )
                                 )
                             )
                         )
                     )
-                )
+                ),
             )
 
         transport.transcription_settings["extra"]["punctuate"] = True
