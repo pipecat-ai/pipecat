@@ -3,7 +3,9 @@ from typing import Any
 
 
 class Frame:
-    pass
+    def __str__(self):
+        return f"{self.__class__.__name__}"
+
 
 class ControlFrame(Frame):
     # Control frames should contain no instance data, so
@@ -18,6 +20,7 @@ class StartFrame(ControlFrame):
 
 class EndFrame(ControlFrame):
     pass
+
 
 class EndPipeFrame(ControlFrame):
     pass
@@ -35,6 +38,9 @@ class LLMResponseEndFrame(ControlFrame):
 class AudioFrame(Frame):
     data: bytes
 
+    def __str__(self):
+        return f"{self.__class__.__name__}, size: {len(self.data)} B"
+
 
 @dataclass()
 class ImageFrame(Frame):
@@ -50,6 +56,9 @@ class SpriteFrame(Frame):
 @dataclass()
 class TextFrame(Frame):
     text: str
+
+    def __str__(self):
+        return f'{self.__class__.__name__}: "{self.text}"'
 
 
 @dataclass()
@@ -67,15 +76,20 @@ class AppMessageQueueFrame(Frame):
     message: Any
     participantId: str
 
+
 class UserStartedSpeakingFrame(Frame):
     pass
+
 
 class UserStoppedSpeakingFrame(Frame):
     pass
 
+
 @dataclass()
 class LLMFunctionStartFrame(Frame):
     function_name: str
+
+
 @dataclass()
 class LLMFunctionCallFrame(Frame):
     function_name: str
