@@ -18,6 +18,7 @@ from dailyai.pipeline.frames import (
     LLMResponseEndFrame,
     LLMResponseStartFrame,
     UserStartedSpeakingFrame,
+    AudioFrame,
 )
 from dailyai.services.ai_services import AIService
 from dailyai.pipeline.pipeline import Pipeline
@@ -50,21 +51,35 @@ quiet_frame = ImageFrame("", sprites[0])
 talking_frame = SpriteFrame(images=sprites)
 
 
-class ImageSyncAggregator(AIService):
+class TalkingAnimation(AIService):
+    """
+    This class starts a talking animation when it receives an first AudioFrame,
+    and then returns to a "quiet" sprite when it sees a LLMResponseEndFrame.
+    """
+
     def __init__(self):
-        pass
+        super().__init__()
+        self._is_talking = False
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, UserStartedSpeakingFrame):
-            yield quiet_frame
-            yield frame
-        elif isinstance(frame, LLMResponseStartFrame):
-            yield talking_frame
-            yield frame
+        print(f"### talkinganimation got frame: {frame}")
+        if isinstance(frame, AudioFrame):
+            print(f"### this is an audio frame")
+            if not self._is_talking:
+                print(f"### not talking, yielding talking frame then frame")
+                yield talking_frame
+                yield frame
+                self._is_talking = True
+            else:
+                print(f"### is talking true")
+                yield frame
         elif isinstance(frame, LLMResponseEndFrame):
+            print(f"### llm response end frame")
             yield quiet_frame
             yield frame
+            self._is_talking = False
         else:
+            print(f"### some other frame: {frame}")
             yield frame
 
 
@@ -94,9 +109,9 @@ async def main(room_url: str, token):
             api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
         )
 
-        isa = ImageSyncAggregator()
+        ta = TalkingAnimation()
 
-        pipeline = Pipeline([FrameLogger(), llm, FrameLogger(), tts, isa])
+        pipeline = Pipeline([FrameLogger(), llm, FrameLogger(), tts, ta])
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):

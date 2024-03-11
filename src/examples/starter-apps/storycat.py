@@ -240,8 +240,8 @@ async def main(room_url: str, token):
                     llm,
                     sp,
                     fl,
-                    ParallelPipeline([[tts], [sig]]),
-                    # tts,
+                    # ParallelPipeline([[tts], [sig]]),
+                    tts,
                     lra,
                 ]
             )

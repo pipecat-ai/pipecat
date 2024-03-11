@@ -155,7 +155,7 @@ class TTSService(AIService):
             if self.current_sentence.strip().endswith((".", "?", "!")):
                 text = self.current_sentence
                 self.current_sentence = ""
-
+        print(f"!!! out here, text is {text}")
         if text:
             async for audio_chunk in self.run_tts(text):
                 yield AudioFrame(audio_chunk)

@@ -85,6 +85,14 @@ class UserStoppedSpeakingFrame(Frame):
     pass
 
 
+class BotStartedSpeakingFrame(Frame):
+    pass
+
+
+class BotStoppedSpeakingFrame(Frame):
+    pass
+
+
 @dataclass()
 class LLMFunctionStartFrame(Frame):
     function_name: str
