@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dailyai"
 version = "0.0.1"
-description = "Framework for building AI tools with WebRTC"
+description = "An open source framework for real-time, multi-modal, conversational AI applications"
 license = { text = "BSD 2-Clause License" }
 readme = "README.md"
 requires-python = ">=3.7"
