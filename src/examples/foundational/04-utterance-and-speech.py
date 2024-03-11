@@ -62,8 +62,15 @@ async def main(room_url: str):
         await source_queue.put(EndFrame())
         pipeline_run_task = pipeline.run_pipeline()
 
+        other_participant_joined = asyncio.Event()
+
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
+            other_participant_joined.set()
+
+        async def say_something():
+            await other_participant_joined.wait()
+
             await azure_tts.say(
                 "My friend the LLM is now going to tell a joke about llamas.",
                 transport.send_queue,
@@ -87,9 +94,8 @@ async def main(room_url: str):
                         break
 
             await asyncio.gather(pipeline_run_task, buffer_to_send_queue())
-            await transport.stop_when_done()
 
-        await transport.run()
+        await asyncio.gather(transport.run(), say_something())
 
 
 if __name__ == "__main__":

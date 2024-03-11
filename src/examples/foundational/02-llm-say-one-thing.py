@@ -47,8 +47,7 @@ async def main(room_url):
             await other_joined_event.wait()
             await tts.run_to_queue(
                 transport.send_queue,
-                llm.run([LLMMessagesQueueFrame(messages)]),
-                add_end_of_stream=True
+                llm.run([LLMMessagesQueueFrame(messages)])
             )
             await transport.stop_when_done()
 

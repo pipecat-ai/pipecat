@@ -28,21 +28,32 @@ async def main(room_url):
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         )
 
+        other_joined_event = asyncio.Event()
+        participant_name = ''
+
+        async def say_hello():
+            nonlocal tts
+            nonlocal participant_name
+
+            await other_joined_event.wait()
+            print("done waiting")
+            await tts.say(
+                "Hello there, " + participant_name + "!",
+                transport.send_queue,
+            )
+            await transport.stop_when_done()
+
         # Register an event handler so we can play the audio when the participant joins.
         @transport.event_handler("on_participant_joined")
         async def on_participant_joined(transport, participant):
             if participant["info"]["isLocal"]:
                 return
 
-            await tts.say(
-                "Hello there, " + participant["info"]["userName"] + "!",
-                transport.send_queue,
-            )
+            nonlocal participant_name
+            participant_name = participant["info"]["userName"] or ''
+            other_joined_event.set()
 
-            # wait for the output queue to be empty, then leave the meeting
-            await transport.stop_when_done()
-
-        await transport.run()
+        await asyncio.gather(transport.run(), say_hello())
         del tts
 
 

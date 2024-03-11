@@ -23,6 +23,7 @@ async def main(room_url):
             camera_enabled=True,
             camera_width=1024,
             camera_height=1024,
+            duration_minutes=1
         )
 
         imagegen = FalImageGenService(
@@ -32,13 +33,19 @@ async def main(room_url):
             key_secret=os.getenv("FAL_KEY_SECRET"),
         )
 
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        other_joined_event = asyncio.Event()
+
+        async def show_image():
+            await other_joined_event.wait()
             await imagegen.run_to_queue(
                 transport.send_queue, [TextFrame("a cat in the style of picasso")]
             )
 
-        await transport.run()
+        @transport.event_handler("on_first_other_participant_joined")
+        async def on_first_other_participant_joined(transport):
+            other_joined_event.set()
+
+        await asyncio.gather(transport.run(), show_image())
 
 
 if __name__ == "__main__":
