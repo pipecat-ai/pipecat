@@ -26,6 +26,16 @@ class EndPipeFrame(ControlFrame):
     pass
 
 
+class PipelineStartedFrame(ControlFrame):
+    """
+    Used by the transport to indicate that execution of a pipeline is starting
+    (or restarting). It should be the first frame your app receives when it
+    starts, or when an interruptible pipeline has been interrupted.
+    """
+
+    pass
+
+
 class LLMResponseStartFrame(ControlFrame):
     pass
 

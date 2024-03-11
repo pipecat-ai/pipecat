@@ -22,6 +22,7 @@ from dailyai.pipeline.frames import (
     TranscriptionQueueFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    PipelineStartedFrame,
 )
 from dailyai.pipeline.pipeline import Pipeline
 
@@ -437,12 +438,9 @@ class BaseTransportService:
 
                         if isinstance(frame, StartFrame):
                             self._is_interrupted.clear()
-                            # Trying this to see if I can reset each task run
-                            print(
-                                f"$$$$$ this is the startframe part, frame is {frame}"
-                            )
                             asyncio.run_coroutine_threadsafe(
-                                self.receive_queue.put(frame), self._loop
+                                self.receive_queue.put(PipelineStartedFrame()),
+                                self._loop,
                             )
 
                     if self._loop:

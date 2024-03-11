@@ -20,7 +20,7 @@ from dailyai.pipeline.frames import (
     LLMMessagesQueueFrame,
     UserStartedSpeakingFrame,
     AudioFrame,
-    StartFrame,
+    PipelineStartedFrame,
 )
 from dailyai.services.ai_services import AIService
 from dailyai.pipeline.pipeline import Pipeline
@@ -90,7 +90,7 @@ class AnimationInitializer(AIService):
         super().__init__()
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, StartFrame):
+        if isinstance(frame, PipelineStartedFrame):
             yield quiet_frame
             yield frame
         else:
