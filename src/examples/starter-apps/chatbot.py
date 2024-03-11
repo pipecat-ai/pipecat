@@ -20,6 +20,7 @@ from dailyai.pipeline.frames import (
     LLMMessagesQueueFrame,
     UserStartedSpeakingFrame,
     AudioFrame,
+    StartFrame,
 )
 from dailyai.services.ai_services import AIService
 from dailyai.pipeline.pipeline import Pipeline
@@ -87,16 +88,12 @@ class TalkingAnimation(AIService):
 class AnimationInitializer(AIService):
     def __init__(self):
         super().__init__()
-        self._is_initialized = False
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if not self._is_initialized:
-            print(f"!!!!!!!!!!!!!!!! INITIALIZING")
-            self._is_initialized = True
+        if isinstance(frame, StartFrame):
             yield quiet_frame
             yield frame
         else:
-            print(f"######## IM INITIALIZED")
             yield frame
 
 
