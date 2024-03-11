@@ -49,7 +49,7 @@ async def main(room_url: str, token):
         async def on_first_other_participant_joined(transport):
             await tts.say("Hi, I'm listening!", transport.send_queue)
 
-        async def handle_transcriptions():
+        async def have_conversation():
             messages = [
                 {
                     "role": "system",
@@ -75,7 +75,7 @@ async def main(room_url: str, token):
 
         transport.transcription_settings["extra"]["endpointing"] = True
         transport.transcription_settings["extra"]["punctuate"] = True
-        await asyncio.gather(transport.run(), handle_transcriptions())
+        await asyncio.gather(transport.run(), have_conversation())
 
 
 if __name__ == "__main__":
