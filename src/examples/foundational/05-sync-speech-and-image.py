@@ -4,6 +4,9 @@ import aiohttp
 import os
 import logging
 
+from dataclasses import dataclass
+from typing import AsyncGenerator
+
 from dailyai.pipeline.aggregators import (
     GatedAggregator,
     LLMFullResponseAggregator,
@@ -11,17 +14,20 @@ from dailyai.pipeline.aggregators import (
     SentenceAggregator,
 )
 from dailyai.pipeline.frames import (
-    AudioFrame,
+    Frame,
+    TextFrame,
     EndFrame,
     ImageFrame,
     LLMMessagesQueueFrame,
     LLMResponseStartFrame,
 )
+from dailyai.pipeline.frame_processor import FrameProcessor
+
 from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.daily_transport_service import DailyTransportService
-from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.open_ai_services import OpenAILLMService
+from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
+from dailyai.services.fal_ai_services import FalImageGenService
 
 from examples.support.runner import configure
 
@@ -30,14 +36,35 @@ logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
 
+@dataclass
+class MonthFrame(Frame):
+    month: str
+
+
+class MonthPrepender(FrameProcessor):
+    def __init__(self):
+        self.most_recent_month = "Placeholder, month frame not yet received"
+        self.prepend_to_next_text_frame = False
+
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, MonthFrame):
+            self.most_recent_month = frame.month
+        elif self.prepend_to_next_text_frame and isinstance(frame, TextFrame):
+            yield TextFrame(f"{self.most_recent_month}: {frame.text}")
+            self.prepend_to_next_text_frame = False
+        elif isinstance(frame, LLMResponseStartFrame):
+            self.prepend_to_next_text_frame = True
+            yield frame
+        else:
+            yield frame
+
+
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
-        meeting_duration_minutes = 5
         transport = DailyTransportService(
             room_url,
             None,
             "Month Narration Bot",
-            duration_minutes=meeting_duration_minutes,
             mic_enabled=True,
             camera_enabled=True,
             mic_sample_rate=16000,
@@ -55,8 +82,8 @@ async def main(room_url):
             api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
         )
 
-        dalle = FalImageGenService(
-            image_size="1024x1024",
+        imagegen = FalImageGenService(
+            image_size="square_hd",
             aiohttp_session=session,
             key_id=os.getenv("FAL_KEY_ID"),
             key_secret=os.getenv("FAL_KEY_SECRET"),
@@ -84,6 +111,7 @@ async def main(room_url):
                     "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
                 }
             ]
+            await source_queue.put(MonthFrame(month))
             await source_queue.put(LLMMessagesQueueFrame(messages))
 
         await source_queue.put(EndFrame())
@@ -95,6 +123,7 @@ async def main(room_url):
         )
 
         sentence_aggregator = SentenceAggregator()
+        month_prepender = MonthPrepender()
         llm_full_response_aggregator = LLMFullResponseAggregator()
 
         pipeline = Pipeline(
@@ -103,7 +132,9 @@ async def main(room_url):
             processors=[
                 llm,
                 sentence_aggregator,
-                ParallelPipeline([[tts], [llm_full_response_aggregator, dalle]]),
+                ParallelPipeline(
+                    [[month_prepender, tts], [llm_full_response_aggregator, imagegen]]
+                ),
                 gated_aggregator,
             ],
         )
@@ -112,8 +143,6 @@ async def main(room_url):
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
             await pipeline_task
-
-            # wait for the output queue to be empty, then leave the meeting
             await transport.stop_when_done()
 
         await transport.run()

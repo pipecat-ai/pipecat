@@ -9,17 +9,19 @@ from dailyai.services.ai_services import ImageGenService
 
 
 from dailyai.services.ai_services import ImageGenService
+
 # Fal expects FAL_KEY_ID and FAL_KEY_SECRET to be set in the env
 
 
 class FalImageGenService(ImageGenService):
     def __init__(
-            self,
-            *,
-            image_size,
-            aiohttp_session: aiohttp.ClientSession,
-            key_id=None,
-            key_secret=None):
+        self,
+        *,
+        image_size,
+        aiohttp_session: aiohttp.ClientSession,
+        key_id=None,
+        key_secret=None
+    ):
         super().__init__(image_size)
         self._aiohttp_session = aiohttp_session
         if key_id:
@@ -30,10 +32,9 @@ class FalImageGenService(ImageGenService):
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         def get_image_url(sentence, size):
             handler = fal.apps.submit(
-                "110602490-fast-sdxl",
-                arguments={
-                    "prompt": sentence
-                },
+                # "110602490-fast-sdxl",
+                "fal-ai/fast-sdxl",
+                arguments={"prompt": sentence},
             )
             for event in handler.iter_events():
                 if isinstance(event, fal.apps.InProgress):
@@ -46,6 +47,7 @@ class FalImageGenService(ImageGenService):
                 raise Exception("Image generation failed")
 
             return image_url
+
         image_url = await asyncio.to_thread(get_image_url, sentence, self.image_size)
         # Load the image from the url
         async with self._aiohttp_session.get(image_url) as response:
