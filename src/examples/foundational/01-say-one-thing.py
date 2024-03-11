@@ -36,7 +36,6 @@ async def main(room_url):
             nonlocal participant_name
 
             await other_joined_event.wait()
-            print("done waiting")
             await tts.say(
                 "Hello there, " + participant_name + "!",
                 transport.send_queue,
