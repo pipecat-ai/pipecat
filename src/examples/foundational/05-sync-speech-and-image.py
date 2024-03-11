@@ -140,12 +140,18 @@ async def main(room_url):
         )
         pipeline_task = pipeline.run_pipeline()
 
+        other_joined = asyncio.Event()
+
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
+            other_joined.set()
+
+        async def show_calendar():
+            await other_joined.wait()
             await pipeline_task
             await transport.stop_when_done()
 
-        await transport.run()
+        await asyncio.gather(transport.run(), show_calendar())
 
 
 if __name__ == "__main__":
