@@ -5,7 +5,20 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dailyai"
 version = "0.0.1"
-description = "Orchestrator for AI bots with Daily"
+description = "Framework for building AI tools with WebRTC"
+license = { text = "BSD 2-Clause License" }
+readme = "README.md"
+requires-python = ">=3.7"
+keywords = ["webrtc", "audio", "video", "ai"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Topic :: Communications :: Conferencing",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
 dependencies = [
     "aiohttp",
     "azure-cognitiveservices-speech",
@@ -23,6 +36,10 @@ dependencies = [
     "pyaudio",
     "typing-extensions"
 ]
+
+[project.urls]
+Source = "https://github.com/daily-co/daily-ai-sdk"
+Website = "https://daily.co"
 
 [tool.setuptools.packages.find]
 # All the following settings are optional:
