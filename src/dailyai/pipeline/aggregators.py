@@ -43,7 +43,6 @@ class ResponseAggregator(FrameProcessor):
         self._pass_through = pass_through
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        print(f"!!! {self._role} aggregator, frame: {frame}")
         if isinstance(frame, self._start_frame):
             self.aggregating = True
         elif isinstance(frame, self._end_frame):

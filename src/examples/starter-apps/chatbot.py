@@ -17,6 +17,7 @@ from dailyai.pipeline.frames import (
     Frame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
+    LLMMessagesQueueFrame,
     UserStartedSpeakingFrame,
     AudioFrame,
 )
@@ -83,12 +84,28 @@ class TalkingAnimation(AIService):
             yield frame
 
 
+class AnimationInitializer(AIService):
+    def __init__(self):
+        super().__init__()
+        self._is_initialized = False
+
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if not self._is_initialized:
+            print(f"!!!!!!!!!!!!!!!! INITIALIZING")
+            self._is_initialized = True
+            yield quiet_frame
+            yield frame
+        else:
+            print(f"######## IM INITIALIZED")
+            yield frame
+
+
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
         transport = DailyTransportService(
             room_url,
             token,
-            "Respond bot",
+            "Chatbot",
             duration_minutes=5,
             start_transcription=True,
             mic_enabled=True,
@@ -102,7 +119,7 @@ async def main(room_url: str, token):
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+            voice_id="pNInz6obpgDQGcFmaJgB",
         )
 
         llm = OpenAILLMService(
@@ -110,20 +127,23 @@ async def main(room_url: str, token):
         )
 
         ta = TalkingAnimation()
-
-        pipeline = Pipeline([FrameLogger(), llm, FrameLogger(), tts, ta])
+        ai = AnimationInitializer()
+        pipeline = Pipeline([ai, llm, tts, ta])
+        messages = [
+            {
+                "role": "system",
+                "content": "You are Chatbot, a friendly, helpful robot. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by introducing yourself.",
+            },
+        ]
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            await tts.say("Hi, I'm listening!", transport.send_queue)
+            await ta.run_to_queue(
+                transport.send_queue,
+                tts.run(llm.run([LLMMessagesQueueFrame(messages)])),
+            )
 
         async def run_conversation():
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
-                },
-            ]
 
             await transport.run_interruptible_pipeline(
                 pipeline,
@@ -131,7 +151,8 @@ async def main(room_url: str, token):
                 pre_processor=UserResponseAggregator(messages),
             )
 
-        transport.transcription_settings["extra"]["punctuate"] = False
+        transport.transcription_settings["extra"]["endpointing"] = True
+        transport.transcription_settings["extra"]["punctuate"] = True
         await asyncio.gather(transport.run(), run_conversation())
 
 
