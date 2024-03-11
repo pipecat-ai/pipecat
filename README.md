@@ -13,7 +13,7 @@ Build things like this:
 In 2023 a *lot* of us got excited about the possibility of having open-ended conversations with LLMs. It became clear pretty quickly that we were all solving the same [low-level problems](https://www.daily.co/blog/how-to-talk-to-an-llm-with-your-voice/):
 - low-latency, reliable audio transport
 - echo cancellation 
-- phrase endpointing (knowing when the bot should respond to human speech),
+- phrase endpointing (knowing when the bot should respond to human speech)
 - interruptibility
 - writing clean code to stream data through "pipelines" of speech-to-text, LLM inference, and text-to-speech models
 
