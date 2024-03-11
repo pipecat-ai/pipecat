@@ -7,6 +7,7 @@ from dailyai.pipeline.pipeline import Pipeline
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
+from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.pipeline.frames import EndFrame, LLMMessagesQueueFrame
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from examples.support.runner import configure
@@ -25,7 +26,6 @@ async def main(room_url: str):
             duration_minutes=1,
             mic_enabled=True,
             mic_sample_rate=16000,
-            camera_enabled=False,
         )
 
         llm = AzureLLMService(
@@ -36,6 +36,11 @@ async def main(room_url: str):
         azure_tts = AzureTTSService(
             api_key=os.getenv("AZURE_SPEECH_API_KEY"),
             region=os.getenv("AZURE_SPEECH_REGION"),
+        )
+
+        deepgram_tts = DeepgramTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("DEEPGRAM_API_KEY"),
         )
         elevenlabs_tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -64,6 +69,15 @@ async def main(room_url: str):
                 transport.send_queue,
             )
 
+            # khk: deepgram_tts.say() doesn't seem to put bytes in the transport
+            # queue. I get a debug log line that indicates we're set up okay, but
+            # no further log lines or audio bytes. debug this later:
+            #   20 2024-03-10 13:24:46,235 Running deepgram tts for My friend the LLM is now going to tell a joke about llamas.
+            # await deepgram_tts.say(
+            #    "My friend the LLM is now going to tell a joke about llamas.",
+            #    transport.send_queue,
+            # )
+
             async def buffer_to_send_queue():
                 while True:
                     frame = await buffer_queue.get()
@@ -73,7 +87,6 @@ async def main(room_url: str):
                         break
 
             await asyncio.gather(pipeline_run_task, buffer_to_send_queue())
-
             await transport.stop_when_done()
 
         await transport.run()
