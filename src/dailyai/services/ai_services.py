@@ -137,6 +137,7 @@ class TTSService(AIService):
         yield bytes()
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        print(f"!!! TTS got a frame: {frame}")
         if isinstance(frame, EndFrame):
             if self.current_sentence:
                 async for audio_chunk in self.run_tts(self.current_sentence):
@@ -146,13 +147,12 @@ class TTSService(AIService):
         if not isinstance(frame, TextFrame):
             yield frame
             return
-        print(f"!!! TTS got past the textframe test with: {frame}")
         text: str | None = None
         if not self.aggregate_sentences:
             text = frame.text
         else:
             self.current_sentence += frame.text
-            if self.current_sentence.endswith((".", "?", "!")):
+            if self.current_sentence.strip().endswith((".", "?", "!")):
                 text = self.current_sentence
                 self.current_sentence = ""
 
