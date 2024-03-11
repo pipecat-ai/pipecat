@@ -42,15 +42,21 @@ async def main(room_url):
             }
         ]
 
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        other_joined_event = asyncio.Event()
+        async def speak_from_llm():
+            await other_joined_event.wait()
             await tts.run_to_queue(
                 transport.send_queue,
                 llm.run([LLMMessagesQueueFrame(messages)]),
+                add_end_of_stream=True
             )
             await transport.stop_when_done()
 
-        await transport.run()
+        @transport.event_handler("on_first_other_participant_joined")
+        async def on_first_other_participant_joined(transport):
+            other_joined_event.set()
+
+        await asyncio.gather(transport.run(), speak_from_llm())
 
 
 if __name__ == "__main__":
