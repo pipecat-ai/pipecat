@@ -2,6 +2,8 @@ import asyncio
 import aiohttp
 import logging
 import os
+from PIL import Image
+from typing import AsyncGenerator
 
 from dailyai.pipeline.aggregators import (
     LLMAssistantContextAggregator,
@@ -9,7 +11,15 @@ from dailyai.pipeline.aggregators import (
     LLMUserContextAggregator,
     UserResponseAggregator,
 )
-from dailyai.pipeline.frames import ImageFrame, SpriteFrame
+from dailyai.pipeline.frames import (
+    ImageFrame,
+    SpriteFrame,
+    Frame,
+    LLMResponseEndFrame,
+    LLMResponseStartFrame,
+    UserStartedSpeakingFrame,
+)
+from dailyai.services.ai_services import AIService
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import FrameLogger
 from dailyai.services.daily_transport_service import DailyTransportService
@@ -21,43 +31,41 @@ logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
-sprites = {}
-image_files = [
-    "sc-default.png",
-    "sc-talk.png",
-    "sc-listen-1.png",
-    "sc-think-1.png",
-    "sc-think-2.png",
-    "sc-think-3.png",
-    "sc-think-4.png",
-]
+sprites = []
 
 script_dir = os.path.dirname(__file__)
 
-for file in image_files:
+for i in range(1, 26):
     # Build the full path to the image file
-    full_path = os.path.join(script_dir, "assets", file)
+    full_path = os.path.join(script_dir, f"assets/robot0{i}.png")
     # Get the filename without the extension to use as the dictionary key
-    filename = os.path.splitext(os.path.basename(full_path))[0]
     # Open the image and convert it to bytes
     with Image.open(full_path) as img:
-        sprites[file] = img.tobytes()
+        sprites.append(img.tobytes())
 
+flipped = sprites[::-1]
+sprites.extend(flipped)
 # When the bot isn't talking, show a static image of the cat listening
-quiet_frame = ImageFrame("", sprites["sc-listen-1.png"])
-# When the bot is talking, build an animation from two sprites
-talking_list = [sprites["sc-default.png"], sprites["sc-talk.png"]]
-talking = [random.choice(talking_list) for x in range(30)]
-talking_frame = SpriteFrame(images=talking)
+quiet_frame = ImageFrame("", sprites[0])
+talking_frame = SpriteFrame(images=sprites)
 
-# TODO: Support "thinking" as soon as we get a valid transcript, while LLM is processing
-thinking_list = [
-    sprites["sc-think-1.png"],
-    sprites["sc-think-2.png"],
-    sprites["sc-think-3.png"],
-    sprites["sc-think-4.png"],
-]
-thinking_frame = SpriteFrame(images=thinking_list)
+
+class ImageSyncAggregator(AIService):
+    def __init__(self):
+        pass
+
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, UserStartedSpeakingFrame):
+            yield quiet_frame
+            yield frame
+        elif isinstance(frame, LLMResponseStartFrame):
+            yield talking_frame
+            yield frame
+        elif isinstance(frame, LLMResponseEndFrame):
+            yield quiet_frame
+            yield frame
+        else:
+            yield frame
 
 
 async def main(room_url: str, token):
@@ -70,7 +78,9 @@ async def main(room_url: str, token):
             start_transcription=True,
             mic_enabled=True,
             mic_sample_rate=16000,
-            camera_enabled=False,
+            camera_enabled=True,
+            camera_width=1024,
+            camera_height=576,
             vad_enabled=True,
         )
 
@@ -84,7 +94,9 @@ async def main(room_url: str, token):
             api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
         )
 
-        pipeline = Pipeline([FrameLogger(), llm, FrameLogger(), tts])
+        isa = ImageSyncAggregator()
+
+        pipeline = Pipeline([FrameLogger(), llm, FrameLogger(), tts, isa])
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
