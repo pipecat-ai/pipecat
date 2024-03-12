@@ -8,49 +8,13 @@ import json
 from collections.abc import AsyncGenerator
 
 from dailyai.services.ai_services import LLMService, ImageGenService
+from dailyai.services.openai_api_llm_service import BaseOpenAILLMService
 
 
-class OpenAILLMService(LLMService):
-    def __init__(self, *, api_key, model="gpt-4", tools=None, messages=None):
-        super().__init__(tools=tools, messages=messages)
-        self._model = model
-        self._client = AsyncOpenAI(api_key=api_key)
+class OpenAILLMService(BaseOpenAILLMService):
 
-    async def get_response(self, messages, stream):
-        return await self._client.chat.completions.create(
-            stream=stream,
-            messages=messages,
-            model=self._model,
-            tools=self._tools
-        )
-
-    async def run_llm_async(self, messages, tool_choice=None) -> AsyncGenerator[str, None]:
-        messages_for_log = json.dumps(messages)
-        self.logger.debug(f"Generating chat via openai: {messages_for_log}")
-        if self._tools:
-            tools = self._tools
-        else:
-            tools = None
-        start_time = time.time()
-        chunks = await self._client.chat.completions.create(model=self._model, stream=True, messages=messages, tools=tools, tool_choice=tool_choice)
-        self.logger.info(f"=== OpenAI LLM TTFB: {time.time() - start_time}")
-        async for chunk in chunks:
-            if len(chunk.choices) == 0:
-                continue
-            if chunk.choices[0].delta.tool_calls:
-                yield chunk.choices[0].delta.tool_calls[0]
-            elif chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-
-    async def run_llm(self, messages) -> str | None:
-        messages_for_log = json.dumps(messages)
-        self.logger.debug(f"Generating chat via openai: {messages_for_log}")
-
-        response = await self._client.chat.completions.create(model=self._model, stream=False, messages=messages)
-        if response and len(response.choices) > 0:
-            return response.choices[0].message.content
-        else:
-            return None
+    def __init__(self, model="gpt-4", * args, **kwargs):
+        super().__init__(model, *args, **kwargs)
 
 
 class OpenAIImageGenService(ImageGenService):

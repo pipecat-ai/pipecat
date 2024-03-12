@@ -1,13 +1,16 @@
+from typing import Tuple
 import aiohttp
 import asyncio
 import logging
 import os
+from dailyai.pipeline.aggregators import SentenceAggregator
+from dailyai.pipeline.pipeline import Pipeline
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
-from dailyai.pipeline.frames import AudioFrame, ImageFrame
+from dailyai.pipeline.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesQueueFrame, TextFrame
 from examples.support.runner import configure
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
@@ -63,33 +66,46 @@ async def main(room_url: str):
             },
         ]
 
-        async def get_bot1_statement():
-            # Run the LLMs synchronously for the back-and-forth
-            bot1_msg = await llm.run_llm(bot1_messages)
-            print(f"bot1_msg: {bot1_msg}")
-            if bot1_msg:
-                bot1_messages.append({"role": "assistant", "content": bot1_msg})
-                bot2_messages.append({"role": "user", "content": bot1_msg})
+        async def get_text_and_audio(messages) -> Tuple[str, bytearray]:
+            """This function streams text from the LLM and uses the TTS service to convert
+             that text to speech as it's received. """
+            source_queue = asyncio.Queue()
+            sink_queue = asyncio.Queue()
+            sentence_aggregator = SentenceAggregator()
+            pipeline = Pipeline(
+                [llm, sentence_aggregator, tts1], source_queue, sink_queue
+            )
 
+            await source_queue.put(LLMMessagesQueueFrame(messages))
+            await source_queue.put(EndFrame())
+            await pipeline.run_pipeline()
+
+            message = ""
             all_audio = bytearray()
-            async for audio in tts1.run_tts(bot1_msg):
-                all_audio.extend(audio)
+            while sink_queue.qsize():
+                frame = sink_queue.get_nowait()
+                if isinstance(frame, TextFrame):
+                    message += frame.text
+                elif isinstance(frame, AudioFrame):
+                    all_audio.extend(frame.data)
 
-            return all_audio
+            return (message, all_audio)
+
+        async def get_bot1_statement():
+            message, audio = await get_text_and_audio(bot1_messages)
+
+            bot1_messages.append({"role": "assistant", "content": message})
+            bot2_messages.append({"role": "user", "content": message})
+
+            return audio
 
         async def get_bot2_statement():
-            # Run the LLMs synchronously for the back-and-forth
-            bot2_msg = await llm.run_llm(bot2_messages)
-            print(f"bot2_msg: {bot2_msg}")
-            if bot2_msg:
-                bot2_messages.append({"role": "assistant", "content": bot2_msg})
-                bot1_messages.append({"role": "user", "content": bot2_msg})
+            message, audio = await get_text_and_audio(bot2_messages)
 
-            all_audio = bytearray()
-            async for audio in tts2.run_tts(bot2_msg):
-                all_audio.extend(audio)
+            bot2_messages.append({"role": "assistant", "content": message})
+            bot1_messages.append({"role": "user", "content": message})
 
-            return all_audio
+            return audio
 
         async def argue():
             for i in range(100):

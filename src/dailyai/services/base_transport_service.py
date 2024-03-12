@@ -380,7 +380,6 @@ class BaseTransportService():
         b = bytearray()
         smallest_write_size = 3200
         largest_write_size = 8000
-        all_audio_frames = bytearray()
         while True:
             try:
                 frames_or_frame: Frame | list[Frame] = (
@@ -414,7 +413,6 @@ class BaseTransportService():
                         if frame:
                             if isinstance(frame, AudioFrame):
                                 chunk = frame.data
-                                all_audio_frames.extend(chunk)
 
                                 b.extend(chunk)
                                 truncated_length: int = len(b) - (

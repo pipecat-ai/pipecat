@@ -1,3 +1,4 @@
+import copy
 import aiohttp
 import asyncio
 import json
@@ -6,39 +7,33 @@ import logging
 import os
 import re
 import wave
-from typing import AsyncGenerator
+from typing import AsyncGenerator, List
 from PIL import Image
+from dailyai.pipeline.opeanai_llm_aggregator import OpenAIAssistantContextAggregator, OpenAIUserContextAggregator
 
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
+from dailyai.services.openai_llm_context import OpenAILLMContext
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.pipeline.aggregators import (
-    LLMAssistantContextAggregator,
-    LLMContextAggregator,
-    LLMUserContextAggregator,
-    UserResponseAggregator,
-    LLMResponseAggregator,
-)
 from examples.support.runner import configure
 from dailyai.pipeline.frames import (
-    LLMMessagesQueueFrame,
+    OpenAILLMContextFrame,
     TranscriptionQueueFrame,
     Frame,
-    TextFrame,
     LLMFunctionCallFrame,
     LLMFunctionStartFrame,
-    LLMResponseEndFrame,
-    StartFrame,
-    AudioFrame,
-    SpriteFrame,
-    ImageFrame,
 )
 from dailyai.services.ai_services import FrameLogger, AIService
+from openai._types import NotGiven, NOT_GIVEN
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
+from openai.types.chat import (
+    ChatCompletionToolParam,
+)
+
+logging.basicConfig(format="%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
@@ -227,11 +222,18 @@ class TranscriptFilter(AIService):
 
 
 class ChecklistProcessor(AIService):
-    def __init__(self, messages, llm, tools, *args, **kwargs):
+
+    def __init__(
+        self,
+        context: OpenAILLMContext,
+        llm: AIService,
+        tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN,
+        *args,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
-        self._messages = messages
+        self._context: OpenAILLMContext = context
         self._llm = llm
-        self._tools = tools
         self._id = "You are Jessica, an agent for a company called Tri-County Health Services. Your job is to collect important information from the user before their doctor visit. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor. Don't make assumptions about what values to plug into functions. Ask for clarification if a user response is ambiguous."
         self._acks = ["One sec.", "Let me confirm that.", "Thanks.", "OK."]
 
@@ -244,9 +246,12 @@ class ChecklistProcessor(AIService):
             "list_visit_reasons",
         ]
 
-        messages.append(
+        self._context.add_message(
             {"role": "system", "content": f"{self._id} {steps[0]['prompt']}"}
         )
+
+        if tools:
+            self._context.set_tools(tools)
 
     def verify_birthday(self, args):
         return args["birthday"] == "1983-01-01"
@@ -270,9 +275,7 @@ class ChecklistProcessor(AIService):
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         global current_step
         this_step = steps[current_step]
-        # TODO-CB: forcing a global here :/
-        self._tools.clear()
-        self._tools.extend(this_step["tools"])
+        self._context.set_tools(this_step["tools"])
         if isinstance(frame, LLMFunctionStartFrame):
             print(f"... Preparing function call: {frame.function_name}")
             self._function_name = frame.function_name
@@ -280,12 +283,15 @@ class ChecklistProcessor(AIService):
                 # Get the LLM talking about the next step before getting the rest
                 # of the function call completion
                 current_step += 1
-                self._messages.append(
+                self._context.add_message(
                     {"role": "system", "content": steps[current_step]["prompt"]}
                 )
-                yield LLMMessagesQueueFrame(self._messages)
+                yield OpenAILLMContextFrame(self._context)
+
+                local_context = copy.deepcopy(self._context)
+                local_context.set_tool_choice("none")
                 async for frame in llm.process_frame(
-                    LLMMessagesQueueFrame(self._messages), tool_choice="none"
+                    OpenAILLMContextFrame(local_context)
                 ):
                     yield frame
             else:
@@ -300,7 +306,7 @@ class ChecklistProcessor(AIService):
                     "\n", "\n    ", json.dumps(json.loads(frame.arguments), indent=2)
                 )
                 print(f"--> {pretty_json}\n")
-                if not frame.function_name in self._functions:
+                if frame.function_name not in self._functions:
                     raise Exception(
                         f"The LLM tried to call a function named {frame.function_name}, which isn't in the list of known functions. Please check your prompt and/or self._functions."
                     )
@@ -310,21 +316,27 @@ class ChecklistProcessor(AIService):
                 if not this_step["run_async"]:
                     if result:
                         current_step += 1
-                        self._messages.append(
+                        self._context.add_message(
                             {"role": "system", "content": steps[current_step]["prompt"]}
                         )
-                        yield LLMMessagesQueueFrame(self._messages)
+                        yield OpenAILLMContextFrame(self._context)
+
+                        local_context = copy.deepcopy(self._context)
+                        local_context.set_tool_choice("none")
                         async for frame in llm.process_frame(
-                            LLMMessagesQueueFrame(self._messages), tool_choice="none"
+                            OpenAILLMContextFrame(local_context)
                         ):
                             yield frame
                     else:
-                        self._messages.append(
+                        self._context.add_message(
                             {"role": "system", "content": this_step["failed"]}
                         )
-                        yield LLMMessagesQueueFrame(self._messages)
+                        yield OpenAILLMContextFrame(self._context)
+
+                        local_context = copy.deepcopy(self._context)
+                        local_context.set_tool_choice("none")
                         async for frame in llm.process_frame(
-                            LLMMessagesQueueFrame(self._messages), tool_choice="none"
+                            OpenAILLMContextFrame(local_context)
                         ):
                             yield frame
                     print(f"<-- Verify result: {result}\n")
@@ -353,14 +365,12 @@ async def main(room_url: str, token):
         # TODO-CB: Go back to vad_enabled
 
         messages = []
-        tools = []
 
         # llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv(
         #     "AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
             model="gpt-4-1106-preview",
-            tools=tools,
         )  # gpt-4-1106-preview
         # tts = AzureTTSService(api_key=os.getenv(
         #     "AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
@@ -372,9 +382,13 @@ async def main(room_url: str, token):
         # tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv(
         #     "DEEPGRAM_API_KEY"), voice="aura-asteria-en")
 
+        context = OpenAILLMContext(
+            messages=messages,
+        )
+
         # lca = LLMContextAggregator(
         #     messages=messages, bot_participant_id=transport._my_participant_id)
-        checklist = ChecklistProcessor(messages, llm, tools)
+        checklist = ChecklistProcessor(context, llm)
         fl = FrameLogger("FRAME LOGGER 1:")
         fl2 = FrameLogger("FRAME LOGGER 2:")
 
@@ -384,15 +398,15 @@ async def main(room_url: str, token):
             # TODO-CB: Make sure this message gets into the context somehow
             await tts.run_to_queue(
                 transport.send_queue,
-                llm.run([LLMMessagesQueueFrame(messages)]),
+                llm.run([OpenAILLMContextFrame(context)]),
             )
 
         async def handle_intake():
             pipeline = Pipeline(processors=[fl, llm, fl2, checklist, tts])
             await transport.run_interruptible_pipeline(
                 pipeline,
-                post_processor=LLMResponseAggregator(messages),
-                pre_processor=UserResponseAggregator(messages),
+                post_processor=OpenAIAssistantContextAggregator(context),
+                pre_processor=OpenAIUserContextAggregator(context),
             )
 
         transport.transcription_settings["extra"]["endpointing"] = True
