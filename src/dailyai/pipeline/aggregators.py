@@ -15,6 +15,7 @@ from dailyai.pipeline.frames import (
     TranscriptionQueueFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    AudioFrame,
 )
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import AIService
@@ -46,6 +47,10 @@ class ResponseAggregator(FrameProcessor):
         self._pass_through = pass_through
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if not isinstance(frame, AudioFrame):
+            print(
+                f"$$$ {self._role} aggregator is aggregating: {self.aggregating}, frame: {frame}"
+            )
         if not self.messages:
             return
 

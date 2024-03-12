@@ -98,6 +98,10 @@ class TTSService(AIService):
                     yield AudioFrame(audio_chunk)
                 yield TextFrame(self.current_sentence)
 
+        if isinstance(frame, LLMResponseEndFrame) and self.current_sentence:
+            # Flush the current sentence, because the LLM is done
+            async for audio_chunk in self.run_tts(self.current_sentence):
+                yield AudioFrame(audio_chunk)
         if not isinstance(frame, TextFrame):
             yield frame
             return

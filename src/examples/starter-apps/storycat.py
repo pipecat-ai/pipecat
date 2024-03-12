@@ -131,6 +131,8 @@ class StoryProcessor(AIService):
                 pass
         elif isinstance(frame, LLMResponseEndFrame):
             yield StoryPromptFrame(self._text)
+            self._text = ""
+            yield frame
         else:
             # pass through everything that's not a TextFrame
             yield frame
@@ -138,7 +140,6 @@ class StoryProcessor(AIService):
 
 class StoryImageGenerator(AIService):
     def __init__(self, story, llm, img):
-        print(f"!!! Story is {story}")
         self._story = story
         self._llm = llm
         self._img = img
@@ -233,13 +234,12 @@ async def main(room_url: str, token):
         async def storytime():
             fl = FrameLogger("after story service")
             fl1 = FrameLogger("!!! INPUT FRAME")
+            fl2 = FrameLogger("### OUTPUT FRAME")
             pipeline = Pipeline(
                 processors=[
-                    fl1,
                     ura,
                     llm,
                     sp,
-                    fl,
                     # ParallelPipeline([[tts], [sig]]),
                     tts,
                     lra,
