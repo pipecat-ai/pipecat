@@ -32,8 +32,8 @@ class FalImageGenService(ImageGenService):
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         def get_image_url(sentence, size):
             handler = fal.apps.submit(
-                "110602490-fast-sdxl",
-                #"fal-ai/fast-sdxl",
+                #"110602490-fast-sdxl",
+                "fal-ai/fast-sdxl",
                 arguments={"prompt": sentence},
             )
             for event in handler.iter_events():
