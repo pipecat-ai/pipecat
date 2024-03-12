@@ -67,49 +67,9 @@ class AIService(FrameProcessor):
 
 
 class LLMService(AIService):
-    def __init__(self, messages=None, tools=None):
+    """ This class is a no-op but serves as a base class for LLM services. """
+    def __init__(self):
         super().__init__()
-        self._tools = tools
-        self._messages = messages
-
-    @abstractmethod
-    async def run_llm_async(self, messages) -> AsyncGenerator[str, None]:
-        yield ""
-
-    @abstractmethod
-    async def run_llm(self, messages) -> str:
-        pass
-
-    async def process_frame(self, frame: Frame, tool_choice: str = None) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, LLMMessagesQueueFrame):
-            function_name = ""
-            arguments = ""
-            if isinstance(frame, LLMMessagesQueueFrame):
-                yield LLMResponseStartFrame()
-                async for text_chunk in self.run_llm_async(frame.messages, tool_choice):
-                    # We're streaming the LLM response and returning individual TextFrames for each chunk because
-                    # we want to enable quick TTS. But if the LLM response is a function call, we don't need to yield
-                    # each chunk because the function call is only useful as a single frame. Instead, we'll emit a
-                    # LLMFunctionStartFrame to let downstream services know a function call is coming, then we'll
-                    # collect the function arguments and return the entire call in a single LLMFunctionCallFrame.
-                    if isinstance(text_chunk, str):
-                        yield TextFrame(text_chunk)
-                    elif text_chunk.function:
-                        if text_chunk.function.name:
-                            function_name += text_chunk.function.name
-                            yield LLMFunctionStartFrame(function_name=text_chunk.function.name)
-                        if text_chunk.function.arguments:
-                            # Keep iterating through the response to collect all the argument fragments and
-                            # yield a complete LLMFunctionCallFrame after run_llm_async completes
-                            arguments += text_chunk.function.arguments
-
-                if (function_name and arguments):
-                    yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
-                    function_name = ""
-                    arguments = ""
-                yield LLMResponseEndFrame()
-        else:
-            yield frame
 
 
 class TTSService(AIService):
