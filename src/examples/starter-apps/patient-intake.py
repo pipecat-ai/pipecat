@@ -9,11 +9,13 @@ import re
 import wave
 from typing import AsyncGenerator, List
 from PIL import Image
-from dailyai.pipeline.opeanai_llm_aggregator import OpenAIAssistantContextAggregator, OpenAIUserContextAggregator
+from dailyai.pipeline.opeanai_llm_aggregator import (
+    OpenAIAssistantContextAggregator,
+    OpenAIUserContextAggregator,
+)
 
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.daily_transport_service import DailyTransportService
-from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.openai_llm_context import OpenAILLMContext
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
@@ -25,6 +27,7 @@ from dailyai.pipeline.frames import (
     Frame,
     LLMFunctionCallFrame,
     LLMFunctionStartFrame,
+    AudioFrame,
 )
 from dailyai.services.ai_services import FrameLogger, AIService
 from openai._types import NotGiven, NOT_GIVEN
@@ -38,16 +41,22 @@ logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
 sounds = {}
-sound_files = ["clack-short.wav", "clack.wav", "clack-short-quiet.wav"]
+sound_files = [
+    "clack-short.wav",
+    "clack.wav",
+    "clack-short-quiet.wav",
+    "ding.wav",
+    "ding2.wav",
+]
 
 script_dir = os.path.dirname(__file__)
 
 for file in sound_files:
-    # Build the full path to the image file
+    # Build the full path to the sound file
     full_path = os.path.join(script_dir, "assets", file)
     # Get the filename without the extension to use as the dictionary key
     filename = os.path.splitext(os.path.basename(full_path))[0]
-    # Open the image and convert it to bytes
+    # Open the sound and convert it to bytes
     with wave.open(full_path) as audio_file:
         sounds[file] = audio_file.readframes(-1)
 
@@ -210,17 +219,6 @@ steps = [
 current_step = 0
 
 
-class TranscriptFilter(AIService):
-    def __init__(self, bot_participant_id=None):
-        super().__init__()
-        self.bot_participant_id = bot_participant_id
-
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, TranscriptionQueueFrame):
-            if frame.participantId != self.bot_participant_id:
-                yield frame
-
-
 class ChecklistProcessor(AIService):
 
     def __init__(
@@ -296,7 +294,7 @@ class ChecklistProcessor(AIService):
                     yield frame
             else:
                 # Insert a quick response while we run the function
-                # yield AudioFrame(sounds["clack-short-quiet.wav"])
+                yield AudioFrame(sounds["ding2.wav"])
                 pass
         elif isinstance(frame, LLMFunctionCallFrame):
 
@@ -362,32 +360,27 @@ async def main(room_url: str, token):
             start_transcription=True,
             vad_enabled=True,
         )
-        # TODO-CB: Go back to vad_enabled
 
         messages = []
 
-        # llm = AzureLLMService(api_key=os.getenv("AZURE_CHATGPT_API_KEY"), endpoint=os.getenv(
-        #     "AZURE_CHATGPT_ENDPOINT"), model=os.getenv("AZURE_CHATGPT_MODEL"))
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
             model="gpt-4-1106-preview",
-        )  # gpt-4-1106-preview
-        # tts = AzureTTSService(api_key=os.getenv(
-        #     "AZURE_SPEECH_API_KEY"), region=os.getenv("AZURE_SPEECH_REGION"))
+        )
+        # tts = DeepgramTTSService(
+        #     aiohttp_session=session,
+        #     api_key=os.getenv("DEEPGRAM_API_KEY"),
+        #     voice="aura-asteria-en",
+        # )
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
             voice_id="XrExE9yKIg1WjnnlVkGX",
-        )  # matilda
-        # tts = DeepgramTTSService(aiohttp_session=session, api_key=os.getenv(
-        #     "DEEPGRAM_API_KEY"), voice="aura-asteria-en")
-
+        )
         context = OpenAILLMContext(
             messages=messages,
         )
 
-        # lca = LLMContextAggregator(
-        #     messages=messages, bot_participant_id=transport._my_participant_id)
         checklist = ChecklistProcessor(context, llm)
         fl = FrameLogger("FRAME LOGGER 1:")
         fl2 = FrameLogger("FRAME LOGGER 2:")
@@ -395,7 +388,6 @@ async def main(room_url: str, token):
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
             fl = FrameLogger("first other participant")
-            # TODO-CB: Make sure this message gets into the context somehow
             await tts.run_to_queue(
                 transport.send_queue,
                 llm.run([OpenAILLMContextFrame(context)]),
