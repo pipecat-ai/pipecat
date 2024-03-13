@@ -16,11 +16,12 @@ from dailyai.pipeline.frames import (
     LLMFunctionCallFrame,
     Frame,
     TextFrame,
-    TranscriptionQueueFrame
+    TranscriptionQueueFrame,
 )
 
 from abc import abstractmethod
 from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable, List
+
 
 class AIService(FrameProcessor):
 
@@ -30,7 +31,9 @@ class AIService(FrameProcessor):
     def stop(self):
         pass
 
-    async def run_to_queue(self, queue: asyncio.Queue, frames, add_end_of_stream=False) -> None:
+    async def run_to_queue(
+        self, queue: asyncio.Queue, frames, add_end_of_stream=False
+    ) -> None:
         async for frame in self.run(frames):
             await queue.put(frame)
 
@@ -39,9 +42,7 @@ class AIService(FrameProcessor):
 
     async def run(
         self,
-        frames: Iterable[Frame]
-        | AsyncIterable[Frame]
-        | asyncio.Queue[Frame],
+        frames: Iterable[Frame] | AsyncIterable[Frame] | asyncio.Queue[Frame],
     ) -> AsyncGenerator[Frame, None]:
         try:
             if isinstance(frames, AsyncIterable):
@@ -67,7 +68,8 @@ class AIService(FrameProcessor):
 
 
 class LLMService(AIService):
-    """ This class is a no-op but serves as a base class for LLM services. """
+    """This class is a no-op but serves as a base class for LLM services."""
+
     def __init__(self):
         super().__init__()
 
@@ -105,7 +107,7 @@ class TTSService(AIService):
             text = frame.text
         else:
             self.current_sentence += frame.text
-            if self.current_sentence.endswith((".", "?", "!")):
+            if self.current_sentence.strip().endswith((".", "?", "!")):
                 text = self.current_sentence
                 self.current_sentence = ""
 
@@ -118,7 +120,9 @@ class TTSService(AIService):
 
     # Convenience function to send the audio for a sentence to the given queue
     async def say(self, sentence, queue: asyncio.Queue):
-        await self.run_to_queue(queue, [LLMResponseStartFrame(), TextFrame(sentence), LLMResponseEndFrame()])
+        await self.run_to_queue(
+            queue, [LLMResponseStartFrame(), TextFrame(sentence), LLMResponseEndFrame()]
+        )
 
 
 class ImageGenService(AIService):
@@ -169,7 +173,7 @@ class STTService(AIService):
         ww.close()
         content.seek(0)
         text = await self.run_stt(content)
-        yield TranscriptionQueueFrame(text, '', str(time.time()))
+        yield TranscriptionQueueFrame(text, "", str(time.time()))
 
 
 class FrameLogger(AIService):
