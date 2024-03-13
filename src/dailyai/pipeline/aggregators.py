@@ -5,6 +5,7 @@ from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
     EndFrame,
+    AudioFrame,
     EndPipeFrame,
     Frame,
     ImageFrame,
@@ -14,7 +15,7 @@ from dailyai.pipeline.frames import (
     TextFrame,
     TranscriptionQueueFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame
+    UserStoppedSpeakingFrame,
 )
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import AIService
@@ -22,6 +23,7 @@ from dailyai.services.ai_services import AIService
 from typing import AsyncGenerator, Callable, Coroutine, List
 
 from dailyai.services.openai_llm_context import OpenAILLMContext
+
 
 class ResponseAggregator(FrameProcessor):
 
@@ -44,9 +46,7 @@ class ResponseAggregator(FrameProcessor):
         self._accumulator_frame = accumulator_frame
         self._pass_through = pass_through
 
-    async def process_frame(
-        self, frame: Frame
-    ) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if not self.messages:
             return
 
@@ -54,15 +54,20 @@ class ResponseAggregator(FrameProcessor):
             self.aggregating = True
         elif isinstance(frame, self._end_frame):
             self.aggregating = False
-            self.messages.append({"role": self._role, "content": self.aggregation})
-            self.aggregation = ""
-            yield LLMMessagesQueueFrame(self.messages)
+            # Sometimes VAD triggers quickly on and off. If we don't get any transcription,
+            # it creates empty LLM message queue frames
+            if len(self.aggregation) > 0:
+                self.messages.append({"role": self._role, "content": self.aggregation})
+                self.aggregation = ""
+                yield self._end_frame()
+                yield LLMMessagesQueueFrame(self.messages)
         elif isinstance(frame, self._accumulator_frame) and self.aggregating:
             self.aggregation += f" {frame.text}"
             if self._pass_through:
                 yield frame
         else:
             yield frame
+
 
 class LLMResponseAggregator(ResponseAggregator):
     def __init__(self, messages: list[dict]):
@@ -71,8 +76,9 @@ class LLMResponseAggregator(ResponseAggregator):
             role="assistant",
             start_frame=LLMResponseStartFrame,
             end_frame=LLMResponseEndFrame,
-            accumulator_frame=TextFrame
+            accumulator_frame=TextFrame,
         )
+
 
 class UserResponseAggregator(ResponseAggregator):
     def __init__(self, messages: list[dict]):
@@ -82,7 +88,7 @@ class UserResponseAggregator(ResponseAggregator):
             start_frame=UserStartedSpeakingFrame,
             end_frame=UserStoppedSpeakingFrame,
             accumulator_frame=TranscriptionQueueFrame,
-            pass_through=False
+            pass_through=False,
         )
 
 
@@ -103,9 +109,7 @@ class LLMContextAggregator(AIService):
         self.complete_sentences = complete_sentences
         self.pass_through = pass_through
 
-    async def process_frame(
-        self, frame: Frame
-    ) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         # We don't do anything with non-text frames, pass it along to next in the pipeline.
         if not isinstance(frame, TextFrame):
             yield frame
@@ -136,6 +140,7 @@ class LLMContextAggregator(AIService):
             # though we check it above
             self.messages.append({"role": self.role, "content": frame.text})
             yield LLMMessagesQueueFrame(self.messages)
+
 
 class LLMUserContextAggregator(LLMContextAggregator):
     def __init__(
@@ -176,12 +181,11 @@ class SentenceAggregator(FrameProcessor):
     >>> asyncio.run(print_frames(aggregator, TextFrame(" world.")))
     Hello, world.
     """
+
     def __init__(self):
         self.aggregation = ""
 
-    async def process_frame(
-        self, frame: Frame
-    ) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, TextFrame):
             m = re.search("(.*[?.!])(.*)", frame.text)
             if m:
@@ -233,12 +237,11 @@ class LLMFullResponseAggregator(FrameProcessor):
     Hello, world. I am an LLM.
     LLMResponseEndFrame
     """
+
     def __init__(self):
         self.aggregation = ""
 
-    async def process_frame(
-        self, frame: Frame
-    ) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, TextFrame):
             self.aggregation += frame.text
         elif isinstance(frame, LLMResponseEndFrame):
@@ -274,8 +277,9 @@ class StatelessTextTransformer(FrameProcessor):
         else:
             yield frame
 
+
 class ParallelPipeline(FrameProcessor):
-    """ Run multiple pipelines in parallel.
+    """Run multiple pipelines in parallel.
 
     This class takes frames from its source queue and sends them to each
     sub-pipeline. Each sub-pipeline emits its frames into this class's
@@ -292,6 +296,7 @@ class ParallelPipeline(FrameProcessor):
     Since frame handlers pass through unhandled frames by convention, this
     class de-dupes frames in its sink before yielding them.
     """
+
     def __init__(self, pipeline_definitions: List[List[FrameProcessor]]):
         self.sources = [asyncio.Queue() for _ in pipeline_definitions]
         self.sink: asyncio.Queue[Frame] = asyncio.Queue()
@@ -327,6 +332,7 @@ class ParallelPipeline(FrameProcessor):
             if not isinstance(frame, EndPipeFrame):
                 yield frame
 
+
 class GatedAggregator(FrameProcessor):
     """Accumulate frames, with custom functions to start and stop accumulation.
     Yields gate-opening frame before any accumulated frames, then ensuing frames
@@ -352,6 +358,7 @@ class GatedAggregator(FrameProcessor):
     >>> asyncio.run(print_frames(aggregator, TextFrame("Goodbye.")))
     Goodbye.
     """
+
     def __init__(self, gate_open_fn, gate_close_fn, start_open):
         self.gate_open_fn = gate_open_fn
         self.gate_close_fn = gate_close_fn

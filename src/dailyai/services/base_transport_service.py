@@ -17,43 +17,40 @@ from dailyai.pipeline.frames import (
     EndFrame,
     ImageFrame,
     Frame,
+    PipelineStartedFrame,
     SpriteFrame,
     StartFrame,
     TranscriptionQueueFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame
+    UserStoppedSpeakingFrame,
 )
 from dailyai.pipeline.pipeline import Pipeline
 
 torch.set_num_threads(1)
 
-model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                              model='silero_vad',
-                              force_reload=False)
+model, utils = torch.hub.load(
+    repo_or_dir="snakers4/silero-vad", model="silero_vad", force_reload=False
+)
 
-(get_speech_timestamps,
- save_audio,
- read_audio,
- VADIterator,
- collect_chunks) = utils
+(get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks) = utils
 
 # Taken from utils_vad.py
 
 
-def validate(model,
-             inputs: torch.Tensor):
+def validate(model, inputs: torch.Tensor):
     with torch.no_grad():
         outs = model(inputs)
     return outs
+
 
 # Provided by Alexander Veysov
 
 
 def int2float(sound):
     abs_max = np.abs(sound).max()
-    sound = sound.astype('float32')
+    sound = sound.astype("float32")
     if abs_max > 0:
-        sound *= 1/32768
+        sound *= 1 / 32768
     sound = sound.squeeze()  # depends on the use case
     return sound
 
@@ -73,7 +70,7 @@ class VADState(Enum):
     STOPPING = 4
 
 
-class BaseTransportService():
+class BaseTransportService:
 
     def __init__(
         self,
@@ -94,7 +91,8 @@ class BaseTransportService():
 
         if self._vad_enabled and self._speaker_enabled:
             raise Exception(
-                "Sorry, you can't use speaker_enabled and vad_enabled at the same time. Please set one to False.")
+                "Sorry, you can't use speaker_enabled and vad_enabled at the same time. Please set one to False."
+            )
 
         self._vad_samples = 1536
         vad_frame_s = self._vad_samples / SAMPLE_RATE
@@ -130,20 +128,20 @@ class BaseTransportService():
     async def run(self):
         self._prerun()
 
-        async_output_queue_marshal_task = asyncio.create_task(
-            self._marshal_frames())
+        async_output_queue_marshal_task = asyncio.create_task(self._marshal_frames())
 
-        self._camera_thread = threading.Thread(
-            target=self._run_camera, daemon=True)
+        self._camera_thread = threading.Thread(target=self._run_camera, daemon=True)
         self._camera_thread.start()
 
         self._frame_consumer_thread = threading.Thread(
-            target=self._frame_consumer, daemon=True)
+            target=self._frame_consumer, daemon=True
+        )
         self._frame_consumer_thread.start()
 
         if self._speaker_enabled:
             self._receive_audio_thread = threading.Thread(
-                target=self._receive_audio, daemon=True)
+                target=self._receive_audio, daemon=True
+            )
             self._receive_audio_thread.start()
 
         if self._vad_enabled:
@@ -151,10 +149,7 @@ class BaseTransportService():
             self._vad_thread.start()
 
         try:
-            while (
-                time.time() < self._expiration
-                and not self._stop_threads.is_set()
-            ):
+            while time.time() < self._expiration and not self._stop_threads.is_set():
                 await asyncio.sleep(1)
         except Exception as e:
             self._logger.error(f"Exception {e}")
@@ -278,8 +273,7 @@ class BaseTransportService():
             audio_chunk = self.read_audio_frames(self._vad_samples)
             audio_int16 = np.frombuffer(audio_chunk, np.int16)
             audio_float32 = int2float(audio_int16)
-            new_confidence = model(
-                torch.from_numpy(audio_float32), 16000).item()
+            new_confidence = model(torch.from_numpy(audio_float32), 16000).item()
             speaking = new_confidence > 0.5
 
             if speaking:
@@ -303,18 +297,22 @@ class BaseTransportService():
                     case VADState.STOPPING:
                         self._vad_stopping_count += 1
 
-            if self._vad_state == VADState.STARTING and self._vad_starting_count >= self._vad_start_frames:
+            if (
+                self._vad_state == VADState.STARTING
+                and self._vad_starting_count >= self._vad_start_frames
+            ):
                 asyncio.run_coroutine_threadsafe(
-                    self.receive_queue.put(
-                        UserStartedSpeakingFrame()), self._loop
+                    self.receive_queue.put(UserStartedSpeakingFrame()), self._loop
                 )
                 # self.interrupt()
                 self._vad_state = VADState.SPEAKING
                 self._vad_starting_count = 0
-            if self._vad_state == VADState.STOPPING and self._vad_stopping_count >= self._vad_stop_frames:
+            if (
+                self._vad_state == VADState.STOPPING
+                and self._vad_stopping_count >= self._vad_stop_frames
+            ):
                 asyncio.run_coroutine_threadsafe(
-                    self.receive_queue.put(
-                        UserStoppedSpeakingFrame()), self._loop
+                    self.receive_queue.put(UserStoppedSpeakingFrame()), self._loop
                 )
                 self._vad_state = VADState.QUIET
                 self._vad_stopping_count = 0
@@ -353,9 +351,7 @@ class BaseTransportService():
                     self.receive_queue.put(frame), self._loop
                 )
 
-        asyncio.run_coroutine_threadsafe(
-            self.receive_queue.put(EndFrame()), self._loop
-        )
+        asyncio.run_coroutine_threadsafe(self.receive_queue.put(EndFrame()), self._loop)
 
     def _set_image(self, image: bytes):
         self._images = itertools.cycle([image])
@@ -382,15 +378,17 @@ class BaseTransportService():
         largest_write_size = 8000
         while True:
             try:
-                frames_or_frame: Frame | list[Frame] = (
-                    self._threadsafe_send_queue.get()
-                )
-                if isinstance(frames_or_frame, AudioFrame) and len(frames_or_frame.data) > largest_write_size:
+                frames_or_frame: Frame | list[Frame] = self._threadsafe_send_queue.get()
+                if (
+                    isinstance(frames_or_frame, AudioFrame)
+                    and len(frames_or_frame.data) > largest_write_size
+                ):
                     # subdivide large audio frames to enable interruption
                     frames = []
                     for i in range(0, len(frames_or_frame.data), largest_write_size):
-                        frames.append(AudioFrame(
-                            frames_or_frame.data[i: i+largest_write_size]))
+                        frames.append(
+                            AudioFrame(frames_or_frame.data[i : i + largest_write_size])
+                        )
                 elif isinstance(frames_or_frame, Frame):
                     frames: list[Frame] = [frames_or_frame]
                 elif isinstance(frames_or_frame, list):
@@ -419,8 +417,7 @@ class BaseTransportService():
                                     len(b) % smallest_write_size
                                 )
                                 if truncated_length:
-                                    self.write_frame_to_mic(
-                                        bytes(b[:truncated_length]))
+                                    self.write_frame_to_mic(bytes(b[:truncated_length]))
                                     b = b[truncated_length:]
                             elif isinstance(frame, ImageFrame):
                                 self._set_image(frame.image)
@@ -434,12 +431,15 @@ class BaseTransportService():
                         # can cause static in the audio stream.
                         if len(b):
                             truncated_length = len(b) - (len(b) % 160)
-                            self.write_frame_to_mic(
-                                bytes(b[:truncated_length]))
+                            self.write_frame_to_mic(bytes(b[:truncated_length]))
                             b = bytearray()
 
                         if isinstance(frame, StartFrame):
                             self._is_interrupted.clear()
+                            asyncio.run_coroutine_threadsafe(
+                                self.receive_queue.put(PipelineStartedFrame()),
+                                self._loop,
+                            )
 
                     if self._loop:
                         asyncio.run_coroutine_threadsafe(
@@ -453,6 +453,5 @@ class BaseTransportService():
 
                 b = bytearray()
             except Exception as e:
-                self._logger.error(
-                    f"Exception in frame_consumer: {e}, {len(b)}")
+                self._logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
                 raise e
