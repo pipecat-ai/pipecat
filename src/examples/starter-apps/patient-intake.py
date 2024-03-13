@@ -384,17 +384,13 @@ async def main(room_url: str, token):
         checklist = ChecklistProcessor(context, llm)
         fl = FrameLogger("FRAME LOGGER 1:")
         fl2 = FrameLogger("FRAME LOGGER 2:")
+        pipeline = Pipeline(processors=[fl, llm, fl2, checklist, tts])
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            fl = FrameLogger("first other participant")
-            await tts.run_to_queue(
-                transport.send_queue,
-                llm.run([OpenAILLMContextFrame(context)]),
-            )
+            await pipeline.queue_frames([OpenAILLMContextFrame(context)])
 
         async def handle_intake():
-            pipeline = Pipeline(processors=[fl, llm, fl2, checklist, tts])
             await transport.run_interruptible_pipeline(
                 pipeline,
                 post_processor=OpenAIAssistantContextAggregator(context),

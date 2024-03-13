@@ -129,10 +129,8 @@ async def main(room_url: str, token):
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            await ta.run_to_queue(
-                transport.send_queue,
-                tts.run(llm.run([LLMMessagesQueueFrame(messages)])),
-            )
+            print(f"!!! in here, pipeline.source is {pipeline.source}")
+            await pipeline.queue_frames(LLMMessagesQueueFrame(messages))
 
         async def run_conversation():
 
