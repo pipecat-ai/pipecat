@@ -63,6 +63,7 @@ class ResponseAggregator(FrameProcessor):
             if len(self.aggregation) > 0:
                 self.messages.append({"role": self._role, "content": self.aggregation})
                 self.aggregation = ""
+                yield self._end_frame()
                 yield LLMMessagesQueueFrame(self.messages)
         elif isinstance(frame, self._accumulator_frame) and self.aggregating:
             self.aggregation += f" {frame.text}"
