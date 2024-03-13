@@ -10,6 +10,7 @@ from typing import AsyncGenerator
 from PIL import Image
 
 from dailyai.pipeline.pipeline import Pipeline
+from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
@@ -47,7 +48,7 @@ logger.setLevel(logging.DEBUG)
 
 sounds = {}
 images = {}
-sound_files = ["talking.wav", "listening.wav"]
+sound_files = ["talking.wav", "listening.wav", "ding3.wav"]
 image_files = ["grandma-writing.png", "grandma-listening.png"]
 script_dir = os.path.dirname(__file__)
 
@@ -82,7 +83,7 @@ class StoryPromptFrame(TextFrame):
     pass
 
 
-class StoryProcessor(AIService):
+class StoryProcessor(FrameProcessor):
     def __init__(self, messages, story):
         self._messages = messages
         self._text = ""
@@ -116,6 +117,7 @@ class StoryProcessor(AIService):
                 if len(self._text) > 2:
                     yield ImageFrame(None, images["grandma-writing.png"])
                     yield StoryStartFrame(self._text)
+                    yield AudioFrame(sounds["ding3.wav"])
                 self._text = ""
 
             elif re.findall(r".*\[[bB]reak\].*", self._text):
@@ -126,6 +128,8 @@ class StoryProcessor(AIService):
                 if len(self._text) > 2:
                     self._story.append(self._text)
                     yield StoryPageFrame(self._text)
+                    yield AudioFrame(sounds["ding3.wav"])
+
                 self._text = ""
             elif re.findall(r".*\[[pP]rompt\].*", self._text):
                 # Then it's question time. Flush any
@@ -156,7 +160,7 @@ class StoryProcessor(AIService):
             yield frame
 
 
-class StoryImageGenerator(AIService):
+class StoryImageGenerator(FrameProcessor):
     def __init__(self, story, llm, img):
         self._story = story
         self._llm = llm
@@ -257,12 +261,14 @@ async def main(room_url: str, token):
             )
 
         async def storytime():
+            fl = FrameLogger("### After Image Generation")
             pipeline = Pipeline(
                 processors=[
                     ura,
                     llm,
                     sp,
                     sig,
+                    fl,
                     tts,
                     lra,
                 ]
