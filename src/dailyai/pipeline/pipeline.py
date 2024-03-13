@@ -94,7 +94,7 @@ class Pipeline:
                 await processor.interrupted()
             pass
 
-    async def queue_frames(self, frames: List[Frame]):
+    async def queue_frames(self, frames: Frame | List[Frame]):
         """Insert frames directly into a pipeline. This is typically used inside a transport
         participant_joined callback to prompt a bot to start a conversation, for example.
         """
