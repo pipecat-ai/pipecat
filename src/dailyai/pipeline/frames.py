@@ -5,7 +5,9 @@ from dailyai.services.openai_llm_context import OpenAILLMContext
 
 
 class Frame:
-    pass
+    def __str__(self):
+        return f"{self.__class__.__name__}"
+
 
 class ControlFrame(Frame):
     # Control frames should contain no instance data, so
@@ -21,7 +23,18 @@ class StartFrame(ControlFrame):
 class EndFrame(ControlFrame):
     pass
 
+
 class EndPipeFrame(ControlFrame):
+    pass
+
+
+class PipelineStartedFrame(ControlFrame):
+    """
+    Used by the transport to indicate that execution of a pipeline is starting
+    (or restarting). It should be the first frame your app receives when it
+    starts, or when an interruptible pipeline has been interrupted.
+    """
+
     pass
 
 
@@ -37,21 +50,33 @@ class LLMResponseEndFrame(ControlFrame):
 class AudioFrame(Frame):
     data: bytes
 
+    def __str__(self):
+        return f"{self.__class__.__name__}, size: {len(self.data)} B"
+
 
 @dataclass()
 class ImageFrame(Frame):
     url: str | None
     image: bytes
 
+    def __str__(self):
+        return f"{self.__class__.__name__}, url: {self.url}, image size: {len(self.image)} B"
+
 
 @dataclass()
 class SpriteFrame(Frame):
     images: list[bytes]
 
+    def __str__(self):
+        return f"{self.__class__.name__}, list size: {len(self.images)}"
+
 
 @dataclass()
 class TextFrame(Frame):
     text: str
+
+    def __str__(self):
+        return f'{self.__class__.__name__}: "{self.text}"'
 
 
 @dataclass()
@@ -74,15 +99,28 @@ class AppMessageQueueFrame(Frame):
     message: Any
     participantId: str
 
+
 class UserStartedSpeakingFrame(Frame):
     pass
+
 
 class UserStoppedSpeakingFrame(Frame):
     pass
 
+
+class BotStartedSpeakingFrame(Frame):
+    pass
+
+
+class BotStoppedSpeakingFrame(Frame):
+    pass
+
+
 @dataclass()
 class LLMFunctionStartFrame(Frame):
     function_name: str
+
+
 @dataclass()
 class LLMFunctionCallFrame(Frame):
     function_name: str
