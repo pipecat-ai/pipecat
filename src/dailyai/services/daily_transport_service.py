@@ -219,7 +219,8 @@ class DailyTransportService(BaseTransportService, EventHandler):
         pass
 
     def call_joined(self, join_data, client_error):
-        self._logger.info(f"Call_joined: {join_data}, {client_error}")
+        #self._logger.info(f"Call_joined: {join_data}, {client_error}")
+        pass
 
     def dialout(self, number):
         self.client.start_dialout({"phoneNumber": number})

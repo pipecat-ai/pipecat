@@ -2,6 +2,7 @@ import asyncio
 import aiohttp
 import logging
 import os
+from dailyai.pipeline.frames import LLMMessagesQueueFrame
 from dailyai.pipeline.pipeline import Pipeline
 
 from dailyai.services.daily_transport_service import DailyTransportService
@@ -44,38 +45,37 @@ async def main(room_url: str, token):
         )
         fl = FrameLogger("Inner")
         fl2 = FrameLogger("Outer")
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
+            },
+        ]
+
+        tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
+        tma_out = LLMAssistantContextAggregator(
+            messages, transport._my_participant_id
+        )
+        pipeline = Pipeline(
+            processors=[
+                fl,
+                tma_in,
+                llm,
+                fl2,
+                tts,
+                tma_out,
+            ],
+        )
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            await tts.say("Hi, I'm listening!", transport.send_queue)
-
-        async def have_conversation():
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
-                },
-            ]
-
-            tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
-            tma_out = LLMAssistantContextAggregator(
-                messages, transport._my_participant_id
-            )
-            pipeline = Pipeline(
-                processors=[
-                    fl,
-                    tma_in,
-                    llm,
-                    fl2,
-                    tts,
-                    tma_out,
-                ],
-            )
-            await transport.run_uninterruptible_pipeline(pipeline)
+            # Kick off the conversation.
+            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+            await pipeline.queue_frames([LLMMessagesQueueFrame(messages)])
 
         transport.transcription_settings["extra"]["endpointing"] = True
         transport.transcription_settings["extra"]["punctuate"] = True
-        await asyncio.gather(transport.run(), have_conversation())
+        await transport.run(pipeline)
 
 
 if __name__ == "__main__":

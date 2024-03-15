@@ -273,7 +273,7 @@ async def main(room_url: str, token):
                     lra,
                 ]
             )
-            await transport.run_uninterruptible_pipeline(
+            await transport.run_pipeline(
                 pipeline,
             )
 

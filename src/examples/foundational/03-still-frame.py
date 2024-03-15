@@ -3,7 +3,8 @@ import aiohttp
 import logging
 import os
 
-from dailyai.pipeline.frames import TextFrame
+from dailyai.pipeline.frames import EndFrame, TextFrame
+from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService
 
@@ -33,19 +34,18 @@ async def main(room_url):
             key_secret=os.getenv("FAL_KEY_SECRET"),
         )
 
-        other_joined_event = asyncio.Event()
-
-        async def show_image():
-            await other_joined_event.wait()
-            await imagegen.run_to_queue(
-                transport.send_queue, [TextFrame("a cat in the style of picasso")]
-            )
+        pipeline = Pipeline([imagegen])
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            other_joined_event.set()
+            # Note that we do not put an EndFrame() item in the pipeline for this demo.
+            # This means that the bot will stay in the channel until it times out.
+            # An EndFrame() in the pipeline would cause the transport to shut down.
+            await pipeline.queue_frames(
+                [TextFrame("a cat in the style of picasso")]
+            )
 
-        await asyncio.gather(transport.run(), show_image())
+        await transport.run(pipeline)
 
 
 if __name__ == "__main__":
