@@ -27,6 +27,7 @@ from dailyai.pipeline.aggregators import (
 )
 from examples.support.runner import configure
 from dailyai.pipeline.frames import (
+    EndPipeFrame,
     LLMMessagesQueueFrame,
     TranscriptionQueueFrame,
     Frame,
@@ -187,10 +188,6 @@ class StoryImageGenerator(FrameProcessor):
 
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
-        global transport
-        global llm
-        global tts
-
         messages = [
             {
                 "role": "system",
@@ -235,8 +232,15 @@ async def main(room_url: str, token):
             vad_stop_s=1.5,
         )
 
+        start_story_event = asyncio.Event()
+
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
+            start_story_event.set()
+
+        async def storytime():
+            await start_story_event.wait()
+
             # We're being a bit tricky here by using a special system prompt to
             # ask the user for a story topic. After their intial response, we'll
             # use a different system prompt to create story pages.
@@ -247,20 +251,17 @@ async def main(room_url: str, token):
                 }
             ]
             lca = LLMAssistantContextAggregator(messages)
-            await tts.run_to_queue(
-                transport.send_queue,
-                lca.run(
-                    llm.run(
-                        [
-                            ImageFrame(None, images["grandma-listening.png"]),
-                            LLMMessagesQueueFrame(intro_messages),
-                            AudioFrame(sounds["listening.wav"]),
-                        ]
-                    ),
-                ),
+            local_pipeline = Pipeline([llm, lca, tts], sink=transport.send_queue)
+            await local_pipeline.queue_frames(
+                [
+                    ImageFrame(None, images["grandma-listening.png"]),
+                    LLMMessagesQueueFrame(intro_messages),
+                    AudioFrame(sounds["listening.wav"]),
+                    EndPipeFrame(),
+                ]
             )
+            await local_pipeline.run_pipeline()
 
-        async def storytime():
             fl = FrameLogger("### After Image Generation")
             pipeline = Pipeline(
                 processors=[

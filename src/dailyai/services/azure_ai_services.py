@@ -64,13 +64,17 @@ class AzureTTSService(TTSService):
 
 class AzureLLMService(BaseOpenAILLMService):
     def __init__(self, *, api_key, endpoint, api_version="2023-12-01-preview", model):
-        super().__init__(model)
+        self._endpoint = endpoint
+        self._api_version = api_version
 
-        # This overrides the client created by the super class init
+        super().__init__(api_key=api_key, model=model)
+        self._model: str = model
+
+    def create_client(self, api_key=None, base_url=None):
         self._client = AsyncAzureOpenAI(
             api_key=api_key,
-            azure_endpoint=endpoint,
-            api_version=api_version,
+            azure_endpoint=self._endpoint,
+            api_version=self._api_version,
         )
 
 
