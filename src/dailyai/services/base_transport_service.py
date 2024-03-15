@@ -151,10 +151,9 @@ class BaseTransportService:
 
         pipeline_task = None
         if pipeline:
-            pipeline.set_sink(self.send_queue)
-            if override_pipeline_source_queue:
-                pipeline.set_source(self.receive_queue)
-            pipeline_task =  asyncio.create_task(pipeline.run_pipeline())
+            pipeline_task = asyncio.create_task(
+                self.run_pipeline(pipeline, override_pipeline_source_queue)
+            )
 
         try:
             while time.time() < self._expiration and not self._stop_threads.is_set():
@@ -181,6 +180,12 @@ class BaseTransportService:
 
         if self._vad_enabled:
             self._vad_thread.join()
+
+    async def run_pipeline(self, pipeline:Pipeline, override_pipeline_source_queue=True):
+        pipeline.set_sink(self.send_queue)
+        if override_pipeline_source_queue:
+            pipeline.set_source(self.receive_queue)
+        await pipeline.run_pipeline()
 
     async def run_interruptible_pipeline(
         self,
