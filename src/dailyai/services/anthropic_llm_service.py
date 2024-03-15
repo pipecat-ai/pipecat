@@ -33,19 +33,3 @@ class AnthropicLLMService(LLMService):
         async for event in stream:
             if event.type == "content_block_delta":
                 yield TextFrame(event.delta.text)
-
-
-async def test():
-    service = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    messages = [
-        {
-            "role": "user",
-            "content": "Hello, Claude",
-        }
-    ]
-    async for frame in service.process_frame(LLMMessagesQueueFrame(messages)):
-        print(frame)
-
-
-if __name__=="__main__":
-    asyncio.run(test())
