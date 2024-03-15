@@ -6,9 +6,7 @@ from PIL import Image
 from typing import AsyncGenerator
 
 from dailyai.pipeline.aggregators import (
-    LLMAssistantContextAggregator,
     LLMResponseAggregator,
-    LLMUserContextAggregator,
     UserResponseAggregator,
 )
 from dailyai.pipeline.frames import (
@@ -16,15 +14,12 @@ from dailyai.pipeline.frames import (
     SpriteFrame,
     Frame,
     LLMResponseEndFrame,
-    LLMResponseStartFrame,
     LLMMessagesQueueFrame,
-    UserStartedSpeakingFrame,
     AudioFrame,
     PipelineStartedFrame,
 )
 from dailyai.services.ai_services import AIService
 from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.ai_services import FrameLogger
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
@@ -130,7 +125,7 @@ async def main(room_url: str, token):
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
             print(f"!!! in here, pipeline.source is {pipeline.source}")
-            await pipeline.queue_frames(LLMMessagesQueueFrame(messages))
+            await pipeline.queue_frames([LLMMessagesQueueFrame(messages)])
 
         async def run_conversation():
 

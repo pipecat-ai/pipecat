@@ -2,6 +2,8 @@ import asyncio
 import aiohttp
 import logging
 import os
+from dailyai.pipeline.frames import EndFrame, TextFrame
+from dailyai.pipeline.pipeline import Pipeline
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
@@ -28,19 +30,7 @@ async def main(room_url):
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         )
 
-        other_joined_event = asyncio.Event()
-        participant_name = ''
-
-        async def say_hello():
-            nonlocal tts
-            nonlocal participant_name
-
-            await other_joined_event.wait()
-            await tts.say(
-                "Hello there, " + participant_name + "!",
-                transport.send_queue,
-            )
-            await transport.stop_when_done()
+        pipeline = Pipeline([tts])
 
         # Register an event handler so we can play the audio when the participant joins.
         @transport.event_handler("on_participant_joined")
@@ -48,11 +38,10 @@ async def main(room_url):
             if participant["info"]["isLocal"]:
                 return
 
-            nonlocal participant_name
             participant_name = participant["info"]["userName"] or ''
-            other_joined_event.set()
+            await pipeline.queue_frames([TextFrame("Hello there, " + participant_name + "!"), EndFrame()])
 
-        await asyncio.gather(transport.run(), say_hello())
+        await transport.run(pipeline)
         del tts
 
 

@@ -49,7 +49,7 @@ async def main(room_url: str, token):
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            await tts.say("Hi, I'm listening!", transport.send_queue)
+            await transport.say("Hi, I'm listening!", tts)
 
         async def run_conversation():
             messages = [

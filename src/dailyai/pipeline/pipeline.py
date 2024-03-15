@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, AsyncIterable, Iterable, List
 from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import EndPipeFrame, EndFrame, Frame
@@ -17,17 +17,17 @@ class Pipeline:
         self,
         processors: List[FrameProcessor],
         source: asyncio.Queue | None = None,
-        sink: asyncio.Queue[Frame] | None = None,
+        sink: asyncio.Queue[Frame] | None = None
     ):
-        """Create a new pipeline. By default neither the source nor sink
-        queues are set, so you'll need to pass them to this constructor or
-        call set_source and set_sink before using the pipeline. Note that
-        the transport's run_*_pipeline methods will set the source and sink
-        queues on the pipeline for you.
+        """Create a new pipeline. By default we create the sink and source queues
+        if they're not provided, but these can be overridden to point to other
+        queues. If this pipeline is run by a transport, its sink and source queues
+        will be overridden.
         """
-        self.processors = processors
-        self.source: asyncio.Queue[Frame] | None = source
-        self.sink: asyncio.Queue[Frame] | None = sink
+        self.processors: List[FrameProcessor] = processors
+
+        self.source: asyncio.Queue[Frame] = source or asyncio.Queue()
+        self.sink: asyncio.Queue[Frame] = sink or asyncio.Queue()
 
     def set_source(self, source: asyncio.Queue[Frame]):
         """Set the source queue for this pipeline. Frames from this queue
@@ -44,21 +44,24 @@ class Pipeline:
         """Convenience function to get the next frame from the source queue. This
         lets us consistently have an AsyncGenerator yield frames, from either the
         source queue or a frame_processor."""
-        if self.source is None:
-            raise ValueError("Source queue not set")
+
         yield await self.source.get()
 
-    async def run_pipeline_recursively(
-        self, initial_frame: Frame, processors: List[FrameProcessor]
-    ) -> AsyncGenerator[Frame, None]:
-        if processors:
-            async for frame in processors[0].process_frame(initial_frame):
-                async for final_frame in self.run_pipeline_recursively(
-                    frame, processors[1:]
-                ):
-                    yield final_frame
+    async def queue_frames(
+        self,
+        frames: Iterable[Frame] | AsyncIterable[Frame],
+    ) -> None:
+        """Insert frames directly into a pipeline. This is typically used inside a transport
+        participant_joined callback to prompt a bot to start a conversation, for example."""
+
+        if isinstance(frames, AsyncIterable):
+            async for frame in frames:
+                await self.source.put(frame)
+        elif isinstance(frames, Iterable):
+            for frame in frames:
+                await self.source.put(frame)
         else:
-            yield initial_frame
+            raise Exception("Frames must be an iterable or async iterable")
 
     async def run_pipeline(self):
         """Run the pipeline. Take each frame from the source queue, pass it to
@@ -73,13 +76,10 @@ class Pipeline:
         if it's not the last frame yielded by the last frame_processor in the pipeline..
         """
 
-        if self.source is None or self.sink is None:
-            raise ValueError("Source or sink queue not set")
-
         try:
             while True:
                 initial_frame = await self.source.get()
-                async for frame in self.run_pipeline_recursively(
+                async for frame in self._run_pipeline_recursively(
                     initial_frame, self.processors
                 ):
                     await self.sink.put(frame)
@@ -94,11 +94,17 @@ class Pipeline:
                 await processor.interrupted()
             pass
 
-    async def queue_frames(self, frames: Frame | List[Frame]):
-        """Insert frames directly into a pipeline. This is typically used inside a transport
-        participant_joined callback to prompt a bot to start a conversation, for example.
-        """
-        if not isinstance(frames, List):
-            frames = [frames]
-        for f in frames:
-            await self.source.put(f)
+    async def _run_pipeline_recursively(
+        self, initial_frame: Frame, processors: List[FrameProcessor]
+    ) -> AsyncGenerator[Frame, None]:
+        """Internal function to add frames to the pipeline as they're yielded
+        by each processor."""
+        if processors:
+            async for frame in processors[0].process_frame(initial_frame):
+                async for final_frame in self._run_pipeline_recursively(
+                    frame, processors[1:]
+                ):
+                    yield final_frame
+        else:
+            yield initial_frame
+

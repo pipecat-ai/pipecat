@@ -12,7 +12,7 @@ class SimpleAIService(AIService):
 
 
 class TestBaseAIService(unittest.IsolatedAsyncioTestCase):
-    async def test_async_input(self):
+    async def test_simple_processing(self):
         service = SimpleAIService()
 
         input_frames = [
@@ -20,28 +20,10 @@ class TestBaseAIService(unittest.IsolatedAsyncioTestCase):
             EndFrame()
         ]
 
-        async def iterate_frames() -> AsyncGenerator[Frame, None]:
-            for frame in input_frames:
-                yield frame
-
         output_frames = []
-        async for frame in service.run(iterate_frames()):
-            output_frames.append(frame)
-
-        self.assertEqual(input_frames, output_frames)
-
-    async def test_nonasync_input(self):
-        service = SimpleAIService()
-
-        input_frames = [TextFrame("hello"), EndFrame()]
-
-        def iterate_frames() -> Generator[Frame, None, None]:
-            for frame in input_frames:
-                yield frame
-
-        output_frames = []
-        async for frame in service.run(iterate_frames()):
-            output_frames.append(frame)
+        for input_frame in input_frames:
+            async for output_frame in service.process_frame(input_frame):
+                output_frames.append(output_frame)
 
         self.assertEqual(input_frames, output_frames)
 

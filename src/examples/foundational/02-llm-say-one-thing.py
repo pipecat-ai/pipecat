@@ -4,7 +4,8 @@ import logging
 
 import aiohttp
 
-from dailyai.pipeline.frames import LLMMessagesQueueFrame
+from dailyai.pipeline.frames import EndFrame, LLMMessagesQueueFrame
+from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.open_ai_services import OpenAILLMService
@@ -42,20 +43,13 @@ async def main(room_url):
             }
         ]
 
-        other_joined_event = asyncio.Event()
-        async def speak_from_llm():
-            await other_joined_event.wait()
-            await tts.run_to_queue(
-                transport.send_queue,
-                llm.run([LLMMessagesQueueFrame(messages)])
-            )
-            await transport.stop_when_done()
+        pipeline= Pipeline([llm, tts])
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            other_joined_event.set()
+            await pipeline.queue_frames([LLMMessagesQueueFrame(messages), EndFrame()])
 
-        await asyncio.gather(transport.run(), speak_from_llm())
+        await transport.run(pipeline)
 
 
 if __name__ == "__main__":
