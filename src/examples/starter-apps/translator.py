@@ -24,6 +24,11 @@ logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
+"""
+This example looks a bit different than the chatbot example, because it isn't waiting on the user to stop talking to start translating.
+It also isn't saving what the user or bot says into the context object for use in subsequent interactions.
+"""
+
 
 # We need to use a custom service here to yield LLM frames without saving any context
 class TranslationProcessor(FrameProcessor):
