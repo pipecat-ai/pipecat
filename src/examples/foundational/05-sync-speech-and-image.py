@@ -89,8 +89,28 @@ async def main(room_url):
             key_secret=os.getenv("FAL_KEY_SECRET"),
         )
 
-        source_queue = asyncio.Queue()
+        gated_aggregator = GatedAggregator(
+            gate_open_fn=lambda frame: isinstance(frame, ImageFrame),
+            gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartFrame),
+            start_open=False,
+        )
 
+        sentence_aggregator = SentenceAggregator()
+        month_prepender = MonthPrepender()
+        llm_full_response_aggregator = LLMFullResponseAggregator()
+
+        pipeline = Pipeline(
+            processors=[
+                llm,
+                sentence_aggregator,
+                ParallelPipeline(
+                    [[month_prepender, tts], [llm_full_response_aggregator, imagegen]]
+                ),
+                gated_aggregator,
+            ],
+        )
+
+        frames = []
         for month in [
             "January",
             "February",
@@ -111,47 +131,13 @@ async def main(room_url):
                     "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
                 }
             ]
-            await source_queue.put(MonthFrame(month))
-            await source_queue.put(LLMMessagesQueueFrame(messages))
+            frames.append(MonthFrame(month))
+            frames.append(LLMMessagesQueueFrame(messages))
 
-        await source_queue.put(EndFrame())
+        frames.append(EndFrame())
+        await pipeline.queue_frames(frames)
 
-        gated_aggregator = GatedAggregator(
-            gate_open_fn=lambda frame: isinstance(frame, ImageFrame),
-            gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartFrame),
-            start_open=False,
-        )
-
-        sentence_aggregator = SentenceAggregator()
-        month_prepender = MonthPrepender()
-        llm_full_response_aggregator = LLMFullResponseAggregator()
-
-        pipeline = Pipeline(
-            source=source_queue,
-            sink=transport.send_queue,
-            processors=[
-                llm,
-                sentence_aggregator,
-                ParallelPipeline(
-                    [[month_prepender, tts], [llm_full_response_aggregator, imagegen]]
-                ),
-                gated_aggregator,
-            ],
-        )
-        pipeline_task = pipeline.run_pipeline()
-
-        other_joined = asyncio.Event()
-
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
-            other_joined.set()
-
-        async def show_calendar():
-            await other_joined.wait()
-            await pipeline_task
-            await transport.stop_when_done()
-
-        await asyncio.gather(transport.run(), show_calendar())
+        await transport.run(pipeline, override_pipeline_source_queue=False)
 
 
 if __name__ == "__main__":

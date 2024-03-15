@@ -20,11 +20,12 @@ from dailyai.pipeline.frames import (
     PipelineStartedFrame,
     SpriteFrame,
     StartFrame,
-    TranscriptionQueueFrame,
+    TextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from dailyai.pipeline.pipeline import Pipeline
+from dailyai.services.ai_services import TTSService
 
 torch.set_num_threads(1)
 
@@ -125,7 +126,7 @@ class BaseTransportService:
 
         self._logger: logging.Logger = logging.getLogger()
 
-    async def run(self):
+    async def run(self, pipeline:Pipeline | None=None, override_pipeline_source_queue=True):
         self._prerun()
 
         async_output_queue_marshal_task = asyncio.create_task(self._marshal_frames())
@@ -148,6 +149,12 @@ class BaseTransportService:
             self._vad_thread = threading.Thread(target=self._vad, daemon=True)
             self._vad_thread.start()
 
+        pipeline_task = None
+        if pipeline:
+            pipeline_task = asyncio.create_task(
+                self.run_pipeline(pipeline, override_pipeline_source_queue)
+            )
+
         try:
             while time.time() < self._expiration and not self._stop_threads.is_set():
                 await asyncio.sleep(1)
@@ -160,9 +167,12 @@ class BaseTransportService:
 
         self._stop_threads.set()
 
+        if pipeline_task:
+            pipeline_task.cancel()
+
         await self.send_queue.put(EndFrame())
+
         await async_output_queue_marshal_task
-        await self.send_queue.join()
         self._frame_consumer_thread.join()
 
         if self._speaker_enabled:
@@ -171,9 +181,10 @@ class BaseTransportService:
         if self._vad_enabled:
             self._vad_thread.join()
 
-    async def run_uninterruptible_pipeline(self, pipeline: Pipeline):
+    async def run_pipeline(self, pipeline:Pipeline, override_pipeline_source_queue=True):
         pipeline.set_sink(self.send_queue)
-        pipeline.set_source(self.receive_queue)
+        if override_pipeline_source_queue:
+            pipeline.set_source(self.receive_queue)
         await pipeline.run_pipeline()
 
     async def run_interruptible_pipeline(
@@ -231,6 +242,11 @@ class BaseTransportService:
                 break
 
         await asyncio.gather(pipeline_task, post_process_task)
+
+    async def say(self, text:str, tts:TTSService):
+        """Say a phrase. Use with caution; this bypasses any running pipelines."""
+        async for frame in tts.process_frame(TextFrame(text)):
+            await self.send_queue.put(frame)
 
     def _post_run(self):
         # Note that this function must be idempotent! It can be called multiple times
@@ -399,6 +415,7 @@ class BaseTransportService:
                 for frame in frames:
                     if isinstance(frame, EndFrame):
                         self._logger.info("Stopping frame consumer thread")
+                        self._stop_threads.set()
                         self._threadsafe_send_queue.task_done()
                         if self._loop:
                             asyncio.run_coroutine_threadsafe(

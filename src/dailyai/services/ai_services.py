@@ -8,6 +8,7 @@ from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.pipeline.frames import (
     AudioFrame,
     EndFrame,
+    EndPipeFrame,
     ImageFrame,
     LLMMessagesQueueFrame,
     LLMResponseEndFrame,
@@ -20,52 +21,12 @@ from dailyai.pipeline.frames import (
 )
 
 from abc import abstractmethod
-from typing import AsyncGenerator, AsyncIterable, BinaryIO, Iterable, List
+from typing import AsyncGenerator, BinaryIO
 
 
 class AIService(FrameProcessor):
-
     def __init__(self):
         self.logger = logging.getLogger("dailyai")
-
-    def stop(self):
-        pass
-
-    async def run_to_queue(
-        self, queue: asyncio.Queue, frames, add_end_of_stream=False
-    ) -> None:
-        async for frame in self.run(frames):
-            await queue.put(frame)
-
-        if add_end_of_stream:
-            await queue.put(EndFrame())
-
-    async def run(
-        self,
-        frames: Iterable[Frame] | AsyncIterable[Frame] | asyncio.Queue[Frame],
-    ) -> AsyncGenerator[Frame, None]:
-        try:
-            if isinstance(frames, AsyncIterable):
-                async for frame in frames:
-                    async for output_frame in self.process_frame(frame):
-                        yield output_frame
-            elif isinstance(frames, Iterable):
-                for frame in frames:
-                    async for output_frame in self.process_frame(frame):
-                        yield output_frame
-            elif isinstance(frames, asyncio.Queue):
-                while True:
-                    frame = await frames.get()
-                    async for output_frame in self.process_frame(frame):
-                        yield output_frame
-                    if isinstance(frame, EndFrame):
-                        break
-            else:
-                raise Exception("Frames must be an iterable or async iterable")
-        except Exception as e:
-            self.logger.error("Exception occurred while running AI service", e)
-            raise e
-
 
 class LLMService(AIService):
     """This class is a no-op but serves as a base class for LLM services."""
@@ -92,7 +53,7 @@ class TTSService(AIService):
         yield bytes()
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, EndFrame):
+        if isinstance(frame, EndFrame) or isinstance(frame, EndPipeFrame):
             if self.current_sentence:
                 async for audio_chunk in self.run_tts(self.current_sentence):
                     yield AudioFrame(audio_chunk)
@@ -117,12 +78,6 @@ class TTSService(AIService):
 
             # note we pass along the text frame *after* the audio, so the text frame is completed after the audio is processed.
             yield TextFrame(text)
-
-    # Convenience function to send the audio for a sentence to the given queue
-    async def say(self, sentence, queue: asyncio.Queue):
-        await self.run_to_queue(
-            queue, [LLMResponseStartFrame(), TextFrame(sentence), LLMResponseEndFrame()]
-        )
 
 
 class ImageGenService(AIService):
