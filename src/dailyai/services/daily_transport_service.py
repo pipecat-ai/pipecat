@@ -6,8 +6,10 @@ import threading
 import types
 
 from functools import partial
+from typing import Any
 
 from dailyai.pipeline.frames import (
+    ReceivedAppMessageFrame,
     TranscriptionQueueFrame,
 )
 
@@ -124,6 +126,9 @@ class DailyTransportService(BaseTransportService, EventHandler):
     def write_frame_to_mic(self, frame: bytes):
         self.mic.write_frames(frame)
 
+    def send_app_message(self, message: Any, participantId: str | None):
+        self.client.send_app_message(message, participantId)
+
     def read_audio_frames(self, desired_frame_count):
         bytes = self._speaker.read_frames(desired_frame_count)
         return bytes
@@ -219,7 +224,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
         pass
 
     def call_joined(self, join_data, client_error):
-        #self._logger.info(f"Call_joined: {join_data}, {client_error}")
+        # self._logger.info(f"Call_joined: {join_data}, {client_error}")
         pass
 
     def dialout(self, number):
@@ -243,8 +248,13 @@ class DailyTransportService(BaseTransportService, EventHandler):
         if len(self.client.participants()) < self._min_others_count + 1:
             self._stop_threads.set()
 
-    def on_app_message(self, message, sender):
-        pass
+    def on_app_message(self, message:Any, sender:str):
+        if self._loop:
+            frame = ReceivedAppMessageFrame(message, sender)
+            print(frame)
+            asyncio.run_coroutine_threadsafe(
+                self.receive_queue.put(frame), self._loop
+            )
 
     def on_transcription_message(self, message: dict):
         if self._loop:

@@ -8,11 +8,13 @@ import torch
 import queue
 import threading
 import time
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 from enum import Enum
 from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
+    ReceivedAppMessageFrame,
+    SendAppMessageFrame,
     AudioFrame,
     EndFrame,
     ImageFrame,
@@ -317,9 +319,10 @@ class BaseTransportService:
                 self._vad_state == VADState.STARTING
                 and self._vad_starting_count >= self._vad_start_frames
             ):
-                asyncio.run_coroutine_threadsafe(
-                    self.receive_queue.put(UserStartedSpeakingFrame()), self._loop
-                )
+                if self._loop:
+                    asyncio.run_coroutine_threadsafe(
+                        self.receive_queue.put(UserStartedSpeakingFrame()), self._loop
+                    )
                 # self.interrupt()
                 self._vad_state = VADState.SPEAKING
                 self._vad_starting_count = 0
@@ -327,9 +330,10 @@ class BaseTransportService:
                 self._vad_state == VADState.STOPPING
                 and self._vad_stopping_count >= self._vad_stop_frames
             ):
-                asyncio.run_coroutine_threadsafe(
-                    self.receive_queue.put(UserStoppedSpeakingFrame()), self._loop
-                )
+                if self._loop:
+                    asyncio.run_coroutine_threadsafe(
+                        self.receive_queue.put(UserStoppedSpeakingFrame()), self._loop
+                    )
                 self._vad_state = VADState.QUIET
                 self._vad_stopping_count = 0
 
@@ -374,6 +378,10 @@ class BaseTransportService:
 
     def _set_images(self, images: list[bytes], start_frame=0):
         self._images = itertools.cycle(images)
+
+    def send_app_message(self, message: Any, participantId:str|None):
+        """ Child classes should override this to send a custom message to the room. """
+        pass
 
     def _run_camera(self):
         try:
@@ -440,6 +448,8 @@ class BaseTransportService:
                                 self._set_image(frame.image)
                             elif isinstance(frame, SpriteFrame):
                                 self._set_images(frame.images)
+                            elif isinstance(frame, SendAppMessageFrame):
+                                self.send_app_message(frame.message, frame.participantId)
                         elif len(b):
                             self.write_frame_to_mic(bytes(b))
                             b = bytearray()
