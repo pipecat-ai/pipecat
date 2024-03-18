@@ -154,7 +154,7 @@ class BotStoppedSpeakingFrame(Frame):
 
 @dataclass()
 class LLMFunctionStartFrame(Frame):
-    """Emitted when the LLM receives the beginngin of a function call
+    """Emitted when the LLM receives the beginning of a function call
     completion. A frame processor can use this frame to indicate that it should
     start preparing to make a function call, if it can do so in the absence of
     any arguments."""
@@ -163,6 +163,6 @@ class LLMFunctionStartFrame(Frame):
 
 @dataclass()
 class LLMFunctionCallFrame(Frame):
-    """Emitted when the LLM has received an entire function call completions."""
+    """Emitted when the LLM has received an entire function call completion."""
     function_name: str
     arguments: str
