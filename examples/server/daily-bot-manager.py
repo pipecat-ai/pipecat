@@ -5,10 +5,10 @@ import time
 
 from flask import Flask, jsonify, request, redirect
 from flask_cors import CORS
-from examples.server.auth import get_meeting_token
+
+from auth import get_meeting_token
 
 from dotenv import load_dotenv
-
 load_dotenv()
 
 app = Flask(__name__)

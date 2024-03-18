@@ -21,7 +21,10 @@ from dailyai.pipeline.frames import (
 )
 from typing import AsyncGenerator
 
-from examples.support.runner import configure
+from runner import configure
+
+from dotenv import load_dotenv
+load_dotenv()
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
