@@ -13,7 +13,6 @@ from enum import Enum
 from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
-    ReceivedAppMessageFrame,
     SendAppMessageFrame,
     AudioFrame,
     EndFrame,

@@ -109,6 +109,9 @@ class SendAppMessageFrame(Frame):
     message: Any
     participantId: str | None
 
+    def __str__(self):
+        return f"SendAppMessageFrame: participantId: {self.participantId}, message: {self.message}"
+
 
 class UserStartedSpeakingFrame(Frame):
     pass
