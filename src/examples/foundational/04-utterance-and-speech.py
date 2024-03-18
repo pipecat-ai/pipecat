@@ -49,7 +49,8 @@ async def main(room_url: str):
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         )
 
-        messages = [{"role": "system", "content": "tell the user a joke about llamas"}]
+        messages = [{"role": "system",
+                     "content": "tell the user a joke about llamas"}]
 
         # Start a task to run the LLM to create a joke, and convert the LLM output to audio frames. This task
         # will run in parallel with generating and speaking the audio for static text, so there's no delay to
@@ -65,7 +66,8 @@ async def main(room_url: str):
             ]
         )
 
-        merge_pipeline = SequentialMergePipeline([simple_tts_pipeline, llm_pipeline])
+        merge_pipeline = SequentialMergePipeline(
+            [simple_tts_pipeline, llm_pipeline])
 
         await asyncio.gather(
             transport.run(merge_pipeline),

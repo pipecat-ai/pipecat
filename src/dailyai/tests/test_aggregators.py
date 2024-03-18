@@ -45,10 +45,9 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
 
     async def test_gated_accumulator(self):
         gated_aggregator = GatedAggregator(
-            gate_open_fn=lambda frame: isinstance(frame, ImageFrame),
-            gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartFrame),
-            start_open=False,
-        )
+            gate_open_fn=lambda frame: isinstance(
+                frame, ImageFrame), gate_close_fn=lambda frame: isinstance(
+                frame, LLMResponseStartFrame), start_open=False, )
 
         frames = [
             LLMResponseStartFrame(),
@@ -76,12 +75,14 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
 
     async def test_parallel_pipeline(self):
 
-        async def slow_add(sleep_time:float, name:str, x: str):
+        async def slow_add(sleep_time: float, name: str, x: str):
             await asyncio.sleep(sleep_time)
             return ":".join([x, name])
 
-        pipe1_annotation = StatelessTextTransformer(functools.partial(slow_add, 0.1, 'pipe1'))
-        pipe2_annotation = StatelessTextTransformer(functools.partial(slow_add, 0.2, 'pipe2'))
+        pipe1_annotation = StatelessTextTransformer(
+            functools.partial(slow_add, 0.1, 'pipe1'))
+        pipe2_annotation = StatelessTextTransformer(
+            functools.partial(slow_add, 0.2, 'pipe2'))
         sentence_aggregator = SentenceAggregator()
         add_dots = StatelessTextTransformer(lambda x: x + ".")
 

@@ -15,13 +15,15 @@ class LocalTransportService(BaseTransportService):
         self._tk_root = kwargs.get("tk_root") or None
 
         if self._camera_enabled and not self._tk_root:
-            raise ValueError("If camera is enabled, a tkinter root must be provided")
+            raise ValueError(
+                "If camera is enabled, a tkinter root must be provided")
 
         if self._speaker_enabled:
             self._speaker_buffer_pending = bytearray()
 
     async def _write_frame_to_tkinter(self, frame: bytes):
-        data = f"P6 {self._camera_width} {self._camera_height} 255 ".encode() + frame
+        data = f"P6 {self._camera_width} {self._camera_height} 255 ".encode() + \
+            frame
         photo = tk.PhotoImage(
             width=self._camera_width,
             height=self._camera_height,
@@ -29,7 +31,8 @@ class LocalTransportService(BaseTransportService):
             format="PPM")
         self._image_label.config(image=photo)
 
-        # This holds a reference to the photo, preventing it from being garbage collected.
+        # This holds a reference to the photo, preventing it from being garbage
+        # collected.
         self._image_label.image = photo  # type: ignore
 
     def write_frame_to_camera(self, frame: bytes):
@@ -61,8 +64,13 @@ class LocalTransportService(BaseTransportService):
         if self._camera_enabled:
             # Start with a neutral gray background.
             array = np.ones((1024, 1024, 3)) * 128
-            data = f"P5 {1024} {1024} 255 ".encode() + array.astype(np.uint8).tobytes()
-            photo = tk.PhotoImage(width=1024, height=1024, data=data, format="PPM")
+            data = f"P5 {1024} {1024} 255 ".encode(
+            ) + array.astype(np.uint8).tobytes()
+            photo = tk.PhotoImage(
+                width=1024,
+                height=1024,
+                data=data,
+                format="PPM")
             self._image_label = tk.Label(self._tk_root, image=photo)
             self._image_label.pack()
 

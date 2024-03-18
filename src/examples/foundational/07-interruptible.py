@@ -42,8 +42,8 @@ async def main(room_url: str, token):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
-        )
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
+            model="gpt-4-turbo-preview")
 
         pipeline = Pipeline([FrameLogger(), llm, FrameLogger(), tts])
 

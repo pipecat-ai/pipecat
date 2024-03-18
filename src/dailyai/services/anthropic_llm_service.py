@@ -9,7 +9,11 @@ from dailyai.services.ai_services import LLMService
 
 class AnthropicLLMService(LLMService):
 
-    def __init__(self, api_key, model="claude-3-opus-20240229", max_tokens=1024):
+    def __init__(
+            self,
+            api_key,
+            model="claude-3-opus-20240229",
+            max_tokens=1024):
         super().__init__()
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = model

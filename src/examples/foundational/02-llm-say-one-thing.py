@@ -33,17 +33,16 @@ async def main(room_url):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
-        )
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
+            model="gpt-4-turbo-preview")
 
         messages = [
             {
                 "role": "system",
                 "content": "You are an LLM in a WebRTC session, and this is a 'hello world' demo. Say hello to the world.",
-            }
-        ]
+            }]
 
-        pipeline= Pipeline([llm, tts])
+        pipeline = Pipeline([llm, tts])
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):

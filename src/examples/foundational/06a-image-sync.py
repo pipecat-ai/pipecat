@@ -61,8 +61,8 @@ async def main(room_url: str, token):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
-        )
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
+            model="gpt-4-turbo-preview")
 
         img = FalImageGenService(
             image_size="1024x1024",
@@ -97,14 +97,15 @@ async def main(room_url: str, token):
                 },
             ]
 
-            tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
+            tma_in = LLMUserContextAggregator(
+                messages, transport._my_participant_id)
             tma_out = LLMAssistantContextAggregator(
                 messages, transport._my_participant_id
             )
             image_sync_aggregator = ImageSyncAggregator(
-                os.path.join(os.path.dirname(__file__), "assets", "speaking.png"),
-                os.path.join(os.path.dirname(__file__), "assets", "waiting.png"),
-            )
+                os.path.join(
+                    os.path.dirname(__file__), "assets", "speaking.png"), os.path.join(
+                    os.path.dirname(__file__), "assets", "waiting.png"), )
             await tts.run_to_queue(
                 transport.send_queue,
                 image_sync_aggregator.run(

@@ -89,7 +89,8 @@ class Pipeline:
                 ):
                     break
         except asyncio.CancelledError:
-            # this means there's been an interruption, do any cleanup necessary here.
+            # this means there's been an interruption, do any cleanup necessary
+            # here.
             for processor in self.processors:
                 await processor.interrupted()
             pass
@@ -107,4 +108,3 @@ class Pipeline:
                     yield final_frame
         else:
             yield initial_frame
-

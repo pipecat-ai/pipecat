@@ -32,7 +32,8 @@ async def main(room_url):
 
         pipeline = Pipeline([tts])
 
-        # Register an event handler so we can play the audio when the participant joins.
+        # Register an event handler so we can play the audio when the
+        # participant joins.
         @transport.event_handler("on_participant_joined")
         async def on_participant_joined(transport, participant):
             if participant["info"]["isLocal"]:

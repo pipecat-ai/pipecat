@@ -48,7 +48,8 @@ class DailyTransportService(BaseTransportService, EventHandler):
         start_transcription: bool = False,
         **kwargs,
     ):
-        super().__init__(**kwargs)  # This will call BaseTransportService.__init__ method, not EventHandler
+        # This will call BaseTransportService.__init__ method, not EventHandler
+        super().__init__(**kwargs)
 
         self._room_url: str = room_url
         self._bot_name: str = bot_name
@@ -83,9 +84,11 @@ class DailyTransportService(BaseTransportService, EventHandler):
             for handler in self._event_handlers[event_name]:
                 if inspect.iscoroutinefunction(handler):
                     if self._loop:
-                        future = asyncio.run_coroutine_threadsafe(handler(*args, **kwargs), self._loop)
+                        future = asyncio.run_coroutine_threadsafe(
+                            handler(*args, **kwargs), self._loop)
 
-                        # wait for the coroutine to finish. This will also raise any exceptions raised by the coroutine.
+                        # wait for the coroutine to finish. This will also
+                        # raise any exceptions raised by the coroutine.
                         future.result()
                     else:
                         raise Exception(
@@ -98,7 +101,8 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
     def add_event_handler(self, event_name: str, handler):
         if not event_name.startswith("on_"):
-            raise Exception(f"Event handler {event_name} must start with 'on_'")
+            raise Exception(
+                f"Event handler {event_name} must start with 'on_'")
 
         methods = inspect.getmembers(self, predicate=inspect.ismethod)
         if event_name not in [method[0] for method in methods]:
@@ -111,7 +115,8 @@ class DailyTransportService(BaseTransportService, EventHandler):
                     handler, self)]
             setattr(self, event_name, partial(self._patch_method, event_name))
         else:
-            self._event_handlers[event_name].append(types.MethodType(handler, self))
+            self._event_handlers[event_name].append(
+                types.MethodType(handler, self))
 
     def event_handler(self, event_name: str):
         def decorator(handler):
@@ -148,8 +153,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
         if self._camera_enabled:
             self.camera: VirtualCameraDevice = Daily.create_camera_device(
-                "camera", width=self._camera_width, height=self._camera_height, color_format="RGB"
-            )
+                "camera", width=self._camera_width, height=self._camera_height, color_format="RGB")
 
         if self._speaker_enabled or self._vad_enabled:
             self._speaker: VirtualSpeakerDevice = Daily.create_speaker_device(
@@ -249,7 +253,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
         if len(self.client.participants()) < self._min_others_count + 1:
             self._stop_threads.set()
 
-    def on_app_message(self, message:Any, sender:str):
+    def on_app_message(self, message: Any, sender: str):
         if self._loop:
             frame = ReceivedAppMessageFrame(message, sender)
             print(frame)
@@ -265,8 +269,10 @@ class DailyTransportService(BaseTransportService, EventHandler):
             elif "session_id" in message:
                 participantId = message["session_id"]
             if self._my_participant_id and participantId != self._my_participant_id:
-                frame = TranscriptionQueueFrame(message["text"], participantId, message["timestamp"])
-                asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self._loop)
+                frame = TranscriptionQueueFrame(
+                    message["text"], participantId, message["timestamp"])
+                asyncio.run_coroutine_threadsafe(
+                    self.receive_queue.put(frame), self._loop)
 
     def on_transcription_error(self, message):
         self._logger.error(f"Transcription error: {message}")
