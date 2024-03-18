@@ -95,9 +95,22 @@ class OpenAILLMContextFrame(Frame):
     context: OpenAILLMContext
 
 
-class AppMessageQueueFrame(Frame):
+@dataclass()
+class ReceivedAppMessageFrame(Frame):
     message: Any
-    participantId: str
+    sender: str
+
+    def __str__(self):
+        return f"ReceivedAppMessageFrame: sender: {self.sender}, message: {self.message}"
+
+
+@dataclass()
+class SendAppMessageFrame(Frame):
+    message: Any
+    participantId: str | None
+
+    def __str__(self):
+        return f"SendAppMessageFrame: participantId: {self.participantId}, message: {self.message}"
 
 
 class UserStartedSpeakingFrame(Frame):
