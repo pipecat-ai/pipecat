@@ -57,7 +57,8 @@ class ResponseAggregator(FrameProcessor):
             # Sometimes VAD triggers quickly on and off. If we don't get any transcription,
             # it creates empty LLM message queue frames
             if len(self.aggregation) > 0:
-                self.messages.append({"role": self._role, "content": self.aggregation})
+                self.messages.append(
+                    {"role": self._role, "content": self.aggregation})
                 self.aggregation = ""
                 yield self._end_frame()
                 yield LLMMessagesQueueFrame(self.messages)
@@ -110,7 +111,8 @@ class LLMContextAggregator(AIService):
         self.pass_through = pass_through
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        # We don't do anything with non-text frames, pass it along to next in the pipeline.
+        # We don't do anything with non-text frames, pass it along to next in
+        # the pipeline.
         if not isinstance(frame, TextFrame):
             yield frame
             return
@@ -132,7 +134,8 @@ class LLMContextAggregator(AIService):
             # though we check it above
             self.sentence += frame.text
             if self.sentence.endswith((".", "?", "!")):
-                self.messages.append({"role": self.role, "content": self.sentence})
+                self.messages.append(
+                    {"role": self.role, "content": self.sentence})
                 self.sentence = ""
                 yield LLMMessagesQueueFrame(self.messages)
         else:
@@ -144,17 +147,24 @@ class LLMContextAggregator(AIService):
 
 class LLMUserContextAggregator(LLMContextAggregator):
     def __init__(
-        self, messages: list[dict], bot_participant_id=None, complete_sentences=True
-    ):
+            self,
+            messages: list[dict],
+            bot_participant_id=None,
+            complete_sentences=True):
         super().__init__(
-            messages, "user", bot_participant_id, complete_sentences, pass_through=False
-        )
+            messages,
+            "user",
+            bot_participant_id,
+            complete_sentences,
+            pass_through=False)
 
 
 class LLMAssistantContextAggregator(LLMContextAggregator):
     def __init__(
-        self, messages: list[dict], bot_participant_id=None, complete_sentences=True
-    ):
+            self,
+            messages: list[dict],
+            bot_participant_id=None,
+            complete_sentences=True):
         super().__init__(
             messages,
             "assistant",
@@ -328,7 +338,8 @@ class ParallelPipeline(FrameProcessor):
                 continue
             seen_ids.add(id(frame))
 
-            # Skip passing along EndParallelPipeQueueFrame, because we use them for our own flow control.
+            # Skip passing along EndParallelPipeQueueFrame, because we use them
+            # for our own flow control.
             if not isinstance(frame, EndPipeFrame):
                 yield frame
 

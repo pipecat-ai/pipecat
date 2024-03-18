@@ -110,7 +110,8 @@ class BaseOpenAILLMService(LLMService):
                     yield LLMFunctionStartFrame(function_name=tool_call.function.name)
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments and
-                    # yield a complete LLMFunctionCallFrame after run_llm_async completes
+                    # yield a complete LLMFunctionCallFrame after run_llm_async
+                    # completes
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
                 yield TextFrame(chunk.choices[0].delta.content)

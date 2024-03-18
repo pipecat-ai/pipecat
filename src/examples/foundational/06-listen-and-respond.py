@@ -41,8 +41,8 @@ async def main(room_url: str, token):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
-        )
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
+            model="gpt-4-turbo-preview")
         fl = FrameLogger("Inner")
         fl2 = FrameLogger("Outer")
         messages = [
@@ -52,7 +52,8 @@ async def main(room_url: str, token):
             },
         ]
 
-        tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
+        tma_in = LLMUserContextAggregator(
+            messages, transport._my_participant_id)
         tma_out = LLMAssistantContextAggregator(
             messages, transport._my_participant_id
         )
@@ -70,7 +71,8 @@ async def main(room_url: str, token):
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
             # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+            messages.append(
+                {"role": "system", "content": "Please introduce yourself to the user."})
             await pipeline.queue_frames([LLMMessagesQueueFrame(messages)])
 
         transport.transcription_settings["extra"]["endpointing"] = True

@@ -13,7 +13,7 @@ class ControlFrame(Frame):
     # Control frames should contain no instance data, so
     # equality is based solely on the class.
     def __eq__(self, other):
-        return type(other) == self.__class__
+        return isinstance(other, self.__class__)
 
 
 class StartFrame(ControlFrame):

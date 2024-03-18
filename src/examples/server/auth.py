@@ -24,7 +24,8 @@ def get_meeting_token(room_name, daily_api_key, token_expiry):
                 'is_owner': True,
                 'exp': token_expiry}})
     if res.status_code != 200:
-        return jsonify({'error': 'Unable to create meeting token', 'detail': res.text}), 500
+        return jsonify(
+            {'error': 'Unable to create meeting token', 'detail': res.text}), 500
     meeting_token = res.json()['token']
     return meeting_token
 

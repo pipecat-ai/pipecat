@@ -39,9 +39,8 @@ async def main():
         )
         image_task = asyncio.create_task(
             imagegen.run_to_queue(
-                transport.send_queue, [TextFrame("a cat in the style of picasso")]
-            )
-        )
+                transport.send_queue, [
+                    TextFrame("a cat in the style of picasso")]))
 
         async def run_tk():
             while not transport._stop_threads.is_set():

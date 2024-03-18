@@ -56,7 +56,8 @@ talking_list = [sprites["sc-default.png"], sprites["sc-talk.png"]]
 talking = [random.choice(talking_list) for x in range(30)]
 talking_frame = SpriteFrame(images=talking)
 
-# TODO: Support "thinking" as soon as we get a valid transcript, while LLM is processing
+# TODO: Support "thinking" as soon as we get a valid transcript, while LLM
+# is processing
 thinking_list = [
     sprites["sc-think-1.png"],
     sprites["sc-think-2.png"],
@@ -130,8 +131,8 @@ async def main(room_url: str, token):
         transport._camera_height = 1280
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
-        )
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
+            model="gpt-4-turbo-preview")
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -155,7 +156,8 @@ async def main(room_url: str, token):
                 },
             ]
 
-            tma_in = LLMUserContextAggregator(messages, transport._my_participant_id)
+            tma_in = LLMUserContextAggregator(
+                messages, transport._my_participant_id)
             tma_out = LLMAssistantContextAggregator(
                 messages, transport._my_participant_id
             )

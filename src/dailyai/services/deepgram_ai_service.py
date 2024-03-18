@@ -25,7 +25,9 @@ class DeepgramAIService(TTSService):
         self.logger.info(f"Running deepgram tts for {sentence}")
         base_url = "https://api.beta.deepgram.com/v1/speak"
         request_url = f"{base_url}?model={self._voice}&encoding=linear16&container=none&sample_rate={self._sample_rate}"
-        headers = {"authorization": f"token {self._api_key}", "Content-Type": "application/json"}
+        headers = {
+            "authorization": f"token {self._api_key}",
+            "Content-Type": "application/json"}
         data = {"text": sentence}
 
         async with self._aiohttp_session.post(

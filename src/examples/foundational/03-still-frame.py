@@ -40,7 +40,8 @@ async def main(room_url):
         async def on_first_other_participant_joined(transport):
             # Note that we do not put an EndFrame() item in the pipeline for this demo.
             # This means that the bot will stay in the channel until it times out.
-            # An EndFrame() in the pipeline would cause the transport to shut down.
+            # An EndFrame() in the pipeline would cause the transport to shut
+            # down.
             await pipeline.queue_frames(
                 [TextFrame("a cat in the style of picasso")]
             )

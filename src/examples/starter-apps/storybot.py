@@ -146,7 +146,8 @@ class StoryProcessor(FrameProcessor):
                     self._story.append(self._text)
                     yield StoryPageFrame(self._text)
             else:
-                # After the prompt thing, we'll catch an LLM end to get the last bit
+                # After the prompt thing, we'll catch an LLM end to get the
+                # last bit
                 pass
         elif isinstance(frame, LLMResponseEndFrame):
             yield ImageFrame(None, images["grandma-writing.png"])
@@ -251,7 +252,8 @@ async def main(room_url: str, token):
                 }
             ]
             lca = LLMAssistantContextAggregator(messages)
-            local_pipeline = Pipeline([llm, lca, tts], sink=transport.send_queue)
+            local_pipeline = Pipeline(
+                [llm, lca, tts], sink=transport.send_queue)
             await local_pipeline.queue_frames(
                 [
                     ImageFrame(None, images["grandma-listening.png"]),

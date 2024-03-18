@@ -69,7 +69,10 @@ class OpenAIContextAggregator(FrameProcessor):
         else:
             yield frame
 
-    def string_aggregator(self, frame: Frame, aggregation: str | None) -> str | None:
+    def string_aggregator(
+            self,
+            frame: Frame,
+            aggregation: str | None) -> str | None:
         if not isinstance(frame, TextFrame):
             raise TypeError(
                 "Frame must be a TextFrame instance to be aggregated by a string aggregator."
@@ -94,7 +97,7 @@ class OpenAIUserContextAggregator(OpenAIContextAggregator):
 
 class OpenAIAssistantContextAggregator(OpenAIContextAggregator):
 
-    def __init__(self, context:OpenAILLMContext):
+    def __init__(self, context: OpenAILLMContext):
         super().__init__(
             context,
             aggregator=self.string_aggregator,
