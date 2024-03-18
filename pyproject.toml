@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dailyai"
-version = "0.0.3"
+version = "0.0.3.1"
 description = "An open source framework for real-time, multi-modal, conversational AI applications"
 license = { text = "BSD 2-Clause License" }
 readme = "README.md"
@@ -21,6 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "aiohttp",
+    "anthropic",
     "azure-cognitiveservices-speech",
     "daily-python",
     "fal",
