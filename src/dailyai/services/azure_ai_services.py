@@ -44,8 +44,7 @@ class AzureTTSService(TTSService):
             "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>"
             "<prosody rate='1.05'>"
             f"{sentence}"
-            "</prosody></mstts:express-as></voice></speak> "
-        )
+            "</prosody></mstts:express-as></voice></speak> ")
         result = await asyncio.to_thread(self.speech_synthesizer.speak_ssml, (ssml))
         self.logger.info("Got azure tts result")
         if result.reason == ResultReason.SynthesizingAudioCompleted:
@@ -55,16 +54,22 @@ class AzureTTSService(TTSService):
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details
             self.logger.info(
-                "Speech synthesis canceled: {}".format(cancellation_details.reason)
-            )
+                "Speech synthesis canceled: {}".format(
+                    cancellation_details.reason))
             if cancellation_details.reason == CancellationReason.Error:
                 self.logger.info(
-                    "Error details: {}".format(cancellation_details.error_details)
-                )
+                    "Error details: {}".format(
+                        cancellation_details.error_details))
 
 
 class AzureLLMService(BaseOpenAILLMService):
-    def __init__(self, *, api_key, endpoint, api_version="2023-12-01-preview", model):
+    def __init__(
+            self,
+            *,
+            api_key,
+            endpoint,
+            api_version="2023-12-01-preview",
+            model):
         self._endpoint = endpoint
         self._api_version = api_version
 
@@ -101,7 +106,9 @@ class AzureImageGenServiceREST(ImageGenService):
 
     async def run_image_gen(self, sentence) -> tuple[str, bytes]:
         url = f"{self._azure_endpoint}openai/images/generations:submit?api-version={self._api_version}"
-        headers = {"api-key": self._api_key, "Content-Type": "application/json"}
+        headers = {
+            "api-key": self._api_key,
+            "Content-Type": "application/json"}
         body = {
             # Enter your prompt text here
             "prompt": sentence,
@@ -112,7 +119,8 @@ class AzureImageGenServiceREST(ImageGenService):
             url, headers=headers, json=body
         ) as submission:
             # We never get past this line, because this header isn't
-            # defined on a 429 response, but something is eating our exceptions!
+            # defined on a 429 response, but something is eating our
+            # exceptions!
             operation_location = submission.headers["operation-location"]
             status = ""
             attempts_left = 120
@@ -130,8 +138,7 @@ class AzureImageGenServiceREST(ImageGenService):
                 status = json_response["status"]
 
             image_url = (
-                json_response["result"]["data"][0]["url"] if json_response else None
-            )
+                json_response["result"]["data"][0]["url"] if json_response else None)
             if not image_url:
                 raise Exception("Image generation failed")
             # Load the image from the url

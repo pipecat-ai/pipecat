@@ -18,7 +18,7 @@ if __name__ == "__main__":
         tools = [
             ChatCompletionToolParam(
                 type="function",
-                function= {
+                function={
                     "name": "get_current_weather",
                     "description": "Get the current weather",
                     "parameters": {
@@ -30,15 +30,17 @@ if __name__ == "__main__":
                             },
                             "format": {
                                 "type": "string",
-                                "enum": ["celsius", "fahrenheit"],
+                                "enum": [
+                                    "celsius",
+                                    "fahrenheit"],
                                 "description": "The temperature unit to use. Infer this from the users location.",
                             },
                         },
-                        "required": ["location", "format"],
+                        "required": [
+                            "location",
+                            "format"],
                     },
-                }
-            )
-        ]
+                })]
 
         api_key = os.getenv("OPENAI_API_KEY")
 
@@ -70,8 +72,7 @@ if __name__ == "__main__":
         )
         context = OpenAILLMContext()
         message: ChatCompletionSystemMessageParam = ChatCompletionSystemMessageParam(
-            content="Please tell the world hello.", name="system", role="system"
-        )
+            content="Please tell the world hello.", name="system", role="system")
         context.add_message(message)
         frame = OpenAILLMContextFrame(context)
         async for s in llm.process_frame(frame):

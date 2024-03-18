@@ -61,161 +61,101 @@ for file in sound_files:
         sounds[file] = audio_file.readframes(-1)
 
 
-steps = [
-    {
-        "prompt": "Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday, including the year. When they answer with their birthday, call the verify_birthday function.",
-        "run_async": False,
-        "failed": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function.",
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "verify_birthday",
-                    "description": "Use this function to verify the user has provided their correct birthday.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "birthday": {
-                                "type": "string",
-                                "description": "The user's birthdate, including the year. The user can provide it in any format, but convert it to YYYY-MM-DD format to call this function.",
-                            }
-                        },
-                    },
-                },
-            }
-        ],
-    },
-    {
-        "prompt": "Next, thank the user for confirming their identity, then ask the user to list their current prescriptions. Each prescription needs to have a medication name and a dosage. Do not call the list_prescriptions function with any unknown dosages.",
-        "run_async": True,
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_prescriptions",
-                    "description": "Once the user has provided a list of their prescription medications, call this function.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "prescriptions": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "medication": {
-                                            "type": "string",
-                                            "description": "The medication's name",
-                                        },
-                                        "dosage": {
-                                            "type": "string",
-                                            "description": "The prescription's dosage",
-                                        },
-                                    },
-                                },
-                            }
-                        },
-                    },
-                },
-            }
-        ],
-    },
-    {
-        "prompt": "Next, ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function.",
-        "run_async": True,
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_allergies",
-                    "description": "Once the user has provided a list of their allergies, call this function.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "allergies": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {
-                                            "type": "string",
-                                            "description": "What the user is allergic to",
-                                        }
-                                    },
-                                },
-                            }
-                        },
-                    },
-                },
-            }
-        ],
-    },
-    {
-        "prompt": "Now ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function.",
-        "run_async": True,
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_conditions",
-                    "description": "Once the user has provided a list of their medical conditions, call this function.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "conditions": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {
-                                            "type": "string",
-                                            "description": "The user's medical condition",
-                                        }
-                                    },
-                                },
-                            }
-                        },
-                    },
-                },
-            },
-        ],
-    },
-    {
-        "prompt": "Finally, ask the user the reason for their doctor visit today. Once they answer, call the list_visit_reasons function.",
-        "run_async": True,
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "list_visit_reasons",
-                    "description": "Once the user has provided a list of the reasons they are visiting a doctor today, call this function.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "visit_reasons": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {
-                                            "type": "string",
-                                            "description": "The user's reason for visiting the doctor",
-                                        }
-                                    },
-                                },
-                            }
-                        },
-                    },
-                },
-            }
-        ],
-    },
-    {
-        "prompt": "Now, thank the user and end the conversation.",
-        "run_async": True,
-        "tools": [],
-    },
-    {"prompt": "", "run_async": True, "tools": []},
-]
+steps = [{"prompt": "Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday, including the year. When they answer with their birthday, call the verify_birthday function.",
+          "run_async": False,
+          "failed": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function.",
+          "tools": [{"type": "function",
+                     "function": {"name": "verify_birthday",
+                                  "description": "Use this function to verify the user has provided their correct birthday.",
+                                  "parameters": {"type": "object",
+                                                 "properties": {"birthday": {"type": "string",
+                                                                             "description": "The user's birthdate, including the year. The user can provide it in any format, but convert it to YYYY-MM-DD format to call this function.",
+                                                                             }},
+                                                 },
+                                  },
+                     }],
+          },
+         {"prompt": "Next, thank the user for confirming their identity, then ask the user to list their current prescriptions. Each prescription needs to have a medication name and a dosage. Do not call the list_prescriptions function with any unknown dosages.",
+          "run_async": True,
+          "tools": [{"type": "function",
+                     "function": {"name": "list_prescriptions",
+                                  "description": "Once the user has provided a list of their prescription medications, call this function.",
+                                  "parameters": {"type": "object",
+                                                 "properties": {"prescriptions": {"type": "array",
+                                                                                  "items": {"type": "object",
+                                                                                            "properties": {"medication": {"type": "string",
+                                                                                                                          "description": "The medication's name",
+                                                                                                                          },
+                                                                                                           "dosage": {"type": "string",
+                                                                                                                      "description": "The prescription's dosage",
+                                                                                                                      },
+                                                                                                           },
+                                                                                            },
+                                                                                  }},
+                                                 },
+                                  },
+                     }],
+          },
+         {"prompt": "Next, ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function.",
+          "run_async": True,
+          "tools": [{"type": "function",
+                     "function": {"name": "list_allergies",
+                                  "description": "Once the user has provided a list of their allergies, call this function.",
+                                  "parameters": {"type": "object",
+                                                 "properties": {"allergies": {"type": "array",
+                                                                              "items": {"type": "object",
+                                                                                        "properties": {"name": {"type": "string",
+                                                                                                                "description": "What the user is allergic to",
+                                                                                                                }},
+                                                                                        },
+                                                                              }},
+                                                 },
+                                  },
+                     }],
+          },
+         {"prompt": "Now ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function.",
+          "run_async": True,
+          "tools": [{"type": "function",
+                     "function": {"name": "list_conditions",
+                                  "description": "Once the user has provided a list of their medical conditions, call this function.",
+                                  "parameters": {"type": "object",
+                                                 "properties": {"conditions": {"type": "array",
+                                                                               "items": {"type": "object",
+                                                                                         "properties": {"name": {"type": "string",
+                                                                                                                 "description": "The user's medical condition",
+                                                                                                                 }},
+                                                                                         },
+                                                                               }},
+                                                 },
+                                  },
+                     },
+                    ],
+          },
+         {"prompt": "Finally, ask the user the reason for their doctor visit today. Once they answer, call the list_visit_reasons function.",
+          "run_async": True,
+          "tools": [{"type": "function",
+                     "function": {"name": "list_visit_reasons",
+                                  "description": "Once the user has provided a list of the reasons they are visiting a doctor today, call this function.",
+                                  "parameters": {"type": "object",
+                                                 "properties": {"visit_reasons": {"type": "array",
+                                                                                  "items": {"type": "object",
+                                                                                            "properties": {"name": {"type": "string",
+                                                                                                                    "description": "The user's reason for visiting the doctor",
+                                                                                                                    }},
+                                                                                            },
+                                                                                  }},
+                                                 },
+                                  },
+                     }],
+          },
+         {"prompt": "Now, thank the user and end the conversation.",
+          "run_async": True,
+          "tools": [],
+          },
+         {"prompt": "",
+          "run_async": True,
+          "tools": []},
+         ]
 current_step = 0
 
 
@@ -299,10 +239,12 @@ class ChecklistProcessor(AIService):
         elif isinstance(frame, LLMFunctionCallFrame):
 
             if frame.function_name and frame.arguments:
-                print(f"--> Calling function: {frame.function_name} with arguments:")
+                print(
+                    f"--> Calling function: {frame.function_name} with arguments:")
                 pretty_json = re.sub(
-                    "\n", "\n    ", json.dumps(json.loads(frame.arguments), indent=2)
-                )
+                    "\n", "\n    ", json.dumps(
+                        json.loads(
+                            frame.arguments), indent=2))
                 print(f"--> {pretty_json}\n")
                 if frame.function_name not in self._functions:
                     raise Exception(

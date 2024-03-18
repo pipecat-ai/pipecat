@@ -28,6 +28,7 @@ class AIService(FrameProcessor):
     def __init__(self):
         self.logger = logging.getLogger("dailyai")
 
+
 class LLMService(AIService):
     """This class is a no-op but serves as a base class for LLM services."""
 
@@ -76,7 +77,8 @@ class TTSService(AIService):
             async for audio_chunk in self.run_tts(text):
                 yield AudioFrame(audio_chunk)
 
-            # note we pass along the text frame *after* the audio, so the text frame is completed after the audio is processed.
+            # note we pass along the text frame *after* the audio, so the text
+            # frame is completed after the audio is processed.
             yield TextFrame(text)
 
 

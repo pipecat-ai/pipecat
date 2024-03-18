@@ -11,8 +11,11 @@ load_dotenv()
 def configure():
     parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")
     parser.add_argument(
-        "-u", "--url", type=str, required=False, help="URL of the Daily room to join"
-    )
+        "-u",
+        "--url",
+        type=str,
+        required=False,
+        help="URL of the Daily room to join")
     parser.add_argument(
         "-k",
         "--apikey",
@@ -33,20 +36,25 @@ def configure():
     if not key:
         raise Exception("No Daily API key specified. use the -k/--apikey option from the command line, or set DAILY_API_KEY in your environment to specify a Daily API key, available from https://dashboard.daily.co/developers.")
 
-    # Create a meeting token for the given room with an expiration 1 hour in the future.
+    # Create a meeting token for the given room with an expiration 1 hour in
+    # the future.
     room_name: str = urllib.parse.urlparse(url).path[1:]
     expiration: float = time.time() + 60 * 60
 
     res: requests.Response = requests.post(
         f"https://api.daily.co/v1/meeting-tokens",
-        headers={"Authorization": f"Bearer {key}"},
+        headers={
+            "Authorization": f"Bearer {key}"},
         json={
-            "properties": {"room_name": room_name, "is_owner": True, "exp": expiration}
-        },
+            "properties": {
+                "room_name": room_name,
+                "is_owner": True,
+                "exp": expiration}},
     )
 
     if res.status_code != 200:
-        raise Exception(f"Failed to create meeting token: {res.status_code} {res.text}")
+        raise Exception(
+            f"Failed to create meeting token: {res.status_code} {res.text}")
 
     token: str = res.json()["token"]
 
