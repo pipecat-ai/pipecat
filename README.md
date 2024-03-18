@@ -7,12 +7,12 @@ Build things like this:
 
 
 
-**`dailyai` started as a toolkit for implementing generative AI voice bots.** Things like personal coaches, meeting assistants, story-telling toys for kids, customer support bots, and snarky social companions. 
+**`dailyai` started as a toolkit for implementing generative AI voice bots.** Things like personal coaches, meeting assistants, story-telling toys for kids, customer support bots, and snarky social companions.
 
 
 In 2023 a *lot* of us got excited about the possibility of having open-ended conversations with LLMs. It became clear pretty quickly that we were all solving the same [low-level problems](https://www.daily.co/blog/how-to-talk-to-an-llm-with-your-voice/):
 - low-latency, reliable audio transport
-- echo cancellation 
+- echo cancellation
 - phrase endpointing (knowing when the bot should respond to human speech)
 - interruptibility
 - writing clean code to stream data through "pipelines" of speech-to-text, LLM inference, and text-to-speech models
@@ -55,11 +55,7 @@ Today, the easiest way to get started with `dailyai` is to use [Daily](https://w
 pip install dailyai
 
 # set up an .env file with API keys
-# for example
-OPENAI_API_KEY=...
-ELEVENLABS_API_KEY=...
-ELEVENLABS_VOICE_ID=...
-DAILY_SAMPLE_ROOM_URL=https://...
+cp dot-env.template .env
 
 # sign up for a free Daily account, if you don't already have one, and
 # join the Daily room URL directly from a browser tab, then run one of the
@@ -103,4 +99,3 @@ If you want to use this package from another directory, you can run:
 ```
 pip install path_to_this_repo
 ```
-
