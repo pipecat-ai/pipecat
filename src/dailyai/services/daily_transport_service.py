@@ -268,11 +268,11 @@ class DailyTransportService(BaseTransportService, EventHandler):
                 frame = TranscriptionQueueFrame(message["text"], participantId, message["timestamp"])
                 asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self._loop)
 
-    def on_transcription_stopped(self, stopped_by, stopped_by_error):
-        pass
-
     def on_transcription_error(self, message):
-        pass
+        self._logger.error(f"Transcription error: {message}")
 
     def on_transcription_started(self, status):
+        pass
+
+    def on_transcription_stopped(self, stopped_by, stopped_by_error):
         pass
