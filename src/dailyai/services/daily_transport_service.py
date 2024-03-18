@@ -219,6 +219,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
     def _post_run(self):
         self.client.leave()
+        self.client.release()
 
     def on_first_other_participant_joined(self):
         pass
