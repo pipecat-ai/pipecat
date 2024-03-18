@@ -25,20 +25,21 @@ from dailyai.services.openai_api_llm_service import BaseOpenAILLMService
 
 
 class AzureTTSService(TTSService):
-    def __init__(self, *, api_key, region):
+    def __init__(self, *, api_key, region, voice="en-US-SaraNeural"):
         super().__init__()
 
         self.speech_config = SpeechConfig(subscription=api_key, region=region)
         self.speech_synthesizer = SpeechSynthesizer(
             speech_config=self.speech_config, audio_config=None
         )
+        self._voice = voice
 
     async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
         self.logger.info("Running azure tts")
         ssml = (
             "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
-            "<voice name='en-US-SaraNeural'>"
+            f"<voice name='{self._voice}'>"
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
             "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>"
             "<prosody rate='1.05'>"
