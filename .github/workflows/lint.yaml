@@ -1,0 +1,32 @@
+name: lint
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "**"
+    paths-ignore:
+      - "docs/**"
+
+concurrency:
+  group: build-lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  autopep8:
+    name: "Formatting lints"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: autopep8
+        id: autopep8
+        uses: peter-evans/autopep8@v2
+        with:
+          args: --exit-code -r -d -a -a src/
+      - name: Fail if autopep8 requires changes
+        if: steps.autopep8.outputs.exit-code == 2
+        run: exit 1
