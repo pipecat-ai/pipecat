@@ -95,7 +95,7 @@ def start_bot(bot_path, args=None):
 
 @app.route("/spin-up-kitty", methods=["GET", "POST"])
 def spin_up_kitty():
-    return start_bot("./src/examples/foundational/10-wake-word.py")
+    return start_bot("./examples/foundational/10-wake-word.py")
 
 
 @app.route("/healthz")

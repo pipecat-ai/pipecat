@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
 ### `configure()`
 
-The `configure()` function comes from `src/examples/foundational/support/runner.py`, and it allows you to configure the examples from the command line directly, or using environment variables:
+The `configure()` function comes from `examples/foundational/support/runner.py`, and it allows you to configure the examples from the command line directly, or using environment variables:
 
 ```bash
 python 01-say-one-thing.py -u https://YOUR_DOMAIN.daily.co/YOUR_ROOM -k YOUR_API_KEY
