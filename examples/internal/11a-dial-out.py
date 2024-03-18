@@ -10,7 +10,10 @@ from dailyai.services.ai_services import AIService, FrameLogger
 from dailyai.pipeline.frames import Frame, AudioFrame, LLMResponseEndFrame, LLMMessagesQueueFrame
 from typing import AsyncGenerator
 
-from examples.support.runner import configure
+from runner import configure
+
+from dotenv import load_dotenv
+load_dotenv()
 
 sounds = {}
 sound_files = [
