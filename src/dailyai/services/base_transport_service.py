@@ -127,12 +127,14 @@ class BaseTransportService:
 
         self._logger: logging.Logger = logging.getLogger()
 
-    async def run(self, pipeline:Pipeline | None=None, override_pipeline_source_queue=True):
+    async def run(self, pipeline: Pipeline | None = None, override_pipeline_source_queue=True):
         self._prerun()
 
-        async_output_queue_marshal_task = asyncio.create_task(self._marshal_frames())
+        async_output_queue_marshal_task = asyncio.create_task(
+            self._marshal_frames())
 
-        self._camera_thread = threading.Thread(target=self._run_camera, daemon=True)
+        self._camera_thread = threading.Thread(
+            target=self._run_camera, daemon=True)
         self._camera_thread.start()
 
         self._frame_consumer_thread = threading.Thread(
@@ -182,7 +184,7 @@ class BaseTransportService:
         if self._vad_enabled:
             self._vad_thread.join()
 
-    async def run_pipeline(self, pipeline:Pipeline, override_pipeline_source_queue=True):
+    async def run_pipeline(self, pipeline: Pipeline, override_pipeline_source_queue=True):
         pipeline.set_sink(self.send_queue)
         if override_pipeline_source_queue:
             pipeline.set_source(self.receive_queue)
@@ -217,7 +219,8 @@ class BaseTransportService:
                     break
 
         if post_processor:
-            post_process_task = asyncio.create_task(post_process(post_processor))
+            post_process_task = asyncio.create_task(
+                post_process(post_processor))
 
         started = False
 
@@ -244,7 +247,7 @@ class BaseTransportService:
 
         await asyncio.gather(pipeline_task, post_process_task)
 
-    async def say(self, text:str, tts:TTSService):
+    async def say(self, text: str, tts: TTSService):
         """Say a phrase. Use with caution; this bypasses any running pipelines."""
         async for frame in tts.process_frame(TextFrame(text)):
             await self.send_queue.put(frame)
@@ -290,7 +293,8 @@ class BaseTransportService:
             audio_chunk = self.read_audio_frames(self._vad_samples)
             audio_int16 = np.frombuffer(audio_chunk, np.int16)
             audio_float32 = int2float(audio_int16)
-            new_confidence = model(torch.from_numpy(audio_float32), 16000).item()
+            new_confidence = model(
+                torch.from_numpy(audio_float32), 16000).item()
             speaking = new_confidence > 0.5
 
             if speaking:
@@ -320,8 +324,8 @@ class BaseTransportService:
             ):
                 if self._loop:
                     asyncio.run_coroutine_threadsafe(
-                        self.receive_queue.put(UserStartedSpeakingFrame()), self._loop
-                    )
+                        self.receive_queue.put(
+                            UserStartedSpeakingFrame()), self._loop)
                 # self.interrupt()
                 self._vad_state = VADState.SPEAKING
                 self._vad_starting_count = 0
@@ -331,8 +335,8 @@ class BaseTransportService:
             ):
                 if self._loop:
                     asyncio.run_coroutine_threadsafe(
-                        self.receive_queue.put(UserStoppedSpeakingFrame()), self._loop
-                    )
+                        self.receive_queue.put(
+                            UserStoppedSpeakingFrame()), self._loop)
                 self._vad_state = VADState.QUIET
                 self._vad_stopping_count = 0
 
@@ -370,7 +374,9 @@ class BaseTransportService:
                     self.receive_queue.put(frame), self._loop
                 )
 
-        asyncio.run_coroutine_threadsafe(self.receive_queue.put(EndFrame()), self._loop)
+        asyncio.run_coroutine_threadsafe(
+            self.receive_queue.put(
+                EndFrame()), self._loop)
 
     def _set_image(self, image: bytes):
         self._images = itertools.cycle([image])
@@ -378,7 +384,7 @@ class BaseTransportService:
     def _set_images(self, images: list[bytes], start_frame=0):
         self._images = itertools.cycle(images)
 
-    def send_app_message(self, message: Any, participantId:str|None):
+    def send_app_message(self, message: Any, participantId: str | None):
         """ Child classes should override this to send a custom message to the room. """
         pass
 
@@ -401,17 +407,18 @@ class BaseTransportService:
         largest_write_size = 8000
         while True:
             try:
-                frames_or_frame: Frame | list[Frame] = self._threadsafe_send_queue.get()
+                frames_or_frame: Frame | list[Frame] = self._threadsafe_send_queue.get(
+                )
                 if (
                     isinstance(frames_or_frame, AudioFrame)
                     and len(frames_or_frame.data) > largest_write_size
                 ):
                     # subdivide large audio frames to enable interruption
                     frames = []
-                    for i in range(0, len(frames_or_frame.data), largest_write_size):
-                        frames.append(
-                            AudioFrame(frames_or_frame.data[i : i + largest_write_size])
-                        )
+                    for i in range(0, len(frames_or_frame.data),
+                                   largest_write_size):
+                        frames.append(AudioFrame(
+                            frames_or_frame.data[i: i + largest_write_size]))
                 elif isinstance(frames_or_frame, Frame):
                     frames: list[Frame] = [frames_or_frame]
                 elif isinstance(frames_or_frame, list):
@@ -430,7 +437,8 @@ class BaseTransportService:
                             )
                         return
 
-                    # if interrupted, we just pull frames off the queue and discard them
+                    # if interrupted, we just pull frames off the queue and
+                    # discard them
                     if not self._is_interrupted.is_set():
                         if frame:
                             if isinstance(frame, AudioFrame):
@@ -441,14 +449,16 @@ class BaseTransportService:
                                     len(b) % smallest_write_size
                                 )
                                 if truncated_length:
-                                    self.write_frame_to_mic(bytes(b[:truncated_length]))
+                                    self.write_frame_to_mic(
+                                        bytes(b[:truncated_length]))
                                     b = b[truncated_length:]
                             elif isinstance(frame, ImageFrame):
                                 self._set_image(frame.image)
                             elif isinstance(frame, SpriteFrame):
                                 self._set_images(frame.images)
                             elif isinstance(frame, SendAppMessageFrame):
-                                self.send_app_message(frame.message, frame.participantId)
+                                self.send_app_message(
+                                    frame.message, frame.participantId)
                         elif len(b):
                             self.write_frame_to_mic(bytes(b))
                             b = bytearray()
@@ -457,7 +467,8 @@ class BaseTransportService:
                         # can cause static in the audio stream.
                         if len(b):
                             truncated_length = len(b) - (len(b) % 160)
-                            self.write_frame_to_mic(bytes(b[:truncated_length]))
+                            self.write_frame_to_mic(
+                                bytes(b[:truncated_length]))
                             b = bytearray()
 
                         if isinstance(frame, StartFrame):
@@ -479,5 +490,6 @@ class BaseTransportService:
 
                 b = bytearray()
             except Exception as e:
-                self._logger.error(f"Exception in frame_consumer: {e}, {len(b)}")
+                self._logger.error(
+                    f"Exception in frame_consumer: {e}, {len(b)}")
                 raise e

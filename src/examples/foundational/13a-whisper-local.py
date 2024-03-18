@@ -57,8 +57,11 @@ async def main(room_url: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
     parser.add_argument(
-        "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
-    )
+        "-u",
+        "--url",
+        type=str,
+        required=True,
+        help="URL of the Daily room to join")
 
     args, unknown = parser.parse_known_args()
     asyncio.run(main(args.url))

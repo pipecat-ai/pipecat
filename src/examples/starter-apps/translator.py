@@ -30,7 +30,8 @@ It also isn't saving what the user or bot says into the context object for use i
 """
 
 
-# We need to use a custom service here to yield LLM frames without saving any context
+# We need to use a custom service here to yield LLM frames without saving
+# any context
 class TranslationProcessor(FrameProcessor):
     def __init__(self, language):
         self._language = language
@@ -68,8 +69,8 @@ async def main(room_url: str, token):
             voice="es-ES-AlvaroNeural",
         )
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
-        )
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
+            model="gpt-4-turbo-preview")
         sa = SentenceAggregator()
         tp = TranslationProcessor("Spanish")
         pipeline = Pipeline([sa, tp, llm, tts])

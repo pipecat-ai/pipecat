@@ -38,8 +38,8 @@ async def main(room_url):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
-        )
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
+            model="gpt-4-turbo-preview")
 
         dalle = FalImageGenService(
             image_size="1024x1024",
@@ -49,7 +49,8 @@ async def main(room_url):
         )
 
         # Get a complete audio chunk from the given text. Splitting this into its own
-        # coroutine lets us ensure proper ordering of the audio chunks on the send queue.
+        # coroutine lets us ensure proper ordering of the audio chunks on the
+        # send queue.
         async def get_all_audio(text):
             all_audio = bytearray()
             async for audio in tts.run_tts(text):
@@ -71,7 +72,8 @@ async def main(room_url):
 
             to_speak = f"{month}: {image_description}"
             audio_task = asyncio.create_task(get_all_audio(to_speak))
-            image_task = asyncio.create_task(dalle.run_image_gen(image_description))
+            image_task = asyncio.create_task(
+                dalle.run_image_gen(image_description))
             (audio, image_data) = await asyncio.gather(audio_task, image_task)
 
             return {
@@ -100,7 +102,8 @@ async def main(room_url):
         async def show_images():
             # This will play the months in the order they're completed. The benefit
             # is we'll have as little delay as possible before the first month, and
-            # likely no delay between months, but the months won't display in order.
+            # likely no delay between months, but the months won't display in
+            # order.
             for month_data_task in asyncio.as_completed(month_tasks):
                 data = await month_data_task
                 if data:
@@ -122,7 +125,9 @@ async def main(room_url):
                 tk_root.update_idletasks()
                 await asyncio.sleep(0.1)
 
-        month_tasks = [asyncio.create_task(get_month_data(month)) for month in months]
+        month_tasks = [
+            asyncio.create_task(
+                get_month_data(month)) for month in months]
 
         await asyncio.gather(transport.run(), show_images(), run_tk())
 
@@ -130,8 +135,11 @@ async def main(room_url):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
     parser.add_argument(
-        "-u", "--url", type=str, required=True, help="URL of the Daily room to join"
-    )
+        "-u",
+        "--url",
+        type=str,
+        required=True,
+        help="URL of the Daily room to join")
 
     args, unknown = parser.parse_known_args()
 

@@ -79,8 +79,8 @@ async def main(room_url):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"), model="gpt-4-turbo-preview"
-        )
+            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
+            model="gpt-4-turbo-preview")
 
         imagegen = FalImageGenService(
             image_size="square_hd",
@@ -90,10 +90,9 @@ async def main(room_url):
         )
 
         gated_aggregator = GatedAggregator(
-            gate_open_fn=lambda frame: isinstance(frame, ImageFrame),
-            gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartFrame),
-            start_open=False,
-        )
+            gate_open_fn=lambda frame: isinstance(
+                frame, ImageFrame), gate_close_fn=lambda frame: isinstance(
+                frame, LLMResponseStartFrame), start_open=False, )
 
         sentence_aggregator = SentenceAggregator()
         month_prepender = MonthPrepender()

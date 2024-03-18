@@ -10,6 +10,7 @@ logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
+
 async def main():
     async with aiohttp.ClientSession() as session:
         meeting_duration_minutes = 1

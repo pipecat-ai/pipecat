@@ -17,7 +17,10 @@ class CloudflareAIService(AIService):
 
     # base endpoint, used by the others
     def run(self, model, input):
-        response = requests.post(f"{self.api_base_url}{model}", headers=self.headers, json=input)
+        response = requests.post(
+            f"{self.api_base_url}{model}",
+            headers=self.headers,
+            json=input)
         return response.json()
 
     # https://developers.cloudflare.com/workers-ai/models/llm/
@@ -41,7 +44,8 @@ class CloudflareAIService(AIService):
 
     # https://developers.cloudflare.com/workers-ai/models/sentiment-analysis/
     def run_text_sentiment(self, sentence):
-        return self.run("@cf/huggingface/distilbert-sst-2-int8", {"text": sentence})
+        return self.run("@cf/huggingface/distilbert-sst-2-int8",
+                        {"text": sentence})
 
     # https://developers.cloudflare.com/workers-ai/models/image-classification/
     def run_image_classification(self, image_url):
