@@ -60,15 +60,15 @@ cp dot-env.template .env
 # sign up for a free Daily account, if you don't already have one, and
 # join the Daily room URL directly from a browser tab, then run one of the
 # samples
-python src/examples/foundational/02-llm-say-one-thing.py
+python examples/foundational/02-llm-say-one-thing.py
 ```
 
 ## Code examples
 
 There are two directories of examples:
 
-- [foundational](https://github.com/daily-co/daily-ai-sdk/tree/main/src/examples/foundational) — demos that build on each other, introducing one or two concepts at a time
-- [starter apps](https://github.com/daily-co/daily-ai-sdk/tree/main/src/examples/starter-apps) — complete applications that you can use as starting points for development
+- [foundational](https://github.com/daily-co/daily-ai-sdk/tree/main/examples/foundational) — demos that build on each other, introducing one or two concepts at a time
+- [starter apps](https://github.com/daily-co/daily-ai-sdk/tree/main/examples/starter-apps) — complete applications that you can use as starting points for development
 
 
 
