@@ -29,25 +29,30 @@ jobs:
       - name: Cache virtual environment
         uses: actions/cache@v3
         with:
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version}}
+          # TODO: we are hashing requirements.txt but that doesn't contain all
+          # our dependencies pinned.
+          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version}}-${{ hashFiles('requirements.txt') }}
           path: .venv
       - name: Install system packages
         run: sudo apt-get install -y portaudio19-dev
       - name: Setup virtual environment
         run: |
           python -m venv .venv
-          source .venv/bin/activate
       - name: Install basic Python dependencies
         run: |
+          source .venv/bin/activate
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Build project
         run: |
+          source .venv/bin/activate
           python -m build
       - name: Install project and other Python dependencies
         run: |
+          source .venv/bin/activate
           pip install --editable .
       - name: Test with pytest
         run: |
+          source .venv/bin/activate
           pip install pytest
           pytest --doctest-modules --ignore-glob="*to_be_updated*" src tests
