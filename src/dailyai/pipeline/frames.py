@@ -191,6 +191,10 @@ class VideoImageFrame(Frame):
     #     return f"{self.__class__.__name__}, participantId: {self.participantId}, image size: {len(self.image)} B"
 
 
+class TelestratorImageFrame(ImageFrame):
+    pass
+
+
 @dataclass()
 class VisionFrame(Frame):
     prompt: str

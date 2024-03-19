@@ -24,7 +24,8 @@ from dailyai.pipeline.frames import (
     TextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
-    RequestVideoImageFrame
+    RequestVideoImageFrame,
+    TelestratorImageFrame
 )
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import TTSService
@@ -456,6 +457,12 @@ class BaseTransportService:
                                     self.write_frame_to_mic(
                                         bytes(b[:truncated_length]))
                                     b = b[truncated_length:]
+                            elif isinstance(frame, TelestratorImageFrame):
+                                self._set_image(frame.image)
+                                asyncio.run_coroutine_threadsafe(
+                                    self.receive_queue.put(frame),
+                                    self._loop,
+                                )
                             elif isinstance(frame, ImageFrame):
                                 self._set_image(frame.image)
                             elif isinstance(frame, SpriteFrame):

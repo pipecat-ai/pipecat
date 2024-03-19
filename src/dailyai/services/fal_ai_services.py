@@ -53,4 +53,7 @@ class FalImageGenService(ImageGenService):
         async with self._aiohttp_session.get(image_url) as response:
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
-            return (image_url, image.tobytes())
+            image_bytes = image.tobytes()
+            print(f"!!! fal image tobytes is:")
+            print(image)
+            return (image_url, image_bytes)

@@ -12,7 +12,8 @@ from typing import Any
 from dailyai.pipeline.frames import (
     ReceivedAppMessageFrame,
     TranscriptionQueueFrame,
-    VideoImageFrame
+    VideoImageFrame,
+    TelestratorImageFrame
 )
 
 from threading import Event
