@@ -6,7 +6,7 @@ Learn about the thinking behind the SDK's design.
 
 ## [Example Code](examples/)
 
-The repo includes several example apps in the `src/examples` directory. The docs explain how they work.
+The repo includes several example apps in the `examples` directory. The docs explain how they work.
 
 ## [API Reference](api/)
 

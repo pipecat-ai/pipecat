@@ -1,12 +1,9 @@
 import time
 import urllib
 
-from dotenv import load_dotenv
 import requests
 from flask import jsonify
 import os
-
-load_dotenv()
 
 
 def get_meeting_token(room_name, daily_api_key, token_expiry):

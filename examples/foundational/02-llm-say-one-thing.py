@@ -10,7 +10,10 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.open_ai_services import OpenAILLMService
 
-from examples.support.runner import configure
+from runner import configure
+
+from dotenv import load_dotenv
+load_dotenv()
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")

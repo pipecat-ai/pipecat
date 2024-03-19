@@ -46,7 +46,7 @@ Currently implemented services:
 
 If you'd like to [implement a service]((https://github.com/daily-co/daily-ai-sdk/tree/main/src/dailyai/services)), we welcome PRs! Our goal is to support lots of services in all of the above categories, plus new categories (like real-time video) as they emerge.
 
-## Step 1: Get started
+## Getting started
 
 Today, the easiest way to get started with `dailyai` is to use [Daily](https://www.daily.co/) as your transport service. This toolkit started life as an internal SDK at Daily and millions of minutes of AI conversation have been served using it and its earlier prototype incarnations. (The [transport base class](https://github.com/daily-co/daily-ai-sdk/blob/main/src/dailyai/services/base_transport_service.py) is easy to extend, though, so feel free to submit PRs if you'd like to implement another transport service.)
 
@@ -56,21 +56,20 @@ pip install dailyai
 
 # set up an .env file with API keys
 cp dot-env.template .env
-
-# sign up for a free Daily account, if you don't already have one, and
-# join the Daily room URL directly from a browser tab, then run one of the
-# samples
-python src/examples/foundational/02-llm-say-one-thing.py
 ```
 
 ## Code examples
 
 There are two directories of examples:
 
-- [foundational](https://github.com/daily-co/daily-ai-sdk/tree/main/src/examples/foundational) — demos that build on each other, introducing one or two concepts at a time
-- [starter apps](https://github.com/daily-co/daily-ai-sdk/tree/main/src/examples/starter-apps) — complete applications that you can use as starting points for development
+- [foundational](https://github.com/daily-co/daily-ai-sdk/tree/main/examples/foundational) — demos that build on each other, introducing one or two concepts at a time
+- [starter apps](https://github.com/daily-co/daily-ai-sdk/tree/main/examples/starter-apps) — complete applications that you can use as starting points for development
 
+To run the example below you to sign up for a [free Daily account](https://dashboard.daily.co/u/signup) (so you can hear the LLM talking) and create a Daily room. After that, join the room's URL directly from a browser tab and run:
 
+```
+python examples/foundational/02-llm-say-one-thing.py
+```
 
 ## Hacking on the framework itself
 

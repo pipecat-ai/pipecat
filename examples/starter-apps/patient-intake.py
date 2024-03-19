@@ -20,7 +20,6 @@ from dailyai.services.openai_llm_context import OpenAILLMContext
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from examples.support.runner import configure
 from dailyai.pipeline.frames import (
     OpenAILLMContextFrame,
     TranscriptionQueueFrame,
@@ -35,6 +34,11 @@ from openai._types import NotGiven, NOT_GIVEN
 from openai.types.chat import (
     ChatCompletionToolParam,
 )
+
+from runner import configure
+
+from dotenv import load_dotenv
+load_dotenv()
 
 logging.basicConfig(format="%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
