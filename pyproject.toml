@@ -45,3 +45,6 @@ Website = "https://daily.co"
 [tool.setuptools.packages.find]
 # All the following settings are optional:
 where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

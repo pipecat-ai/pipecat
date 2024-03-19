@@ -99,6 +99,20 @@ If you want to use this package from another directory, you can run:
 pip install path_to_this_repo
 ```
 
+### Running tests
+
+To run tests you need to install `pytest`:
+
+```
+pip install pytest
+```
+
+Then, from the root directory, run:
+
+```
+pytest --doctest-modules --ignore-glob="*to_be_updated*" src tests
+```
+
 ## Setting up your editor
 
 This project uses strict [PEP 8](https://peps.python.org/pep-0008/) formatting.
