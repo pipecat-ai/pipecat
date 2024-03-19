@@ -5,10 +5,10 @@ import time
 
 from flask import Flask, jsonify, request, redirect
 from flask_cors import CORS
-from examples.server.auth import get_meeting_token
+
+from auth import get_meeting_token
 
 from dotenv import load_dotenv
-
 load_dotenv()
 
 app = Flask(__name__)
@@ -95,7 +95,7 @@ def start_bot(bot_path, args=None):
 
 @app.route("/spin-up-kitty", methods=["GET", "POST"])
 def spin_up_kitty():
-    return start_bot("./src/examples/foundational/10-wake-word.py")
+    return start_bot("./examples/foundational/10-wake-word.py")
 
 
 @app.route("/healthz")

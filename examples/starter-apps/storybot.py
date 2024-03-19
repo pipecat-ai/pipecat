@@ -25,7 +25,6 @@ from dailyai.pipeline.aggregators import (
     UserResponseAggregator,
     LLMResponseAggregator,
 )
-from examples.support.runner import configure
 from dailyai.pipeline.frames import (
     EndPipeFrame,
     LLMMessagesQueueFrame,
@@ -42,6 +41,11 @@ from dailyai.pipeline.frames import (
     UserStoppedSpeakingFrame,
 )
 from dailyai.services.ai_services import FrameLogger, AIService
+
+from runner import configure
+
+from dotenv import load_dotenv
+load_dotenv()
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")

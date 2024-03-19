@@ -4,9 +4,6 @@ import time
 import urllib
 import requests
 
-from dotenv import load_dotenv
-load_dotenv()
-
 
 def configure():
     parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")

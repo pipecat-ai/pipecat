@@ -3,7 +3,11 @@ import logging
 
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.whisper_ai_services import WhisperSTTService
-from examples.support.runner import configure
+
+from runner import configure
+
+from dotenv import load_dotenv
+load_dotenv()
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")

@@ -21,7 +21,11 @@ from dailyai.pipeline.frames import (
     TranscriptionQueueFrame,
 )
 from dailyai.services.ai_services import AIService
-from examples.support.runner import configure
+
+from runner import configure
+
+from dotenv import load_dotenv
+load_dotenv()
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
