@@ -4,7 +4,7 @@ import logging
 import os
 from typing import AsyncGenerator
 
-from dailyai.pipeline.frames import Frame, LLMMessagesQueueFrame
+from dailyai.pipeline.frames import Frame, LLMMessagesQueueFrame, RequestVideoImageFrame, LLMResponseEndFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.services.daily_transport_service import DailyTransportService
@@ -30,7 +30,16 @@ class VideoImageFrameProcessor(FrameProcessor):
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, VideoImageFrame):
-            yield VisionFrame("What is in this image?", frame.image)
+            yield VisionFrame("Describe the image in one sentence.", frame.image)
+        else:
+            yield frame
+
+
+class ImageRefresher(FrameProcessor):
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, LLMResponseEndFrame):
+            yield RequestVideoImageFrame(participantId=None)
+            yield frame
         else:
             yield frame
 
@@ -48,7 +57,7 @@ async def main(room_url: str, token):
             camera_enabled=False,
             vad_enabled=True,
             receive_video=True,
-            receive_video_fps=1/10.0
+            receive_video_fps=0
         )
 
         tts = ElevenLabsTTSService(
@@ -61,30 +70,22 @@ async def main(room_url: str, token):
             api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
             model="gpt-4-turbo-preview")
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
-            },
-        ]
-
-        tma_in = LLMUserContextAggregator(
-            messages, transport._my_participant_id)
-        tma_out = LLMAssistantContextAggregator(
-            messages, transport._my_participant_id
-        )
         vs = OpenAIVisionService(api_key=os.getenv("OPENAI_CHATGPT_API_KEY"))
-
         vifp = VideoImageFrameProcessor()
+        ir = ImageRefresher()
         pipeline = Pipeline(
             processors=[
                 vifp,
                 vs,
                 llm,
                 tts,
-                tma_out,
+                ir,
             ],
         )
+
+        @transport.event_handler("on_first_other_participant_joined")
+        async def on_first_other_participant_joined(transport):
+            await pipeline.queue_frames([RequestVideoImageFrame(participantId=None)])
 
         transport.transcription_settings["extra"]["endpointing"] = True
         transport.transcription_settings["extra"]["punctuate"] = True

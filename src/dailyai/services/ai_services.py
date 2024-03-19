@@ -148,6 +148,7 @@ class VisionService(AIService):
         if isinstance(frame, VisionFrame):
             async for frame in self.run_vision(frame.prompt, frame.image):
                 yield frame
+            yield LLMResponseEndFrame()
         else:
             yield frame
 

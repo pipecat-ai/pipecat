@@ -64,7 +64,6 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
         self._other_participant_has_joined = False
         self._my_participant_id = None
-        self._participant_frame_times = {}
 
         self.transcription_settings = {
             "language": "en",
@@ -230,9 +229,26 @@ class DailyTransportService(BaseTransportService, EventHandler):
         self.client.release()
 
     def _handle_video_frame(self, participant_id, video_frame):
-        if (not participant_id in self._participant_frame_times) or (time.time() > self._participant_frame_times[participant_id] + 1.0/self._receive_video_fps):
-            self._participant_frame_times[participant_id] = time.time()
+        """If receive_video is true, this function is called once for each frame from each participant. We
+         don't need to send every frame to the pipeline, so there are two ways to decide how to send frames:
+         1. Set a greater-than-zero value for receive_video_fps. The transport will track the last send time
+            for each participant and send a new frame when the requested frame rate has elapsed. This
+            guarantees an image every second, for example.
+         2. Set receive_video_fps less than or equal to zero to disable timed frame sending. Then, put a
+            RequestVideoImageFrame in the pipeline to get a new frame for one or all participants. By
+            sending a RequestVideoImageFrame immediately after successfully processing an image, you can
+            ensure you don't end up queueing up frames faster than you can process them.
+            """
+        send_frame = False
+        if not participant_id in self._participant_frame_times:
+            # then it's a new participant; send the first frame
+            send_frame = True
+        elif self._receive_video_fps > 0 and time.time() > self._participant_frame_times[participant_id] + 1.0/self._receive_video_fps:
+            # Then it's an existing participant who is due to send a new frame
+            send_frame = True
 
+        if send_frame:
+            self._participant_frame_times[participant_id] = time.time()
             future = asyncio.run_coroutine_threadsafe(
                 self.receive_queue.put(
                     VideoImageFrame(participant_id, video_frame)), self._loop)

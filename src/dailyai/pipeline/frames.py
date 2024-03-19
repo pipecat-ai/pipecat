@@ -198,3 +198,10 @@ class VisionFrame(Frame):
 
     # def __str__(self):
     #     return f"{self.__class__.__name__}, prompt: {self.prompt}, image size: {len(self.image)} B"
+
+
+@dataclass()
+class RequestVideoImageFrame(Frame):
+    """Send to the transport to request a new video image from a specific participant. Leave participantId
+    empty to request a frame from all participants."""
+    participantId: str | None
