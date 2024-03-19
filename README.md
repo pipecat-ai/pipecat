@@ -116,6 +116,22 @@ You can use [use-package](https://github.com/jwiegley/use-package) to install [p
   (setq py-autopep8-options '("-a" "-a")))
 ```
 
+If you don't have it already, you also need to install [autopep8](https://pypi.org/project/autopep8/):
+
+```
+pip install autopep8
+```
+
+If use install `autopep8` in the `venv` environment described before, you can use [pyvenv-auto](https://github.com/ryotaro612/pyvenv-auto) to automatically load the virtual environment inside Emacs.
+
+```elisp
+(use-package pyvenv-auto
+  :ensure t
+  :defer t
+  :hook ((python-mode . pyvenv-auto-run)))
+
+```
+
 ### Visual Studio Code
 
 Install the
