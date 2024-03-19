@@ -40,4 +40,4 @@ jobs:
       - name: Test with pytest
         run: |
           pip install pytest
-          pytest --doctest-modules --ignore-glob="*to_be_updated*" src/dailyai
+          pytest --doctest-modules --ignore-glob="*to_be_updated*" src tests
