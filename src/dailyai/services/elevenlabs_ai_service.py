@@ -15,18 +15,19 @@ class ElevenLabsTTSService(TTSService):
         *,
         aiohttp_session: aiohttp.ClientSession,
         api_key,
-        voice_id,
+        narrator,
         model="eleven_turbo_v2",
+        aggregate_sentences=True
     ):
-        super().__init__()
+        super().__init__(aggregate_sentences)
 
         self._api_key = api_key
-        self._voice_id = voice_id
+        self._narrator = narrator
         self._aiohttp_session = aiohttp_session
         self._model = model
 
     async def run_tts(self, sentence) -> AsyncGenerator[bytes, None]:
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}/stream"
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._narrator['narrator']['voice_id']}/stream"
         payload = {"text": sentence, "model_id": self._model}
         querystring = {
             "output_format": "pcm_16000",

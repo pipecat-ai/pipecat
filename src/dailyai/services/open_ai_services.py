@@ -118,6 +118,7 @@ class OpenAIVisionService(VisionService):
             )
         )
         async for chunk in chunks:
+            print(f"%%% chunk: {chunk}")
             if len(chunk.choices) == 0:
                 continue
             if chunk.choices[0].delta.content:

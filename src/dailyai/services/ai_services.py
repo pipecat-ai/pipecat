@@ -62,6 +62,7 @@ class TTSService(AIService):
                 yield TextFrame(self.current_sentence)
 
         if not isinstance(frame, TextFrame):
+            print(f"*** tts yielding non-text: {frame}")
             yield frame
             return
 
@@ -80,6 +81,7 @@ class TTSService(AIService):
 
             # note we pass along the text frame *after* the audio, so the text
             # frame is completed after the audio is processed.
+            print(f"*** tts yielding text: {text}")
             yield TextFrame(text)
 
 
@@ -147,6 +149,8 @@ class VisionService(AIService):
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, VisionFrame):
             async for frame in self.run_vision(frame.prompt, frame.image):
+                print(
+                    f"&&& visionservce processframe got frame to yield: {frame}")
                 yield frame
             yield LLMResponseEndFrame()
         else:
@@ -159,8 +163,9 @@ class FrameLogger(AIService):
         self.prefix = prefix
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, (AudioFrame, ImageFrame)):
-            self.logger.info(f"{self.prefix}: {type(frame)}")
+        if isinstance(frame, (AudioFrame)):
+            # self.logger.info(f"{self.prefix}: {type(frame)}")
+            pass
         else:
             print(f"{self.prefix}: {frame}")
 

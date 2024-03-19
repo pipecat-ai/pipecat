@@ -252,9 +252,15 @@ class LLMFullResponseAggregator(FrameProcessor):
         self.aggregation = ""
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if not isinstance(frame, AudioFrame):
+            print(f"^^^ LFRA got frame: {frame}")
         if isinstance(frame, TextFrame):
             self.aggregation += frame.text
+            print(
+                f"^^^ LFRA got textframe. aggregation is now {self.aggregation}")
         elif isinstance(frame, LLMResponseEndFrame):
+            print(
+                f"^^^ LFRA got an llmresponseendframe. About to yield aggregation: {self.aggregation}")
             yield TextFrame(self.aggregation)
             yield frame
             self.aggregation = ""

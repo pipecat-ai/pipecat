@@ -2,6 +2,7 @@ import asyncio
 import aiohttp
 import logging
 import os
+import random
 from typing import AsyncGenerator
 
 from dailyai.pipeline.frames import Frame, LLMMessagesQueueFrame, RequestVideoImageFrame, LLMResponseEndFrame, TelestratorImageFrame, ImageFrame
@@ -25,14 +26,69 @@ logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
+narrators = [
+    {
+        "voice_id": "wDRBdcyPzQOCeq51IxW5",
+        "prompt": "Describe the image in one sentence, in the style of David Attenborough."
+    },
+    {
+        "voice_id": "M3bAX0o3Ptb2l6XqwQJV",
+        "prompt": "Describe the image in one sentence, in the style of John Oliver's Last Week Tonight show."
+    },
+    {
+        "voice_id": "lJm5d2ZZ3UE4qYOxl2t7",
+        "prompt": "Describe the image in one sentence, in the style of Oprah Winfrey."
+    },
+    {
+        "voice_id": "7SNUlQ8GAbnZxRO9CKOt",
+        "prompt": "Describe the image in one sentence, in the style of a royal pronouncement by the Queen of England."
+    },
+    {
+        "voice_id": "PWEz02ggFiibL6P5PKRx",
+        "prompt": "Describe the image in one sentence, in the style of Kanye West."
+    },
+    {
+        "voice_id": "gvpBhHjzfd7M2WedYVUI",
+        "prompt": "Describe the image in one sentence, in the style of Captain Picard from Star Trek."
+    },
+    {
+        "voice_id": "bnyr1EF3snReVXauGBNn",
+        "prompt": "Describe the image in one sentence, in the style of Maya Angelou."
 
-class VideoImageFrameProcessor(FrameProcessor):
-    def __init__(self):
-        pass
+    }
+]
+
+random.shuffle(narrators)
+print(f"$$$ narrators: {narrators}")
+narrator = {"narrator": narrators[0]}
+
+
+class NarratorShuffle(FrameProcessor):
+    def __init__(self, narrator, narrators):
+        self._narrator = narrator
+        self._narrators = narrators
+        self._i = 0
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, VideoImageFrame) or isinstance(frame, TelestratorImageFrame):
-            yield VisionFrame("Describe the image in one sentence, in the style of David Attenborough.", frame.image)
+        if isinstance(frame, (ImageFrame, TelestratorImageFrame)):
+            self._i += 1
+            if self._i >= len(self._narrators):
+                print(f"### shuffling narrators")
+                random.shuffle(self._narrators)
+                self._i = 0
+
+            self._narrator["narrator"] = self._narrators[self._i]
+            print(f"### new narrator is {self._narrator}")
+        yield frame
+
+
+class VideoImageFrameProcessor(FrameProcessor):
+    def __init__(self, narrator):
+        self._narrator = narrator
+
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, (VideoImageFrame, TelestratorImageFrame)):
+            yield VisionFrame(self._narrator["narrator"]["prompt"], frame.image)
         else:
             yield frame
 
@@ -75,7 +131,8 @@ async def main(room_url: str, token):
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+            narrator=narrator,
+            aggregate_sentences=False
         )
 
         llm = OpenAILLMService(
@@ -83,7 +140,7 @@ async def main(room_url: str, token):
             model="gpt-4-turbo-preview")
 
         vs = OpenAIVisionService(api_key=os.getenv("OPENAI_CHATGPT_API_KEY"))
-        vifp = VideoImageFrameProcessor()
+        vifp = VideoImageFrameProcessor(narrator)
         ir = ImageRefresher()
         img = FalImageGenService(
             image_size="1024x1024",
@@ -93,13 +150,17 @@ async def main(room_url: str, token):
         )
         tiw = TelestratorImageWrapper()
         lfra = LLMFullResponseAggregator()
+        fl0 = FrameLogger("@@@ About to describe")
         fl1 = FrameLogger("!!! About to image gen")
+        ns = NarratorShuffle(narrator, narrators)
         pipeline = Pipeline(
             processors=[
+                ns,
+                fl0,
                 vifp,
                 vs,
-                tts,
                 lfra,
+                tts,
                 fl1,
                 img,
                 tiw,
