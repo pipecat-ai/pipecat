@@ -10,7 +10,7 @@ from dailyai.pipeline.aggregators import (
     UserResponseAggregator,
     SentenceAggregator,
 )
-from dailyai.pipeline.frames import Frame, LLMMessagesQueueFrame, TextFrame
+from dailyai.pipeline.frames import Frame, LLMMessagesQueueFrame, TextFrame, SendAppMessageFrame
 from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.services.ai_services import AIService, FrameLogger
 from dailyai.pipeline.pipeline import Pipeline
@@ -61,6 +61,8 @@ class TranslationSubtitles(FrameProcessor):
                 "language": self._language,
                 "text": frame.text
             }
+            yield SendAppMessageFrame(app_message, None)
+            yield frame
         else:
             yield frame
 
