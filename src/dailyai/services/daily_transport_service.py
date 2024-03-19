@@ -230,14 +230,12 @@ class DailyTransportService(BaseTransportService, EventHandler):
         self.client.release()
 
     def _handle_video_frame(self, participant_id, video_frame):
-        # TODO-CB: What about multiple participants?
         if (not participant_id in self._participant_frame_times) or (time.time() > self._participant_frame_times[participant_id] + 1.0/self._receive_video_fps):
-            print(f"### sending frame now")
             self._participant_frame_times[participant_id] = time.time()
-            asyncio.run_coroutine_threadsafe(
+
+            future = asyncio.run_coroutine_threadsafe(
                 self.receive_queue.put(
-                    VideoImageFrame(participant_id, video_frame)), self._loop
-            )
+                    VideoImageFrame(participant_id, video_frame)), self._loop)
 
     def on_first_other_participant_joined(self):
         pass

@@ -71,7 +71,24 @@ class OpenAIVisionService(VisionService):
         self._client = AsyncOpenAI(api_key=api_key)
 
     async def run_vision(self, prompt: str, image: bytes):
-        base64_image = base64.b64encode(image).decode('utf-8')
+        IMAGE_WIDTH = image.width
+        IMAGE_HEIGHT = image.height
+        COLOR_FORMAT = image.color_format
+        a_image = Image.frombytes(
+            'RGBA', (IMAGE_WIDTH, IMAGE_HEIGHT), image.buffer)
+        new_image = a_image.convert('RGB')
+
+        # Uncomment these lines to write the frame to a jpg in the same directory.
+        # current_path = os.getcwd()
+        # image_path = os.path.join(current_path, "image.jpg")
+        # image.save(image_path, format="JPEG")
+
+        jpeg_buffer = io.BytesIO()
+
+        new_image.save(jpeg_buffer, format='JPEG')
+
+        jpeg_bytes = jpeg_buffer.getvalue()
+        base64_image = base64.b64encode(jpeg_bytes).decode('utf-8')
         messages = [
             {
                 "role": "user",
@@ -94,5 +111,7 @@ class OpenAIVisionService(VisionService):
             )
         )
         async for chunk in chunks:
-            print(f"!!! chunk: {chunk}")
-            yield TextFrame(chunk)
+            if len(chunk.choices) == 0:
+                continue
+            if chunk.choices[0].delta.content:
+                yield TextFrame(chunk.choices[0].delta.content)

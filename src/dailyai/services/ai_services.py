@@ -148,6 +148,8 @@ class VisionService(AIService):
         if isinstance(frame, VisionFrame):
             async for frame in self.run_vision(frame.prompt, frame.image):
                 yield frame
+        else:
+            yield frame
 
 
 class FrameLogger(AIService):
