@@ -98,3 +98,36 @@ If you want to use this package from another directory, you can run:
 ```
 pip install path_to_this_repo
 ```
+
+## Setting up your editor
+
+This project uses strict [PEP 8](https://peps.python.org/pep-0008/) formatting.
+
+### Emacs
+
+You can use [use-package](https://github.com/jwiegley/use-package) to install [py-autopep8](https://codeberg.org/ideasman42/emacs-py-autopep8) package and configure `autopep8` arguments:
+
+```elisp
+(use-package py-autopep8
+  :ensure t
+  :defer t
+  :hook ((python-mode . py-autopep8-mode))
+  :config
+  (setq py-autopep8-options '("-a" "-a")))
+```
+
+### Visual Studio Code
+
+Install the
+[autopep8](https://marketplace.visualstudio.com/items?itemName=ms-python.autopep8) extension. Then edit the user settings (_Ctrl-Shift-P_ `Open User Settings (JSON)`) and set it as the default Python formatter, enable formatting on save and configure `autopep8` arguments:
+
+```json
+"[python]": {
+    "editor.defaultFormatter": "ms-python.autopep8",
+    "editor.formatOnSave": true
+},
+"autopep8.args": [
+    "-a",
+    "-a"
+],
+```
