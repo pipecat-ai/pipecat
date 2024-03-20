@@ -127,7 +127,7 @@ You can use [use-package](https://github.com/jwiegley/use-package) to install [p
   :defer t
   :hook ((python-mode . py-autopep8-mode))
   :config
-  (setq py-autopep8-options '("-a" "-a")))
+  (setq py-autopep8-options '("-a" "-a", "--max-line-length=100")))
 ```
 
 `autopep8` was installed in the `venv` environment described before, so you should be able to use [pyvenv-auto](https://github.com/ryotaro612/pyvenv-auto) to automatically load that environment inside Emacs.
@@ -152,6 +152,7 @@ Install the
 },
 "autopep8.args": [
     "-a",
-    "-a"
+    "-a",
+    "--max-line-length=100"
 ],
 ```
