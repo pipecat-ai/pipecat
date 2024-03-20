@@ -3,7 +3,7 @@ import requests
 import subprocess
 import time
 
-from flask import Flask, jsonify, request, redirect
+from flask import Flask, jsonify, redirect
 from flask_cors import CORS
 
 from auth import get_meeting_token

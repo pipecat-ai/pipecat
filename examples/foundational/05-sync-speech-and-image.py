@@ -1,5 +1,4 @@
 import asyncio
-from re import S
 import aiohttp
 import os
 import logging

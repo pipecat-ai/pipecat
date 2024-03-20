@@ -1,6 +1,4 @@
-import os
 import aiohttp
-import requests
 
 from dailyai.services.ai_services import TTSService
 

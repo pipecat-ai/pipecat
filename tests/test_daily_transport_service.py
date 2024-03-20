@@ -1,10 +1,4 @@
-import asyncio
-import threading
 import unittest
-
-from unittest.mock import MagicMock, patch
-
-from dailyai.pipeline.frames import AudioFrame, ImageFrame
 
 
 class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
