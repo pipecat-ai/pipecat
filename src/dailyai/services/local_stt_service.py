@@ -42,6 +42,7 @@ class LocalSTTService(STTService):
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         """Processes a frame of audio data, either buffering or transcribing it."""
         if not isinstance(frame, AudioFrame):
+            yield frame
             return
 
         data = frame.data

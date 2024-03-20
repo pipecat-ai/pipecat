@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any, List
 
 from dailyai.services.openai_llm_context import OpenAILLMContext
+import dailyai.pipeline.protobufs.frames_pb2 as frame_protos
 
 
 class Frame:
@@ -106,6 +107,22 @@ class TranscriptionQueueFrame(TextFrame):
     transport's receive queue when a participant speaks."""
     participantId: str
     timestamp: str
+
+    def __str__(self):
+        return f"{self.__class__.__name__}, text: '{self.text}' participantId: {self.participantId}, timestamp: {self.timestamp}"
+
+
+class TTSStartFrame(ControlFrame):
+    """Used to indicate the beginning of a TTS response. Following AudioFrames
+    are part of the TTS response until an TTEndFrame. These frames can be used
+    for aggregating audio frames in a transport to optimize the size of frames
+    sent to the session, without needing to control this in the TTS service."""
+    pass
+
+
+class TTSEndFrame(ControlFrame):
+    """Indicates the end of a TTS response."""
+    pass
 
 
 @dataclass()

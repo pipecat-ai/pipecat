@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package dailyai_proto;
+
+message TextFrame {
+    string text = 1;
+}
+
+message AudioFrame {
+    bytes data = 1;
+}
+
+message TranscriptionFrame {
+    string text = 1;
+    string participantId = 2;
+    string timestamp = 3;
+}
+
+message Frame {
+    oneof frame {
+        TextFrame text = 1;
+        AudioFrame audio = 2;
+        TranscriptionFrame transcription = 3;
+    }
+}
