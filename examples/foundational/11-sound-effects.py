@@ -8,7 +8,6 @@ from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.pipeline.aggregators import (
-    LLMContextAggregator,
     LLMUserContextAggregator,
     LLMAssistantContextAggregator,
 )
