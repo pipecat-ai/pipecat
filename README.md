@@ -99,6 +99,20 @@ If you want to use this package from another directory, you can run:
 pip install path_to_this_repo
 ```
 
+### Running tests
+
+To run tests you need to install `pytest`:
+
+```
+pip install pytest
+```
+
+Then, from the root directory, run:
+
+```
+pytest --doctest-modules --ignore-glob="*to_be_updated*" src tests
+```
+
 ## Setting up your editor
 
 This project uses strict [PEP 8](https://peps.python.org/pep-0008/) formatting.
@@ -116,13 +130,7 @@ You can use [use-package](https://github.com/jwiegley/use-package) to install [p
   (setq py-autopep8-options '("-a" "-a")))
 ```
 
-If you don't have it already, you also need to install [autopep8](https://pypi.org/project/autopep8/):
-
-```
-pip install autopep8
-```
-
-If use install `autopep8` in the `venv` environment described before, you can use [pyvenv-auto](https://github.com/ryotaro612/pyvenv-auto) to automatically load the virtual environment inside Emacs.
+`autopep8` was installed in the `venv` environment described before, so you should be able to use [pyvenv-auto](https://github.com/ryotaro612/pyvenv-auto) to automatically load that environment inside Emacs.
 
 ```elisp
 (use-package pyvenv-auto
