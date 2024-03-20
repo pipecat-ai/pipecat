@@ -82,7 +82,7 @@ async def main(room_url):
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
+            api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4-turbo-preview")
 
         imagegen = FalImageGenService(
