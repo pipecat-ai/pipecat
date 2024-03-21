@@ -135,7 +135,7 @@ async def main(room_url: str, token):
         transport._camera_height = 1280
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_CHATGPT_API_KEY"),
+            api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4-turbo-preview")
 
         tts = ElevenLabsTTSService(
