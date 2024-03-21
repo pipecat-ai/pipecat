@@ -1,6 +1,6 @@
 import unittest
 
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator
 
 from dailyai.services.ai_services import AIService
 from dailyai.pipeline.frames import EndFrame, Frame, TextFrame

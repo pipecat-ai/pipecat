@@ -9,7 +9,7 @@ from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
-from dailyai.pipeline.frames import EndFrame, EndPipeFrame, LLMMessagesQueueFrame, TextFrame
+from dailyai.pipeline.frames import EndPipeFrame, LLMMessagesQueueFrame, TextFrame
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 from runner import configure

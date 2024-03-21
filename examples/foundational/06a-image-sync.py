@@ -1,12 +1,8 @@
-import argparse
 import asyncio
 import os
 import logging
 from typing import AsyncGenerator
 import aiohttp
-import requests
-import time
-import urllib.parse
 from PIL import Image
 
 from dailyai.pipeline.frames import ImageFrame, Frame

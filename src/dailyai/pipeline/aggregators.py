@@ -5,10 +5,8 @@ from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.frames import (
     EndFrame,
-    AudioFrame,
     EndPipeFrame,
     Frame,
-    ImageFrame,
     LLMMessagesQueueFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
@@ -20,9 +18,7 @@ from dailyai.pipeline.frames import (
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import AIService
 
-from typing import AsyncGenerator, Callable, Coroutine, List
-
-from dailyai.services.openai_llm_context import OpenAILLMContext
+from typing import AsyncGenerator, Coroutine, List
 
 
 class ResponseAggregator(FrameProcessor):
@@ -348,6 +344,8 @@ class GatedAggregator(FrameProcessor):
     """Accumulate frames, with custom functions to start and stop accumulation.
     Yields gate-opening frame before any accumulated frames, then ensuing frames
     until and not including the gate-closed frame.
+
+    >>> from dailyai.pipeline.frames import ImageFrame
 
     >>> async def print_frames(aggregator, frame):
     ...     async for frame in aggregator.process_frame(frame):

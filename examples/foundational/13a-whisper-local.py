@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import logging
-import wave
 from dailyai.pipeline.frames import EndFrame, TranscriptionQueueFrame
 
 from dailyai.services.local_transport_service import LocalTransportService
