@@ -3,7 +3,7 @@ import aiohttp
 import logging
 import os
 
-from dailyai.pipeline.frames import EndFrame, TextFrame
+from dailyai.pipeline.frames import TextFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.fal_ai_services import FalImageGenService

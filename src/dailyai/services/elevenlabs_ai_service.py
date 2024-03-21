@@ -1,7 +1,4 @@
 import aiohttp
-import os
-import requests
-import time
 
 from typing import AsyncGenerator
 

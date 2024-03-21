@@ -1,4 +1,4 @@
-from typing import Any, AsyncGenerator, Callable
+from typing import AsyncGenerator, Callable
 from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.pipeline.frames import (
     Frame,

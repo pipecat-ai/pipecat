@@ -2,13 +2,11 @@ import copy
 import aiohttp
 import asyncio
 import json
-import random
 import logging
 import os
 import re
 import wave
 from typing import AsyncGenerator, List
-from PIL import Image
 from dailyai.pipeline.opeanai_llm_aggregator import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
@@ -18,11 +16,10 @@ from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.daily_transport_service import DailyTransportService
 from dailyai.services.openai_llm_context import OpenAILLMContext
 from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.services.deepgram_ai_services import DeepgramTTSService
+# from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.pipeline.frames import (
     OpenAILLMContextFrame,
-    TranscriptionQueueFrame,
     Frame,
     LLMFunctionCallFrame,
     LLMFunctionStartFrame,
