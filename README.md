@@ -65,7 +65,7 @@ There are two directories of examples:
 - [foundational](https://github.com/daily-co/daily-ai-sdk/tree/main/examples/foundational) — demos that build on each other, introducing one or two concepts at a time
 - [starter apps](https://github.com/daily-co/daily-ai-sdk/tree/main/examples/starter-apps) — complete applications that you can use as starting points for development
 
-To run the example below you to sign up for a [free Daily account](https://dashboard.daily.co/u/signup) (so you can hear the LLM talking) and create a Daily room. After that, join the room's URL directly from a browser tab and run:
+To run the example below you need to sign up for a [free Daily account](https://dashboard.daily.co/u/signup) and create a Daily room (so you can hear the LLM talking). After that, join the room's URL directly from a browser tab and run:
 
 ```
 python examples/foundational/02-llm-say-one-thing.py
