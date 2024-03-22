@@ -5,7 +5,7 @@ import os
 import random
 from typing import AsyncGenerator
 
-from dailyai.pipeline.frames import Frame, LLMMessagesQueueFrame, RequestVideoImageFrame, LLMResponseEndFrame, TelestratorImageFrame, ImageFrame
+from dailyai.pipeline.frames import Frame, LLMMessagesQueueFrame, RequestVideoImageFrame, LLMResponseEndFrame, TelestratorImageFrame, ImageFrame, TextFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.services.daily_transport_service import DailyTransportService
@@ -27,7 +27,7 @@ logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
 narrators = [{"voice_id": "wDRBdcyPzQOCeq51IxW5",
-              "prompt": "Describe the image in one sentence, in the style of David Attenborough."},
+              "prompt": "Describe the image in a haiku."},
              {"voice_id": "M3bAX0o3Ptb2l6XqwQJV",
               "prompt": "Describe the image in one sentence, in the style of John Oliver's Last Week Tonight show."},
              {"voice_id": "lJm5d2ZZ3UE4qYOxl2t7",
@@ -39,9 +39,29 @@ narrators = [{"voice_id": "wDRBdcyPzQOCeq51IxW5",
              {"voice_id": "bnyr1EF3snReVXauGBNn",
               "prompt": "Describe the image in one sentence, in the style of Maya Angelou."}]
 
-random.shuffle(narrators)
+# random.shuffle(narrators)
 print(f"$$$ narrators: {narrators}")
 narrator = {"narrator": narrators[0]}
+
+
+class TranslationProcessor(FrameProcessor):
+    def __init__(self, in_language, out_language):
+        self._in_language = in_language
+        self._out_language = out_language
+
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, TextFrame):
+            context = [
+                {
+                    "role": "system",
+                    "content": f"You will be provided with a sentence in {self._in_language}, and your task is to translate it into {self._out_language}.",
+                },
+                {"role": "user", "content": frame.text},
+            ]
+
+            yield LLMMessagesQueueFrame(context)
+        else:
+            yield frame
 
 
 class NarratorShuffle(FrameProcessor):
@@ -131,12 +151,21 @@ async def main(room_url: str, token):
         )
         tiw = TelestratorImageWrapper()
         lfra = LLMFullResponseAggregator()
+        lfra1 = LLMFullResponseAggregator()
+        lfra2 = LLMFullResponseAggregator()
+        lfra3 = LLMFullResponseAggregator()
+        lfra4 = LLMFullResponseAggregator()
         fl0 = FrameLogger("@@@ About to describe")
         fl1 = FrameLogger("!!! About to image gen")
+        f4 = FrameLogger("((( partway through )))")
+        f5 = FrameLogger("!!! f5")
         ns = NarratorShuffle(narrator, narrators)
+        t1 = TranslationProcessor("English", "Spanish")
+        t2 = TranslationProcessor("Spanish", "German")
+        t3 = TranslationProcessor("German", "Japanese")
+        t4 = TranslationProcessor("Japanese", "English")
         pipeline = Pipeline(
             processors=[
-                ns,
                 fl0,
                 vifp,
                 vs,
