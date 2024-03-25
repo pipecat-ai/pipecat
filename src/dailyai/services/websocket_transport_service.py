@@ -16,9 +16,12 @@ class WebSocketFrameProcessor(FrameProcessor):
 
     def __init__(
             self,
-            audio_frame_size=16000,
+            audio_frame_size: int | None = None,
             sendable_frames: List[Frame] | None = None):
         super().__init__()
+        if not audio_frame_size:
+            raise ValueError("audio_frame_size must be provided")
+
         self._audio_frame_size = audio_frame_size
         self._sendable_frames = sendable_frames or [TextFrame, AudioFrame]
         self._audio_buffer = bytes()
