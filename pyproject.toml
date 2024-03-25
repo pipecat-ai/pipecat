@@ -35,7 +35,8 @@ dependencies = [
     "torch",
     "torchaudio",
     "pyaudio",
-    "typing-extensions"
+    "typing-extensions",
+    "websockets"
 ]
 
 [project.urls]

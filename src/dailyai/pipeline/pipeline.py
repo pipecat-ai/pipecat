@@ -24,7 +24,7 @@ class Pipeline:
         queues. If this pipeline is run by a transport, its sink and source queues
         will be overridden.
         """
-        self.processors: List[FrameProcessor] = processors
+        self._processors: List[FrameProcessor] = processors
 
         self.source: asyncio.Queue[Frame] = source or asyncio.Queue()
         self.sink: asyncio.Queue[Frame] = sink or asyncio.Queue()
@@ -39,6 +39,9 @@ class Pipeline:
         """Set the sink queue for this pipeline. After the last frame_processor
         has processed a frame, its output will be placed on this queue."""
         self.sink = sink
+
+    def add_processor(self, processor: FrameProcessor):
+        self._processors.append(processor)
 
     async def get_next_source_frame(self) -> AsyncGenerator[Frame, None]:
         """Convenience function to get the next frame from the source queue. This
@@ -80,7 +83,7 @@ class Pipeline:
             while True:
                 initial_frame = await self.source.get()
                 async for frame in self._run_pipeline_recursively(
-                    initial_frame, self.processors
+                    initial_frame, self._processors
                 ):
                     await self.sink.put(frame)
 
@@ -91,7 +94,7 @@ class Pipeline:
         except asyncio.CancelledError:
             # this means there's been an interruption, do any cleanup necessary
             # here.
-            for processor in self.processors:
+            for processor in self._processors:
                 await processor.interrupted()
             pass
 

@@ -172,7 +172,8 @@ async def main(room_url: str, token):
                 isa.run(
                     tma_out.run(
                         llm.run(
-                            tma_in.run(ncf.run(tf.run(transport.get_receive_frames())))
+                            tma_in.run(
+                                ncf.run(tf.run(transport.get_receive_frames())))
                         )
                     )
                 ),
