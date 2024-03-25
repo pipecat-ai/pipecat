@@ -58,13 +58,6 @@ class WebsocketTransport(BaseTransportService):
                 TextFrame, AudioFrame, TTSEndFrame, TTSStartFrame])
         self._serializer = kwargs.get("serializer", ProtobufFrameSerializer())
 
-        if self._camera_enabled:
-            raise ValueError(
-                "Camera is not supported in WebsocketTransportService")
-
-        if self._speaker_enabled:
-            self._speaker_buffer_pending = bytearray()
-
         self._server: websockets.WebSocketServer | None = None
         self._websocket: websockets.WebSocketServerProtocol | None = None
 
