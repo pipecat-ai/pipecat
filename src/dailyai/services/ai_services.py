@@ -10,6 +10,8 @@ from dailyai.pipeline.frames import (
     EndPipeFrame,
     ImageFrame,
     Frame,
+    TTSEndFrame,
+    TTSStartFrame,
     TextFrame,
     TranscriptionQueueFrame,
 )
@@ -47,12 +49,18 @@ class TTSService(AIService):
         # yield empty bytes here, so linting can infer what this method does
         yield bytes()
 
+    async def wrap_tts(self, text) -> AsyncGenerator[Frame, None]:
+        yield TTSStartFrame()
+        async for audio_chunk in self.run_tts(text):
+            yield AudioFrame(audio_chunk)
+        yield TTSEndFrame()
+        yield TextFrame(text)
+
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, EndFrame) or isinstance(frame, EndPipeFrame):
             if self.current_sentence:
-                async for audio_chunk in self.run_tts(self.current_sentence):
-                    yield AudioFrame(audio_chunk)
-                yield TextFrame(self.current_sentence)
+                async for cleanup_frame in self.wrap_tts(self.current_sentence):
+                    yield cleanup_frame
 
         if not isinstance(frame, TextFrame):
             yield frame
@@ -68,12 +76,8 @@ class TTSService(AIService):
                 self.current_sentence = ""
 
         if text:
-            async for audio_chunk in self.run_tts(text):
-                yield AudioFrame(audio_chunk)
-
-            # note we pass along the text frame *after* the audio, so the text
-            # frame is completed after the audio is processed.
-            yield TextFrame(text)
+            async for frame in self.wrap_tts(text):
+                yield frame
 
 
 class ImageGenService(AIService):

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="//cdn.jsdelivr.net/npm/protobufjs@7.X.X/dist/protobuf.min.js"></script>
+    <title>WebSocket Audio Stream</title>
+</head>
+
+<body>
+    <h1>WebSocket Audio Stream</h1>
+    <button id="startAudioBtn">Start Audio</button>
+    <button id="stopAudioBtn">Stop Audio</button>
+    <script>
+        const SAMPLE_RATE = 16000;
+        const BUFFER_SIZE = 8192;
+        const MIN_AUDIO_SIZE = 6400;
+
+        let audioContext;
+        let microphoneStream;
+        let scriptProcessor;
+        let source;
+        let frame;
+        let audioChunks = [];
+        let isPlaying = false;
+        let ws;
+
+        const proto = protobuf.load("frames.proto", (err, root) => {
+            if (err) throw err;
+            frame = root.lookupType("dailyai_proto.Frame");
+        });
+
+        function initWebSocket() {
+            ws = new WebSocket('ws://localhost:8765');
+
+            ws.addEventListener('open', () => console.log('WebSocket connection established.'));
+            ws.addEventListener('message', handleWebSocketMessage);
+            ws.addEventListener('close', (event) => console.log("WebSocket connection closed.", event.code, event.reason));
+            ws.addEventListener('error', (event) => console.error('WebSocket error:', event));
+        }
+
+        async function handleWebSocketMessage(event) {
+            const arrayBuffer = await event.data.arrayBuffer();
+            enqueueAudioFromProto(arrayBuffer);
+        }
+
+        function enqueueAudioFromProto(arrayBuffer) {
+            const parsedFrame = frame.decode(new Uint8Array(arrayBuffer));
+            if (!parsedFrame?.audio) return false;
+
+            const frameCount = parsedFrame.audio.data.length / 2;
+            const audioOutBuffer = audioContext.createBuffer(1, frameCount, SAMPLE_RATE);
+            const nowBuffering = audioOutBuffer.getChannelData(0);
+            const view = new Int16Array(parsedFrame.audio.data.buffer);
+
+            for (let i = 0; i < frameCount; i++) {
+                const word = view[i];
+                nowBuffering[i] = ((word + 32768) % 65536 - 32768) / 32768.0;
+            }
+
+            audioChunks.push(audioOutBuffer);
+            if (!isPlaying) playNextChunk();
+        }
+
+        function playNextChunk() {
+            if (audioChunks.length === 0) {
+                isPlaying = false;
+                return;
+            }
+
+            isPlaying = true;
+            const audioOutBuffer = audioChunks.shift();
+            const source = audioContext.createBufferSource();
+            source.buffer = audioOutBuffer;
+            source.connect(audioContext.destination);
+            source.onended = playNextChunk;
+            source.start();
+        }
+
+        function startAudio() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('getUserMedia is not supported in your browser.');
+                return;
+            }
+
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then((stream) => {
+                    microphoneStream = stream;
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    scriptProcessor = audioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
+                    source = audioContext.createMediaStreamSource(stream);
+                    source.connect(scriptProcessor);
+                    scriptProcessor.connect(audioContext.destination);
+
+                    const audioBuffer = [];
+                    const skipRatio = Math.floor(audioContext.sampleRate / (SAMPLE_RATE * 2));
+
+                    scriptProcessor.onaudioprocess = (event) => {
+                        const rawLeftChannelData = event.inputBuffer.getChannelData(0);
+                        for (let i = 0; i < rawLeftChannelData.length; i += skipRatio) {
+                            const normalized = ((rawLeftChannelData[i] * 32768.0) + 32768) % 65536 - 32768;
+                            const swappedBytes = ((normalized & 0xff) << 8) | ((normalized >> 8) & 0xff);
+                            audioBuffer.push(swappedBytes);
+                        }
+
+                        if (audioBuffer.length >= MIN_AUDIO_SIZE) {
+                            const audioFrame = frame.create({ audio: { audio: audioBuffer.slice(0, MIN_AUDIO_SIZE) } });
+                            const encodedFrame = new Uint8Array(frame.encode(audioFrame).finish());
+                            ws.send(encodedFrame);
+                            audioBuffer.splice(0, MIN_AUDIO_SIZE);
+                        }
+                    };
+
+                    initWebSocket();
+                })
+                .catch((error) => console.error('Error accessing microphone:', error));
+        }
+
+        function stopAudio() {
+            if (ws) {
+                ws.close();
+                scriptProcessor.disconnect();
+                source.disconnect();
+                ws = undefined;
+            }
+        }
+
+        document.getElementById('startAudioBtn').addEventListener('click', startAudio);
+        document.getElementById('stopAudioBtn').addEventListener('click', stopAudio);
+    </script>
+</body>
+
+</html>

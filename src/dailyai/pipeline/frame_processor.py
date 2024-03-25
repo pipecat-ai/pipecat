@@ -23,8 +23,6 @@ class FrameProcessor:
         self, frame: Frame
     ) -> AsyncGenerator[Frame, None]:
         """Process a single frame and yield 0 or more frames."""
-        if isinstance(frame, ControlFrame):
-            yield frame
         yield frame
 
     @abstractmethod
