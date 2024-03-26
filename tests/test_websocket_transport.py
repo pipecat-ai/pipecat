@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch, Mock
 
 from dailyai.pipeline.frames import AudioFrame, EndFrame, TextFrame, TTSEndFrame, TTSStartFrame
 from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.websocket_transport_service import WebSocketFrameProcessor, WebsocketTransport
+from dailyai.transports.websocket_transport import WebSocketFrameProcessor, WebsocketTransport
 
 
 class TestWebSocketTransportService(unittest.IsolatedAsyncioTestCase):

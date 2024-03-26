@@ -4,7 +4,7 @@ import logging
 import os
 
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.services.local_transport_service import LocalTransportService
+from dailyai.transports.local_transport import LocalTransport
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
@@ -14,7 +14,7 @@ logger.setLevel(logging.DEBUG)
 async def main():
     async with aiohttp.ClientSession() as session:
         meeting_duration_minutes = 1
-        transport = LocalTransportService(
+        transport = LocalTransport(
             duration_minutes=meeting_duration_minutes, mic_enabled=True
         )
         tts = ElevenLabsTTSService(

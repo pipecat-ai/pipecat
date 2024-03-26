@@ -72,7 +72,7 @@ class VADState(Enum):
     STOPPING = 4
 
 
-class BaseTransportService:
+class ThreadedTransport:
 
     def __init__(
         self,

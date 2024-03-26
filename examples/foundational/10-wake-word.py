@@ -6,7 +6,7 @@ import random
 from typing import AsyncGenerator
 from PIL import Image
 
-from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.pipeline.aggregators import (
@@ -116,7 +116,7 @@ class ImageSyncAggregator(AIService):
 
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
-        transport = DailyTransportService(
+        transport = DailyTransport(
             room_url,
             token,
             "Santa Cat",

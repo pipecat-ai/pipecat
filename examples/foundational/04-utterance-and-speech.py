@@ -6,7 +6,7 @@ import aiohttp
 from dailyai.pipeline.merge_pipeline import SequentialMergePipeline
 from dailyai.pipeline.pipeline import Pipeline
 
-from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.pipeline.frames import EndPipeFrame, LLMMessagesQueueFrame, TextFrame
@@ -24,7 +24,7 @@ logger.setLevel(logging.DEBUG)
 
 async def main(room_url: str):
     async with aiohttp.ClientSession() as session:
-        transport = DailyTransportService(
+        transport = DailyTransport(
             room_url,
             None,
             "Static And Dynamic Speech",

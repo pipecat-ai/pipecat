@@ -6,7 +6,7 @@ from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.pipeline.frames import TextFrame, TranscriptionQueueFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.services.websocket_transport_service import WebsocketTransport
+from dailyai.transports.websocket_transport import WebsocketTransport
 from dailyai.services.whisper_ai_services import WhisperSTTService
 
 logging.basicConfig(format="%(levelno)s %(asctime)s %(message)s")
