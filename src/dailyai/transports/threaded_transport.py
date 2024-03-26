@@ -193,8 +193,7 @@ class ThreadedTransport:
     async def run_interruptible_pipeline(
         self,
         pipeline: Pipeline,
-        allow_interruptions=True,
-        pre_processor=None,
+        pre_processor: FrameProcessor | None = None,
         post_processor: FrameProcessor | None = None,
     ):
         pipeline.set_sink(self.send_queue)
