@@ -24,7 +24,7 @@ from daily import (
     VirtualSpeakerDevice,
 )
 
-from dailyai.transports.base_transport import ThreadedTransport
+from dailyai.transports.threaded_transport import ThreadedTransport
 
 
 class DailyTransport(ThreadedTransport, EventHandler):
@@ -48,7 +48,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
         start_transcription: bool = False,
         **kwargs,
     ):
-        # This will call BaseTransportService.__init__ method, not EventHandler
+        # This will call ThreadedTransport.__init__ method, not EventHandler
         super().__init__(**kwargs)
 
         self._room_url: str = room_url

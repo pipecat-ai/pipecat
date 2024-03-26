@@ -7,7 +7,7 @@ from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.pipeline.frames import AudioFrame, ControlFrame, EndFrame, Frame, TTSEndFrame, TTSStartFrame, TextFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.serializers.protobuf_serializer import ProtobufFrameSerializer
-from dailyai.transports.base_transport import ThreadedTransport
+from dailyai.transports.threaded_transport import ThreadedTransport
 
 
 class WebSocketFrameProcessor(FrameProcessor):
