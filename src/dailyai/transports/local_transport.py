@@ -3,7 +3,7 @@ import numpy as np
 import tkinter as tk
 import pyaudio
 
-from dailyai.transports.base_transport import ThreadedTransport
+from dailyai.transports.threaded_transport import ThreadedTransport
 
 
 class LocalTransport(ThreadedTransport):
