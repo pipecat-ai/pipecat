@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.whisper_ai_services import WhisperSTTService
 
 from runner import configure
@@ -15,7 +15,7 @@ logger.setLevel(logging.DEBUG)
 
 
 async def main(room_url: str):
-    transport = DailyTransportService(
+    transport = DailyTransport(
         room_url,
         None,
         "Transcription bot",

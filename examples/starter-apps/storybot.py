@@ -11,7 +11,7 @@ from PIL import Image
 
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.pipeline.frame_processor import FrameProcessor
-from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.services.open_ai_services import OpenAILLMService
@@ -214,7 +214,7 @@ async def main(room_url: str, token):
         sp = StoryProcessor(messages, story)
         sig = StoryImageGenerator(story, llm, img)
 
-        transport = DailyTransportService(
+        transport = DailyTransport(
             room_url,
             token,
             "Storybot",
