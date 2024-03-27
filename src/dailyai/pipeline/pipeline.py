@@ -1,8 +1,9 @@
 import asyncio
+import logging
 from typing import AsyncGenerator, AsyncIterable, Iterable, List
 from dailyai.pipeline.frame_processor import FrameProcessor
 
-from dailyai.pipeline.frames import EndPipeFrame, EndFrame, Frame
+from dailyai.pipeline.frames import AudioFrame, EndPipeFrame, EndFrame, Frame
 
 
 class Pipeline:
@@ -28,6 +29,8 @@ class Pipeline:
 
         self.source: asyncio.Queue[Frame] = source or asyncio.Queue()
         self.sink: asyncio.Queue[Frame] = sink or asyncio.Queue()
+
+        self._logger = logging.getLogger("dailyai.pipeline")
 
     def set_source(self, source: asyncio.Queue[Frame]):
         """Set the source queue for this pipeline. Frames from this queue
@@ -82,9 +85,11 @@ class Pipeline:
         try:
             while True:
                 initial_frame = await self.source.get()
+                self._log_frame(initial_frame, 0)
                 async for frame in self._run_pipeline_recursively(
                     initial_frame, self._processors
                 ):
+                    self._log_frame(frame, len(self._processors) + 1)
                     await self.sink.put(frame)
 
                 if isinstance(initial_frame, EndFrame) or isinstance(
@@ -96,18 +101,32 @@ class Pipeline:
             # here.
             for processor in self._processors:
                 await processor.interrupted()
-            pass
 
     async def _run_pipeline_recursively(
-        self, initial_frame: Frame, processors: List[FrameProcessor]
+        self, initial_frame: Frame, processors: List[FrameProcessor], depth=1
     ) -> AsyncGenerator[Frame, None]:
         """Internal function to add frames to the pipeline as they're yielded
         by each processor."""
         if processors:
+            self._log_frame(initial_frame, depth)
             async for frame in processors[0].process_frame(initial_frame):
                 async for final_frame in self._run_pipeline_recursively(
-                    frame, processors[1:]
+                    frame, processors[1:], depth + 1
                 ):
                     yield final_frame
         else:
             yield initial_frame
+
+    def _log_frame(self, frame: Frame, depth: int):
+        if not isinstance(frame, AudioFrame):
+            if depth == 0:
+                source = "source"
+                dest = str(self._processors[depth - 1])
+            elif depth == len(self._processors) + 1:
+                dest = "sink"
+                source = str(self._processors[depth - 2])
+            else:
+                dest = str(self._processors[depth - 1])
+                source = str(self._processors[depth - 2])
+
+            self._logger.debug("  " * (depth + 1) + " -> ".join([source, str(frame), dest]))
