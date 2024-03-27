@@ -13,7 +13,7 @@ from typing import AsyncGenerator
 from runner import configure
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 sounds = {}
 sound_files = [

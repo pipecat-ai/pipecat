@@ -25,7 +25,7 @@ from dailyai.services.ai_services import AIService
 from runner import configure
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
