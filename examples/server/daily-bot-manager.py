@@ -9,7 +9,7 @@ from flask_cors import CORS
 from auth import get_meeting_token
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 app = Flask(__name__)
 CORS(app)
