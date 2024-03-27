@@ -35,7 +35,7 @@ from openai.types.chat import (
 from runner import configure
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 logging.basicConfig(format="%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
