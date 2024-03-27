@@ -7,6 +7,7 @@ from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.pipeline.frames import AudioFrame, ControlFrame, EndFrame, Frame, TTSEndFrame, TTSStartFrame, TextFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.serializers.protobuf_serializer import ProtobufFrameSerializer
+from dailyai.transports.abstract_transport import AbstractTransport
 from dailyai.transports.threaded_transport import ThreadedTransport
 
 
@@ -45,7 +46,7 @@ class WebSocketFrameProcessor(FrameProcessor):
             yield frame
 
 
-class WebsocketTransport(ThreadedTransport):
+class WebsocketTransport(AbstractTransport):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._sample_width = kwargs.get("sample_width", 2)
