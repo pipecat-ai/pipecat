@@ -16,7 +16,7 @@ from dailyai.pipeline.frames import (
     Frame,
     AudioFrame,
     LLMResponseEndFrame,
-    LLMMessagesQueueFrame,
+    LLMMessagesFrame,
 )
 from typing import AsyncGenerator
 
@@ -62,7 +62,7 @@ class InboundSoundEffectWrapper(AIService):
         pass
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, LLMMessagesQueueFrame):
+        if isinstance(frame, LLMMessagesFrame):
             yield AudioFrame(sounds["ding2.wav"])
             # In case anything else up the stack needs it
             yield frame

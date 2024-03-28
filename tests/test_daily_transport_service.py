@@ -65,10 +65,10 @@ class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
         daily_mock.create_camera_device.return_value = camera
 
         async def send_audio_frame():
-            await transport.send_queue.put(AudioQueueFrame(bytes([0] * 3300)))
+            await transport.send_queue.put(AudioFrame(bytes([0] * 3300)))
 
         async def send_video_frame():
-            await transport.send_queue.put(ImageQueueFrame(None, b"test"))
+            await transport.send_queue.put(ImageFrame(None, b"test"))
 
         await asyncio.gather(transport.run(), send_audio_frame(), send_video_frame())
 

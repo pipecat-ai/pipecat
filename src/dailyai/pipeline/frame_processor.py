@@ -12,9 +12,9 @@ class FrameProcessor:
 
     By convention, FrameProcessors should immediately yield any frames they don't process.
 
-    Stateful FrameProcessors should watch for the EndStreamQueueFrame and finalize their
+    Stateful FrameProcessors should watch for the EndFrame and finalize their
     output, eg. yielding an unfinished sentence if they're aggregating LLM output to full
-    sentences. EndStreamQueueFrame is also a chance to clean up any services that need to
+    sentences. EndFrame is also a chance to clean up any services that need to
     be closed, del'd, etc.
     """
 

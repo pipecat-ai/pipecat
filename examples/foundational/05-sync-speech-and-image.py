@@ -17,7 +17,7 @@ from dailyai.pipeline.frames import (
     TextFrame,
     EndFrame,
     ImageFrame,
-    LLMMessagesQueueFrame,
+    LLMMessagesFrame,
     LLMResponseStartFrame,
 )
 from dailyai.pipeline.frame_processor import FrameProcessor
@@ -133,7 +133,7 @@ async def main(room_url):
                 }
             ]
             frames.append(MonthFrame(month))
-            frames.append(LLMMessagesQueueFrame(messages))
+            frames.append(LLMMessagesFrame(messages))
 
         frames.append(EndFrame())
         await pipeline.queue_frames(frames)

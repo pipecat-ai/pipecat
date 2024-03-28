@@ -18,7 +18,7 @@ from dailyai.pipeline.frames import (
     TextFrame,
     ImageFrame,
     SpriteFrame,
-    TranscriptionQueueFrame,
+    TranscriptionFrame,
 )
 from dailyai.services.ai_services import AIService
 
@@ -76,7 +76,7 @@ class TranscriptFilter(AIService):
         self.bot_participant_id = bot_participant_id
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, TranscriptionQueueFrame):
+        if isinstance(frame, TranscriptionFrame):
             if frame.participantId != self.bot_participant_id:
                 yield frame
 

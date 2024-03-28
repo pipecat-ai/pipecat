@@ -1,6 +1,6 @@
 import unittest
 
-from dailyai.pipeline.frames import AudioFrame, TextFrame, TranscriptionQueueFrame
+from dailyai.pipeline.frames import AudioFrame, TextFrame, TranscriptionFrame
 from dailyai.serializers.protobuf_serializer import ProtobufFrameSerializer
 
 
@@ -14,7 +14,7 @@ class TestProtobufFrameSerializer(unittest.IsolatedAsyncioTestCase):
             self.serializer.serialize(text_frame))
         self.assertEqual(frame, TextFrame(text='hello world'))
 
-        transcription_frame = TranscriptionQueueFrame(
+        transcription_frame = TranscriptionFrame(
             text="Hello there!", participantId="123", timestamp="2021-01-01")
         frame = self.serializer.deserialize(
             self.serializer.serialize(transcription_frame))

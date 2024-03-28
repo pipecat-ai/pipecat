@@ -7,7 +7,7 @@ from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.pipeline.aggregators import LLMContextAggregator
 from dailyai.services.ai_services import AIService, FrameLogger
-from dailyai.pipeline.frames import Frame, AudioFrame, LLMResponseEndFrame, LLMMessagesQueueFrame
+from dailyai.pipeline.frames import Frame, AudioFrame, LLMResponseEndFrame, LLMMessagesFrame
 from typing import AsyncGenerator
 
 from runner import configure
@@ -51,7 +51,7 @@ class InboundSoundEffectWrapper(AIService):
         pass
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, LLMMessagesQueueFrame):
+        if isinstance(frame, LLMMessagesFrame):
             yield AudioFrame(sounds["ding2.wav"])
             # In case anything else up the stack needs it
             yield frame
