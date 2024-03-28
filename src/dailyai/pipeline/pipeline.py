@@ -18,7 +18,8 @@ class Pipeline:
         self,
         processors: List[FrameProcessor],
         source: asyncio.Queue | None = None,
-        sink: asyncio.Queue[Frame] | None = None
+        sink: asyncio.Queue[Frame] | None = None,
+        name: str | None = None,
     ):
         """Create a new pipeline. By default we create the sink and source queues
         if they're not provided, but these can be overridden to point to other
@@ -31,6 +32,9 @@ class Pipeline:
         self.sink: asyncio.Queue[Frame] = sink or asyncio.Queue()
 
         self._logger = logging.getLogger("dailyai.pipeline")
+        self._last_log_line = ""
+        self._shown_repeated_log = False
+        self._name = name or str(id(self))
 
     def set_source(self, source: asyncio.Queue[Frame]):
         """Set the source queue for this pipeline. Frames from this queue
@@ -85,7 +89,6 @@ class Pipeline:
         try:
             while True:
                 initial_frame = await self.source.get()
-                self._log_frame(initial_frame, 0)
                 async for frame in self._run_pipeline_recursively(
                     initial_frame, self._processors
                 ):
@@ -118,15 +121,29 @@ class Pipeline:
             yield initial_frame
 
     def _log_frame(self, frame: Frame, depth: int):
-        if not isinstance(frame, AudioFrame):
-            if depth == 0:
-                source = "source"
-                dest = str(self._processors[depth - 1])
-            elif depth == len(self._processors) + 1:
-                dest = "sink"
-                source = str(self._processors[depth - 2])
-            else:
-                dest = str(self._processors[depth - 1])
-                source = str(self._processors[depth - 2])
+        """Log a frame as it moves through the pipeline. This is useful for debugging.
+        Note that this function inherits the logging level from the "dailyai" logger.
+        If you want debug output from dailyai in general but not this function (it is
+        noisy) you can silence this function by doing something like this:
 
-            self._logger.debug("  " * (depth + 1) + " -> ".join([source, str(frame), dest]))
+        # enable debug logging for the dailyai package.
+        logger = logging.getLogger("dailyai")
+        logger.setLevel(logging.DEBUG)
+
+        # silence the pipeline logging
+        logger = logging.getLogger("dailyai.pipeline")
+        logger.setLevel(logging.WARNING)
+        """
+        source = str(self._processors[depth - 2]) if depth > 1 else "source"
+        dest = str(self._processors[depth - 1]) if depth < (len(self._processors) + 1) else "sink"
+        prefix = self._name + "  " * depth
+        logline = prefix + " -> ".join([source, frame.__class__.__name__, dest])
+        if logline == self._last_log_line:
+            if self._shown_repeated_log:
+                return
+            self._shown_repeated_log = True
+            self._logger.debug(prefix + "... repeated")
+        else:
+            self._shown_repeated_log = False
+            self._last_log_line = logline
+            self._logger.debug(logline)

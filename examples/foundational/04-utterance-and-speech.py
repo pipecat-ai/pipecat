@@ -65,7 +65,7 @@ async def main(room_url: str):
         simple_tts_pipeline = Pipeline([azure_tts])
         await simple_tts_pipeline.queue_frames(
             [
-                TextFrame("My friend the LLM is going to tell a joke about llamas"),
+                TextFrame("My friend the LLM is going to tell a joke about llamas."),
                 EndPipeFrame(),
             ]
         )
