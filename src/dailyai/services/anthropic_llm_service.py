@@ -1,6 +1,6 @@
 from typing import AsyncGenerator
 from anthropic import AsyncAnthropic
-from dailyai.pipeline.frames import Frame, LLMMessagesQueueFrame, TextFrame
+from dailyai.pipeline.frames import Frame, LLMMessagesFrame, TextFrame
 
 from dailyai.services.ai_services import LLMService
 
@@ -18,7 +18,7 @@ class AnthropicLLMService(LLMService):
         self.max_tokens = max_tokens
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if not isinstance(frame, LLMMessagesQueueFrame):
+        if not isinstance(frame, LLMMessagesFrame):
             yield frame
 
         stream = await self.client.messages.create(

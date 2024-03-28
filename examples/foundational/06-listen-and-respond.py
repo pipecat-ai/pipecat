@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 import logging
 import os
-from dailyai.pipeline.frames import LLMMessagesQueueFrame
+from dailyai.pipeline.frames import LLMMessagesFrame
 from dailyai.pipeline.pipeline import Pipeline
 
 from dailyai.transports.daily_transport import DailyTransport
@@ -76,7 +76,7 @@ async def main(room_url: str, token):
             # Kick off the conversation.
             messages.append(
                 {"role": "system", "content": "Please introduce yourself to the user."})
-            await pipeline.queue_frames([LLMMessagesQueueFrame(messages)])
+            await pipeline.queue_frames([LLMMessagesFrame(messages)])
 
         transport.transcription_settings["extra"]["endpointing"] = True
         transport.transcription_settings["extra"]["punctuate"] = True

@@ -6,7 +6,7 @@ from dailyai.pipeline.frames import (
     Frame,
     LLMFunctionCallFrame,
     LLMFunctionStartFrame,
-    LLMMessagesQueueFrame,
+    LLMMessagesFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
     OpenAILLMContextFrame,
@@ -75,7 +75,7 @@ class BaseOpenAILLMService(LLMService):
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, OpenAILLMContextFrame):
             context: OpenAILLMContext = frame.context
-        elif isinstance(frame, LLMMessagesQueueFrame):
+        elif isinstance(frame, LLMMessagesFrame):
             context = OpenAILLMContext.from_messages(frame.messages)
         else:
             yield frame

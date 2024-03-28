@@ -9,7 +9,7 @@ from dailyai.pipeline.pipeline import Pipeline
 from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.deepgram_ai_services import DeepgramTTSService
-from dailyai.pipeline.frames import EndPipeFrame, LLMMessagesQueueFrame, TextFrame
+from dailyai.pipeline.frames import EndPipeFrame, LLMMessagesFrame, TextFrame
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 
 from runner import configure
@@ -60,7 +60,7 @@ async def main(room_url: str):
         # will run in parallel with generating and speaking the audio for static text, so there's no delay to
         # speak the LLM response.
         llm_pipeline = Pipeline([llm, elevenlabs_tts])
-        await llm_pipeline.queue_frames([LLMMessagesQueueFrame(messages), EndPipeFrame()])
+        await llm_pipeline.queue_frames([LLMMessagesFrame(messages), EndPipeFrame()])
 
         simple_tts_pipeline = Pipeline([azure_tts])
         await simple_tts_pipeline.queue_frames(
