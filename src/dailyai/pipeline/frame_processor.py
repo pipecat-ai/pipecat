@@ -29,3 +29,6 @@ class FrameProcessor:
     async def interrupted(self) -> None:
         """Handle any cleanup if the pipeline was interrupted."""
         pass
+
+    def __str__(self):
+        return self.__class__.__name__
