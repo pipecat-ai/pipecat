@@ -3,7 +3,7 @@ import asyncio
 import logging
 from dailyai.pipeline.frames import EndFrame, TranscriptionQueueFrame
 
-from dailyai.services.local_transport_service import LocalTransportService
+from dailyai.transports.local_transport import LocalTransport
 from dailyai.services.whisper_ai_services import WhisperSTTService
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
@@ -16,7 +16,7 @@ async def main(room_url: str):
     global stt
 
     meeting_duration_minutes = 1
-    transport = LocalTransportService(
+    transport = LocalTransport(
         mic_enabled=True,
         camera_enabled=False,
         speaker_enabled=True,

@@ -10,7 +10,7 @@ from dailyai.pipeline.aggregators import (
 from dailyai.pipeline.frames import Frame, LLMMessagesQueueFrame, TextFrame
 from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.azure_ai_services import AzureTTSService
 from dailyai.services.open_ai_services import OpenAILLMService
 
@@ -51,7 +51,7 @@ class TranslationProcessor(FrameProcessor):
 
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
-        transport = DailyTransportService(
+        transport = DailyTransport(
             room_url,
             token,
             "Translator",

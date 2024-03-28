@@ -23,7 +23,7 @@ from dailyai.pipeline.frames import (
 from dailyai.pipeline.frame_processor import FrameProcessor
 
 from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
@@ -63,7 +63,7 @@ class MonthPrepender(FrameProcessor):
 
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
-        transport = DailyTransportService(
+        transport = DailyTransport(
             room_url,
             None,
             "Month Narration Bot",

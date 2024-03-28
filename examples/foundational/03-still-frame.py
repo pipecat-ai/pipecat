@@ -5,7 +5,7 @@ import os
 
 from dailyai.pipeline.frames import TextFrame
 from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.fal_ai_services import FalImageGenService
 
 from runner import configure
@@ -20,7 +20,7 @@ logger.setLevel(logging.DEBUG)
 
 async def main(room_url):
     async with aiohttp.ClientSession() as session:
-        transport = DailyTransportService(
+        transport = DailyTransport(
             room_url,
             None,
             "Show a still frame image",

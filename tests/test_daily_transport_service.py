@@ -4,9 +4,9 @@ import unittest
 class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
 
     async def test_event_handler(self):
-        from dailyai.services.daily_transport_service import DailyTransportService
+        from dailyai.transports.daily_transport import DailyTransport
 
-        transport = DailyTransportService("mock.daily.co/mock", "token", "bot")
+        transport = DailyTransport("mock.daily.co/mock", "token", "bot")
 
         was_called = False
 

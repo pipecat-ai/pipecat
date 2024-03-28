@@ -6,7 +6,7 @@ import aiohttp
 from PIL import Image
 
 from dailyai.pipeline.frames import ImageFrame, Frame
-from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.ai_services import AIService
 from dailyai.pipeline.aggregators import (
     LLMAssistantContextAggregator,
@@ -42,7 +42,7 @@ class ImageSyncAggregator(AIService):
 
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
-        transport = DailyTransportService(
+        transport = DailyTransport(
             room_url,
             token,
             "Respond bot",

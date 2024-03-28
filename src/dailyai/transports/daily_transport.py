@@ -24,10 +24,10 @@ from daily import (
     VirtualSpeakerDevice,
 )
 
-from dailyai.services.base_transport_service import BaseTransportService
+from dailyai.transports.threaded_transport import ThreadedTransport
 
 
-class DailyTransportService(BaseTransportService, EventHandler):
+class DailyTransport(ThreadedTransport, EventHandler):
     _daily_initialized = False
     _lock = threading.Lock()
 
@@ -48,7 +48,7 @@ class DailyTransportService(BaseTransportService, EventHandler):
         start_transcription: bool = False,
         **kwargs,
     ):
-        # This will call BaseTransportService.__init__ method, not EventHandler
+        # This will call ThreadedTransport.__init__ method, not EventHandler
         super().__init__(**kwargs)
 
         self._room_url: str = room_url
@@ -140,10 +140,10 @@ class DailyTransportService(BaseTransportService, EventHandler):
 
     def _prerun(self):
         # Only initialize Daily once
-        if not DailyTransportService._daily_initialized:
-            with DailyTransportService._lock:
+        if not DailyTransport._daily_initialized:
+            with DailyTransport._lock:
                 Daily.init()
-                DailyTransportService._daily_initialized = True
+                DailyTransport._daily_initialized = True
         self.client = CallClient(event_handler=self)
 
         if self._mic_enabled:

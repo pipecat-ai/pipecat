@@ -13,7 +13,7 @@ from dailyai.pipeline.opeanai_llm_aggregator import (
 )
 
 from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.openai_llm_context import OpenAILLMContext
 from dailyai.services.open_ai_services import OpenAILLMService
 # from dailyai.services.deepgram_ai_services import DeepgramTTSService
@@ -292,7 +292,7 @@ async def main(room_url: str, token):
         global llm
         global tts
 
-        transport = DailyTransportService(
+        transport = DailyTransport(
             room_url,
             token,
             "Intake Bot",
