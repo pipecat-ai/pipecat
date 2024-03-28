@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 import logging
-from dailyai.pipeline.frames import EndFrame, TranscriptionQueueFrame
+from dailyai.pipeline.frames import EndFrame, TranscriptionFrame
 
 from dailyai.transports.local_transport import LocalTransport
 from dailyai.services.whisper_ai_services import WhisperSTTService
@@ -32,7 +32,7 @@ async def main(room_url: str):
         while not transport_done.is_set():
             item = await transcription_output_queue.get()
             print("got item from queue", item)
-            if isinstance(item, TranscriptionQueueFrame):
+            if isinstance(item, TranscriptionFrame):
                 print(item.text)
             elif isinstance(item, EndFrame):
                 break

@@ -24,7 +24,7 @@ from dailyai.pipeline.aggregators import (
 )
 from dailyai.pipeline.frames import (
     EndPipeFrame,
-    LLMMessagesQueueFrame,
+    LLMMessagesFrame,
     Frame,
     TextFrame,
     LLMResponseEndFrame,
@@ -172,7 +172,7 @@ class StoryImageGenerator(FrameProcessor):
                 prompt = f"You are an illustrator for a children's story book. Here is the story so far:\n\n\"{' '.join(self._story[:-1])}\"\n\nGenerate a prompt for DALL-E to create an illustration for the next page. Here's the sentence for the next page:\n\n\"{self._story[-1:][0]}\"\n\n Your response should start with the phrase \"Children's book illustration of\"."
             msgs = [{"role": "system", "content": prompt}]
             image_prompt = ""
-            async for f in self._llm.process_frame(LLMMessagesQueueFrame(msgs)):
+            async for f in self._llm.process_frame(LLMMessagesFrame(msgs)):
                 if isinstance(f, TextFrame):
                     image_prompt += f.text
             async for f in self._img.process_frame(TextFrame(image_prompt)):
@@ -253,7 +253,7 @@ async def main(room_url: str, token):
             await local_pipeline.queue_frames(
                 [
                     ImageFrame(None, images["grandma-listening.png"]),
-                    LLMMessagesQueueFrame(intro_messages),
+                    LLMMessagesFrame(intro_messages),
                     AudioFrame(sounds["listening.wav"]),
                     EndPipeFrame(),
                 ]

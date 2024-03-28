@@ -14,7 +14,7 @@ from dailyai.pipeline.frames import (
     SpriteFrame,
     Frame,
     LLMResponseEndFrame,
-    LLMMessagesQueueFrame,
+    LLMMessagesFrame,
     AudioFrame,
     PipelineStartedFrame,
 )
@@ -129,7 +129,7 @@ async def main(room_url: str, token):
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
             print(f"!!! in here, pipeline.source is {pipeline.source}")
-            await pipeline.queue_frames([LLMMessagesQueueFrame(messages)])
+            await pipeline.queue_frames([LLMMessagesFrame(messages)])
 
         async def run_conversation():
 

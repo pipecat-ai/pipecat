@@ -3,7 +3,7 @@ import aiohttp
 import logging
 import os
 from dailyai.pipeline.frame_processor import FrameProcessor
-from dailyai.pipeline.frames import TextFrame, TranscriptionQueueFrame
+from dailyai.pipeline.frames import TextFrame, TranscriptionFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.transports.websocket_transport import WebsocketTransport
@@ -16,7 +16,7 @@ logger.setLevel(logging.DEBUG)
 
 class WhisperTranscriber(FrameProcessor):
     async def process_frame(self, frame):
-        if isinstance(frame, TranscriptionQueueFrame):
+        if isinstance(frame, TranscriptionFrame):
             print(f"Transcribed: {frame.text}")
         else:
             yield frame

@@ -1,6 +1,6 @@
 import dataclasses
 from typing import Text
-from dailyai.pipeline.frames import AudioFrame, Frame, TextFrame, TranscriptionQueueFrame
+from dailyai.pipeline.frames import AudioFrame, Frame, TextFrame, TranscriptionFrame
 import dailyai.pipeline.protobufs.frames_pb2 as frame_protos
 from dailyai.serializers.abstract_frame_serializer import FrameSerializer
 
@@ -9,7 +9,7 @@ class ProtobufFrameSerializer(FrameSerializer):
     SERIALIZABLE_TYPES = {
         TextFrame: "text",
         AudioFrame: "audio",
-        TranscriptionQueueFrame: "transcription"
+        TranscriptionFrame: "transcription"
     }
 
     SERIALIZABLE_FIELDS = {v: k for k, v in SERIALIZABLE_TYPES.items()}
@@ -45,9 +45,9 @@ class ProtobufFrameSerializer(FrameSerializer):
         ...     serializer.serialize(TextFrame(text='hello world')))
         TextFrame(text='hello world')
 
-        >>> serializer.deserialize(serializer.serialize(TranscriptionQueueFrame(
+        >>> serializer.deserialize(serializer.serialize(TranscriptionFrame(
         ...     text="Hello there!", participantId="123", timestamp="2021-01-01")))
-        TranscriptionQueueFrame(text='Hello there!', participantId='123', timestamp='2021-01-01')
+        TranscriptionFrame(text='Hello there!', participantId='123', timestamp='2021-01-01')
         """
 
         proto = frame_protos.Frame.FromString(data)

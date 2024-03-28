@@ -102,7 +102,7 @@ class TextFrame(Frame):
 
 
 @dataclass()
-class TranscriptionQueueFrame(TextFrame):
+class TranscriptionFrame(TextFrame):
     """A text frame with transcription-specific data. Will be placed in the
     transport's receive queue when a participant speaks."""
     participantId: str
@@ -126,7 +126,7 @@ class TTSEndFrame(ControlFrame):
 
 
 @dataclass()
-class LLMMessagesQueueFrame(Frame):
+class LLMMessagesFrame(Frame):
     """A frame containing a list of LLM messages. Used to signal that an LLM
     service should run a chat completion and emit an LLMStartFrames, TextFrames
     and an LLMEndFrame.
@@ -137,7 +137,7 @@ class LLMMessagesQueueFrame(Frame):
 
 @dataclass()
 class OpenAILLMContextFrame(Frame):
-    """Like an LLMMessagesQueueFrame, but with extra context specific to the
+    """Like an LLMMessagesFrame, but with extra context specific to the
     OpenAI API. The context in this message is also mutable, and will be
     changed by the OpenAIContextAggregator frame processor."""
     context: OpenAILLMContext

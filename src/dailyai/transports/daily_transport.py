@@ -10,7 +10,7 @@ from typing import Any
 
 from dailyai.pipeline.frames import (
     ReceivedAppMessageFrame,
-    TranscriptionQueueFrame,
+    TranscriptionFrame,
 )
 
 from threading import Event
@@ -269,7 +269,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
             elif "session_id" in message:
                 participantId = message["session_id"]
             if self._my_participant_id and participantId != self._my_participant_id:
-                frame = TranscriptionQueueFrame(
+                frame = TranscriptionFrame(
                     message["text"], participantId, message["timestamp"])
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(frame), self._loop)
