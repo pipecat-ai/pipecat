@@ -15,7 +15,6 @@ class SequentialMergePipeline(Pipeline):
         for idx, pipeline in enumerate(self.pipelines):
             while True:
                 frame = await pipeline.sink.get()
-                print(idx, frame)
                 if isinstance(
                         frame, EndFrame) or isinstance(
                         frame, EndPipeFrame):
