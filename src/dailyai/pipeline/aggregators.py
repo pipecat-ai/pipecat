@@ -7,11 +7,11 @@ from dailyai.pipeline.frames import (
     EndFrame,
     EndPipeFrame,
     Frame,
-    LLMMessagesQueueFrame,
+    LLMMessagesFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
     TextFrame,
-    TranscriptionQueueFrame,
+    TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -57,7 +57,7 @@ class ResponseAggregator(FrameProcessor):
                     {"role": self._role, "content": self.aggregation})
                 self.aggregation = ""
                 yield self._end_frame()
-                yield LLMMessagesQueueFrame(self.messages)
+                yield LLMMessagesFrame(self.messages)
         elif isinstance(frame, self._accumulator_frame) and self.aggregating:
             self.aggregation += f" {frame.text}"
             if self._pass_through:
@@ -84,7 +84,7 @@ class UserResponseAggregator(ResponseAggregator):
             role="user",
             start_frame=UserStartedSpeakingFrame,
             end_frame=UserStoppedSpeakingFrame,
-            accumulator_frame=TranscriptionQueueFrame,
+            accumulator_frame=TranscriptionFrame,
             pass_through=False,
         )
 
@@ -114,7 +114,7 @@ class LLMContextAggregator(AIService):
             return
 
         # Ignore transcription frames from the bot
-        if isinstance(frame, TranscriptionQueueFrame):
+        if isinstance(frame, TranscriptionFrame):
             if frame.participantId == self.bot_participant_id:
                 return
 
@@ -126,19 +126,19 @@ class LLMContextAggregator(AIService):
 
         # TODO: split up transcription by participant
         if self.complete_sentences:
-            # type: ignore -- the linter thinks this isn't a TextQueueFrame, even
+            # type: ignore -- the linter thinks this isn't a TextFrame, even
             # though we check it above
             self.sentence += frame.text
             if self.sentence.endswith((".", "?", "!")):
                 self.messages.append(
                     {"role": self.role, "content": self.sentence})
                 self.sentence = ""
-                yield LLMMessagesQueueFrame(self.messages)
+                yield LLMMessagesFrame(self.messages)
         else:
-            # type: ignore -- the linter thinks this isn't a TextQueueFrame, even
+            # type: ignore -- the linter thinks this isn't a TextFrame, even
             # though we check it above
             self.messages.append({"role": self.role, "content": frame.text})
-            yield LLMMessagesQueueFrame(self.messages)
+            yield LLMMessagesFrame(self.messages)
 
 
 class LLMUserContextAggregator(LLMContextAggregator):
@@ -334,7 +334,7 @@ class ParallelPipeline(FrameProcessor):
                 continue
             seen_ids.add(id(frame))
 
-            # Skip passing along EndParallelPipeQueueFrame, because we use them
+            # Skip passing along EndPipeFrame, because we use them
             # for our own flow control.
             if not isinstance(frame, EndPipeFrame):
                 yield frame

@@ -7,7 +7,7 @@ from typing import AsyncGenerator
 from dailyai.pipeline.aggregators import (
     SentenceAggregator,
 )
-from dailyai.pipeline.frames import Frame, LLMMessagesQueueFrame, TextFrame
+from dailyai.pipeline.frames import Frame, LLMMessagesFrame, TextFrame
 from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.transports.daily_transport import DailyTransport
@@ -44,7 +44,7 @@ class TranslationProcessor(FrameProcessor):
                 },
                 {"role": "user", "content": frame.text},
             ]
-            yield LLMMessagesQueueFrame(context)
+            yield LLMMessagesFrame(context)
         else:
             yield frame
 

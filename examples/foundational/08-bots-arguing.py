@@ -10,7 +10,7 @@ from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
-from dailyai.pipeline.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesQueueFrame, TextFrame
+from dailyai.pipeline.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
 
 from runner import configure
 
@@ -80,7 +80,7 @@ async def main(room_url: str):
                 [llm, sentence_aggregator, tts1], source_queue, sink_queue
             )
 
-            await source_queue.put(LLMMessagesQueueFrame(messages))
+            await source_queue.put(LLMMessagesFrame(messages))
             await source_queue.put(EndFrame())
             await pipeline.run_pipeline()
 

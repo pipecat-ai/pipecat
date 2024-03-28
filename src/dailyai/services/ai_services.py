@@ -13,7 +13,7 @@ from dailyai.pipeline.frames import (
     TTSEndFrame,
     TTSStartFrame,
     TextFrame,
-    TranscriptionQueueFrame,
+    TranscriptionFrame,
 )
 
 from abc import abstractmethod
@@ -128,7 +128,7 @@ class STTService(AIService):
         ww.close()
         content.seek(0)
         text = await self.run_stt(content)
-        yield TranscriptionQueueFrame(text, "", str(time.time()))
+        yield TranscriptionFrame(text, "", str(time.time()))
 
 
 class FrameLogger(AIService):

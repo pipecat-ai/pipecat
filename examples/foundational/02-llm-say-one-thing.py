@@ -4,7 +4,7 @@ import logging
 
 import aiohttp
 
-from dailyai.pipeline.frames import EndFrame, LLMMessagesQueueFrame
+from dailyai.pipeline.frames import EndFrame, LLMMessagesFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
@@ -49,7 +49,7 @@ async def main(room_url):
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            await pipeline.queue_frames([LLMMessagesQueueFrame(messages), EndFrame()])
+            await pipeline.queue_frames([LLMMessagesFrame(messages), EndFrame()])
 
         await transport.run(pipeline)
 

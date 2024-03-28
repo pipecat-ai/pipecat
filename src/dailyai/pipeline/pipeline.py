@@ -81,8 +81,8 @@ class Pipeline:
 
         The source and sink queues must be set before calling this method.
 
-        This method will exit when an EndStreamQueueFrame is placed on the sink queue.
-        No more frames will be placed on the sink queue after an EndStreamQueueFrame, even
+        This method will exit when an EndFrame is placed on the sink queue.
+        No more frames will be placed on the sink queue after an EndFrame, even
         if it's not the last frame yielded by the last frame_processor in the pipeline..
         """
 

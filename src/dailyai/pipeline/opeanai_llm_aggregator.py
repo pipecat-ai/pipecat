@@ -6,7 +6,7 @@ from dailyai.pipeline.frames import (
     LLMResponseStartFrame,
     OpenAILLMContextFrame,
     TextFrame,
-    TranscriptionQueueFrame,
+    TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -90,7 +90,7 @@ class OpenAIUserContextAggregator(OpenAIContextAggregator):
             role="user",
             start_frame=UserStartedSpeakingFrame,
             end_frame=UserStoppedSpeakingFrame,
-            accumulator_frame=TranscriptionQueueFrame,
+            accumulator_frame=TranscriptionFrame,
             pass_through=False,
         )
 
