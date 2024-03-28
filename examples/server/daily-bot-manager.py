@@ -105,61 +105,59 @@ def start_bot(*, bot_path, room_url, token, bot_args, wait_for_bot):
     return True
 
 
-@app.route("/start/<string:text>", methods=["GET", "POST"])
-def start(text):
-    if text in APPS:
+@app.route("/start/<string:botname>", methods=["GET", "POST"])
+def start(botname):
+    try:
+        if botname not in APPS:
+            raise Exception(f"Bot '{botname}' is not in the allowlist.")
+
+        bot_path = APPS[botname]
+        props = {
+            "room_url": None,
+            "room_properties": None,
+            "token_properties": None,
+            "bot_args": None,
+            "wait_for_bot": True,
+            "duration": None,
+            "redirect": True
+        }
+        props |= request.values.to_dict()  # gets URL params as well as plaintext POST body
         try:
-            bot_path = APPS[text]
+            props |= request.json
+        except BaseException:
+            pass
+        if props['redirect'] == "false":
+            props['redirect'] = False
+        if props['wait_for_bot'] == "false":
+            props['wait_for_bot'] = False
 
-            props = {
-                "room_url": None,
-                "room_properties": None,
-                "token_properties": None,
-                "bot_args": None,
-                "wait_for_bot": True,
-                "duration": None,
-                "redirect": True
-            }
-            props |= request.values.to_dict()  # gets URL params as well as plaintext POST body
+        duration = int(os.getenv("DAILY_BOT_DURATION") or 7200)
+        if props['duration']:
+            duration = props['duration']
+        exp = time.time() + duration
+        if (props['room_url']):
+            room_url = props['room_url']
             try:
-                props |= request.json
-            except BaseException:
-                pass
-            if props['redirect'] == "false":
-                props['redirect'] = False
-            if props['wait_for_bot'] == "false":
-                props['wait_for_bot'] = False
+                room_name = get_room_name(room_url)
+            except ValueError:
+                raise Exception(
+                    "There was a problem detecting the room name. Please double-check the value of room_url.")
+        else:
+            room_url, room_name = create_room(props['room_properties'], exp)
+        token = create_token(room_name, props['token_properties'], exp)
+        bot = start_bot(
+            room_url=room_url,
+            bot_path=bot_path,
+            token=token,
+            bot_args=props['bot_args'],
+            wait_for_bot=props['wait_for_bot'])
 
-            duration = int(os.getenv("DAILY_ROOM_TIMEOUT")
-                           or os.getenv("DAILY_BOT_DURATION") or 7200)
-            if props['duration']:
-                duration = props['duration']
-            exp = time.time() + duration
-            if (props['room_url']):
-                room_url = props['room_url']
-                try:
-                    room_name = get_room_name(room_url)
-                except BaseException:
-                    raise Exception(
-                        "There was a problem detecting the room name. Please double-check the value of room_url.")
-            else:
-                room_url, room_name = create_room(props['room_properties'], exp)
-            token = create_token(room_name, props['token_properties'], exp)
-            bot = start_bot(
-                room_url=room_url,
-                bot_path=bot_path,
-                token=token,
-                bot_args=props['bot_args'],
-                wait_for_bot=props['wait_for_bot'])
-
-            if props['redirect'] and request.method == "GET":
-                return redirect(room_url, 302)
-            else:
-                return jsonify({"room_url": room_url, "token": token})
-        except BaseException as e:
-            return "There was a problem starting the bot: {e}", 500
-    else:
-        return "Bot not found", 404
+        if props['redirect'] and request.method == "GET":
+            return redirect(room_url, 302)
+        else:
+            return jsonify({"room_url": room_url, "token": token})
+    except BaseException as e:
+        return "There was a problem starting the bot: {e}", 500
 
 
 @app.route("/healthz")
