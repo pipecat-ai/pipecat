@@ -5,7 +5,7 @@ import time
 import urllib.parse
 import random
 
-from dailyai.services.daily_transport_service import DailyTransportService
+from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
 from dailyai.pipeline.frames import Frame, FrameType
 from dailyai.services.fal_ai_services import FalImageGenService
@@ -17,7 +17,7 @@ async def main(room_url: str, token):
     global llm
     global tts
 
-    transport = DailyTransportService(
+    transport = DailyTransport(
         room_url,
         token,
         "Imagebot",

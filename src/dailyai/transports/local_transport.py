@@ -3,10 +3,10 @@ import numpy as np
 import tkinter as tk
 import pyaudio
 
-from dailyai.services.base_transport_service import BaseTransportService
+from dailyai.transports.threaded_transport import ThreadedTransport
 
 
-class LocalTransportService(BaseTransportService):
+class LocalTransport(ThreadedTransport):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._sample_width = kwargs.get("sample_width") or 2

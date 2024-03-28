@@ -7,7 +7,7 @@ import tkinter as tk
 
 from dailyai.pipeline.frames import TextFrame
 from dailyai.services.fal_ai_services import FalImageGenService
-from dailyai.services.local_transport_service import LocalTransportService
+from dailyai.transports.local_transport import LocalTransport
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
@@ -22,7 +22,7 @@ async def main():
         meeting_duration_minutes = 2
         tk_root = tk.Tk()
         tk_root.title("Calendar")
-        transport = LocalTransportService(
+        transport = LocalTransport(
             tk_root=tk_root,
             mic_enabled=True,
             camera_enabled=True,

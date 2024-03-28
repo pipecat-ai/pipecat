@@ -27,6 +27,7 @@ from dailyai.pipeline.frames import (
 )
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import TTSService
+from dailyai.transports.abstract_transport import AbstractTransport
 
 torch.set_num_threads(1)
 
@@ -72,20 +73,13 @@ class VADState(Enum):
     STOPPING = 4
 
 
-class BaseTransportService:
+class ThreadedTransport(AbstractTransport):
 
     def __init__(
         self,
         **kwargs,
     ) -> None:
-        self._mic_enabled = kwargs.get("mic_enabled") or False
-        self._mic_sample_rate = kwargs.get("mic_sample_rate") or 16000
-        self._camera_enabled = kwargs.get("camera_enabled") or False
-        self._camera_width = kwargs.get("camera_width") or 1024
-        self._camera_height = kwargs.get("camera_height") or 768
-        self._speaker_enabled = kwargs.get("speaker_enabled") or False
-        self._speaker_sample_rate = kwargs.get("speaker_sample_rate") or 16000
-        self._fps = kwargs.get("fps") or 8
+        super().__init__(**kwargs)
         self._vad_start_s = kwargs.get("vad_start_s") or 0.2
         self._vad_stop_s = kwargs.get("vad_stop_s") or 0.8
         self._context = kwargs.get("context") or []
@@ -105,14 +99,6 @@ class BaseTransportService:
         self._vad_state = VADState.QUIET
         self._user_is_speaking = False
 
-        duration_minutes = kwargs.get("duration_minutes") or 10
-        self._expiration = time.time() + duration_minutes * 60
-
-        self.send_queue = asyncio.Queue()
-        self.receive_queue = asyncio.Queue()
-
-        self.completed_queue = asyncio.Queue()
-
         self._threadsafe_send_queue = queue.Queue()
 
         self._images = None
@@ -124,8 +110,6 @@ class BaseTransportService:
 
         self._stop_threads = threading.Event()
         self._is_interrupted = threading.Event()
-
-        self._logger: logging.Logger = logging.getLogger()
 
     async def run(self, pipeline: Pipeline | None = None, override_pipeline_source_queue=True):
         self._prerun()
@@ -193,8 +177,7 @@ class BaseTransportService:
     async def run_interruptible_pipeline(
         self,
         pipeline: Pipeline,
-        allow_interruptions=True,
-        pre_processor=None,
+        pre_processor: FrameProcessor | None = None,
         post_processor: FrameProcessor | None = None,
     ):
         pipeline.set_sink(self.send_queue)
