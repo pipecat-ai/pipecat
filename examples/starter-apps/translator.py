@@ -7,16 +7,24 @@ from typing import AsyncGenerator
 from dailyai.pipeline.aggregators import (
     SentenceAggregator,
 )
-from dailyai.pipeline.frames import Frame, LLMMessagesFrame, TextFrame
+from dailyai.pipeline.frames import (
+    Frame,
+    LLMMessagesFrame,
+    TextFrame,
+    SendAppMessageFrame,
+)
 from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.azure_ai_services import AzureTTSService
 from dailyai.services.open_ai_services import OpenAILLMService
+from dailyai.pipeline.aggregators import LLMFullResponseAggregator
 
 from runner import configure
 
 from dotenv import load_dotenv
+
+
 load_dotenv(override=True)
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
@@ -49,6 +57,22 @@ class TranslationProcessor(FrameProcessor):
             yield frame
 
 
+class TranslationSubtitles(FrameProcessor):
+    def __init__(self, language):
+        self._language = language
+
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, TextFrame):
+            app_message = {
+                "language": self._language,
+                "text": frame.text
+            }
+            yield SendAppMessageFrame(app_message, None)
+            yield frame
+        else:
+            yield frame
+
+
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
         transport = DailyTransport(
@@ -68,11 +92,13 @@ async def main(room_url: str, token):
             voice="es-ES-AlvaroNeural",
         )
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4-turbo-preview")
+            api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4-turbo-preview"
+        )
         sa = SentenceAggregator()
         tp = TranslationProcessor("Spanish")
-        pipeline = Pipeline([sa, tp, llm, tts])
+        lfra = LLMFullResponseAggregator()
+        ts = TranslationSubtitles("spanish")
+        pipeline = Pipeline([sa, tp, llm, lfra, ts])
 
         transport.transcription_settings["extra"]["endpointing"] = True
         transport.transcription_settings["extra"]["punctuate"] = True
