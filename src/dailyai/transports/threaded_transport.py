@@ -3,7 +3,6 @@ import asyncio
 import itertools
 import logging
 import numpy as np
-import pyaudio
 import torch
 import queue
 import threading
@@ -58,12 +57,7 @@ def int2float(sound):
     return sound
 
 
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
 SAMPLE_RATE = 16000
-CHUNK = int(SAMPLE_RATE / 10)
-
-audio = pyaudio.PyAudio()
 
 
 class VADState(Enum):
