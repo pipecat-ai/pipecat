@@ -171,7 +171,8 @@ class LLMAssistantContextAggregator(LLMContextAggregator):
 
 
 class SentenceAggregator(FrameProcessor):
-    """This frame processor aggregates text frames into complete sentences.
+    """This frame processor aggregates text frames into complete sentences. It separates
+    frames by participant if the participant_id field is defined in the TextFrame.
 
     Frame input/output:
         TextFrame("Hello,") -> None
@@ -183,26 +184,33 @@ class SentenceAggregator(FrameProcessor):
     ...         print(frame.text)
 
     >>> aggregator = SentenceAggregator()
-    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello,")))
-    >>> asyncio.run(print_frames(aggregator, TextFrame(" world.")))
-    Hello, world.
+    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello,", participantId="abcd")))
+    >>> asyncio.run(print_frames(aggregator, TextFrame(" world.", participantId="cdef")))
+     world.
+    >>> asyncio.run(print_frames(aggregator, TextFrame(" everyone.", participantId="abcd")))
+    Hello, everyone.
     """
 
     def __init__(self):
-        self.aggregation = ""
+        self.aggregations = {}
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, TextFrame):
+            pax_id = "none"
+            if frame.participantId:
+                pax_id = frame.participantId
+                if pax_id not in self.aggregations:
+                    self.aggregations[pax_id] = ""
             m = re.search("(.*[?.!])(.*)", frame.text)
             if m:
-                yield TextFrame(self.aggregation + m.group(1))
-                self.aggregation = m.group(2)
+                yield TextFrame(self.aggregations[pax_id] + m.group(1), participantId=pax_id)
+                self.aggregations[pax_id] = m.group(2)
             else:
-                self.aggregation += frame.text
+                self.aggregations[pax_id] += frame.text
         elif isinstance(frame, EndFrame):
-            if self.aggregation:
-                yield TextFrame(self.aggregation)
-            yield frame
+            for key in self.aggregations:
+                if self.aggregations[key]:
+                    yield TextFrame(self.aggregation, participantId=key)
         else:
             yield frame
 
@@ -245,15 +253,24 @@ class LLMFullResponseAggregator(FrameProcessor):
     """
 
     def __init__(self):
-        self.aggregation = ""
+        self.aggregations = {}
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if isinstance(frame, TextFrame):
-            self.aggregation += frame.text
+            pax_id = "none"
+            if frame.participantId:
+                pax_id = frame.participantId
+            if pax_id not in self.aggregations:
+                self.aggregations[pax_id] = ""
+            self.aggregations[pax_id] += frame.text
         elif isinstance(frame, LLMResponseEndFrame):
-            yield TextFrame(self.aggregation)
+            pax_id = "none"
+            if frame.participantId:
+                pax_id = frame.participantId
+            if self.aggregations[pax_id]:
+                yield TextFrame(self.aggregations[pax_id], participantId=pax_id)
             yield frame
-            self.aggregation = ""
+            self.aggregations[pax_id] = ""
         else:
             yield frame
 
@@ -390,3 +407,8 @@ class GatedAggregator(FrameProcessor):
             self.accumulator = []
         else:
             self.accumulator.append(frame)
+
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()

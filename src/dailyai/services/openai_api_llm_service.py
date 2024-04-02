@@ -83,8 +83,8 @@ class BaseOpenAILLMService(LLMService):
 
         function_name = ""
         arguments = ""
-
-        yield LLMResponseStartFrame()
+        print(f"%%% I'm yielding a start frame, and in here, frame is {frame}")
+        yield LLMResponseStartFrame(participantId=frame.participantId)
         chunk_stream: AsyncStream[ChatCompletionChunk] = (
             await self._stream_chat_completions(context)
         )
@@ -107,18 +107,19 @@ class BaseOpenAILLMService(LLMService):
                 tool_call = chunk.choices[0].delta.tool_calls[0]
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
-                    yield LLMFunctionStartFrame(function_name=tool_call.function.name)
+                    yield LLMFunctionStartFrame(function_name=tool_call.function.name, participantId=frame.participantId)
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments and
                     # yield a complete LLMFunctionCallFrame after run_llm_async
                     # completes
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
-                yield TextFrame(chunk.choices[0].delta.content)
+                print(f"%%% yielding text frame for {frame.participantId}")
+                yield TextFrame(chunk.choices[0].delta.content, participantId=frame.participantId)
 
         # if we got a function name and arguments, yield the frame with all the info so
         # frame consumers can take action based on the function call.
         if function_name and arguments:
-            yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
-
-        yield LLMResponseEndFrame()
+            yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments, participantId=frame.participantId)
+        print(f"%%% yielding llm response end frame for {frame.participantId}")
+        yield LLMResponseEndFrame(participantId=frame.participantId)

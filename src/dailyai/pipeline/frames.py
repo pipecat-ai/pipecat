@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any, List, Optional
 
 from dailyai.services.openai_llm_context import OpenAILLMContext
 import dailyai.pipeline.protobufs.frames_pb2 as frame_protos
@@ -48,15 +48,17 @@ class PipelineStartedFrame(ControlFrame):
     pass
 
 
-class LLMResponseStartFrame(ControlFrame):
+@dataclass
+class LLMResponseStartFrame(Frame):
     """Used to indicate the beginning of an LLM response. Following TextFrames
     are part of the LLM response until an LLMResponseEndFrame"""
-    pass
+    participantId: Optional[str] = None
 
 
-class LLMResponseEndFrame(ControlFrame):
+@dataclass
+class LLMResponseEndFrame(Frame):
     """Indicates the end of an LLM response."""
-    pass
+    participantId: Optional[str] = None
 
 
 @dataclass()
@@ -64,6 +66,7 @@ class AudioFrame(Frame):
     """A chunk of audio. Will be played by the transport if the transport's mic
     has been enabled."""
     data: bytes
+    participantId: Optional[str] = None
 
     def __str__(self):
         return f"{self.__class__.__name__}, size: {len(self.data)} B"
@@ -75,6 +78,7 @@ class ImageFrame(Frame):
     enabled."""
     url: str | None
     image: bytes
+    participantId: Optional[str] = None
 
     def __str__(self):
         return f"{self.__class__.__name__}, url: {self.url}, image size: {len(self.image)} B"
@@ -96,16 +100,16 @@ class TextFrame(Frame):
     """A chunk of text. Emitted by LLM services, consumed by TTS services, can
     be used to send text through pipelines."""
     text: str
+    participantId: Optional[str] = None
 
     def __str__(self):
-        return f'{self.__class__.__name__}: "{self.text}"'
+        return f'{self.__class__.__name__}: "{self.text}", participantId: {self.participantId}'
 
 
-@dataclass()
+@dataclass(kw_only=True)
 class TranscriptionFrame(TextFrame):
     """A text frame with transcription-specific data. Will be placed in the
     transport's receive queue when a participant speaks."""
-    participantId: str
     timestamp: str
 
     def __str__(self):
@@ -133,6 +137,10 @@ class LLMMessagesFrame(Frame):
     Note that the messages property on this class is mutable, and will be
     be updated by various ResponseAggregator frame processors."""
     messages: List[dict]
+    participantId: Optional[str] = None
+
+    def __str__(self):
+        return f"{self.__class__.__name__}, participantId: {self.participantId}"
 
 
 @dataclass()
@@ -141,6 +149,7 @@ class OpenAILLMContextFrame(Frame):
     OpenAI API. The context in this message is also mutable, and will be
     changed by the OpenAIContextAggregator frame processor."""
     context: OpenAILLMContext
+    participantId: Optional[str] = None
 
 
 @dataclass()
@@ -189,6 +198,7 @@ class LLMFunctionStartFrame(Frame):
     start preparing to make a function call, if it can do so in the absence of
     any arguments."""
     function_name: str
+    participantId: Optional[str] = None
 
 
 @dataclass()
@@ -196,3 +206,4 @@ class LLMFunctionCallFrame(Frame):
     """Emitted when the LLM has received an entire function call completion."""
     function_name: str
     arguments: str
+    participantId: Optional[str] = None

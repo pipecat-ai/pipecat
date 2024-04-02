@@ -132,6 +132,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
         self.mic.write_frames(frame)
 
     def send_app_message(self, message: Any, participantId: str | None):
+        print(f"### about to try to send {message} to {participantId}")
         self.client.send_app_message(message, participantId)
 
     def read_audio_frames(self, desired_frame_count):
@@ -270,7 +271,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
                 participantId = message["session_id"]
             if self._my_participant_id and participantId != self._my_participant_id:
                 frame = TranscriptionFrame(
-                    message["text"], participantId, message["timestamp"])
+                    message["text"], participantId=participantId, timestamp=message["timestamp"])
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(frame), self._loop)
 

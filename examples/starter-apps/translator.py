@@ -52,7 +52,7 @@ class TranslationProcessor(FrameProcessor):
                 },
                 {"role": "user", "content": frame.text},
             ]
-            yield LLMMessagesFrame(context)
+            yield LLMMessagesFrame(context, participantId=frame.participantId)
         else:
             yield frame
 
@@ -62,11 +62,15 @@ class TranslationSubtitles(FrameProcessor):
         self._language = language
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        print(f"!!! got a frame: {frame}")
         if isinstance(frame, TextFrame):
+            print(f"!!! got a textframe: {frame}")
             app_message = {
                 "language": self._language,
-                "text": frame.text
+                "text": frame.text,
+                "speakerId": frame.participantId
             }
+            print(f"!!! App message contents: {app_message}")
             yield SendAppMessageFrame(app_message, None)
             yield frame
         else:
