@@ -5,6 +5,7 @@ import signal
 import threading
 import types
 
+from enum import Enum
 from functools import partial
 from typing import Any
 
@@ -25,6 +26,14 @@ from daily import (
 )
 
 from dailyai.transports.threaded_transport import ThreadedTransport
+
+SAMPLE_RATE = 16000
+NUM_CHANNELS = 1
+
+SPEECH_THRESHOLD = 0.90
+SPEECH_THRESHOLD_MS = 300
+SILENCE_THRESHOLD_MS = 700
+VAD_RESET_PERIOD_MS = 2000
 
 
 class DailyTransport(ThreadedTransport, EventHandler):
@@ -48,6 +57,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
         start_transcription: bool = False,
         **kwargs,
     ):
+        kwargs['has_webrtc_vad'] = True
         # This will call ThreadedTransport.__init__ method, not EventHandler
         super().__init__(**kwargs)
 
@@ -79,6 +89,12 @@ class DailyTransport(ThreadedTransport, EventHandler):
 
         self._event_handlers = {}
 
+        self.webrtc_vad = Daily.create_native_vad(
+            reset_period_ms=VAD_RESET_PERIOD_MS,
+            sample_rate=SAMPLE_RATE,
+            channels=NUM_CHANNELS
+        )
+
     def _patch_method(self, event_name, *args, **kwargs):
         try:
             for handler in self._event_handlers[event_name]:
@@ -98,6 +114,17 @@ class DailyTransport(ThreadedTransport, EventHandler):
         except Exception as e:
             self._logger.error(f"Exception in event handler {event_name}: {e}")
             raise e
+
+    def _webrtc_vad_analyze(self):
+        buffer = self.read_audio_frames(
+            int(self._speaker_sample_rate / 100))
+        if len(buffer) > 0:
+            confidence = self.webrtc_vad.analyze_frames(buffer)
+            # yeses = int(confidence * 20.0)
+            # nos = 20 - yeses
+            # out = "!" * yeses + "." * nos
+            # print(f"!!! confidence: {out}")
+            return confidence > 0.90
 
     def add_event_handler(self, event_name: str, handler):
         if not event_name.startswith("on_"):
