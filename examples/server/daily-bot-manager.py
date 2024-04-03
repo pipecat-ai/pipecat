@@ -14,10 +14,10 @@ app = Flask(__name__)
 CORS(app)
 
 APPS = {
-    "chatbot": "examples/starter-apps/chatbot.py",
-    "patient-intake": "examples/starter-apps/patient-intake.py",
-    "storybot": "examples/starter-apps/storybot.py",
-    "translator": "examples/starter-apps/translator.py"
+    "chatbot": "../starter-apps/chatbot.py",
+    "patient-intake": "../starter-apps/patient-intake.py",
+    "storybot": "../starter-apps/storybot.py",
+    "translator": "../starter-apps/translator.py"
 }
 
 daily_api_key = os.getenv("DAILY_API_KEY")
@@ -157,7 +157,7 @@ def start(botname):
         else:
             return jsonify({"room_url": room_url, "token": token})
     except BaseException as e:
-        return "There was a problem starting the bot: {e}", 500
+        return f"There was a problem starting the bot: {e}", 500
 
 
 @app.route("/healthz")

@@ -1,7 +1,6 @@
 import asyncio
 import numpy as np
 import tkinter as tk
-import pyaudio
 
 from dailyai.transports.threaded_transport import ThreadedTransport
 
@@ -9,6 +8,13 @@ from dailyai.transports.threaded_transport import ThreadedTransport
 class LocalTransport(ThreadedTransport):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        try:
+            global pyaudio
+            import pyaudio
+        except ModuleNotFoundError as e:
+            print(f"Exception: {e}")
+            print("In order to use the local transport, you'll need to `pip install pyaudio`. On MacOS, you'll also need to `brew install portaudio`.")
+            raise Exception(f"Missing module: {e}")
         self._sample_width = kwargs.get("sample_width") or 2
         self._n_channels = kwargs.get("n_channels") or 1
         self._tk_root = kwargs.get("tk_root") or None
