@@ -4,11 +4,7 @@ Build things like this:
 
 [![AI-powered voice patient intake for healthcare](https://img.youtube.com/vi/lDevgsp9vn0/0.jpg)](https://www.youtube.com/watch?v=lDevgsp9vn0)
 
-
-
-
 **`dailyai` started as a toolkit for implementing generative AI voice bots.** Things like personal coaches, meeting assistants, story-telling toys for kids, customer support bots, and snarky social companions.
-
 
 In 2023 a *lot* of us got excited about the possibility of having open-ended conversations with LLMs. It became clear pretty quickly that we were all solving the same [low-level problems](https://www.daily.co/blog/how-to-talk-to-an-llm-with-your-voice/):
 - low-latency, reliable audio transport
@@ -48,7 +44,7 @@ If you'd like to [implement a service]((https://github.com/daily-co/daily-ai-sdk
 
 ## Getting started
 
-Today, the easiest way to get started with `dailyai` is to use [Daily](https://www.daily.co/) as your transport service. This toolkit started life as an internal SDK at Daily and millions of minutes of AI conversation have been served using it and its earlier prototype incarnations. (The [transport base class](https://github.com/daily-co/daily-ai-sdk/blob/main/src/dailyai/services/base_transport_service.py) is easy to extend, though, so feel free to submit PRs if you'd like to implement another transport service.)
+Today, the easiest way to get started with `dailyai` is to use [Daily](https://www.daily.co/) as your transport service. This toolkit started life as an internal SDK at Daily and millions of minutes of AI conversation have been served using it and its earlier prototype incarnations. (The [transport base class](https://github.com/daily-co/daily-ai-sdk/blob/main/src/dailyai/transports/abstract_transport.py) is easy to extend, though, so feel free to submit PRs if you'd like to implement another transport service.)
 
 ```
 # install the module
@@ -58,12 +54,30 @@ pip install dailyai
 cp dot-env.template .env
 ```
 
+By default, in order to minimize dependencies, only the basic framework functionality is available. Some third-party AI services require additional
+dependencies that you can install with:
+
+```
+pip install dailyai[option,...]
+```
+
+Your project may or may not need these, so they're made available as optional requirements. Here is a list:
+
+- **AI services**: `anthropic`, `azure`, `fal`, `openai`, `playht`, `silero`, `whisper`
+- **Transports**: `daily`, `local`, `websocket`
+
 ## Code examples
 
 There are two directories of examples:
 
 - [foundational](https://github.com/daily-co/daily-ai-sdk/tree/main/examples/foundational) — demos that build on each other, introducing one or two concepts at a time
 - [starter apps](https://github.com/daily-co/daily-ai-sdk/tree/main/examples/starter-apps) — complete applications that you can use as starting points for development
+
+Before running the examples you need to install the dependencies (which will install all the dependencies to run all of the examples):
+
+```
+pip install -r requirements.txt
+```
 
 To run the example below you need to sign up for a [free Daily account](https://dashboard.daily.co/u/signup) and create a Daily room (so you can hear the LLM talking). After that, join the room's URL directly from a browser tab and run:
 
@@ -76,14 +90,14 @@ python examples/foundational/02-llm-say-one-thing.py
 _Note that you may need to set up a virtual environment before following the instructions below. For instance, you might need to run the following from the root of the repo:_
 
 ```
-python3 -m venv env
-source env/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 ```
 
 From the root of this repo, run the following:
 
 ```
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 python -m build
 ```
 
@@ -101,13 +115,7 @@ pip install path_to_this_repo
 
 ### Running tests
 
-To run tests you need to install `pytest`:
-
-```
-pip install pytest
-```
-
-Then, from the root directory, run:
+From the root directory, run:
 
 ```
 pytest --doctest-modules --ignore-glob="*to_be_updated*" src tests
