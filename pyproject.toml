@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "dailyai"
-version = "0.0.3.1"
+dynamic = ["version"]
 description = "An open source framework for real-time, multi-modal, conversational AI applications"
 license = { text = "BSD 2-Clause License" }
 readme = "README.md"
@@ -49,3 +49,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.setuptools_scm]
+# Empty
