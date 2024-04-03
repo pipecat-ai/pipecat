@@ -1,8 +1,15 @@
 from typing import AsyncGenerator
-from anthropic import AsyncAnthropic
 from dailyai.pipeline.frames import Frame, LLMMessagesFrame, TextFrame
 
 from dailyai.services.ai_services import LLMService
+
+try:
+    from anthropic import AsyncAnthropic
+except ModuleNotFoundError as e:
+    print(f"Exception: {e}")
+    print(
+        "In order to use Anthropic, you need to `pip install dailyai[anthropic]`. Also, set `ANTHROPIC_API_KEY` environment variable.")
+    raise Exception(f"Missing module: {e}")
 
 
 class AnthropicLLMService(LLMService):

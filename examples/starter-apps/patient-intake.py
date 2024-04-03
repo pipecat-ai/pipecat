@@ -19,12 +19,12 @@ from dailyai.services.open_ai_services import OpenAILLMService
 # from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.pipeline.frames import (
-    OpenAILLMContextFrame,
     Frame,
     LLMFunctionCallFrame,
     LLMFunctionStartFrame,
     AudioFrame,
 )
+from dailyai.pipeline.openai_frames import OpenAILLMContextFrame
 from dailyai.services.ai_services import FrameLogger, AIService
 from openai._types import NotGiven, NOT_GIVEN
 

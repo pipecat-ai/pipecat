@@ -1,7 +1,6 @@
 import asyncio
 import time
 from typing import AsyncGenerator, List
-import websockets
 
 from dailyai.pipeline.frame_processor import FrameProcessor
 from dailyai.pipeline.frames import AudioFrame, ControlFrame, EndFrame, Frame, TTSEndFrame, TTSStartFrame, TextFrame
@@ -9,6 +8,14 @@ from dailyai.pipeline.pipeline import Pipeline
 from dailyai.serializers.protobuf_serializer import ProtobufFrameSerializer
 from dailyai.transports.abstract_transport import AbstractTransport
 from dailyai.transports.threaded_transport import ThreadedTransport
+
+try:
+    import websockets
+except ModuleNotFoundError as e:
+    print(f"Exception: {e}")
+    print(
+        "In order to use the websocket transport, you need to `pip install dailyai[websocket]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 class WebSocketFrameProcessor(FrameProcessor):

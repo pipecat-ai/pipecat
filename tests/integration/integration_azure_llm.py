@@ -1,8 +1,6 @@
 import asyncio
 import os
-from dailyai.pipeline.frames import (
-    OpenAILLMContextFrame,
-)
+from dailyai.pipeline.openai_frames import OpenAILLMContextFrame
 from dailyai.services.azure_ai_services import AzureLLMService
 from dailyai.services.openai_llm_context import OpenAILLMContext
 
