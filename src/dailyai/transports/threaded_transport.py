@@ -64,6 +64,7 @@ class ThreadedTransport(AbstractTransport):
             raise Exception(
                 "Sorry, you can't use speaker_enabled and vad_enabled at the same time. Please set one to False."
             )
+        self._vad_samples = 1536
 
         if self._vad_enabled:
             try:
@@ -78,7 +79,6 @@ class ThreadedTransport(AbstractTransport):
                     repo_or_dir="snakers4/silero-vad", model="silero_vad", force_reload=False
                 )
                 print(f"!!! Loaded Silero VAD")
-                self._vad_samples = 1536
 
             except ModuleNotFoundError as e:
                 if self._has_webrtc_vad:
