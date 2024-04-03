@@ -32,9 +32,6 @@ dependencies = [
     "Pillow",
     "pyht",
     "python-dotenv",
-    "torch",
-    "torchaudio",
-    "pyaudio",
     "typing-extensions",
     "websockets"
 ]
