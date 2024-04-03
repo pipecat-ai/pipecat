@@ -3,8 +3,7 @@ import asyncio
 import itertools
 import logging
 import numpy as np
-import pyaudio
-import torch
+
 import queue
 import threading
 import time
@@ -29,22 +28,6 @@ from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import TTSService
 from dailyai.transports.abstract_transport import AbstractTransport
 
-torch.set_num_threads(1)
-
-model, utils = torch.hub.load(
-    repo_or_dir="snakers4/silero-vad", model="silero_vad", force_reload=False
-)
-
-(get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks) = utils
-
-# Taken from utils_vad.py
-
-
-def validate(model, inputs: torch.Tensor):
-    with torch.no_grad():
-        outs = model(inputs)
-    return outs
-
 
 # Provided by Alexander Veysov
 
@@ -58,12 +41,7 @@ def int2float(sound):
     return sound
 
 
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
 SAMPLE_RATE = 16000
-CHUNK = int(SAMPLE_RATE / 10)
-
-audio = pyaudio.PyAudio()
 
 
 class VADState(Enum):
@@ -89,6 +67,24 @@ class ThreadedTransport(AbstractTransport):
             raise Exception(
                 "Sorry, you can't use speaker_enabled and vad_enabled at the same time. Please set one to False."
             )
+
+        if self._vad_enabled:
+            try:
+                global torch, torchaudio
+                import torch
+                # We don't use torchaudio here, but we need to try importing it because
+                # Silero uses it
+                import torchaudio
+                torch.set_num_threads(1)
+
+                (self.model, self.utils) = torch.hub.load(
+                    repo_or_dir="snakers4/silero-vad", model="silero_vad", force_reload=False
+                )
+
+            except ModuleNotFoundError as e:
+                print(f"Exception: {e}")
+                print("In order to use VAD, you'll need to install the `torch` and `torchaudio` modules.")
+                raise Exception(f"Missing module(s): {e}")
 
         self._vad_samples = 1536
         vad_frame_s = self._vad_samples / SAMPLE_RATE
@@ -276,7 +272,7 @@ class ThreadedTransport(AbstractTransport):
             audio_chunk = self.read_audio_frames(self._vad_samples)
             audio_int16 = np.frombuffer(audio_chunk, np.int16)
             audio_float32 = int2float(audio_int16)
-            new_confidence = model(
+            new_confidence = self.model(
                 torch.from_numpy(audio_float32), 16000).item()
             speaking = new_confidence > 0.5
 

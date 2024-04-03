@@ -84,7 +84,6 @@ async def main(room_url: str, token):
             mic_enabled=True,
             mic_sample_rate=16000,
             camera_enabled=False,
-            vad_enabled=True,
         )
         tts = AzureTTSService(
             api_key=os.getenv("AZURE_SPEECH_API_KEY"),
@@ -98,7 +97,7 @@ async def main(room_url: str, token):
         tp = TranslationProcessor("Spanish")
         lfra = LLMFullResponseAggregator()
         ts = TranslationSubtitles("spanish")
-        pipeline = Pipeline([sa, tp, llm, lfra, ts])
+        pipeline = Pipeline([sa, tp, llm, lfra, ts, tts])
 
         transport.transcription_settings["extra"]["endpointing"] = True
         transport.transcription_settings["extra"]["punctuate"] = True
