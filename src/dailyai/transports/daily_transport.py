@@ -27,7 +27,6 @@ from daily import (
 
 from dailyai.transports.threaded_transport import ThreadedTransport
 
-SAMPLE_RATE = 16000
 NUM_CHANNELS = 1
 
 SPEECH_THRESHOLD = 0.90
@@ -91,7 +90,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
 
         self.webrtc_vad = Daily.create_native_vad(
             reset_period_ms=VAD_RESET_PERIOD_MS,
-            sample_rate=SAMPLE_RATE,
+            sample_rate=self._speaker_sample_rate,
             channels=NUM_CHANNELS
         )
 
@@ -117,14 +116,15 @@ class DailyTransport(ThreadedTransport, EventHandler):
 
     def _webrtc_vad_analyze(self):
         buffer = self.read_audio_frames(
-            int(self._speaker_sample_rate / 100))
+            int(self._vad_samples))
         if len(buffer) > 0:
             confidence = self.webrtc_vad.analyze_frames(buffer)
             # yeses = int(confidence * 20.0)
             # nos = 20 - yeses
             # out = "!" * yeses + "." * nos
-            # print(f"!!! confidence: {out}")
-            return confidence > 0.90
+            # print(f"!!! confidence: {out} {confidence}")
+            talking = confidence > 0.90
+            return talking
 
     def add_event_handler(self, event_name: str, handler):
         if not event_name.startswith("on_"):
