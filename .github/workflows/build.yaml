@@ -1,4 +1,4 @@
-name: test
+name: build
 
 on:
   workflow_dispatch:
@@ -12,12 +12,12 @@ on:
       - "docs/**"
 
 concurrency:
-  group: build-test-${{ github.event.pull_request.number || github.ref }}
+  group: build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: "Unit and Integration Tests"
+  build:
+    name: "Build and Install"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +43,11 @@ jobs:
           source .venv/bin/activate
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
-      - name: Test with pytest
+      - name: Build project
         run: |
           source .venv/bin/activate
-          pytest --doctest-modules --ignore-glob="*to_be_updated*" src tests
+          python -m build
+      - name: Install project and other Python dependencies
+        run: |
+          source .venv/bin/activate
+          pip install --editable .
