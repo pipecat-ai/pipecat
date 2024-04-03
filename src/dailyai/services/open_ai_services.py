@@ -1,10 +1,18 @@
 import aiohttp
 from PIL import Image
 import io
-from openai import AsyncOpenAI
 
 from dailyai.services.ai_services import ImageGenService
 from dailyai.services.openai_api_llm_service import BaseOpenAILLMService
+
+
+try:
+    from openai import AsyncOpenAI
+except ModuleNotFoundError as e:
+    print(f"Exception: {e}")
+    print(
+        "In order to use OpenAI, you need to `pip install dailyai[openai]`. Also, set `OPENAI_API_KEY` environment variable.")
+    raise Exception(f"Missing module: {e}")
 
 
 class OpenAILLMService(BaseOpenAILLMService):

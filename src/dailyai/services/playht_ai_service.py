@@ -1,10 +1,17 @@
 import io
 import struct
-from pyht import Client
-from pyht.client import TTSOptions
-from pyht.protos.api_pb2 import Format
 
 from dailyai.services.ai_services import TTSService
+
+try:
+    from pyht import Client
+    from pyht.client import TTSOptions
+    from pyht.protos.api_pb2 import Format
+except ModuleNotFoundError as e:
+    print(f"Exception: {e}")
+    print(
+        "In order to use PlayHT, you need to `pip install dailyai[playht]`. Also, set `PLAY_HT_USER_ID` and `PLAY_HT_API_KEY` environment variables.")
+    raise Exception(f"Missing module: {e}")
 
 
 class PlayHTAIService(TTSService):
