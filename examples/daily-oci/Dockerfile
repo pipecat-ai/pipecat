@@ -1,0 +1,27 @@
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG USE_PERSISTENT_DATA
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    build-essential \
+    python3-pip \
+    python3-dev \
+    git \
+    ffmpeg \
+    google-perftools \
+    ca-certificates curl gnupg \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies (Worker Template)
+COPY requirements.txt /requirements.txt
+RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip install --upgrade -r /requirements.txt --no-cache-dir && \
+    rm /requirements.txt
+
+ADD app.py .
+
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc.so.4
+
+CMD python3 app.py
