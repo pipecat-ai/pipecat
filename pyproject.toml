@@ -26,6 +26,8 @@ dependencies = [
     "daily-python",
     "fal",
     "faster_whisper",
+    "flask",
+    "flask_cors",
     "google-cloud-texttospeech",
     "numpy",
     "openai",
