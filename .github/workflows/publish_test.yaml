@@ -23,15 +23,6 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      - name: Cache virtual environment
-        uses: actions/cache@v3
-        with:
-          # We are hashing requirements-dev.txt and requirements-extra.txt which
-          # contain all dependencies needed to run the tests and examples.
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version}}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}
-          path: .venv
-      - name: Install system packages
-        run: sudo apt-get install -y portaudio19-dev
       - name: Setup virtual environment
         run: |
           python -m venv .venv
@@ -39,7 +30,7 @@ jobs:
         run: |
           source .venv/bin/activate
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements-dev.txt
       - name: Build project
         run: |
           source .venv/bin/activate
