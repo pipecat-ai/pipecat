@@ -42,7 +42,7 @@ jobs:
         run: |
           source .venv/bin/activate
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r linux-py3.10-requirements.txt -r dev-requirements.txt
       - name: Test with pytest
         run: |
           source .venv/bin/activate
