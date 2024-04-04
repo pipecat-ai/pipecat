@@ -32,12 +32,15 @@ from dailyai.transports.abstract_transport import AbstractTransport
 
 
 def int2float(sound):
-    abs_max = np.abs(sound).max()
-    sound = sound.astype("float32")
-    if abs_max > 0:
-        sound *= 1 / 32768
-    sound = sound.squeeze()  # depends on the use case
-    return sound
+    try:
+        abs_max = np.abs(sound).max()
+        sound = sound.astype("float32")
+        if abs_max > 0:
+            sound *= 1 / 32768
+        sound = sound.squeeze()  # depends on the use case
+        return sound
+    except ValueError:
+        return sound
 
 
 class VADState(Enum):
@@ -266,17 +269,21 @@ class ThreadedTransport(AbstractTransport):
         pass
 
     def _silero_vad_analyze(self):
-        audio_chunk = self.read_audio_frames(self._vad_samples)
-        audio_int16 = np.frombuffer(audio_chunk, np.int16)
-        audio_float32 = int2float(audio_int16)
-        new_confidence = self.model(
-            torch.from_numpy(audio_float32), 16000).item()
-        # yeses = int(new_confidence * 20.0)
-        # nos = 20 - yeses
-        # out = "!" * yeses + "." * nos
-        # print(f"!!! confidence: {out}")
-        speaking = new_confidence > 0.5
-        return speaking
+        try:
+            audio_chunk = self.read_audio_frames(self._vad_samples)
+            audio_int16 = np.frombuffer(audio_chunk, np.int16)
+            audio_float32 = int2float(audio_int16)
+            new_confidence = self.model(
+                torch.from_numpy(audio_float32), 16000).item()
+            # yeses = int(new_confidence * 20.0)
+            # nos = 20 - yeses
+            # out = "!" * yeses + "." * nos
+            # print(f"!!! confidence: {out}")
+            speaking = new_confidence > 0.5
+            return speaking
+        except BaseException:
+            # This comes from an empty audio array
+            return False
 
     def _vad(self):
 
@@ -425,6 +432,10 @@ class ThreadedTransport(AbstractTransport):
                         if self._loop:
                             asyncio.run_coroutine_threadsafe(
                                 self.completed_queue.put(frame), self._loop
+                            )
+                            # Also send the EndFrame to the pipeline so it can stop
+                            asyncio.run_coroutine_threadsafe(
+                                self.receive_queue.put(frame), self._loop
                             )
                         return
 
