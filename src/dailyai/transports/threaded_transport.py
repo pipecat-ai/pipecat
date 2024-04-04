@@ -78,15 +78,16 @@ class ThreadedTransport(AbstractTransport):
                 (self.model, self.utils) = torch.hub.load(
                     repo_or_dir="snakers4/silero-vad", model="silero_vad", force_reload=False
                 )
-                print(f"!!! Loaded Silero VAD")
+                self._logger.debug("Loaded Silero VAD")
 
             except ModuleNotFoundError as e:
                 if self._has_webrtc_vad:
-                    print(f"Couldn't load torch; using webrtc VAD")
+                    self._logger.debug(f"Couldn't load torch; using webrtc VAD")
                     self._vad_samples = int(self._speaker_sample_rate / 100.0)
                 else:
-                    print(f"Exception: {e}")
-                    print("In order to use VAD, you'll need to install the `torch` and `torchaudio` modules.")
+                    self._logger.error(f"Exception: {e}")
+                    self._logger.error(
+                        "In order to use VAD, you'll need to install the `torch` and `torchaudio` modules.")
                     raise Exception(f"Missing module(s): {e}")
 
         vad_frame_s = self._vad_samples / self._speaker_sample_rate
@@ -312,7 +313,6 @@ class ThreadedTransport(AbstractTransport):
                 self._vad_state == VADState.STARTING
                 and self._vad_starting_count >= self._vad_start_frames
             ):
-                print(f"!!! !!! STARTED SPEAKING")
                 if self._loop:
                     asyncio.run_coroutine_threadsafe(
                         self.receive_queue.put(
@@ -324,7 +324,6 @@ class ThreadedTransport(AbstractTransport):
                 self._vad_state == VADState.STOPPING
                 and self._vad_stopping_count >= self._vad_stop_frames
             ):
-                print(f"!!! !!! STOPPED SPEAKING")
 
                 if self._loop:
                     asyncio.run_coroutine_threadsafe(

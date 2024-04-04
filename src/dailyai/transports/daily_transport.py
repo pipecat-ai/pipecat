@@ -30,8 +30,6 @@ from dailyai.transports.threaded_transport import ThreadedTransport
 NUM_CHANNELS = 1
 
 SPEECH_THRESHOLD = 0.90
-SPEECH_THRESHOLD_MS = 300
-SILENCE_THRESHOLD_MS = 700
 VAD_RESET_PERIOD_MS = 2000
 
 
@@ -123,7 +121,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
             # nos = 20 - yeses
             # out = "!" * yeses + "." * nos
             # print(f"!!! confidence: {out} {confidence}")
-            talking = confidence > 0.90
+            talking = confidence > SPEECH_THRESHOLD
             return talking
 
     def add_event_handler(self, event_name: str, handler):
