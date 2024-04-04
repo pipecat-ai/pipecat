@@ -31,7 +31,7 @@ jobs:
         with:
           # We are hashing requirements-dev.txt and requirements-extra.txt which
           # contain all dependencies needed to run the tests and examples.
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version}}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}
+          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version}}-${{ hashFiles('linux-py3.10-requirements.txt) }}-${{ hashFiles('dev-requirements.txt') }}
           path: .venv
       - name: Install system packages
         run: sudo apt-get install -y portaudio19-dev
