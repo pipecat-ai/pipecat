@@ -76,7 +76,7 @@ There are two directories of examples:
 Before running the examples you need to install the dependencies (which will install all the dependencies to run all of the examples):
 
 ```
-pip install -r requirements.txt
+pip install -r {env}-requirements.txt
 ```
 
 To run the example below you need to sign up for a [free Daily account](https://dashboard.daily.co/u/signup) and create a Daily room (so you can hear the LLM talking). After that, join the room's URL directly from a browser tab and run:
@@ -97,7 +97,7 @@ source venv/bin/activate
 From the root of this repo, run the following:
 
 ```
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -r {env}-requirements.txt -r dev-requirements.txt
 python -m build
 ```
 
