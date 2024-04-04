@@ -9,12 +9,18 @@ from dailyai.services.ai_services import TTSService, ImageGenService
 from PIL import Image
 
 # See .env.example for Azure configuration needed
-from azure.cognitiveservices.speech import (
-    SpeechSynthesizer,
-    SpeechConfig,
-    ResultReason,
-    CancellationReason,
-)
+try:
+    from azure.cognitiveservices.speech import (
+        SpeechSynthesizer,
+        SpeechConfig,
+        ResultReason,
+        CancellationReason,
+    )
+except ModuleNotFoundError as e:
+    print(f"Exception: {e}")
+    print(
+        "In order to use Azure TTS, you need to `pip install dailyai[azure]`. Also, set `SPEECH_KEY` and `SPEECH_REGION` environment variables.")
+    raise Exception(f"Missing module: {e}")
 
 from dailyai.services.openai_api_llm_service import BaseOpenAILLMService
 

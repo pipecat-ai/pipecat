@@ -1,0 +1,59 @@
+name: publish-test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: "Build and upload wheels"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.gitref }}
+      - name: Set up Python
+        id: setup_python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Setup virtual environment
+        run: |
+          python -m venv .venv
+      - name: Install basic Python dependencies
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r dev-requirements.txt
+      - name: Build project
+        run: |
+          source .venv/bin/activate
+          python -m build
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./dist
+
+  publish-to-pypi:
+    name: "Test publish to PyPI"
+    runs-on: ubuntu-latest
+    needs: [ build ]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dailyai
+    permissions:
+      id-token: write
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+          print-hash: true
+          repository-url: https://test.pypi.org/legacy/

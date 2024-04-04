@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "dailyai"
-version = "0.0.3.1"
+dynamic = ["version"]
 description = "An open source framework for real-time, multi-modal, conversational AI applications"
 license = { text = "BSD 2-Clause License" }
 readme = "README.md"
@@ -20,27 +20,28 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "aiohttp",
-    "anthropic",
-    "azure-cognitiveservices-speech",
-    "daily-python",
-    "fal",
-    "faster_whisper",
-    "flask",
-    "flask_cors",
-    "google-cloud-texttospeech",
-    "numpy",
-    "openai",
-    "Pillow",
-    "pyht",
-    "python-dotenv",
-    "typing-extensions",
-    "websockets"
+    "aiohttp==3.9.3",
+    "numpy==1.26.4",
+    "Pillow==10.2.0",
+    "typing-extensions==4.10.0",
 ]
 
 [project.urls]
 Source = "https://github.com/daily-co/daily-ai-sdk"
 Website = "https://daily.co"
+
+[project.optional-dependencies]
+anthropic = [ "anthropic==0.20.0" ]
+azure = [ "azure-cognitiveservices-speech==1.36.0" ]
+daily = [ "daily-python==0.7.2" ]
+examples = [ "python-dotenv==1.0.1", "flask==3.0.2", "flask_cors==4.0.0" ]
+fal = [ "fal==0.12.3" ]
+local = [ "pyaudio==0.2.14" ]
+openai = [ "openai==1.14.2" ]
+playht = [ "pyht==0.0.26" ]
+silero = [ "torch==2.2.1", "torchaudio==2.2.1" ]
+websocket = [ "websockets==12.0" ]
+whisper = [ "faster_whisper==1.0.1" ]
 
 [tool.setuptools.packages.find]
 # All the following settings are optional:
@@ -48,3 +49,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.setuptools_scm]
+# Empty

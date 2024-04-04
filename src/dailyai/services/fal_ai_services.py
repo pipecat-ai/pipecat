@@ -1,4 +1,3 @@
-import fal
 import aiohttp
 import asyncio
 import io
@@ -10,7 +9,13 @@ from dailyai.services.ai_services import ImageGenService
 
 from dailyai.services.ai_services import ImageGenService
 
-# Fal expects FAL_KEY_ID and FAL_KEY_SECRET to be set in the env
+try:
+    import fal
+except ModuleNotFoundError as e:
+    print(f"Exception: {e}")
+    print(
+        "In order to use Fal, you need to `pip install dailyai[fal]`. Also, set `FAL_KEY_ID` and `FAL_KEY_SECRET` environment variables.")
+    raise Exception(f"Missing module: {e}")
 
 
 class FalImageGenService(ImageGenService):

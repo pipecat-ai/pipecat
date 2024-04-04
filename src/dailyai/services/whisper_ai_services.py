@@ -3,8 +3,16 @@ import asyncio
 from enum import Enum
 import logging
 from typing import BinaryIO
-from faster_whisper import WhisperModel
 from dailyai.services.local_stt_service import LocalSTTService
+
+
+try:
+    from faster_whisper import WhisperModel
+except ModuleNotFoundError as e:
+    print(f"Exception: {e}")
+    print(
+        "In order to use Whisper, you need to `pip install dailyai[whisper]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 class Model(Enum):
