@@ -1,4 +1,0 @@
-autopep8==2.0.4
-build==1.0.3
-packaging==23.2
-pyproject_hooks==1.0.0

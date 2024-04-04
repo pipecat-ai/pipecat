@@ -1,7 +1,6 @@
 from abc import abstractmethod
 import asyncio
 import itertools
-import logging
 import numpy as np
 
 import queue

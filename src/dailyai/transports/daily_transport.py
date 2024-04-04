@@ -15,14 +15,21 @@ from dailyai.pipeline.frames import (
 
 from threading import Event
 
-from daily import (
-    EventHandler,
-    CallClient,
-    Daily,
-    VirtualCameraDevice,
-    VirtualMicrophoneDevice,
-    VirtualSpeakerDevice,
-)
+try:
+    from daily import (
+        EventHandler,
+        CallClient,
+        Daily,
+        VirtualCameraDevice,
+        VirtualMicrophoneDevice,
+        VirtualSpeakerDevice,
+    )
+except ModuleNotFoundError as e:
+    print(f"Exception: {e}")
+    print(
+        "In order to use the Daily transport, you need to `pip install dailyai[daily]`.")
+    raise Exception(f"Missing module: {e}")
+
 
 from dailyai.transports.threaded_transport import ThreadedTransport
 

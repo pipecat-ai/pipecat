@@ -1,26 +1,22 @@
-name: test
+name: publish
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - "**"
-    paths-ignore:
-      - "docs/**"
-
-concurrency:
-  group: build-test-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+    inputs:
+      gitref:
+        type: string
+        description: "what git ref to build"
+        required: true
 
 jobs:
-  test:
-    name: "Unit and Integration Tests"
+  build:
+    name: "Build and upload wheels"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.gitref }}
       - name: Set up Python
         id: setup_python
         uses: actions/setup-python@v4
@@ -43,7 +39,31 @@ jobs:
           source .venv/bin/activate
           python -m pip install --upgrade pip
           pip install -r linux-py3.10-requirements.txt -r dev-requirements.txt
-      - name: Test with pytest
+      - name: Build project
         run: |
           source .venv/bin/activate
-          pytest --doctest-modules --ignore-glob="*to_be_updated*" src tests
+          python -m build
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          path: ./dist
+
+  publish-to-pypi:
+    name: "Publish to PyPI"
+    runs-on: ubuntu-latest
+    needs: [ build ]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/dailyai
+    permissions:
+      id-token: write
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+          print-hash: true

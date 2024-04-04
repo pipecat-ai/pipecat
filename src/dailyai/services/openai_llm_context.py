@@ -1,11 +1,18 @@
 from typing import List
-from openai._types import NOT_GIVEN, NotGiven
 
-from openai.types.chat import (
-    ChatCompletionToolParam,
-    ChatCompletionToolChoiceOptionParam,
-    ChatCompletionMessageParam,
-)
+try:
+    from openai._types import NOT_GIVEN, NotGiven
+
+    from openai.types.chat import (
+        ChatCompletionToolParam,
+        ChatCompletionToolChoiceOptionParam,
+        ChatCompletionMessageParam,
+    )
+except ModuleNotFoundError as e:
+    print(f"Exception: {e}")
+    print(
+        "In order to use OpenAI, you need to `pip install dailyai[openai]`. Also, set `OPENAI_API_KEY` environment variable.")
+    raise Exception(f"Missing module: {e}")
 
 
 class OpenAILLMContext:

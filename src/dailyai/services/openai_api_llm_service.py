@@ -1,7 +1,6 @@
 import json
 import time
 from typing import AsyncGenerator, List
-from openai import AsyncOpenAI, AsyncStream
 from dailyai.pipeline.frames import (
     Frame,
     LLMFunctionCallFrame,
@@ -9,17 +8,25 @@ from dailyai.pipeline.frames import (
     LLMMessagesFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
-    OpenAILLMContextFrame,
     TextFrame,
 )
 from dailyai.services.ai_services import LLMService
+from dailyai.pipeline.openai_frames import OpenAILLMContextFrame
 from dailyai.services.openai_llm_context import OpenAILLMContext
 
-from openai.types.chat import (
-    ChatCompletion,
-    ChatCompletionChunk,
-    ChatCompletionMessageParam,
-)
+try:
+    from openai import AsyncOpenAI, AsyncStream
+
+    from openai.types.chat import (
+        ChatCompletion,
+        ChatCompletionChunk,
+        ChatCompletionMessageParam,
+    )
+except ModuleNotFoundError as e:
+    print(f"Exception: {e}")
+    print(
+        "In order to use OpenAI, you need to `pip install dailyai[openai]`. Also, set `OPENAI_API_KEY` environment variable.")
+    raise Exception(f"Missing module: {e}")
 
 
 class BaseOpenAILLMService(LLMService):
