@@ -182,7 +182,6 @@ class ThreadedTransport(AbstractTransport):
         pipeline.set_sink(self.send_queue)
         source_queue = asyncio.Queue()
         pipeline.set_source(source_queue)
-        pipeline.set_sink(self.send_queue)
         pipeline_task = asyncio.create_task(pipeline.run_pipeline())
 
         async def yield_frame(frame: Frame) -> AsyncGenerator[Frame, None]:
