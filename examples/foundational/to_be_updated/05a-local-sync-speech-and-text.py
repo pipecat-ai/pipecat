@@ -1,5 +1,4 @@
 import aiohttp
-import argparse
 import asyncio
 import logging
 import tkinter as tk
@@ -11,12 +10,15 @@ from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.transports.local_transport import LocalTransport
 
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
 
-async def main(room_url):
+async def main():
     async with aiohttp.ClientSession() as session:
         meeting_duration_minutes = 5
         tk_root = tk.Tk()
@@ -59,12 +61,8 @@ async def main(room_url):
             return all_audio
 
         async def get_month_data(month):
-            messages = [
-                {
-                    "role": "system",
-                    "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
-                }
-            ]
+            messages = [{"role": "system", "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {
+                month}. Include only the image description with no preamble. Limit the description to one sentence, please.", }]
 
             image_description = await llm.run_llm(messages)
             if not image_description:
@@ -133,14 +131,4 @@ async def main(room_url):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
-    parser.add_argument(
-        "-u",
-        "--url",
-        type=str,
-        required=True,
-        help="URL of the Daily room to join")
-
-    args, unknown = parser.parse_known_args()
-
-    asyncio.run(main(args.url))
+    asyncio.run(main())
