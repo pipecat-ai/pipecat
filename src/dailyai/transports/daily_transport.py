@@ -5,7 +5,6 @@ import signal
 import threading
 import types
 
-from enum import Enum
 from functools import partial
 from typing import Any
 
@@ -120,8 +119,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
             raise e
 
     def _webrtc_vad_analyze(self):
-        buffer = self.read_audio_frames(
-            int(self._vad_samples))
+        buffer = self.read_audio_frames(int(self._vad_samples))
         if len(buffer) > 0:
             confidence = self.webrtc_vad.analyze_frames(buffer)
             # yeses = int(confidence * 20.0)

@@ -84,12 +84,13 @@ class ThreadedTransport(AbstractTransport):
 
             except ModuleNotFoundError as e:
                 if self._has_webrtc_vad:
-                    self._logger.debug(f"Couldn't load torch; using webrtc VAD")
+                    self._logger.debug(
+                        f"Couldn't load torch; using webrtc VAD")
                     self._vad_samples = int(self._speaker_sample_rate / 100.0)
                 else:
                     self._logger.error(f"Exception: {e}")
                     self._logger.error(
-                        "In order to use VAD, you'll need to install the `torch` and `torchaudio` modules.")
+                        "In order to use Silero VAD, you'll need to `pip install dailyai[silero].")
                     raise Exception(f"Missing module(s): {e}")
 
         vad_frame_s = self._vad_samples / self._speaker_sample_rate
@@ -184,7 +185,6 @@ class ThreadedTransport(AbstractTransport):
         pipeline.set_sink(self.send_queue)
         source_queue = asyncio.Queue()
         pipeline.set_source(source_queue)
-        pipeline.set_sink(self.send_queue)
         pipeline_task = asyncio.create_task(pipeline.run_pipeline())
 
         async def yield_frame(frame: Frame) -> AsyncGenerator[Frame, None]:

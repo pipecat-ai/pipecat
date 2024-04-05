@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.urls]
-Source = "https://github.com/daily-co/daily-ai-sdk"
+Source = "https://github.com/daily-co/dailyai"
 Website = "https://daily.co"
 
 [project.optional-dependencies]
