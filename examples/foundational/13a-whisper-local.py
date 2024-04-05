@@ -15,11 +15,10 @@ async def main():
     meeting_duration_minutes = 1
 
     transport = LocalTransport(
-        mic_enabled=False,
+        mic_enabled=True,
         camera_enabled=False,
         speaker_enabled=True,
         duration_minutes=meeting_duration_minutes,
-        start_transcription=False,
     )
 
     stt = WhisperSTTService()
@@ -27,8 +26,7 @@ async def main():
     transcription_output_queue = asyncio.Queue()
     transport_done = asyncio.Event()
 
-    pipeline = Pipeline([stt])
-    pipeline.set_sink(transcription_output_queue)
+    pipeline = Pipeline([stt], source=transport.receive_queue, sink=transcription_output_queue)
 
     async def handle_transcription():
         print("`````````TRANSCRIPTION`````````")
@@ -42,11 +40,11 @@ async def main():
         print("handle_transcription done")
 
     async def run_until_done():
-        await transport.run(pipeline)
+        await transport.run()
         transport_done.set()
         print("run_until_done done")
 
-    await asyncio.gather(run_until_done(), handle_transcription())
+    await asyncio.gather(run_until_done(), pipeline.run_pipeline(), handle_transcription())
 
 
 if __name__ == "__main__":
