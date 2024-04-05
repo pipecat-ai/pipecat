@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ build ]
     environment:
-      name: pypi
+      name: testpypi
       url: https://pypi.org/p/dailyai
     permissions:
       id-token: write
