@@ -3,6 +3,7 @@ env/
 __pycache__/
 *~
 venv
+.venv
 #*#
 
 # Distribution / packaging

@@ -51,4 +51,4 @@ where = ["src"]
 pythonpath = ["src"]
 
 [tool.setuptools_scm]
-# Empty
+local_scheme = "no-local-version"
