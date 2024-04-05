@@ -58,7 +58,7 @@ By default, in order to minimize dependencies, only the basic framework function
 dependencies that you can install with:
 
 ```
-pip install dailyai[option,...]
+pip install "dailyai[option,...]"
 ```
 
 Your project may or may not need these, so they're made available as optional requirements. Here is a list:
