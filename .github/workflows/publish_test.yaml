@@ -16,7 +16,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.gitref }}
           fetch-tags: true
-          fetch-depth: 50
+          fetch-depth: 100
       - name: Set up Python
         id: setup_python
         uses: actions/setup-python@v4
