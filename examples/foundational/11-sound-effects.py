@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import wave
+from dailyai.pipeline.pipeline import Pipeline
 
 from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.open_ai_services import OpenAILLMService
@@ -81,6 +82,7 @@ async def main(room_url: str, token):
             mic_sample_rate=16000,
             camera_enabled=False,
         )
+        transport.transcription_settings["extra"]["punctuate"] = True
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
@@ -92,47 +94,31 @@ async def main(room_url: str, token):
             voice_id="ErXwobaYiN019PkySvjV",
         )
 
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
+            },
+        ]
+
+        tma_in = LLMUserContextAggregator(
+            messages, transport._my_participant_id)
+        tma_out = LLMAssistantContextAggregator(
+            messages, transport._my_participant_id
+        )
+        out_sound = OutboundSoundEffectWrapper()
+        in_sound = InboundSoundEffectWrapper()
+        fl = FrameLogger("LLM Out")
+        fl2 = FrameLogger("Transcription In")
+
+        pipeline = Pipeline([tma_in, in_sound, fl2, llm, tma_out, fl, tts, out_sound])
+
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            await tts.say("Hi, I'm listening!", transport.send_queue)
+            await transport.say("Hi, I'm listening!", tts)
             await transport.send_queue.put(AudioFrame(sounds["ding1.wav"]))
 
-        async def handle_transcriptions():
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
-                },
-            ]
-
-            tma_in = LLMUserContextAggregator(
-                messages, transport._my_participant_id)
-            tma_out = LLMAssistantContextAggregator(
-                messages, transport._my_participant_id
-            )
-            out_sound = OutboundSoundEffectWrapper()
-            in_sound = InboundSoundEffectWrapper()
-            fl = FrameLogger("LLM Out")
-            fl2 = FrameLogger("Transcription In")
-            await out_sound.run_to_queue(
-                transport.send_queue,
-                tts.run(
-                    fl.run(
-                        tma_out.run(
-                            llm.run(
-                                fl2.run(
-                                    in_sound.run(
-                                        tma_in.run(transport.get_receive_frames())
-                                    )
-                                )
-                            )
-                        )
-                    )
-                ),
-            )
-
-        transport.transcription_settings["extra"]["punctuate"] = True
-        await asyncio.gather(transport.run(), handle_transcriptions())
+        await asyncio.gather(transport.run(pipeline))
 
 
 if __name__ == "__main__":
