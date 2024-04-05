@@ -5,6 +5,7 @@ import os
 import random
 from typing import AsyncGenerator
 from PIL import Image
+from dailyai.pipeline.pipeline import Pipeline
 
 from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.open_ai_services import OpenAILLMService
@@ -133,6 +134,7 @@ async def main(room_url: str, token):
         transport._camera_enabled = True
         transport._camera_width = 720
         transport._camera_height = 1280
+        transport.transcription_settings["extra"]["punctuate"] = True
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
@@ -145,45 +147,34 @@ async def main(room_url: str, token):
         )
         isa = ImageSyncAggregator()
 
+        messages = [
+            {
+                "role": "system",
+                "content": "You are Santa Cat, a cat that lives in Santa's workshop at the North Pole. You should be clever, and a bit sarcastic. You should also tell jokes every once in a while.  Your responses should only be a few sentences long.",
+            },
+        ]
+
+        tma_in = LLMUserContextAggregator(
+            messages, transport._my_participant_id)
+        tma_out = LLMAssistantContextAggregator(
+            messages, transport._my_participant_id
+        )
+        tf = TranscriptFilter(transport._my_participant_id)
+        ncf = NameCheckFilter(["Santa Cat", "Santa"])
+
+        pipeline = Pipeline([isa, tf, ncf, tma_in, llm, tma_out, tts])
+
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            await tts.say(
+            await transport.say(
                 "Hi! If you want to talk to me, just say 'hey Santa Cat'.",
-                transport.send_queue,
-            )
-
-        async def handle_transcriptions():
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are Santa Cat, a cat that lives in Santa's workshop at the North Pole. You should be clever, and a bit sarcastic. You should also tell jokes every once in a while.  Your responses should only be a few sentences long.",
-                },
-            ]
-
-            tma_in = LLMUserContextAggregator(
-                messages, transport._my_participant_id)
-            tma_out = LLMAssistantContextAggregator(
-                messages, transport._my_participant_id
-            )
-            tf = TranscriptFilter(transport._my_participant_id)
-            ncf = NameCheckFilter(["Santa Cat", "Santa"])
-            await tts.run_to_queue(
-                transport.send_queue,
-                isa.run(
-                    tma_out.run(
-                        llm.run(
-                            tma_in.run(
-                                ncf.run(tf.run(transport.get_receive_frames())))
-                        )
-                    )
-                ),
+                tts,
             )
 
         async def starting_image():
             await transport.send_queue.put(quiet_frame)
 
-        transport.transcription_settings["extra"]["punctuate"] = True
-        await asyncio.gather(transport.run(), handle_transcriptions(), starting_image())
+        await asyncio.gather(transport.run(pipeline), starting_image())
 
 
 if __name__ == "__main__":
