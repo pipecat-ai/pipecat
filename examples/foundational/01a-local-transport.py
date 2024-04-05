@@ -6,6 +6,9 @@ import os
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.transports.local_transport import LocalTransport
 
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
@@ -25,10 +28,7 @@ async def main():
 
         async def say_something():
             await asyncio.sleep(1)
-            await tts.say(
-                "Hello there.",
-                transport.send_queue,
-            )
+            await transport.say("Hello there.", tts)
             await transport.stop_when_done()
 
         await asyncio.gather(transport.run(), say_something())

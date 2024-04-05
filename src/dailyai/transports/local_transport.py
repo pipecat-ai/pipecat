@@ -48,13 +48,16 @@ class LocalTransport(ThreadedTransport):
             )
 
     def write_frame_to_mic(self, frame: bytes):
-        self._audio_stream.write(frame)
+        if self._mic_enabled:
+            self._audio_stream.write(frame)
 
     def read_frames(self, desired_frame_count):
-        bytes = self._speaker_stream.read(
-            desired_frame_count,
-            exception_on_overflow=False,
-        )
+        bytes = b""
+        if self._speaker_enabled:
+            bytes = self._speaker_stream.read(
+                desired_frame_count,
+                exception_on_overflow=False,
+            )
         return bytes
 
     def _prerun(self):

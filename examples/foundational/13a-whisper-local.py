@@ -1,31 +1,34 @@
-import argparse
 import asyncio
 import logging
-from dailyai.pipeline.frames import EndFrame, TranscriptionFrame
 
+from dailyai.pipeline.frames import EndFrame, TranscriptionFrame
 from dailyai.transports.local_transport import LocalTransport
 from dailyai.services.whisper_ai_services import WhisperSTTService
+from dailyai.pipeline.pipeline import Pipeline
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("dailyai")
 logger.setLevel(logging.DEBUG)
 
 
-async def main(room_url: str):
-    global transport
-    global stt
-
+async def main():
     meeting_duration_minutes = 1
+
     transport = LocalTransport(
-        mic_enabled=True,
+        mic_enabled=False,
         camera_enabled=False,
         speaker_enabled=True,
         duration_minutes=meeting_duration_minutes,
-        start_transcription=True,
+        start_transcription=False,
     )
+
     stt = WhisperSTTService()
+
     transcription_output_queue = asyncio.Queue()
     transport_done = asyncio.Event()
+
+    pipeline = Pipeline([stt])
+    pipeline.set_sink(transcription_output_queue)
 
     async def handle_transcription():
         print("`````````TRANSCRIPTION`````````")
@@ -38,29 +41,13 @@ async def main(room_url: str):
                 break
         print("handle_transcription done")
 
-    async def handle_speaker():
-        await stt.run_to_queue(
-            transcription_output_queue, transport.get_receive_frames()
-        )
-        await transcription_output_queue.put(EndFrame())
-        print("handle speaker done.")
-
     async def run_until_done():
-        await transport.run()
+        await transport.run(pipeline)
         transport_done.set()
         print("run_until_done done")
 
-    await asyncio.gather(run_until_done(), handle_speaker(), handle_transcription())
+    await asyncio.gather(run_until_done(), handle_transcription())
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Simple Daily Bot Sample")
-    parser.add_argument(
-        "-u",
-        "--url",
-        type=str,
-        required=True,
-        help="URL of the Daily room to join")
-
-    args, unknown = parser.parse_known_args()
-    asyncio.run(main(args.url))
+    asyncio.run(main())
