@@ -19,6 +19,7 @@ class LocalTransport(ThreadedTransport):
         self._sample_width = kwargs.get("sample_width") or 2
         self._n_channels = kwargs.get("n_channels") or 1
         self._tk_root = kwargs.get("tk_root") or None
+        self._pyaudio = None
 
         if self._camera_enabled and not self._tk_root:
             raise ValueError(
@@ -51,7 +52,7 @@ class LocalTransport(ThreadedTransport):
         if self._mic_enabled:
             self._audio_stream.write(frame)
 
-    def read_frames(self, desired_frame_count):
+    def read_audio_frames(self, desired_frame_count):
         bytes = b""
         if self._speaker_enabled:
             bytes = self._speaker_stream.read(
@@ -62,7 +63,8 @@ class LocalTransport(ThreadedTransport):
 
     def _prerun(self):
         if self._mic_enabled:
-            self._pyaudio = pyaudio.PyAudio()
+            if not self._pyaudio:
+                self._pyaudio = pyaudio.PyAudio()
             self._audio_stream = self._pyaudio.open(
                 format=self._pyaudio.get_format_from_width(self._sample_width),
                 channels=self._n_channels,
@@ -84,6 +86,8 @@ class LocalTransport(ThreadedTransport):
             self._image_label.pack()
 
         if self._speaker_enabled:
+            if not self._pyaudio:
+                self._pyaudio = pyaudio.PyAudio()
             self._speaker_stream = self._pyaudio.open(
                 format=self._pyaudio.get_format_from_width(self._sample_width),
                 channels=self._n_channels,
