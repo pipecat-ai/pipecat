@@ -19,7 +19,7 @@ try:
 except ModuleNotFoundError as e:
     print(f"Exception: {e}")
     print(
-        "In order to use Azure TTS, you need to `pip install dailyai[azure]`. Also, set `SPEECH_KEY` and `SPEECH_REGION` environment variables.")
+        "In order to use Azure TTS, you need to `pip install dailyai[azure]`. Also, set `AZURE_SPEECH_API_KEY` and `AZURE_SPEECH_REGION` environment variables.")
     raise Exception(f"Missing module: {e}")
 
 from dailyai.services.openai_api_llm_service import BaseOpenAILLMService

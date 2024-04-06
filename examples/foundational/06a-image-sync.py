@@ -5,7 +5,8 @@ from typing import AsyncGenerator
 import aiohttp
 from PIL import Image
 
-from dailyai.pipeline.frames import ImageFrame, Frame
+from dailyai.pipeline.frames import ImageFrame, Frame, TextFrame
+from dailyai.pipeline.pipeline import Pipeline
 from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.ai_services import AIService
 from dailyai.pipeline.aggregators import (
@@ -14,7 +15,6 @@ from dailyai.pipeline.aggregators import (
 )
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.services.fal_ai_services import FalImageGenService
 
 from runner import configure
 
@@ -53,6 +53,7 @@ async def main(room_url: str, token):
         transport._camera_height = 1024
         transport._mic_enabled = True
         transport._mic_sample_rate = 16000
+        transport.transcription_settings["extra"]["punctuate"] = True
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -64,57 +65,30 @@ async def main(room_url: str, token):
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4-turbo-preview")
 
-        img = FalImageGenService(
-            image_size="1024x1024",
-            aiohttp_session=session,
-            key_id=os.getenv("FAL_KEY_ID"),
-            key_secret=os.getenv("FAL_KEY_SECRET"),
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so it should not include any special characters. Respond to what the user said in a creative and helpful way.",
+            },
+        ]
+
+        tma_in = LLMUserContextAggregator(
+            messages, transport._my_participant_id)
+        tma_out = LLMAssistantContextAggregator(
+            messages, transport._my_participant_id
+        )
+        image_sync_aggregator = ImageSyncAggregator(
+            os.path.join(os.path.dirname(__file__), "assets", "speaking.png"),
+            os.path.join(os.path.dirname(__file__), "assets", "waiting.png"),
         )
 
-        async def get_images():
-            get_speaking_task = asyncio.create_task(
-                img.run_image_gen("An image of a cat speaking")
-            )
-            get_waiting_task = asyncio.create_task(
-                img.run_image_gen("An image of a cat waiting")
-            )
-
-            (speaking_data, waiting_data) = await asyncio.gather(
-                get_speaking_task, get_waiting_task
-            )
-
-            return speaking_data, waiting_data
+        pipeline = Pipeline([image_sync_aggregator, tma_in, llm, tma_out, tts])
 
         @transport.event_handler("on_first_other_participant_joined")
         async def on_first_other_participant_joined(transport):
-            await tts.say("Hi, I'm listening!", transport.send_queue)
+            await pipeline.queue_frames([TextFrame("Hi, I'm listening!")])
 
-        async def handle_transcriptions():
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
-                },
-            ]
-
-            tma_in = LLMUserContextAggregator(
-                messages, transport._my_participant_id)
-            tma_out = LLMAssistantContextAggregator(
-                messages, transport._my_participant_id
-            )
-            image_sync_aggregator = ImageSyncAggregator(
-                os.path.join(
-                    os.path.dirname(__file__), "assets", "speaking.png"), os.path.join(
-                    os.path.dirname(__file__), "assets", "waiting.png"), )
-            await tts.run_to_queue(
-                transport.send_queue,
-                image_sync_aggregator.run(
-                    tma_out.run(llm.run(tma_in.run(transport.get_receive_frames())))
-                ),
-            )
-
-        transport.transcription_settings["extra"]["punctuate"] = True
-        await asyncio.gather(transport.run(), handle_transcriptions())
+        await transport.run(pipeline)
 
 
 if __name__ == "__main__":
