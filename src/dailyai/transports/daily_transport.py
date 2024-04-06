@@ -224,7 +224,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
                                 "low": {
                                     "maxBitrate": self._camera_max_bitrate,
                                     "scaleResolutionDownBy": 1.333,
-                                    "maxFramerate": 30,
+                                    "maxFramerate": self._camera_max_framerate,
                                 }
                             },
                         }

@@ -22,6 +22,7 @@ class AbstractTransport:
         self._camera_width = kwargs.get("camera_width") or 1024
         self._camera_height = kwargs.get("camera_height") or 768
         self._camera_max_bitrate = kwargs.get("camera_max_bitrate") or 250000
+        self._camera_max_framerate = kwargs.get("camera_max_framerate") or 30
         self._speaker_enabled = kwargs.get("speaker_enabled") or False
         self._speaker_sample_rate = kwargs.get("speaker_sample_rate") or 16000
         self._fps = kwargs.get("fps") or 8
