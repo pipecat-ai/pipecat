@@ -393,7 +393,7 @@ class ThreadedTransport(AbstractTransport):
                     this_frame = next(self._images)
                     self.write_frame_to_camera(this_frame)
 
-                time.sleep(1.0 / self._fps)
+                time.sleep(1.0 / self._camera_framerate)
         except Exception as e:
             self._logger.error(f"Exception {e} in camera thread.")
             raise e
