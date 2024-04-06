@@ -222,9 +222,9 @@ class DailyTransport(ThreadedTransport, EventHandler):
                             "maxQuality": "low",
                             "encodings": {
                                 "low": {
-                                    "maxBitrate": self._camera_max_bitrate,
+                                    "maxBitrate": self._camera_bitrate,
                                     "scaleResolutionDownBy": 1.333,
-                                    "maxFramerate": self._camera_max_framerate,
+                                    "maxFramerate": self._camera_framerate,
                                 }
                             },
                         }
