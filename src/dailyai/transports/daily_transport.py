@@ -224,7 +224,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
                                 "low": {
                                     "maxBitrate": 250000,
                                     "scaleResolutionDownBy": 1.333,
-                                    "maxFramerate": 8,
+                                    "maxFramerate": 30,
                                 }
                             },
                         }
