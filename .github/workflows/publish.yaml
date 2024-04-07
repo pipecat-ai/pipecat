@@ -62,7 +62,7 @@ jobs:
           print-hash: true
 
   publish-to-test-pypi:
-    name: "Test publish to PyPI"
+    name: "Publish to Test PyPI"
     runs-on: ubuntu-latest
     needs: [ build ]
     environment:
