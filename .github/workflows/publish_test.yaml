@@ -41,7 +41,7 @@ jobs:
           path: ./dist
 
   publish-to-pypi:
-    name: "Test publish to PyPI"
+    name: "Publish to Test PyPI"
     runs-on: ubuntu-latest
     needs: [ build ]
     environment:
