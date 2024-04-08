@@ -20,10 +20,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "aiohttp==3.9.3",
-    "numpy==1.26.4",
-    "Pillow==10.2.0",
-    "typing-extensions==4.10.0",
+    "aiohttp~=3.9.0",
+    "numpy~=1.26.0",
+    "Pillow~=10.2.0",
+    "typing-extensions~=4.10.0",
 ]
 
 [project.urls]
@@ -31,17 +31,17 @@ Source = "https://github.com/daily-co/dailyai"
 Website = "https://daily.co"
 
 [project.optional-dependencies]
-anthropic = [ "anthropic==0.20.0" ]
-azure = [ "azure-cognitiveservices-speech==1.36.0" ]
-daily = [ "daily-python==0.7.2" ]
-examples = [ "python-dotenv==1.0.1", "flask==3.0.2", "flask_cors==4.0.0" ]
-fal = [ "fal==0.12.3" ]
-local = [ "pyaudio==0.2.14" ]
-openai = [ "openai==1.14.2" ]
-playht = [ "pyht==0.0.26" ]
-silero = [ "torch==2.2.1", "torchaudio==2.2.1" ]
-websocket = [ "websockets==12.0" ]
-whisper = [ "faster_whisper==1.0.1" ]
+anthropic = [ "anthropic~=0.20.0" ]
+azure = [ "azure-cognitiveservices-speech~=1.36.0" ]
+daily = [ "daily-python~=0.7.0" ]
+examples = [ "python-dotenv~=1.0.0", "flask~=3.0.0", "flask_cors~=4.0.0" ]
+fal = [ "fal~=0.12.0" ]
+local = [ "pyaudio~=0.2.0" ]
+openai = [ "openai~=1.14.0" ]
+playht = [ "pyht~=0.0.26" ]
+silero = [ "torch~=2.2.0", "torchaudio~=2.2.0" ]
+websocket = [ "websockets~=12.0" ]
+whisper = [ "faster_whisper~=1.0.0" ]
 
 [tool.setuptools.packages.find]
 # All the following settings are optional:
