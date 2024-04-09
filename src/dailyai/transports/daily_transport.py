@@ -255,7 +255,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
         self.client.leave()
         self.client.release()
 
-    def on_first_other_participant_joined(self):
+    def on_first_other_participant_joined(self, participant):
         pass
 
     def call_joined(self, join_data, client_error):
@@ -277,7 +277,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
     def on_participant_joined(self, participant):
         if not self._other_participant_has_joined and participant["id"] != self._my_participant_id:
             self._other_participant_has_joined = True
-            self.on_first_other_participant_joined()
+            self.on_first_other_participant_joined(participant)
 
     def on_participant_left(self, participant, reason):
         if len(self.client.participants()) < self._min_others_count + 1:
@@ -286,7 +286,6 @@ class DailyTransport(ThreadedTransport, EventHandler):
     def on_app_message(self, message: Any, sender: str):
         if self._loop:
             frame = ReceivedAppMessageFrame(message, sender)
-            print(frame)
             asyncio.run_coroutine_threadsafe(
                 self.receive_queue.put(frame), self._loop
             )

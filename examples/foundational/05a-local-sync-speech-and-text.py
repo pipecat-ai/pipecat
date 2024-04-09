@@ -67,8 +67,7 @@ async def main():
                     return frame.text
 
         async def get_month_data(month):
-            messages = [{"role": "system", "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {
-                month}. Include only the image description with no preamble. Limit the description to one sentence, please.", }]
+            messages = [{"role": "system", "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.", }]
 
             messages_frame = LLMMessagesFrame(messages)
 

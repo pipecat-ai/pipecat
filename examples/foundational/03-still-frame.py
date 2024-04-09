@@ -40,7 +40,7 @@ async def main(room_url):
         pipeline = Pipeline([imagegen])
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             # Note that we do not put an EndFrame() item in the pipeline for this demo.
             # This means that the bot will stay in the channel until it times out.
             # An EndFrame() in the pipeline would cause the transport to shut
