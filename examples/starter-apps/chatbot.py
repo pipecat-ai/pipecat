@@ -48,7 +48,7 @@ for i in range(1, 26):
 flipped = sprites[::-1]
 sprites.extend(flipped)
 # When the bot isn't talking, show a static image of the cat listening
-quiet_frame = ImageFrame("", sprites[0])
+quiet_frame = ImageFrame(sprites[0], (1024, 576))
 talking_frame = SpriteFrame(images=sprites)
 
 

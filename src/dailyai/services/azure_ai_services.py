@@ -105,7 +105,7 @@ class AzureImageGenServiceREST(ImageGenService):
         self._model = model
         self._aiohttp_session = aiohttp_session
 
-    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence) -> tuple[str, bytes, tuple[int, int]]:
         url = f"{self._azure_endpoint}openai/images/generations:submit?api-version={self._api_version}"
         headers = {
             "api-key": self._api_key,
@@ -146,4 +146,4 @@ class AzureImageGenServiceREST(ImageGenService):
             async with self._aiohttp_session.get(image_url) as response:
                 image_stream = io.BytesIO(await response.content.read())
                 image = Image.open(image_stream)
-                return (image_url, image.tobytes())
+                return (image_url, image.tobytes(), image.size)

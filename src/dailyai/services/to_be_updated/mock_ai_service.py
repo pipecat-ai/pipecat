@@ -19,7 +19,7 @@ class MockAIService(AIService):
         image_stream = io.BytesIO(response.content)
         image = Image.open(image_stream)
         time.sleep(1)
-        return (image_url, image)
+        return (image_url, image.tobytes(), image.size)
 
     def run_llm(self, messages, latest_user_message=None, stream=True):
         for i in range(5):

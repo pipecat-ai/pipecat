@@ -70,11 +70,39 @@ class AudioFrame(Frame):
 class ImageFrame(Frame):
     """An image. Will be shown by the transport if the transport's camera is
     enabled."""
-    url: str | None
     image: bytes
+    size: tuple[int, int]
 
     def __str__(self):
-        return f"{self.__class__.__name__}, url: {self.url}, image size: {len(self.image)} B"
+        return f"{self.__class__.__name__}, image size: {self.size[0]}x{self.size[1]} buffer size: {len(self.image)} B"
+
+
+@dataclass()
+class URLImageFrame(ImageFrame):
+    """An image. Will be shown by the transport if the transport's camera is
+    enabled."""
+    url: str | None
+
+    def __init__(self, url, image, size):
+        super().__init__(image, size)
+        self.url = url
+
+    def __str__(self):
+        return f"{self.__class__.__name__}, url: {self.url}, image size: {self.size[0]}x{self.size[1]}, buffer size: {len(self.image)} B"
+
+
+@dataclass()
+class UserImageFrame(ImageFrame):
+    """An image associated to a user. Will be shown by the transport if the transport's camera is
+    enabled."""
+    user_id: str
+
+    def __init__(self, user_id, image, size):
+        super().__init__(image, size)
+        self.user_id = user_id
+
+    def __str__(self):
+        return f"{self.__class__.__name__}, user: {self.user_id}, image size: {self.size[0]}x{self.size[1]}, buffer size: {len(self.image)} B"
 
 
 @dataclass()

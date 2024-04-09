@@ -55,7 +55,7 @@ for file in image_files:
         sprites[file] = img.tobytes()
 
 # When the bot isn't talking, show a static image of the cat listening
-quiet_frame = ImageFrame("", sprites["sc-listen-1.png"])
+quiet_frame = ImageFrame(sprites["sc-listen-1.png"], (720, 1280))
 # When the bot is talking, build an animation from two sprites
 talking_list = [sprites["sc-default.png"], sprites["sc-talk.png"]]
 talking = [random.choice(talking_list) for x in range(30)]
