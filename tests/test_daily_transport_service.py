@@ -68,7 +68,7 @@ class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
             await transport.send_queue.put(AudioFrame(bytes([0] * 3300)))
 
         async def send_video_frame():
-            await transport.send_queue.put(ImageFrame(None, b"test"))
+            await transport.send_queue.put(ImageFrame(b"test", (0, 0)))
 
         await asyncio.gather(transport.run(), send_audio_frame(), send_video_frame())
 

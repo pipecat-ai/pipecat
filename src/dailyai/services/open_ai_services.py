@@ -36,7 +36,7 @@ class OpenAIImageGenService(ImageGenService):
         self._client = AsyncOpenAI(api_key=api_key)
         self._aiohttp_session = aiohttp_session
 
-    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence) -> tuple[str, bytes, tuple[int, int]]:
         self.logger.info("Generating OpenAI image", sentence)
 
         image = await self._client.images.generate(
@@ -53,4 +53,4 @@ class OpenAIImageGenService(ImageGenService):
         async with self._aiohttp_session.get(image_url) as response:
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
-            return (image_url, image.tobytes())
+            return (image_url, image.tobytes(), image.size)

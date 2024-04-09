@@ -31,7 +31,7 @@ class FalImageGenService(ImageGenService):
         if key_secret:
             os.environ["FAL_KEY_SECRET"] = key_secret
 
-    async def run_image_gen(self, sentence) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence) -> tuple[str, bytes, tuple[int, int]]:
         def get_image_url(sentence, size):
             handler = fal.apps.submit(
                 "110602490-fast-sdxl",
@@ -55,4 +55,4 @@ class FalImageGenService(ImageGenService):
         async with self._aiohttp_session.get(image_url) as response:
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
-            return (image_url, image.tobytes())
+            return (image_url, image.tobytes(), image.size)
