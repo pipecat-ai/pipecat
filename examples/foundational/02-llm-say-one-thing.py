@@ -48,7 +48,7 @@ async def main(room_url):
         pipeline = Pipeline([llm, tts])
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             await pipeline.queue_frames([LLMMessagesFrame(messages), EndFrame()])
 
         await transport.run(pipeline)

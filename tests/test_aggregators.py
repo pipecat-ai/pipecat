@@ -54,13 +54,13 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
             TextFrame("Hello, "),
             TextFrame("world."),
             AudioFrame(b"hello"),
-            ImageFrame("image", b"image"),
+            ImageFrame(b"image", (0, 0)),
             AudioFrame(b"world"),
             LLMResponseEndFrame(),
         ]
 
         expected_output_frames = [
-            ImageFrame("image", b"image"),
+            ImageFrame(b"image", (0, 0)),
             LLMResponseStartFrame(),
             TextFrame("Hello, "),
             TextFrame("world."),

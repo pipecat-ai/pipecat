@@ -360,7 +360,7 @@ class GatedAggregator(FrameProcessor):
     ...     start_open=False)
     >>> asyncio.run(print_frames(aggregator, TextFrame("Hello")))
     >>> asyncio.run(print_frames(aggregator, TextFrame("Hello again.")))
-    >>> asyncio.run(print_frames(aggregator, ImageFrame(url='', image=bytes([]))))
+    >>> asyncio.run(print_frames(aggregator, ImageFrame(image=bytes([]), size=(0, 0))))
     ImageFrame
     Hello
     Hello again.

@@ -5,7 +5,7 @@ import tkinter as tk
 import os
 from dailyai.pipeline.aggregators import LLMFullResponseAggregator
 
-from dailyai.pipeline.frames import AudioFrame, ImageFrame, LLMMessagesFrame, TextFrame
+from dailyai.pipeline.frames import AudioFrame, URLImageFrame, LLMMessagesFrame, TextFrame
 from dailyai.services.open_ai_services import OpenAILLMService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.fal_ai_services import FalImageGenService
@@ -67,8 +67,7 @@ async def main():
                     return frame.text
 
         async def get_month_data(month):
-            messages = [{"role": "system", "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {
-                month}. Include only the image description with no preamble. Limit the description to one sentence, please.", }]
+            messages = [{"role": "system", "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.", }]
 
             messages_frame = LLMMessagesFrame(messages)
 
@@ -95,6 +94,7 @@ async def main():
                 "text": image_description,
                 "image_url": image_data[0],
                 "image": image_data[1],
+                "image_size": image_data[2],
                 "audio": audio,
             }
 
@@ -118,7 +118,7 @@ async def main():
                 if data:
                     await transport.send_queue.put(
                         [
-                            ImageFrame(data["image_url"], data["image"]),
+                            URLImageFrame(data["image_url"], data["image"], data["image_size"]),
                             AudioFrame(data["audio"]),
                         ]
                     )

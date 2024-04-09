@@ -35,9 +35,9 @@ class ImageSyncAggregator(AIService):
         self._waiting_image_bytes = self._waiting_image.tobytes()
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        yield ImageFrame(None, self._speaking_image_bytes)
+        yield ImageFrame(self._speaking_image_bytes, (1024, 1024))
         yield frame
-        yield ImageFrame(None, self._waiting_image_bytes)
+        yield ImageFrame(self._waiting_image_bytes, (1024, 1024))
 
 
 async def main(room_url: str, token):
@@ -85,7 +85,7 @@ async def main(room_url: str, token):
         pipeline = Pipeline([image_sync_aggregator, tma_in, llm, tma_out, tts])
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             await pipeline.queue_frames([TextFrame("Hi, I'm listening!")])
 
         await transport.run(pipeline)

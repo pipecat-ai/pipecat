@@ -122,7 +122,7 @@ async def main(room_url: str):
                 )
                 await transport.send_queue.put(
                     [
-                        ImageFrame(None, image_data1[1]),
+                        ImageFrame(image_data1[1], image_data1[2]),
                         AudioFrame(audio1),
                     ]
                 )
@@ -134,7 +134,7 @@ async def main(room_url: str):
                 )
                 await transport.send_queue.put(
                     [
-                        ImageFrame(None, image_data2[1]),
+                        ImageFrame(image_data2[1], image_data2[2]),
                         AudioFrame(audio2),
                     ]
                 )
