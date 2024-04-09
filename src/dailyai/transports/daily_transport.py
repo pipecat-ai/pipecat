@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import logging
 import signal
+import time
 import threading
 import types
 
@@ -11,6 +12,7 @@ from typing import Any
 from dailyai.pipeline.frames import (
     ReceivedAppMessageFrame,
     TranscriptionFrame,
+    UserImageFrame,
 )
 
 from threading import Event
@@ -58,6 +60,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
         bot_name: str,
         min_others_count: int = 1,
         start_transcription: bool = False,
+        video_rendering_enabled: bool = False,
         **kwargs,
     ):
         kwargs['has_webrtc_vad'] = True
@@ -69,12 +72,15 @@ class DailyTransport(ThreadedTransport, EventHandler):
         self._token: str | None = token
         self._min_others_count = min_others_count
         self._start_transcription = start_transcription
+        self._video_rendering_enabled = video_rendering_enabled
 
         self._is_interrupted = Event()
         self._stop_threads = Event()
 
         self._other_participant_has_joined = False
         self._my_participant_id = None
+
+        self._video_renderers = {}
 
         self.transcription_settings = {
             "language": "en",
@@ -236,7 +242,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
 
         self.client.update_subscription_profiles({
             "base": {
-                "camera": "unsubscribed",
+                "camera": "subscribed" if self._video_rendering_enabled else "unsubscribed",
             }
         })
 
@@ -255,7 +261,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
         self.client.leave()
         self.client.release()
 
-    def on_first_other_participant_joined(self):
+    def on_first_other_participant_joined(self, participant):
         pass
 
     def call_joined(self, join_data, client_error):
@@ -268,6 +274,37 @@ class DailyTransport(ThreadedTransport, EventHandler):
     def start_recording(self):
         self.client.start_recording()
 
+    def render_participant_video(self,
+                                 participant_id,
+                                 framerate=10,
+                                 video_source="camera",
+                                 color_format="RGB") -> None:
+        if not self._video_rendering_enabled:
+            self._logger.warn("Video rendering is not enabled")
+
+        self._video_renderers[participant_id] = {
+            "framerate": framerate,
+            "timestamp": 0,
+        }
+        self.client.set_video_renderer(
+            participant_id,
+            self.on_participant_video_frame,
+            video_source=video_source,
+            color_format=color_format)
+
+    def on_participant_video_frame(self, participant_id, video_frame):
+        curr_time = time.time()
+        prev_time = self._video_renderers[participant_id]["timestamp"]
+        diff_time = curr_time - prev_time
+        period = 1 / self._video_renderers[participant_id]["framerate"]
+        if diff_time > period and self._loop:
+            self._video_renderers[participant_id]["timestamp"] = curr_time
+            frame = UserImageFrame(participant_id, video_frame.buffer,
+                                   (video_frame.width, video_frame.height))
+            asyncio.run_coroutine_threadsafe(
+                self.receive_queue.put(frame), self._loop
+            )
+
     def on_error(self, error):
         self._logger.error(f"on_error: {error}")
 
@@ -277,7 +314,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
     def on_participant_joined(self, participant):
         if not self._other_participant_has_joined and participant["id"] != self._my_participant_id:
             self._other_participant_has_joined = True
-            self.on_first_other_participant_joined()
+            self.on_first_other_participant_joined(participant)
 
     def on_participant_left(self, participant, reason):
         if len(self.client.participants()) < self._min_others_count + 1:
@@ -286,7 +323,6 @@ class DailyTransport(ThreadedTransport, EventHandler):
     def on_app_message(self, message: Any, sender: str):
         if self._loop:
             frame = ReceivedAppMessageFrame(message, sender)
-            print(frame)
             asyncio.run_coroutine_threadsafe(
                 self.receive_queue.put(frame), self._loop
             )

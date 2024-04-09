@@ -48,7 +48,7 @@ for i in range(1, 26):
 flipped = sprites[::-1]
 sprites.extend(flipped)
 # When the bot isn't talking, show a static image of the cat listening
-quiet_frame = ImageFrame("", sprites[0])
+quiet_frame = ImageFrame(sprites[0], (1024, 576))
 talking_frame = SpriteFrame(images=sprites)
 
 
@@ -127,7 +127,7 @@ async def main(room_url: str, token):
         ]
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             print(f"!!! in here, pipeline.source is {pipeline.source}")
             await pipeline.queue_frames([LLMMessagesFrame(messages)])
 

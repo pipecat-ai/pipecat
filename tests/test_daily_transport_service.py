@@ -11,11 +11,11 @@ class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
         was_called = False
 
         @transport.event_handler("on_first_other_participant_joined")
-        def test_event_handler(transport):
+        def test_event_handler(transport, participant):
             nonlocal was_called
             was_called = True
 
-        transport.on_first_other_participant_joined()
+        transport.on_first_other_participant_joined({"id": "user-id"})
 
         self.assertTrue(was_called)
 
@@ -29,7 +29,7 @@ class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
         event = asyncio.Event()
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def test_event_handler(transport):
+        async def test_event_handler(transport, participant):
             nonlocal event
             print("sleeping")
             await asyncio.sleep(0.1)
@@ -68,7 +68,7 @@ class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
             await transport.send_queue.put(AudioFrame(bytes([0] * 3300)))
 
         async def send_video_frame():
-            await transport.send_queue.put(ImageFrame(None, b"test"))
+            await transport.send_queue.put(ImageFrame(b"test", (0, 0)))
 
         await asyncio.gather(transport.run(), send_audio_frame(), send_video_frame())
 

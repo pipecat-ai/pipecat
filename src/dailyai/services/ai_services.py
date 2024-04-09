@@ -14,6 +14,7 @@ from dailyai.pipeline.frames import (
     TTSStartFrame,
     TextFrame,
     TranscriptionFrame,
+    URLImageFrame,
 )
 
 from abc import abstractmethod
@@ -87,7 +88,7 @@ class ImageGenService(AIService):
 
     # Renders the image. Returns an Image object.
     @abstractmethod
-    async def run_image_gen(self, sentence: str) -> tuple[str, bytes]:
+    async def run_image_gen(self, sentence: str) -> tuple[str, bytes, tuple[int, int]]:
         pass
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
@@ -95,8 +96,8 @@ class ImageGenService(AIService):
             yield frame
             return
 
-        (url, image_data) = await self.run_image_gen(frame.text)
-        yield ImageFrame(url, image_data)
+        (url, image_data, image_size) = await self.run_image_gen(frame.text)
+        yield URLImageFrame(url, image_data, image_size)
 
 
 class STTService(AIService):

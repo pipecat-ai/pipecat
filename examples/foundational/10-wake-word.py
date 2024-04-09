@@ -55,7 +55,7 @@ for file in image_files:
         sprites[file] = img.tobytes()
 
 # When the bot isn't talking, show a static image of the cat listening
-quiet_frame = ImageFrame("", sprites["sc-listen-1.png"])
+quiet_frame = ImageFrame(sprites["sc-listen-1.png"], (720, 1280))
 # When the bot is talking, build an animation from two sprites
 talking_list = [sprites["sc-default.png"], sprites["sc-talk.png"]]
 talking = [random.choice(talking_list) for x in range(30)]
@@ -165,7 +165,7 @@ async def main(room_url: str, token):
         pipeline = Pipeline([isa, tf, ncf, tma_in, llm, tma_out, tts])
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             await transport.say(
                 "Hi! If you want to talk to me, just say 'hey Santa Cat'.",
                 tts,

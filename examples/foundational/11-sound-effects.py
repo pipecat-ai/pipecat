@@ -114,7 +114,7 @@ async def main(room_url: str, token):
         pipeline = Pipeline([tma_in, in_sound, fl2, llm, tma_out, fl, tts, out_sound])
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             await transport.say("Hi, I'm listening!", tts)
             await transport.send_queue.put(AudioFrame(sounds["ding1.wav"]))
 

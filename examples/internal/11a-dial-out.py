@@ -80,7 +80,7 @@ async def main(room_url: str, token, phone):
         tts = AzureTTSService()
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             await tts.say("Hi, I'm listening!", transport.send_queue)
             await transport.send_queue.put(AudioFrame(sounds["ding1.wav"]))
 
