@@ -6,8 +6,8 @@ from PIL import Image
 from typing import AsyncGenerator
 
 from dailyai.pipeline.aggregators import (
-    LLMResponseAggregator,
-    UserResponseAggregator,
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
 )
 from dailyai.pipeline.frames import (
     ImageFrame,
@@ -135,8 +135,8 @@ async def main(room_url: str, token):
 
             await transport.run_interruptible_pipeline(
                 pipeline,
-                post_processor=LLMResponseAggregator(messages),
-                pre_processor=UserResponseAggregator(messages),
+                post_processor=LLMAssistantResponseAggregator(messages),
+                pre_processor=LLMUserResponseAggregator(messages),
             )
 
         transport.transcription_settings["extra"]["endpointing"] = True
