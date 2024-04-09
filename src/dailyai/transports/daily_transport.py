@@ -162,16 +162,20 @@ class DailyTransport(ThreadedTransport, EventHandler):
         return decorator
 
     def write_frame_to_camera(self, frame: bytes):
-        self.camera.write_frame(frame)
+        if self._camera_enabled:
+            self.camera.write_frame(frame)
 
     def write_frame_to_mic(self, frame: bytes):
-        self.mic.write_frames(frame)
+        if self._mic_enabled:
+            self.mic.write_frames(frame)
 
     def send_app_message(self, message: Any, participantId: str | None):
         self.client.send_app_message(message, participantId)
 
     def read_audio_frames(self, desired_frame_count):
-        bytes = self._speaker.read_frames(desired_frame_count)
+        bytes = b""
+        if self._speaker_enabled or self._vad_enabled:
+            bytes = self._speaker.read_frames(desired_frame_count)
         return bytes
 
     def _prerun(self):
