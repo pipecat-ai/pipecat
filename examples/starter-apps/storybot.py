@@ -232,7 +232,7 @@ async def main(room_url: str, token):
         start_story_event = asyncio.Event()
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             start_story_event.set()
 
         async def storytime():

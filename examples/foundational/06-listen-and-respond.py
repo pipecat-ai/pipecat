@@ -72,7 +72,7 @@ async def main(room_url: str, token):
         )
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             # Kick off the conversation.
             messages.append(
                 {"role": "system", "content": "Please introduce yourself to the user."})

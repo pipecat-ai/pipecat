@@ -85,7 +85,7 @@ async def main(room_url: str, token):
         pipeline = Pipeline([image_sync_aggregator, tma_in, llm, tma_out, tts])
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             await pipeline.queue_frames([TextFrame("Hi, I'm listening!")])
 
         await transport.run(pipeline)

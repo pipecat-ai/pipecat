@@ -127,7 +127,7 @@ async def main(room_url: str, token):
         ]
 
         @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport):
+        async def on_first_other_participant_joined(transport, participant):
             print(f"!!! in here, pipeline.source is {pipeline.source}")
             await pipeline.queue_frames([LLMMessagesFrame(messages)])
 
