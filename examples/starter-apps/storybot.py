@@ -19,8 +19,8 @@ from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.pipeline.aggregators import (
     LLMAssistantContextAggregator,
-    UserResponseAggregator,
-    LLMResponseAggregator,
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
 )
 from dailyai.pipeline.frames import (
     EndPipeFrame,
@@ -209,8 +209,8 @@ async def main(room_url: str, token):
             key_id=os.getenv("FAL_KEY_ID"),
             key_secret=os.getenv("FAL_KEY_SECRET"),
         )
-        lra = LLMResponseAggregator(messages)
-        ura = UserResponseAggregator(messages)
+        lra = LLMAssistantResponseAggregator(messages)
+        ura = LLMUserResponseAggregator(messages)
         sp = StoryProcessor(messages, story)
         sig = StoryImageGenerator(story, llm, img)
 

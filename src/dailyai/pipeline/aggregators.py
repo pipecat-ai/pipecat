@@ -21,7 +21,7 @@ from dailyai.services.ai_services import AIService
 from typing import AsyncGenerator, Coroutine, List
 
 
-class BasicResponseAggregator(FrameProcessor):
+class ResponseAggregator(FrameProcessor):
     """This frame processor aggregates frames between a start and an end frame
     into complete text frame sentences.
 
@@ -37,10 +37,10 @@ class BasicResponseAggregator(FrameProcessor):
     ...         if isinstance(frame, TextFrame):
     ...             print(frame.text)
 
-    >>> aggregator = BasicResponseAggregator(start_frame = UserStartedSpeakingFrame,
-    ...                                      end_frame=UserStoppedSpeakingFrame,
-    ...                                      accumulator_frame=TranscriptionFrame,
-    ...                                      pass_through=False)
+    >>> aggregator = ResponseAggregator(start_frame = UserStartedSpeakingFrame,
+    ...                                 end_frame=UserStoppedSpeakingFrame,
+    ...                                 accumulator_frame=TranscriptionFrame,
+    ...                                 pass_through=False)
     >>> asyncio.run(print_frames(aggregator, UserStartedSpeakingFrame()))
     >>> asyncio.run(print_frames(aggregator, TranscriptionFrame("Hello,", 1, 1)))
     >>> asyncio.run(print_frames(aggregator, TranscriptionFrame("world.",  1, 2)))
@@ -84,7 +84,7 @@ class BasicResponseAggregator(FrameProcessor):
             yield frame
 
 
-class UserTranscriptionAggregator(BasicResponseAggregator):
+class UserResponseAggregator(ResponseAggregator):
     def __init__(self):
         super().__init__(
             start_frame=UserStartedSpeakingFrame,
@@ -94,7 +94,7 @@ class UserTranscriptionAggregator(BasicResponseAggregator):
         )
 
 
-class ResponseAggregator(FrameProcessor):
+class LLMResponseAggregator(FrameProcessor):
 
     def __init__(
         self,
@@ -139,7 +139,7 @@ class ResponseAggregator(FrameProcessor):
             yield frame
 
 
-class LLMResponseAggregator(ResponseAggregator):
+class LLMAssistantResponseAggregator(LLMResponseAggregator):
     def __init__(self, messages: list[dict]):
         super().__init__(
             messages=messages,
@@ -150,7 +150,7 @@ class LLMResponseAggregator(ResponseAggregator):
         )
 
 
-class UserResponseAggregator(ResponseAggregator):
+class LLMUserResponseAggregator(LLMResponseAggregator):
     def __init__(self, messages: list[dict]):
         super().__init__(
             messages=messages,
