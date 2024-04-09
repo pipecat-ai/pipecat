@@ -244,9 +244,12 @@ class DailyTransport(ThreadedTransport, EventHandler):
         )
         self._my_participant_id = self.client.participants()["local"]["id"]
 
+        # For performance reasons, never subscribe to video streams (unless a
+        # video renderer is registered).
         self.client.update_subscription_profiles({
             "base": {
-                "camera": "subscribed" if self._video_rendering_enabled else "unsubscribed",
+                "camera": "unsubscribed",
+                "screenVideo": "unsubscribed"
             }
         })
 
@@ -285,6 +288,16 @@ class DailyTransport(ThreadedTransport, EventHandler):
                                  color_format="RGB") -> None:
         if not self._video_rendering_enabled:
             self._logger.warn("Video rendering is not enabled")
+            return
+
+        # Only enable camera subscription on this participant
+        self.client.update_subscriptions(participant_settings={
+            participant_id: {
+                "media": {
+                    video_source: "subscribed"
+                }
+            }
+        })
 
         self._video_renderers[participant_id] = {
             "framerate": framerate,
