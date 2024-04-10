@@ -5,7 +5,7 @@ import os
 
 import tkinter as tk
 
-from dailyai.pipeline.frames import TextFrame, EndFrame
+from dailyai.pipeline.frames import TextFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.fal_ai_services import FalImageGenService
 from dailyai.transports.local_transport import LocalTransport
