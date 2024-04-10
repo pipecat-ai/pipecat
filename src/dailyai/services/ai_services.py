@@ -100,6 +100,31 @@ class ImageGenService(AIService):
         yield URLImageFrame(url, image_data, image_size)
 
 
+class VisionService(AIService):
+    """VisionService is a base class for vision services."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._describe_text = None
+
+    @abstractmethod
+    async def run_vision(self, describe_text: str, frame: ImageFrame) -> str:
+        pass
+
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, TextFrame):
+            self._describe_text = frame.text
+        elif isinstance(frame, ImageFrame):
+            if self._describe_text:
+                description = await self.run_vision(self._describe_text, frame)
+                self._describe_text = None
+                yield TextFrame(description)
+            else:
+                yield frame
+        else:
+            yield frame
+
+
 class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
