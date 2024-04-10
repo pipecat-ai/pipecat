@@ -7,6 +7,7 @@ from dailyai.pipeline.frames import (
     EndFrame,
     EndPipeFrame,
     Frame,
+    ImageFrame,
     LLMMessagesFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
@@ -14,6 +15,7 @@ from dailyai.pipeline.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VisionImageFrame,
 )
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.ai_services import AIService
@@ -463,3 +465,37 @@ class GatedAggregator(FrameProcessor):
             self.accumulator = []
         else:
             self.accumulator.append(frame)
+
+
+class VisionImageFrameAggregator(FrameProcessor):
+    """This aggregator waits for a consecutive TextFrame and an
+    ImageFrame. After the ImageFrame arrives it will output a VisionImageFrame.
+
+    >>> from dailyai.pipeline.frames import ImageFrame
+
+    >>> async def print_frames(aggregator, frame):
+    ...     async for frame in aggregator.process_frame(frame):
+    ...         print(frame)
+
+    >>> aggregator = VisionImageFrameAggregator()
+    >>> asyncio.run(print_frames(aggregator, TextFrame("What do you see?")))
+    >>> asyncio.run(print_frames(aggregator, ImageFrame(image=bytes([]), size=(0, 0))))
+    VisionImageFrame, text: What do you see?, image size: 0x0, buffer size: 0 B
+
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._describe_text = None
+
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, TextFrame):
+            self._describe_text = frame.text
+        elif isinstance(frame, ImageFrame):
+            if self._describe_text:
+                yield VisionImageFrame(self._describe_text, frame.image, frame.size)
+                self._describe_text = None
+            else:
+                yield frame
+        else:
+            yield frame

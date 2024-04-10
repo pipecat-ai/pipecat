@@ -79,8 +79,10 @@ class ImageFrame(Frame):
 
 @dataclass()
 class URLImageFrame(ImageFrame):
-    """An image. Will be shown by the transport if the transport's camera is
-    enabled."""
+    """An image with an associated URL. Will be shown by the transport if the
+    transport's camera is enabled.
+
+    """
     url: str | None
 
     def __init__(self, url, image, size):
@@ -89,6 +91,22 @@ class URLImageFrame(ImageFrame):
 
     def __str__(self):
         return f"{self.__class__.__name__}, url: {self.url}, image size: {self.size[0]}x{self.size[1]}, buffer size: {len(self.image)} B"
+
+
+@dataclass()
+class VisionImageFrame(ImageFrame):
+    """An image with an associated text to ask for a description of it. Will be shown by the
+    transport if the transport's camera is enabled.
+
+    """
+    text: str | None
+
+    def __init__(self, text, image, size):
+        super().__init__(image, size)
+        self.text = text
+
+    def __str__(self):
+        return f"{self.__class__.__name__}, text: {self.text}, image size: {self.size[0]}x{self.size[1]}, buffer size: {len(self.image)} B"
 
 
 @dataclass()

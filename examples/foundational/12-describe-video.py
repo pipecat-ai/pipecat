@@ -5,7 +5,7 @@ import os
 
 from typing import AsyncGenerator
 
-from dailyai.pipeline.aggregators import FrameProcessor, UserResponseAggregator
+from dailyai.pipeline.aggregators import FrameProcessor, UserResponseAggregator, VisionImageFrameAggregator
 
 from dailyai.pipeline.frames import Frame, TextFrame, UserImageRequestFrame
 from dailyai.pipeline.pipeline import Pipeline
@@ -59,6 +59,8 @@ async def main(room_url: str, token):
 
         image_requester = UserImageRequester()
 
+        vision_aggregator = VisionImageFrameAggregator()
+
         moondream = MoondreamService()
 
         tts = ElevenLabsTTSService(
@@ -73,7 +75,7 @@ async def main(room_url: str, token):
             transport.render_participant_video(participant["id"], framerate=0)
             image_requester.set_participant_id(participant["id"])
 
-        pipeline = Pipeline([user_response, image_requester, moondream, tts])
+        pipeline = Pipeline([user_response, image_requester, vision_aggregator, moondream, tts])
 
         await transport.run(pipeline)
 
