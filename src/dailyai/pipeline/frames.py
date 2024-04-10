@@ -106,6 +106,15 @@ class UserImageFrame(ImageFrame):
 
 
 @dataclass()
+class UserImageRequestFrame(Frame):
+    """A frame user to request an image from the given user."""
+    user_id: str
+
+    def __str__(self):
+        return f"{self.__class__.__name__}, user: {self.user_id}"
+
+
+@dataclass()
 class SpriteFrame(Frame):
     """An animated sprite. Will be shown by the transport if the transport's
     camera is enabled. Will play at the framerate specified in the transport's
@@ -172,10 +181,10 @@ class ReceivedAppMessageFrame(Frame):
 @dataclass()
 class SendAppMessageFrame(Frame):
     message: Any
-    participantId: str | None
+    participant_id: str | None
 
     def __str__(self):
-        return f"SendAppMessageFrame: participantId: {self.participantId}, message: {self.message}"
+        return f"SendAppMessageFrame: participant: {self.participant_id}, message: {self.message}"
 
 
 class UserStartedSpeakingFrame(Frame):
