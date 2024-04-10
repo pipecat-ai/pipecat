@@ -39,6 +39,8 @@ Currently implemented services:
 - Transport
   - Daily
   - Local (in progress, intended as a quick start example service)
+- Vision
+  - Moondream
 
 If you'd like to [implement a service]((https://github.com/daily-co/daily-ai-sdk/tree/main/src/dailyai/services)), we welcome PRs! Our goal is to support lots of services in all of the above categories, plus new categories (like real-time video) as they emerge.
 
@@ -63,7 +65,7 @@ pip install "dailyai[option,...]"
 
 Your project may or may not need these, so they're made available as optional requirements. Here is a list:
 
-- **AI services**: `anthropic`, `azure`, `fal`, `openai`, `playht`, `silero`, `whisper`
+- **AI services**: `anthropic`, `azure`, `fal`, `moondream`, `openai`, `playht`, `silero`, `whisper`
 - **Transports**: `daily`, `local`, `websocket`
 
 ## Code examples
