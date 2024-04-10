@@ -51,7 +51,9 @@ async def main(room_url: str):
             voice_id="jBpfuIE2acCO8z3wKNLl",
         )
         dalle = FalImageGenService(
-            image_size="1024x1024",
+            params=FalImageGenService.InputParams(
+                image_size="1024x1024"
+            ),
             aiohttp_session=session,
             key_id=os.getenv("FAL_KEY_ID"),
             key_secret=os.getenv("FAL_KEY_SECRET"),

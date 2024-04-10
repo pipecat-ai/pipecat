@@ -83,13 +83,12 @@ class TTSService(AIService):
 
 
 class ImageGenService(AIService):
-    def __init__(self, image_size, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.image_size = image_size
 
     # Renders the image. Returns an Image object.
     @abstractmethod
-    async def run_image_gen(self, sentence: str) -> tuple[str, bytes, tuple[int, int]]:
+    async def run_image_gen(self, prompt: str) -> tuple[str, bytes, tuple[int, int]]:
         pass
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:

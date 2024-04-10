@@ -97,23 +97,24 @@ class AzureImageGenServiceREST(ImageGenService):
         endpoint,
         model,
     ):
-        super().__init__(image_size=image_size)
+        super().__init__()
 
         self._api_key = api_key
         self._azure_endpoint = endpoint
         self._api_version = api_version
         self._model = model
         self._aiohttp_session = aiohttp_session
+        self._image_size = image_size
 
-    async def run_image_gen(self, sentence) -> tuple[str, bytes, tuple[int, int]]:
+    async def run_image_gen(self, prompt: str) -> tuple[str, bytes, tuple[int, int]]:
         url = f"{self._azure_endpoint}openai/images/generations:submit?api-version={self._api_version}"
         headers = {
             "api-key": self._api_key,
             "Content-Type": "application/json"}
         body = {
             # Enter your prompt text here
-            "prompt": sentence,
-            "size": self.image_size,
+            "prompt": prompt,
+            "size": self._image_size,
             "n": 1,
         }
         async with self._aiohttp_session.post(
