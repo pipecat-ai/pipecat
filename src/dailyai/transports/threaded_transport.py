@@ -20,6 +20,7 @@ from dailyai.pipeline.frames import (
     SpriteFrame,
     StartFrame,
     TextFrame,
+    UserImageRequestFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -382,7 +383,11 @@ class ThreadedTransport(AbstractTransport):
     def _set_images(self, images: list[bytes], start_frame=0):
         self._images = itertools.cycle(images)
 
-    def send_app_message(self, message: Any, participantId: str | None):
+    def request_participant_image(self, participant_id: str):
+        """ Child classes should override this to force an image from a user. """
+        pass
+
+    def send_app_message(self, message: Any, participant_id: str | None):
         """ Child classes should override this to send a custom message to the room. """
         pass
 
@@ -458,9 +463,10 @@ class ThreadedTransport(AbstractTransport):
                                 self._set_image(frame.image)
                             elif isinstance(frame, SpriteFrame):
                                 self._set_images(frame.images)
+                            elif isinstance(frame, UserImageRequestFrame):
+                                self.request_participant_image(frame.user_id)
                             elif isinstance(frame, SendAppMessageFrame):
-                                self.send_app_message(
-                                    frame.message, frame.participantId)
+                                self.send_app_message(frame.message, frame.participant_id)
                         elif len(b):
                             self.write_frame_to_mic(bytes(b))
                             b = bytearray()
