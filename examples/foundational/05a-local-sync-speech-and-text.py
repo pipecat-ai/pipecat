@@ -45,7 +45,9 @@ async def main():
             model="gpt-4-turbo-preview")
 
         imagegen = FalImageGenService(
-            image_size="1024x1024",
+            params=FalImageGenService.InputParams(
+                image_size="1024x1024"
+            ),
             aiohttp_session=session,
             key_id=os.getenv("FAL_KEY_ID"),
             key_secret=os.getenv("FAL_KEY_SECRET"),
