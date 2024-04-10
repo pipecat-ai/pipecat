@@ -15,6 +15,7 @@ from dailyai.pipeline.frames import (
     TextFrame,
     TranscriptionFrame,
     URLImageFrame,
+    VisionImageFrame,
 )
 
 from abc import abstractmethod
@@ -98,6 +99,25 @@ class ImageGenService(AIService):
 
         (url, image_data, image_size) = await self.run_image_gen(frame.text)
         yield URLImageFrame(url, image_data, image_size)
+
+
+class VisionService(AIService):
+    """VisionService is a base class for vision services."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._describe_text = None
+
+    @abstractmethod
+    async def run_vision(self, frame: VisionImageFrame) -> str:
+        pass
+
+    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        if isinstance(frame, VisionImageFrame):
+            description = await self.run_vision(frame)
+            yield TextFrame(description)
+        else:
+            yield frame
 
 
 class STTService(AIService):

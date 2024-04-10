@@ -169,8 +169,12 @@ class DailyTransport(ThreadedTransport, EventHandler):
         if self._mic_enabled:
             self.mic.write_frames(frame)
 
-    def send_app_message(self, message: Any, participantId: str | None):
-        self.client.send_app_message(message, participantId)
+    def request_participant_image(self, participant_id: str):
+        if participant_id in self._video_renderers:
+            self._video_renderers[participant_id]["render_next_frame"] = True
+
+    def send_app_message(self, message: Any, participant_id: str | None):
+        self.client.send_app_message(message, participant_id)
 
     def read_audio_frames(self, desired_frame_count):
         bytes = b""
@@ -302,6 +306,7 @@ class DailyTransport(ThreadedTransport, EventHandler):
         self._video_renderers[participant_id] = {
             "framerate": framerate,
             "timestamp": 0,
+            "render_next_frame": False,
         }
         self.client.set_video_renderer(
             participant_id,
@@ -310,17 +315,28 @@ class DailyTransport(ThreadedTransport, EventHandler):
             color_format=color_format)
 
     def on_participant_video_frame(self, participant_id, video_frame):
+        if not self._loop:
+            return
+
+        render_frame = False
+
         curr_time = time.time()
-        prev_time = self._video_renderers[participant_id]["timestamp"]
-        diff_time = curr_time - prev_time
-        period = 1 / self._video_renderers[participant_id]["framerate"]
-        if diff_time > period and self._loop:
-            self._video_renderers[participant_id]["timestamp"] = curr_time
+        framerate = self._video_renderers[participant_id]["framerate"]
+
+        if framerate > 0:
+            prev_time = self._video_renderers[participant_id]["timestamp"]
+            next_time = prev_time + 1 / framerate
+            render_frame = curr_time > next_time
+        elif self._video_renderers[participant_id]["render_next_frame"]:
+            self._video_renderers[participant_id]["render_next_frame"] = False
+            render_frame = True
+
+        if render_frame:
             frame = UserImageFrame(participant_id, video_frame.buffer,
                                    (video_frame.width, video_frame.height))
-            asyncio.run_coroutine_threadsafe(
-                self.receive_queue.put(frame), self._loop
-            )
+            asyncio.run_coroutine_threadsafe(self.receive_queue.put(frame), self._loop)
+
+        self._video_renderers[participant_id]["timestamp"] = curr_time
 
     def on_error(self, error):
         self._logger.error(f"on_error: {error}")
