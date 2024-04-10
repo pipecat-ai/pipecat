@@ -1,3 +1,4 @@
+from typing import Literal
 import aiohttp
 from PIL import Image
 import io
@@ -26,24 +27,25 @@ class OpenAIImageGenService(ImageGenService):
     def __init__(
         self,
         *,
-        image_size: str,
+        image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"],
         aiohttp_session: aiohttp.ClientSession,
         api_key,
         model="dall-e-3",
     ):
-        super().__init__(image_size=image_size)
+        super().__init__()
         self._model = model
+        self._image_size = image_size
         self._client = AsyncOpenAI(api_key=api_key)
         self._aiohttp_session = aiohttp_session
 
-    async def run_image_gen(self, sentence) -> tuple[str, bytes, tuple[int, int]]:
-        self.logger.info("Generating OpenAI image", sentence)
+    async def run_image_gen(self, prompt: str) -> tuple[str, bytes, tuple[int, int]]:
+        self.logger.info("Generating OpenAI image", prompt)
 
         image = await self._client.images.generate(
-            prompt=sentence,
+            prompt=prompt,
             model=self._model,
             n=1,
-            size=self.image_size
+            size=self._image_size
         )
         image_url = image.data[0].url
         if not image_url:

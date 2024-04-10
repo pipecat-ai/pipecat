@@ -204,7 +204,9 @@ async def main(room_url: str, token):
             voice_id="Xb7hH8MSUJpSbSDYk0k2",
         )  # matilda
         img = FalImageGenService(
-            image_size="1024x1024",
+            params={
+                image_size = "1024x1024",
+            },
             aiohttp_session=session,
             key_id=os.getenv("FAL_KEY_ID"),
             key_secret=os.getenv("FAL_KEY_SECRET"),
