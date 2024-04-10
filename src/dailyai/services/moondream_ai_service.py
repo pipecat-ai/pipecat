@@ -1,4 +1,4 @@
-from dailyai.pipeline.frames import ImageFrame
+from dailyai.pipeline.frames import ImageFrame, VisionImageFrame
 from dailyai.services.ai_services import VisionService
 
 from PIL import Image
@@ -42,11 +42,11 @@ class MoondreamService(VisionService):
         ).to(device=device, dtype=dtype)
         self._model.eval()
 
-    async def run_vision(self, describe_text: str, frame: ImageFrame) -> str:
+    async def run_vision(self, frame: VisionImageFrame) -> str:
         image = Image.frombytes("RGB", (frame.size[0], frame.size[1]), frame.image)
         image_embeds = self._model.encode_image(image)
         description = self._model.answer_question(
             image_embeds=image_embeds,
-            question=describe_text,
+            question=frame.text,
             tokenizer=self._tokenizer)
         return description

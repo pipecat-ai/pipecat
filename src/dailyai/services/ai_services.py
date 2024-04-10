@@ -15,6 +15,7 @@ from dailyai.pipeline.frames import (
     TextFrame,
     TranscriptionFrame,
     URLImageFrame,
+    VisionImageFrame,
 )
 
 from abc import abstractmethod
@@ -108,19 +109,13 @@ class VisionService(AIService):
         self._describe_text = None
 
     @abstractmethod
-    async def run_vision(self, describe_text: str, frame: ImageFrame) -> str:
+    async def run_vision(self, frame: VisionImageFrame) -> str:
         pass
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, TextFrame):
-            self._describe_text = frame.text
-        elif isinstance(frame, ImageFrame):
-            if self._describe_text:
-                description = await self.run_vision(self._describe_text, frame)
-                self._describe_text = None
-                yield TextFrame(description)
-            else:
-                yield frame
+        if isinstance(frame, VisionImageFrame):
+            description = await self.run_vision(frame)
+            yield TextFrame(description)
         else:
             yield frame
 
