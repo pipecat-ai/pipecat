@@ -1,5 +1,4 @@
 import asyncio
-import io
 import logging
 
 from typing import AsyncGenerator
