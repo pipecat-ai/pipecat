@@ -76,8 +76,6 @@ async def main(room_url: str, token):
                 {"role": "system", "content": "Please introduce yourself to the user."})
             await pipeline.queue_frames([LLMMessagesFrame(messages)])
 
-        transport.transcription_settings["extra"]["endpointing"] = True
-        transport.transcription_settings["extra"]["punctuate"] = True
         await transport.run(pipeline)
 
 

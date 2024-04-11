@@ -67,7 +67,6 @@ async def main(room_url: str, token):
                 pre_processor=LLMUserResponseAggregator(messages),
             )
 
-        transport.transcription_settings["extra"]["punctuate"] = False
         await asyncio.gather(transport.run(), run_conversation())
 
 
