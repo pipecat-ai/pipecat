@@ -18,6 +18,7 @@ from dailyai.services.openai_llm_context import OpenAILLMContext
 from dailyai.services.open_ai_services import OpenAILLMService
 # from dailyai.services.deepgram_ai_services import DeepgramTTSService
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
+from dailyai.services.fireworks_ai_services import FireworksLLMService
 from dailyai.pipeline.frames import (
     Frame,
     LLMFunctionCallFrame,
@@ -249,8 +250,7 @@ class ChecklistProcessor(AIService):
                 print(f"--> {pretty_json}\n")
                 if frame.function_name not in self._functions:
                     raise Exception(
-                        f"The LLM tried to call a function named {frame.function_name}, which isn't in the list of known functions. Please check your prompt and/or self._functions."
-                    )
+                        f"Unknown function.")
                 fn = getattr(self, frame.function_name)
                 result = fn(json.loads(frame.arguments))
 
@@ -306,9 +306,9 @@ async def main(room_url: str, token):
 
         messages = []
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4-1106-preview",
+        llm = FireworksLLMService(
+            api_key=os.getenv("FIREWORKS_API_KEY"),
+            model="accounts/fireworks/models/firefunction-v1"
         )
         # tts = DeepgramTTSService(
         #     aiohttp_session=session,
