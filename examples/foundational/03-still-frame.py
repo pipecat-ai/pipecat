@@ -35,8 +35,7 @@ async def main(room_url):
                 image_size="square_hd"
             ),
             aiohttp_session=session,
-            key_id=os.getenv("FAL_KEY_ID"),
-            key_secret=os.getenv("FAL_KEY_SECRET"),
+            key=os.getenv("FAL_KEY"),
         )
 
         pipeline = Pipeline([imagegen])

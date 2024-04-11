@@ -4,10 +4,12 @@
 #
 #    pip-compile --all-extras pyproject.toml
 #
-aiohttp==3.9.3
+aiohttp==3.9.4
     # via dailyai (pyproject.toml)
 aiosignal==1.3.1
     # via aiohttp
+annotated-types==0.6.0
+    # via pydantic
 anthropic==0.20.0
     # via dailyai (pyproject.toml)
 anyio==4.3.0
@@ -15,13 +17,10 @@ anyio==4.3.0
     #   anthropic
     #   httpx
     #   openai
-    #   starlette
 async-timeout==4.0.3
     # via aiohttp
 attrs==23.2.0
-    # via
-    #   aiohttp
-    #   fal
+    # via aiohttp
 av==11.0.0
     # via faster-whisper
 azure-cognitiveservices-speech==1.36.0
@@ -33,31 +32,16 @@ certifi==2024.2.2
     #   httpcore
     #   httpx
     #   requests
-cffi==1.16.0
-    # via cryptography
 charset-normalizer==3.3.2
     # via requests
 click==8.1.7
-    # via
-    #   fal
-    #   flask
-    #   rich-click
-colorama==0.4.6
-    # via fal
+    # via flask
 coloredlogs==15.0.1
     # via onnxruntime
-cryptography==42.0.5
-    # via pyjwt
-ctranslate2==4.1.0
+ctranslate2==4.2.0
     # via faster-whisper
 daily-python==0.7.3
     # via dailyai (pyproject.toml)
-deprecated==1.2.14
-    # via opentelemetry-api
-dill==0.3.7
-    # via fal
-distlib==0.3.8
-    # via virtualenv
 distro==1.9.0
     # via
     #   anthropic
@@ -66,10 +50,8 @@ einops==0.7.0
     # via dailyai (pyproject.toml)
 exceptiongroup==1.2.0
     # via anyio
-fal==0.12.7
+fal-client==0.2.2
     # via dailyai (pyproject.toml)
-fastapi==0.99.1
-    # via fal
 faster-whisper==1.0.1
     # via dailyai (pyproject.toml)
 filelock==3.13.4
@@ -78,7 +60,6 @@ filelock==3.13.4
     #   pyht
     #   torch
     #   transformers
-    #   virtualenv
 flask==3.0.3
     # via
     #   dailyai (pyproject.toml)
@@ -95,15 +76,8 @@ fsspec==2024.3.1
     # via
     #   huggingface-hub
     #   torch
-grpc-interceptor==0.15.4
-    # via fal
 grpcio==1.62.1
-    # via
-    #   fal
-    #   grpc-interceptor
-    #   isolate
-    #   isolate-proto
-    #   pyht
+    # via pyht
 h11==0.14.0
     # via httpcore
 httpcore==1.0.5
@@ -111,8 +85,10 @@ httpcore==1.0.5
 httpx==0.27.0
     # via
     #   anthropic
-    #   fal
+    #   fal-client
     #   openai
+httpx-sse==0.4.0
+    # via fal-client
 huggingface-hub==0.22.2
     # via
     #   faster-whisper
@@ -121,38 +97,24 @@ huggingface-hub==0.22.2
     #   transformers
 humanfriendly==10.0
     # via coloredlogs
-idna==3.6
+idna==3.7
     # via
     #   anyio
     #   httpx
     #   requests
     #   yarl
-importlib-metadata==7.0.0
-    # via opentelemetry-api
-isolate[build]==0.12.7
-    # via
-    #   fal
-    #   isolate-proto
-isolate-proto==0.3.4
-    # via fal
 itsdangerous==2.1.2
     # via flask
 jinja2==3.1.3
     # via
     #   flask
     #   torch
-markdown-it-py==3.0.0
-    # via rich
 markupsafe==2.1.5
     # via
     #   jinja2
     #   werkzeug
-mdurl==0.1.2
-    # via markdown-it-py
 mpmath==1.3.0
     # via sympy
-msgpack==1.0.8
-    # via fal
 multidict==6.0.5
     # via
     #   aiohttp
@@ -170,64 +132,35 @@ onnxruntime==1.17.1
     # via faster-whisper
 openai==1.14.3
     # via dailyai (pyproject.toml)
-opentelemetry-api==1.24.0
-    # via
-    #   fal
-    #   opentelemetry-sdk
-opentelemetry-sdk==1.24.0
-    # via fal
-opentelemetry-semantic-conventions==0.45b0
-    # via opentelemetry-sdk
 packaging==24.0
     # via
-    #   fal
     #   huggingface-hub
     #   onnxruntime
     #   transformers
-pathspec==0.11.2
-    # via fal
 pillow==10.2.0
     # via
     #   dailyai (pyproject.toml)
-    #   fal
     #   torchvision
-platformdirs==4.2.0
-    # via
-    #   isolate
-    #   virtualenv
-portalocker==2.8.2
-    # via fal
 protobuf==4.25.3
     # via
-    #   isolate
-    #   isolate-proto
     #   onnxruntime
     #   pyht
 pyaudio==0.2.14
     # via dailyai (pyproject.toml)
-pycparser==2.22
-    # via cffi
-pydantic==1.10.15
+pydantic==2.7.0
     # via
     #   anthropic
-    #   fal
-    #   fastapi
     #   openai
-pygments==2.17.2
-    # via rich
+pydantic-core==2.18.1
+    # via pydantic
 pyht==0.0.27
     # via dailyai (pyproject.toml)
-pyjwt[crypto]==2.8.0
-    # via fal
-python-dateutil==2.9.0.post0
-    # via fal
 python-dotenv==1.0.1
     # via dailyai (pyproject.toml)
 pyyaml==6.0.1
     # via
     #   ctranslate2
     #   huggingface-hub
-    #   isolate
     #   timm
     #   transformers
 regex==2023.12.25
@@ -237,34 +170,20 @@ requests==2.31.0
     #   huggingface-hub
     #   pyht
     #   transformers
-rich==13.7.1
-    # via
-    #   fal
-    #   rich-click
-rich-click==1.7.4
-    # via fal
 safetensors==0.4.2
     # via
     #   timm
     #   transformers
-six==1.16.0
-    # via python-dateutil
 sniffio==1.3.1
     # via
     #   anthropic
     #   anyio
     #   httpx
     #   openai
-starlette==0.27.0
-    # via fastapi
-structlog==22.3.0
-    # via fal
 sympy==1.12
     # via
     #   onnxruntime
     #   torch
-tblib==3.0.0
-    # via isolate
 timm==0.9.16
     # via dailyai (pyproject.toml)
 tokenizers==0.15.2
@@ -289,37 +208,24 @@ tqdm==4.66.2
     #   transformers
 transformers==4.39.3
     # via dailyai (pyproject.toml)
-types-python-dateutil==2.9.0.20240316
-    # via fal
 typing-extensions==4.10.0
     # via
     #   anthropic
     #   anyio
     #   dailyai (pyproject.toml)
-    #   fal
-    #   fastapi
     #   huggingface-hub
     #   openai
-    #   opentelemetry-sdk
     #   pydantic
-    #   rich-click
+    #   pydantic-core
     #   torch
 urllib3==2.2.1
     # via requests
-virtualenv==20.25.1
-    # via isolate
 websockets==12.0
-    # via
-    #   dailyai (pyproject.toml)
-    #   fal
+    # via dailyai (pyproject.toml)
 werkzeug==3.0.2
     # via flask
-wrapt==1.16.0
-    # via deprecated
 yarl==1.9.4
     # via aiohttp
-zipp==3.18.1
-    # via importlib-metadata
 
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools
