@@ -10,6 +10,7 @@ from functools import partial
 from typing import Any
 
 from dailyai.pipeline.frames import (
+    InterimTranscriptionFrame,
     ReceivedAppMessageFrame,
     TranscriptionFrame,
     UserImageFrame,
@@ -88,9 +89,11 @@ class DailyTransport(ThreadedTransport, EventHandler):
             "model": "2-conversationalai",
             "profanity_filter": True,
             "redact": False,
+            "endpointing": True,
+            "punctuate": True,
+            "includeRawResponse": True,
             "extra": {
-                "endpointing": True,
-                "punctuate": False,
+                "interim_results": True,
             },
         }
 
@@ -368,8 +371,12 @@ class DailyTransport(ThreadedTransport, EventHandler):
             elif "session_id" in message:
                 participantId = message["session_id"]
             if self._my_participant_id and participantId != self._my_participant_id:
-                frame = TranscriptionFrame(
-                    message["text"], participantId, message["timestamp"])
+                is_final = message["rawResponse"]["is_final"]
+                if is_final:
+                    frame = TranscriptionFrame(message["text"], participantId, message["timestamp"])
+                else:
+                    frame = InterimTranscriptionFrame(
+                        message["text"], participantId, message["timestamp"])
                 asyncio.run_coroutine_threadsafe(
                     self.receive_queue.put(frame), self._loop)
 

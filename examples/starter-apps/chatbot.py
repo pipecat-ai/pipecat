@@ -139,8 +139,6 @@ async def main(room_url: str, token):
                 pre_processor=LLMUserResponseAggregator(messages),
             )
 
-        transport.transcription_settings["extra"]["endpointing"] = True
-        transport.transcription_settings["extra"]["punctuate"] = True
         await asyncio.gather(transport.run(), run_conversation())
 
 

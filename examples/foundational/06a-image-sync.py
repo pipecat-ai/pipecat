@@ -47,13 +47,12 @@ async def main(room_url: str, token):
             token,
             "Respond bot",
             5,
+            camera_enabled=True,
+            camera_width=1024,
+            camera_height=1024,
+            mic_enabled=True,
+            mic_sample_rate=16000,
         )
-        transport._camera_enabled = True
-        transport._camera_width = 1024
-        transport._camera_height = 1024
-        transport._mic_enabled = True
-        transport._mic_sample_rate = 16000
-        transport.transcription_settings["extra"]["punctuate"] = True
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,

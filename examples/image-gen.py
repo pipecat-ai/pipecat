@@ -77,8 +77,6 @@ async def main(room_url: str, token):
             async for audio in audio_generator:
                 transport.output_queue.put(Frame(FrameType.AUDIO_FRAME, audio))
 
-    transport.transcription_settings["extra"]["punctuate"] = False
-    transport.transcription_settings["extra"]["endpointing"] = False
     await asyncio.gather(transport.run(), handle_transcriptions())
 
 

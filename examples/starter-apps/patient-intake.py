@@ -340,8 +340,6 @@ async def main(room_url: str, token):
                 pre_processor=OpenAIUserContextAggregator(context),
             )
 
-        transport.transcription_settings["extra"]["endpointing"] = True
-        transport.transcription_settings["extra"]["punctuate"] = True
         try:
             await asyncio.gather(transport.run(), handle_intake())
         except (asyncio.CancelledError, KeyboardInterrupt):

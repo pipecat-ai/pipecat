@@ -278,8 +278,6 @@ async def main(room_url: str, token):
                 pipeline,
             )
 
-        transport.transcription_settings["extra"]["endpointing"] = True
-        transport.transcription_settings["extra"]["punctuate"] = True
         try:
             await asyncio.gather(transport.run(), storytime())
         except (asyncio.CancelledError, KeyboardInterrupt):
