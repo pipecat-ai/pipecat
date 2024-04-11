@@ -22,11 +22,13 @@ Today, `dailyai` is:
 3. implementations of specific generative AI services
 
 Currently implemented services:
+
 - Speech-to-text
   - Deepgram
   - Whisper
 - LLMs
   - Azure
+  - Fireworks
   - OpenAI
 - Image generation
   - Azure
