@@ -25,11 +25,11 @@ class MoondreamService(VisionService):
         self,
         model_id="vikhyatk/moondream2",
         revision="2024-04-02",
-        device=None
+        use_cpu=False
     ):
         super().__init__()
 
-        if not device:
+        if not use_cpu:
             device, dtype = detect_device()
         else:
             device = torch.device("cpu")

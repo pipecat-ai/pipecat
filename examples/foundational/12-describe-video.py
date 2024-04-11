@@ -61,6 +61,7 @@ async def main(room_url: str, token):
 
         vision_aggregator = VisionImageFrameAggregator()
 
+        # If you run into weird description, try with use_cpu=True
         moondream = MoondreamService()
 
         tts = ElevenLabsTTSService(
