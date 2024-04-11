@@ -133,8 +133,9 @@ class LLMResponseAggregator(FrameProcessor):
                 self.aggregation = ""
                 yield self._end_frame()
                 yield LLMMessagesFrame(self.messages)
-        elif isinstance(frame, self._accumulator_frame) and self.aggregating:
-            self.aggregation += f" {frame.text}"
+        elif isinstance(frame, self._accumulator_frame):
+            if self.aggregating:
+                self.aggregation += f" {frame.text}"
             if self._pass_through:
                 yield frame
         else:
