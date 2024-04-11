@@ -127,8 +127,6 @@ async def main(room_url: str, token, phone):
                     transport.start_recording()
                     transport.dialout(phone)
 
-        transport.transcription_settings["extra"]["punctuate"] = True
-
         await asyncio.gather(transport.run(), handle_transcriptions())
 
 

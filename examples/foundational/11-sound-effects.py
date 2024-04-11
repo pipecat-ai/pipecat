@@ -82,7 +82,6 @@ async def main(room_url: str, token):
             mic_sample_rate=16000,
             camera_enabled=False,
         )
-        transport.transcription_settings["extra"]["punctuate"] = True
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),

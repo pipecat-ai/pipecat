@@ -1,5 +1,6 @@
 import asyncio
 import re
+import time
 
 from dailyai.pipeline.frame_processor import FrameProcessor
 
@@ -8,6 +9,7 @@ from dailyai.pipeline.frames import (
     EndPipeFrame,
     Frame,
     ImageFrame,
+    InterimTranscriptionFrame,
     LLMMessagesFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
@@ -106,6 +108,7 @@ class LLMResponseAggregator(FrameProcessor):
         start_frame,
         end_frame,
         accumulator_frame,
+        interim_accumulator_frame=None,
         pass_through=True,
     ):
         self.aggregation = ""
@@ -115,30 +118,74 @@ class LLMResponseAggregator(FrameProcessor):
         self._start_frame = start_frame
         self._end_frame = end_frame
         self._accumulator_frame = accumulator_frame
+        self._interim_accumulator_frame = interim_accumulator_frame
         self._pass_through = pass_through
+        self._seen_start_frame = False
+        self._seen_end_frame = False
+        self._seen_interim_results = False
 
+    # Use cases implemented:
+    #
+    # S: Start, E: End, T: Transcription, I: Interim, X: Text
+    #
+    #        S E -> None
+    #      S T E -> X
+    #    S I T E -> X
+    #    S I E T -> X
+    #  S I E I T -> X
+    #
+    # The following case would not be supported:
+    #
+    #    S I E T1 I T2 -> X
+    #
+    # and T2 would be dropped.
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if not self.messages:
             return
 
+        send_aggregation = False
+
         if isinstance(frame, self._start_frame):
+            self._seen_start_frame = True
             self.aggregating = True
         elif isinstance(frame, self._end_frame):
-            self.aggregating = False
-            # Sometimes VAD triggers quickly on and off. If we don't get any transcription,
-            # it creates empty LLM message queue frames
-            if len(self.aggregation) > 0:
-                self.messages.append(
-                    {"role": self._role, "content": self.aggregation})
-                self.aggregation = ""
-                yield self._end_frame()
-                yield LLMMessagesFrame(self.messages)
-        elif isinstance(frame, self._accumulator_frame) and self.aggregating:
-            self.aggregation += f" {frame.text}"
+            self._seen_end_frame = True
+
+            # We might have received the end frame but we might still be
+            # aggregating (i.e. we have seen interim results but not the final
+            # text).
+            self.aggregating = self._seen_interim_results
+
+            # Send the aggregation if we are not aggregating anymore (i.e. no
+            # more interim results received).
+            send_aggregation = not self.aggregating
+        elif isinstance(frame, self._accumulator_frame):
+            if self.aggregating:
+                self.aggregation += f" {frame.text}"
+                # We have receied a complete sentence, so if we have seen the
+                # end frame and we were still aggregating, it means we should
+                # send the aggregation.
+                send_aggregation = self._seen_end_frame
+
             if self._pass_through:
                 yield frame
+
+            # We just got our final result, so let's reset interim results.
+            self._seen_interim_results = False
+        elif self._interim_accumulator_frame and isinstance(frame, self._interim_accumulator_frame):
+            self._seen_interim_results = True
         else:
             yield frame
+
+        if send_aggregation and len(self.aggregation) > 0:
+            self.messages.append({"role": self._role, "content": self.aggregation})
+            yield self._end_frame()
+            yield LLMMessagesFrame(self.messages)
+            # Reset
+            self.aggregation = ""
+            self._seen_start_frame = False
+            self._seen_end_frame = False
+            self._seen_interim_results = False
 
 
 class LLMAssistantResponseAggregator(LLMResponseAggregator):
@@ -160,6 +207,7 @@ class LLMUserResponseAggregator(LLMResponseAggregator):
             start_frame=UserStartedSpeakingFrame,
             end_frame=UserStoppedSpeakingFrame,
             accumulator_frame=TranscriptionFrame,
+            interim_accumulator_frame=InterimTranscriptionFrame,
             pass_through=False,
         )
 
