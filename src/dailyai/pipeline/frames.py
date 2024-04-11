@@ -164,6 +164,17 @@ class TranscriptionFrame(TextFrame):
         return f"{self.__class__.__name__}, text: '{self.text}' participantId: {self.participantId}, timestamp: {self.timestamp}"
 
 
+@dataclass()
+class InterimTranscriptionFrame(TextFrame):
+    """A text frame with interim transcription-specific data. Will be placed in
+    the transport's receive queue when a participant speaks."""
+    participantId: str
+    timestamp: str
+
+    def __str__(self):
+        return f"{self.__class__.__name__}, text: '{self.text}' participantId: {self.participantId}, timestamp: {self.timestamp}"
+
+
 class TTSStartFrame(ControlFrame):
     """Used to indicate the beginning of a TTS response. Following AudioFrames
     are part of the TTS response until an TTEndFrame. These frames can be used
