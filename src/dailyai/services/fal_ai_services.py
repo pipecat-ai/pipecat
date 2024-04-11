@@ -6,14 +6,15 @@ from PIL import Image
 from pydantic import BaseModel
 from typing import Optional, Union, Dict
 
+
 from dailyai.services.ai_services import ImageGenService
 
 try:
-    import fal
+    import fal_client
 except ModuleNotFoundError as e:
     print(f"Exception: {e}")
     print(
-        "In order to use Fal, you need to `pip install dailyai[fal]`. Also, set `FAL_KEY_ID` and `FAL_KEY_SECRET` environment variables.")
+        "In order to use Fal, you need to `pip install dailyai[fal]`. Also, set `FAL_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
 
 
@@ -33,40 +34,25 @@ class FalImageGenService(ImageGenService):
         aiohttp_session: aiohttp.ClientSession,
         params: InputParams,
         model="fal-ai/fast-sdxl",
-        key_id=None,
-        key_secret=None
+        key=None,
     ):
         super().__init__()
         self._model = model
         self._params = params
         self._aiohttp_session = aiohttp_session
-        if key_id:
-            os.environ["FAL_KEY_ID"] = key_id
-        if key_secret:
-            os.environ["FAL_KEY_SECRET"] = key_secret
+        if key:
+            os.environ["FAL_KEY"] = key
 
     async def run_image_gen(self, prompt: str) -> tuple[str, bytes, tuple[int, int]]:
-        def get_image_url(prompt):
-            handler = fal.apps.submit(  # type: ignore
-                self._model,
-                arguments={
-                    "prompt": prompt,
-                    **self._params.dict(),
-                },
-            )
-            for event in handler.iter_events():
-                if isinstance(event, fal.apps.InProgress):  # type: ignore
-                    pass
+        response = await fal_client.run_async(
+            self._model,
+            arguments={"prompt": prompt, **self._params.dict()}
+        )
 
-            result = handler.get()
+        image_url = response["images"][0]["url"] if response else None
 
-            image_url = result["images"][0]["url"] if result else None
-            if not image_url:
-                raise Exception("Image generation failed")
-
-            return image_url
-
-        image_url = await asyncio.to_thread(get_image_url, prompt)
+        if not image_url:
+            raise Exception("Image generation failed")
 
         # Load the image from the url
         async with self._aiohttp_session.get(image_url) as response:
