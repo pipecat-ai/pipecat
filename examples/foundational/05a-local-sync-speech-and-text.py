@@ -49,8 +49,7 @@ async def main():
                 image_size="1024x1024"
             ),
             aiohttp_session=session,
-            key_id=os.getenv("FAL_KEY_ID"),
-            key_secret=os.getenv("FAL_KEY_SECRET"),
+            key=os.getenv("FAL_KEY"),
         )
 
         # Get a complete audio chunk from the given text. Splitting this into its own
