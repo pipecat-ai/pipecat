@@ -1,5 +1,6 @@
 import asyncio
 import re
+import time
 
 from dailyai.pipeline.frame_processor import FrameProcessor
 
@@ -107,6 +108,7 @@ class LLMResponseAggregator(FrameProcessor):
         end_frame,
         accumulator_frame,
         pass_through=True,
+        end_frame_threshold=0.75,
     ):
         self.aggregation = ""
         self.aggregating = False
@@ -116,6 +118,8 @@ class LLMResponseAggregator(FrameProcessor):
         self._end_frame = end_frame
         self._accumulator_frame = accumulator_frame
         self._pass_through = pass_through
+        self._end_frame_threshold = end_frame_threshold
+        self._last_end_frame_time = 0
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
         if not self.messages:
@@ -128,14 +132,22 @@ class LLMResponseAggregator(FrameProcessor):
             # Sometimes VAD triggers quickly on and off. If we don't get any transcription,
             # it creates empty LLM message queue frames
             if len(self.aggregation) > 0:
-                self.messages.append(
-                    {"role": self._role, "content": self.aggregation})
+                self.messages.append({"role": self._role, "content": self.aggregation})
                 self.aggregation = ""
                 yield self._end_frame()
                 yield LLMMessagesFrame(self.messages)
+            self._last_end_frame_time = time.time()
         elif isinstance(frame, self._accumulator_frame):
+            # Also accept transcription frames received for a short period after
+            # the last end frame was received. It might be that transcription
+            # frames are a bit delayed.
+            diff_time = time.time() - self._last_end_frame_time
             if self.aggregating:
                 self.aggregation += f" {frame.text}"
+            elif diff_time <= self._end_frame_threshold:
+                self.messages.append({"role": self._role, "content": frame.text})
+                yield self._end_frame()
+                yield LLMMessagesFrame(self.messages)
             if self._pass_through:
                 yield frame
         else:
