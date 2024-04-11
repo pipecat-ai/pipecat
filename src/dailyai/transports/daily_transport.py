@@ -89,9 +89,11 @@ class DailyTransport(ThreadedTransport, EventHandler):
             "model": "2-conversationalai",
             "profanity_filter": True,
             "redact": False,
+            "endpointing": True,
+            "punctuate": True,
+            "includeRawResponse": True,
             "extra": {
-                "endpointing": True,
-                "punctuate": False,
+                "interim_results": True,
             },
         }
 
