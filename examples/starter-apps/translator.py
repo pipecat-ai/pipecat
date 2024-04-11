@@ -99,8 +99,6 @@ async def main(room_url: str, token):
         ts = TranslationSubtitles("spanish")
         pipeline = Pipeline([sa, tp, llm, lfra, ts, tts])
 
-        transport.transcription_settings["extra"]["endpointing"] = True
-        transport.transcription_settings["extra"]["punctuate"] = True
         await transport.run(pipeline)
 
 

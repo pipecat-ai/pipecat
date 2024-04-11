@@ -129,12 +129,6 @@ async def main(room_url: str, token):
             camera_width=720,
             camera_height=1280,
         )
-        transport._mic_enabled = True
-        transport._mic_sample_rate = 16000
-        transport._camera_enabled = True
-        transport._camera_width = 720
-        transport._camera_height = 1280
-        transport.transcription_settings["extra"]["punctuate"] = True
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
