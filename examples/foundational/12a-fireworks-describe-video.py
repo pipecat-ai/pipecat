@@ -11,6 +11,7 @@ from dailyai.pipeline.frames import Frame, TextFrame, UserImageRequestFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
 from dailyai.services.open_ai_services import OpenAIVisionService
+from dailyai.services.fireworks_ai_services import FireworksVisionService
 from dailyai.transports.daily_transport import DailyTransport
 
 from runner import configure
@@ -62,8 +63,11 @@ async def main(room_url: str, token):
         vision_aggregator = VisionImageFrameAggregator()
 
         # If you run into weird description, try with use_cpu=True
-        img_desc = OpenAIVisionService(
-            api_key=os.getenv("OPENAI_API_KEY")
+        # img_desc = OpenAIVisionService(
+        #     api_key=os.getenv("OPENAI_API_KEY")
+        # )
+        img_desc = FireworksVisionService(
+            api_key=os.getenv("FIREWORKS_API_KEY")
         )
 
         tts = ElevenLabsTTSService(

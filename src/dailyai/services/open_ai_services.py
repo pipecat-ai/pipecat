@@ -72,9 +72,14 @@ class OpenAIVisionService(VisionService):
         *,
         model="gpt-4-vision-preview",
         api_key,
+        base_url=None,
     ):
         self._model = model
-        self._client = AsyncOpenAI(api_key=api_key)
+        if base_url:
+            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        else:
+            self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+
         super().__init__()
 
     async def run_vision_async(self, frame):
