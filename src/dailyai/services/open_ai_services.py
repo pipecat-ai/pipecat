@@ -114,7 +114,7 @@ class OpenAIVisionService(VisionService):
                 ],
             }
         ]
-        print(f"!!! messages: {messages}")
+
         chunks: AsyncStream[ChatCompletionChunk] = (
             await self._client.chat.completions.create(
                 model=self._model,
