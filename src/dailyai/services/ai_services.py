@@ -109,12 +109,20 @@ class VisionService(AIService):
 
     @abstractmethod
     async def run_vision(self, frame: VisionImageFrame) -> str:
+        print(f"### uh oh, abstract run vision")
         pass
 
     async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+        print(f"### visionservice process frame, {frame}")
         if isinstance(frame, VisionImageFrame):
-            description = await self.run_vision(frame)
-            yield TextFrame(description)
+            print(f"### ### calling self.run_vision")
+            if getattr(self, "run_vision_async"):
+                async for frame in self.run_vision_async(frame):
+                    yield frame
+
+            else:
+                description = await self.run_vision(frame)
+                yield TextFrame(description)
         else:
             yield frame
 

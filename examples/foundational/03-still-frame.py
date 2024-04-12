@@ -7,6 +7,7 @@ from dailyai.pipeline.frames import TextFrame
 from dailyai.pipeline.pipeline import Pipeline
 from dailyai.transports.daily_transport import DailyTransport
 from dailyai.services.fal_ai_services import FalImageGenService
+from dailyai.services.fireworks_ai_services import FireworksImageGenService
 
 from runner import configure
 
@@ -30,13 +31,20 @@ async def main(room_url):
             duration_minutes=1
         )
 
-        imagegen = FalImageGenService(
-            params=FalImageGenService.InputParams(
-                image_size="square_hd"
-            ),
+        # imagegen = FalImageGenService(
+        #     params=FalImageGenService.InputParams(
+        #         image_size="square_hd"
+        #     ),
+        #     aiohttp_session=session,
+        #     key_id=os.getenv("FAL_KEY_ID"),
+        #     key_secret=os.getenv("FAL_KEY_SECRET"),
+        # )
+
+        imagegen = FireworksImageGenService(
             aiohttp_session=session,
-            key=os.getenv("FAL_KEY"),
-        )
+            api_key=os.getenv("FIREWORKS_API_KEY"),
+            model="accounts/fireworks/models/stable-diffusion-xl-1024-v1-0",
+            image_size="1024x1024")
 
         pipeline = Pipeline([imagegen])
 
