@@ -83,8 +83,6 @@ class OpenAIVisionService(VisionService):
         super().__init__()
 
     async def run_vision_async(self, frame):
-        print(f"!!! i got a run_vision call")
-        print(f"!!! run vision, frame: {frame}")
         prompt = frame.text
         IMAGE_WIDTH = frame.size[0]
         IMAGE_HEIGHT = frame.size[1]
