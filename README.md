@@ -1,3 +1,5 @@
+[![PyPI](https://img.shields.io/pypi/v/dailyai)](https://pypi.org/project/dailyai)
+
 # dailyai — an open source framework for real-time, multi-modal, conversational AI applications
 
 Build things like this:
@@ -6,7 +8,8 @@ Build things like this:
 
 **`dailyai` started as a toolkit for implementing generative AI voice bots.** Things like personal coaches, meeting assistants, story-telling toys for kids, customer support bots, and snarky social companions.
 
-In 2023 a *lot* of us got excited about the possibility of having open-ended conversations with LLMs. It became clear pretty quickly that we were all solving the same [low-level problems](https://www.daily.co/blog/how-to-talk-to-an-llm-with-your-voice/):
+In 2023 a _lot_ of us got excited about the possibility of having open-ended conversations with LLMs. It became clear pretty quickly that we were all solving the same [low-level problems](https://www.daily.co/blog/how-to-talk-to-an-llm-with-your-voice/):
+
 - low-latency, reliable audio transport
 - echo cancellation
 - phrase endpointing (knowing when the bot should respond to human speech)
@@ -44,7 +47,7 @@ Currently implemented services:
 - Vision
   - Moondream
 
-If you'd like to [implement a service]((https://github.com/daily-co/daily-ai-sdk/tree/main/src/dailyai/services)), we welcome PRs! Our goal is to support lots of services in all of the above categories, plus new categories (like real-time video) as they emerge.
+If you'd like to [implement a service](<(https://github.com/daily-co/daily-ai-sdk/tree/main/src/dailyai/services)>), we welcome PRs! Our goal is to support lots of services in all of the above categories, plus new categories (like real-time video) as they emerge.
 
 ## Getting started
 
