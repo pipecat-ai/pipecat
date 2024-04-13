@@ -1,7 +1,7 @@
 [![PyPI](https://img.shields.io/pypi/v/dailyai)](https://pypi.org/project/dailyai)
 
 > [!IMPORTANT]
-> Hackathon attendees - getting started doc can be found [here]([[https://www.notion.so/dailyco/Daily-AI-ff356d3a799649e583fa91c1ccfe0d87?pvs=4](https://dailyco.notion.site/Daily-AI-ff356d3a799649e583fa91c1ccfe0d87)](https://dailyco.notion.site/Daily-AI-ff356d3a799649e583fa91c1ccfe0d87))
+> Hackathon attendees - getting started doc can be found [here](https://dailyco.notion.site/Daily-AI-ff356d3a799649e583fa91c1ccfe0d87)
 
 
 # dailyai — an open source framework for real-time, multi-modal, conversational AI applications
