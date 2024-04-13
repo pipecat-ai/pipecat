@@ -1,5 +1,9 @@
 [![PyPI](https://img.shields.io/pypi/v/dailyai)](https://pypi.org/project/dailyai)
 
+> [!Hackathaon attendees]
+> Getting started doc can be found [here](https://www.notion.so/dailyco/Daily-AI-ff356d3a799649e583fa91c1ccfe0d87?pvs=4)
+
+
 # dailyai — an open source framework for real-time, multi-modal, conversational AI applications
 
 Build things like this:
