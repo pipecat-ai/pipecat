@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "aiohttp~=3.9.0",
     "numpy~=1.26.0",
-    "Pillow~=10.2.0",
+    "Pillow~=10.3.0",
     "typing-extensions~=4.10.0",
 ]
 
