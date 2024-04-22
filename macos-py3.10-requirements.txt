@@ -137,7 +137,7 @@ packaging==24.0
     #   huggingface-hub
     #   onnxruntime
     #   transformers
-pillow==10.2.0
+pillow==10.3.0
     # via
     #   dailyai (pyproject.toml)
     #   torchvision
