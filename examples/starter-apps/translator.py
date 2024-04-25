@@ -4,21 +4,21 @@ import logging
 import os
 from typing import AsyncGenerator
 
-from dailyai.pipeline.aggregators import (
+from pipecat.pipeline.aggregators import (
     SentenceAggregator,
 )
-from dailyai.pipeline.frames import (
+from pipecat.pipeline.frames import (
     Frame,
     LLMMessagesFrame,
     TextFrame,
     SendAppMessageFrame,
 )
-from dailyai.pipeline.frame_processor import FrameProcessor
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.azure_ai_services import AzureTTSService
-from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.pipeline.aggregators import LLMFullResponseAggregator
+from pipecat.pipeline.frame_processor import FrameProcessor
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.transports.daily_transport import DailyTransport
+from pipecat.services.azure_ai_services import AzureTTSService
+from pipecat.services.open_ai_services import OpenAILLMService
+from pipecat.pipeline.aggregators import LLMFullResponseAggregator
 
 from runner import configure
 
@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
+logger = logging.getLogger("pipecat")
 logger.setLevel(logging.DEBUG)
 
 """

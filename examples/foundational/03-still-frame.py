@@ -1,21 +1,30 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
 import aiohttp
-import logging
 import os
+import sys
 
-from dailyai.pipeline.frames import TextFrame
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.fal_ai_services import FalImageGenService
+from pipecat.frames.frames import TextFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.services.fal import FalImageGenService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from runner import configure
+
+from loguru import logger
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.DEBUG)
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
 
 
 async def main(room_url):
@@ -24,10 +33,11 @@ async def main(room_url):
             room_url,
             None,
             "Show a still frame image",
-            camera_enabled=True,
-            camera_width=1024,
-            camera_height=1024,
-            duration_minutes=1
+            DailyParams(
+                camera_out_enabled=True,
+                camera_out_width=1024,
+                camera_out_height=1024
+            )
         )
 
         imagegen = FalImageGenService(
@@ -38,19 +48,19 @@ async def main(room_url):
             key=os.getenv("FAL_KEY"),
         )
 
-        pipeline = Pipeline([imagegen])
+        runner = PipelineRunner()
 
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport, participant):
+        task = PipelineTask(Pipeline([imagegen, transport.output()]))
+
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
             # Note that we do not put an EndFrame() item in the pipeline for this demo.
             # This means that the bot will stay in the channel until it times out.
             # An EndFrame() in the pipeline would cause the transport to shut
             # down.
-            await pipeline.queue_frames(
-                [TextFrame("a cat in the style of picasso")]
-            )
+            await task.queue_frames([TextFrame("a cat in the style of picasso")])
 
-        await transport.run(pipeline)
+        await runner.run(task)
 
 
 if __name__ == "__main__":

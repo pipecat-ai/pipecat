@@ -1,7 +1,7 @@
 import unittest
 
-from dailyai.pipeline.frames import AudioFrame, TextFrame, TranscriptionFrame
-from dailyai.serializers.protobuf_serializer import ProtobufFrameSerializer
+from pipecat.pipeline.frames import AudioFrame, TextFrame, TranscriptionFrame
+from pipecat.serializers.protobuf_serializer import ProtobufFrameSerializer
 
 
 class TestProtobufFrameSerializer(unittest.IsolatedAsyncioTestCase):

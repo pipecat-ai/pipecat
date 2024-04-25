@@ -3,11 +3,11 @@ import asyncio
 import os
 import wave
 
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.pipeline.aggregators import LLMContextAggregator
-from dailyai.services.ai_services import AIService, FrameLogger
-from dailyai.pipeline.frames import Frame, AudioFrame, LLMResponseEndFrame, LLMMessagesFrame
+from pipecat.transports.daily_transport import DailyTransport
+from pipecat.services.azure_ai_services import AzureLLMService, AzureTTSService
+from pipecat.pipeline.aggregators import LLMContextAggregator
+from pipecat.services.ai_services import AIService, FrameLogger
+from pipecat.pipeline.frames import Frame, AudioFrame, LLMResponseEndFrame, LLMMessagesFrame
 from typing import AsyncGenerator
 
 from runner import configure

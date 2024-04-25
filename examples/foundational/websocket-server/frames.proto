@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package dailyai_proto;
+package pipecat_proto;
 
 message TextFrame {
     string text = 1;

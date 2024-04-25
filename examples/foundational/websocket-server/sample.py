@@ -2,15 +2,15 @@ import asyncio
 import aiohttp
 import logging
 import os
-from dailyai.pipeline.frame_processor import FrameProcessor
-from dailyai.pipeline.frames import TextFrame, TranscriptionFrame
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.transports.websocket_transport import WebsocketTransport
-from dailyai.services.whisper_ai_services import WhisperSTTService
+from pipecat.pipeline.frame_processor import FrameProcessor
+from pipecat.pipeline.frames import TextFrame, TranscriptionFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.services.elevenlabs_ai_services import ElevenLabsTTSService
+from pipecat.transports.websocket_transport import WebsocketTransport
+from pipecat.services.whisper_ai_services import WhisperSTTService
 
 logging.basicConfig(format="%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
+logger = logging.getLogger("pipecat")
 logger.setLevel(logging.DEBUG)
 
 
