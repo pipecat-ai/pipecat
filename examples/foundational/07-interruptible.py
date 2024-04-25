@@ -2,16 +2,16 @@ import asyncio
 import aiohttp
 import logging
 import os
-from dailyai.pipeline.aggregators import (
+from pipecat.pipeline.aggregators import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator,
 )
 
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.services.ai_services import FrameLogger
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.services.ai_services import FrameLogger
+from pipecat.transports.daily_transport import DailyTransport
+from pipecat.services.open_ai_services import OpenAILLMService
+from pipecat.services.elevenlabs_ai_services import ElevenLabsTTSService
 
 from runner import configure
 
@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
+logger = logging.getLogger("pipecat")
 logger.setLevel(logging.DEBUG)
 
 

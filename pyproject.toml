@@ -3,9 +3,9 @@ requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dailyai"
+name = "pipecat"
 dynamic = ["version"]
-description = "An open source framework for real-time, multi-modal, conversational AI applications"
+description = "An open source framework for voice (and multimodal) assistants"
 license = { text = "BSD 2-Clause License" }
 readme = "README.md"
 requires-python = ">=3.7"
@@ -22,22 +22,23 @@ classifiers = [
 dependencies = [
     "aiohttp~=3.9.5",
     "numpy~=1.26.4",
+    "loguru~=0.7.0",
     "Pillow~=10.3.0",
     "typing-extensions~=4.11.0",
 ]
 
 [project.urls]
-Source = "https://github.com/daily-co/dailyai"
+Source = "https://github.com/daily-co/pipecat"
 Website = "https://daily.co"
 
 [project.optional-dependencies]
 anthropic = [ "anthropic~=0.25.7" ]
+audio = [ "pyaudio~=0.2.0" ]
 azure = [ "azure-cognitiveservices-speech~=1.37.0" ]
 daily = [ "daily-python~=0.7.4" ]
 examples = [ "python-dotenv~=1.0.0", "flask~=3.0.3", "flask_cors~=4.0.1" ]
 fal = [ "fal-client~=0.4.0" ]
 fireworks = [ "openai~=1.26.0" ]
-local = [ "pyaudio~=0.2.14" ]
 moondream = [ "einops~=0.8.0", "timm~=0.9.16", "transformers~=4.40.2" ]
 openai = [ "openai~=1.26.0" ]
 playht = [ "pyht~=0.0.28" ]

@@ -1,4 +1,4 @@
-# Daily AI SDK Architecture Guide
+# Pipecat architecture guide
 
 ## Frames
 
@@ -10,8 +10,8 @@ Frame processors operate on frames. Every frame processor implements a `process_
 
 ## Pipelines
 
-Pipelines are lists of frame processors that read from a source queue and send the processed frames to a sink queue. A very simple pipeline might chain an LLM frame processor to a text-to-speech frame processor, with a transport's send queue as its sync. Placing LLM message frames on the pipeline's source queue will cause the LLM's response to be spoken. See example #2 for an implementation of this.
+Pipelines are lists of frame processors linked together. Frame processors can push frames upstream or downstream to their peers. A very simple pipeline might chain an LLM frame processor to a text-to-speech frame processor, with a transport as an output.
 
 ## Transports
 
-Transports provide a receive queue, which is input from "the outside world", and a sink queue, which is data that will be sent "to the outside world". The `LocalTransportService` does this with the local camera, mic, display and speaker. The `DailyTransportService` does this with a WebRTC session joined to a Daily.co room.
+Transports provide input and output frame processors to receive or send frames respectively. For example, the `DailyTransport` does this with a WebRTC session joined to a Daily.co room.

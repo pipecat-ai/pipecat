@@ -1,34 +1,44 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import aiohttp
 import asyncio
-import logging
 import os
+import sys
 import wave
-from dailyai.pipeline.pipeline import Pipeline
 
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.pipeline.aggregators import (
-    LLMUserContextAggregator,
-    LLMAssistantContextAggregator,
-)
-from dailyai.services.ai_services import AIService, FrameLogger
-from dailyai.pipeline.frames import (
+from pipecat.frames.frames import (
     Frame,
-    AudioFrame,
+    AudioRawFrame,
     LLMResponseEndFrame,
     LLMMessagesFrame,
 )
-from typing import AsyncGenerator
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_context import (
+    LLMUserContextAggregator,
+    LLMAssistantContextAggregator,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.logger import FrameLogger
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.openai import OpenAILLMService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from runner import configure
+
+from loguru import logger
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.DEBUG)
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
+
 
 sounds = {}
 sound_files = ["ding1.wav", "ding2.wav"]
@@ -42,33 +52,30 @@ for file in sound_files:
     filename = os.path.splitext(os.path.basename(full_path))[0]
     # Open the image and convert it to bytes
     with wave.open(full_path) as audio_file:
-        sounds[file] = audio_file.readframes(-1)
+        sounds[file] = AudioRawFrame(audio_file.readframes(-1),
+                                     audio_file.getframerate(), audio_file.getnchannels())
 
 
-class OutboundSoundEffectWrapper(AIService):
-    def __init__(self):
-        pass
+class OutboundSoundEffectWrapper(FrameProcessor):
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, LLMResponseEndFrame):
-            yield AudioFrame(sounds["ding1.wav"])
-            # In case anything else up the stack needs it
-            yield frame
+            await self.push_frame(sounds["ding1.wav"])
+            # In case anything else downstream needs it
+            await self.push_frame(frame, direction)
         else:
-            yield frame
+            await self.push_frame(frame, direction)
 
 
-class InboundSoundEffectWrapper(AIService):
-    def __init__(self):
-        pass
+class InboundSoundEffectWrapper(FrameProcessor):
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, LLMMessagesFrame):
-            yield AudioFrame(sounds["ding2.wav"])
-            # In case anything else up the stack needs it
-            yield frame
+            await self.push_frame(sounds["ding2.wav"])
+            # In case anything else downstream needs it
+            await self.push_frame(frame, direction)
         else:
-            yield frame
+            await self.push_frame(frame, direction)
 
 
 async def main(room_url: str, token):
@@ -77,10 +84,7 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Respond bot",
-            duration_minutes=5,
-            mic_enabled=True,
-            mic_sample_rate=16000,
-            camera_enabled=False,
+            DailyParams(audio_out_enabled=True, transcription_enabled=True)
         )
 
         llm = OpenAILLMService(
@@ -100,24 +104,27 @@ async def main(room_url: str, token):
             },
         ]
 
-        tma_in = LLMUserContextAggregator(
-            messages, transport._my_participant_id)
-        tma_out = LLMAssistantContextAggregator(
-            messages, transport._my_participant_id
-        )
+        tma_in = LLMUserContextAggregator(messages)
+        tma_out = LLMAssistantContextAggregator(messages)
         out_sound = OutboundSoundEffectWrapper()
         in_sound = InboundSoundEffectWrapper()
         fl = FrameLogger("LLM Out")
         fl2 = FrameLogger("Transcription In")
 
-        pipeline = Pipeline([tma_in, in_sound, fl2, llm, tma_out, fl, tts, out_sound])
+        pipeline = Pipeline([transport.input(), tma_in, in_sound, fl2, llm,
+                            tma_out, fl, tts, out_sound, transport.output()])
 
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport, participant):
-            await transport.say("Hi, I'm listening!", tts)
-            await transport.send_queue.put(AudioFrame(sounds["ding1.wav"]))
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
+            await tts.say("Hi, I'm listening!")
+            await transport.send_audio(sounds["ding1.wav"])
 
-        await asyncio.gather(transport.run(pipeline))
+        runner = PipelineRunner()
+
+        task = PipelineTask(pipeline)
+
+        await runner.run(task)
 
 
 if __name__ == "__main__":

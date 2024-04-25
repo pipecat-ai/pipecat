@@ -2,11 +2,11 @@ import asyncio
 import unittest
 from unittest.mock import Mock
 
-from dailyai.pipeline.aggregators import SentenceAggregator, StatelessTextTransformer
-from dailyai.pipeline.frame_processor import FrameProcessor
-from dailyai.pipeline.frames import EndFrame, TextFrame
+from pipecat.pipeline.aggregators import SentenceAggregator, StatelessTextTransformer
+from pipecat.pipeline.frame_processor import FrameProcessor
+from pipecat.pipeline.frames import EndFrame, TextFrame
 
-from dailyai.pipeline.pipeline import Pipeline
+from pipecat.pipeline.pipeline import Pipeline
 
 
 class TestDailyPipeline(unittest.IsolatedAsyncioTestCase):

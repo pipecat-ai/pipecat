@@ -46,7 +46,7 @@ jobs:
     needs: [ build ]
     environment:
       name: testpypi
-      url: https://pypi.org/p/dailyai
+      url: https://pypi.org/p/pipecat
     permissions:
       id-token: write
     steps:

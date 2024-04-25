@@ -1,23 +1,31 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
-import os
-import logging
-
 import aiohttp
+import os
+import sys
 
-from dailyai.pipeline.frames import EndFrame, LLMMessagesFrame
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.services.open_ai_services import OpenAILLMService
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.openai import OpenAILLMService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from runner import configure
+
+from loguru import logger
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.DEBUG)
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
 
 
 async def main(room_url):
@@ -26,8 +34,7 @@ async def main(room_url):
             room_url,
             None,
             "Say One Thing From an LLM",
-            mic_enabled=True,
-        )
+            DailyParams(audio_out_enabled=True))
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -45,13 +52,15 @@ async def main(room_url):
                 "content": "You are an LLM in a WebRTC session, and this is a 'hello world' demo. Say hello to the world.",
             }]
 
-        pipeline = Pipeline([llm, tts])
+        runner = PipelineRunner()
 
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport, participant):
-            await pipeline.queue_frames([LLMMessagesFrame(messages), EndFrame()])
+        task = PipelineTask(Pipeline([llm, tts, transport.output()]))
 
-        await transport.run(pipeline)
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            await task.queue_frames([LLMMessagesFrame(messages), EndFrame()])
+
+        await runner.run(task)
 
 
 if __name__ == "__main__":

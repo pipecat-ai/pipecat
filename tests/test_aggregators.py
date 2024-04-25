@@ -3,13 +3,13 @@ import doctest
 import functools
 import unittest
 
-from dailyai.pipeline.aggregators import (
+from pipecat.pipeline.aggregators import (
     GatedAggregator,
     ParallelPipeline,
     SentenceAggregator,
     StatelessTextTransformer,
 )
-from dailyai.pipeline.frames import (
+from pipecat.pipeline.frames import (
     AudioFrame,
     EndFrame,
     ImageFrame,
@@ -19,7 +19,7 @@ from dailyai.pipeline.frames import (
     TextFrame,
 )
 
-from dailyai.pipeline.pipeline import Pipeline
+from pipecat.pipeline.pipeline import Pipeline
 
 
 class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
@@ -124,6 +124,6 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
 
 def load_tests(loader, tests, ignore):
     """ Run doctests on the aggregators module. """
-    from dailyai.pipeline import aggregators
+    from pipecat.pipeline import aggregators
     tests.addTests(doctest.DocTestSuite(aggregators))
     return tests
