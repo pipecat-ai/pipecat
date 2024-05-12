@@ -1,36 +1,47 @@
-import aiohttp
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
-import logging
+import aiohttp
 import os
 import random
-from typing import AsyncGenerator
-from PIL import Image
-from dailyai.pipeline.pipeline import Pipeline
+import sys
 
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.pipeline.aggregators import (
-    LLMUserContextAggregator,
-    LLMAssistantContextAggregator,
-)
-from dailyai.pipeline.frames import (
+from PIL import Image
+
+from pipecat.frames.frames import (
     Frame,
+    SystemFrame,
     TextFrame,
-    ImageFrame,
+    ImageRawFrame,
     SpriteFrame,
     TranscriptionFrame,
 )
-from dailyai.services.ai_services import AIService
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_context import (
+    LLMUserContextAggregator,
+    LLMAssistantContextAggregator,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.openai import OpenAILLMService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from runner import configure
+
+from loguru import logger
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.DEBUG)
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
+
 
 sprites = {}
 image_files = [
@@ -52,14 +63,15 @@ for file in image_files:
     filename = os.path.splitext(os.path.basename(full_path))[0]
     # Open the image and convert it to bytes
     with Image.open(full_path) as img:
-        sprites[file] = img.tobytes()
+        sprites[file] = ImageRawFrame(img.tobytes(), img.size, img.format)
 
 # When the bot isn't talking, show a static image of the cat listening
-quiet_frame = ImageFrame(sprites["sc-listen-1.png"], (720, 1280))
+quiet_frame = sprites["sc-listen-1.png"]
+
 # When the bot is talking, build an animation from two sprites
 talking_list = [sprites["sc-default.png"], sprites["sc-talk.png"]]
 talking = [random.choice(talking_list) for x in range(30)]
-talking_frame = SpriteFrame(images=talking)
+talking_frame = SpriteFrame(talking)
 
 # TODO: Support "thinking" as soon as we get a valid transcript, while LLM
 # is processing
@@ -69,50 +81,42 @@ thinking_list = [
     sprites["sc-think-3.png"],
     sprites["sc-think-4.png"],
 ]
-thinking_frame = SpriteFrame(images=thinking_list)
+thinking_frame = SpriteFrame(thinking_list)
 
 
-class TranscriptFilter(AIService):
-    def __init__(self, bot_participant_id=None):
-        self.bot_participant_id = bot_participant_id
-
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, TranscriptionFrame):
-            if frame.participantId != self.bot_participant_id:
-                yield frame
-
-
-class NameCheckFilter(AIService):
+class NameCheckFilter(FrameProcessor):
     def __init__(self, names: list[str]):
-        self.names = names
-        self.sentence = ""
+        super().__init__()
+        self._names = names
+        self._sentence = ""
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, SystemFrame):
+            await self.push_frame(frame, direction)
+            return
+
         content: str = ""
 
         # TODO: split up transcription by participant
-        if isinstance(frame, TextFrame):
-            content = frame.text
+        if isinstance(frame, TranscriptionFrame):
+            content = frame.data
+            self._sentence += content
+            if self._sentence.endswith((".", "?", "!")):
+                if any(name in self._sentence for name in self._names):
+                    await self.push_frame(TextFrame(self._sentence))
+                    self._sentence = ""
+                else:
+                    self._sentence = ""
+        else:
+            await self.push_frame(frame, direction)
 
-        self.sentence += content
-        if self.sentence.endswith((".", "?", "!")):
-            if any(name in self.sentence for name in self.names):
-                out = self.sentence
-                self.sentence = ""
-                yield TextFrame(out)
-            else:
-                out = self.sentence
-                self.sentence = ""
 
+class ImageSyncAggregator(FrameProcessor):
 
-class ImageSyncAggregator(AIService):
-    def __init__(self):
-        pass
-
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        yield talking_frame
-        yield frame
-        yield quiet_frame
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await self.push_frame(talking_frame)
+        await self.push_frame(frame)
+        await self.push_frame(quiet_frame)
 
 
 async def main(room_url: str, token):
@@ -121,13 +125,14 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Santa Cat",
-            duration_minutes=3,
-            start_transcription=True,
-            mic_enabled=True,
-            mic_sample_rate=16000,
-            camera_enabled=True,
-            camera_width=720,
-            camera_height=1280,
+            DailyParams(
+                audio_out_enabled=True,
+                camera_out_enabled=True,
+                camera_out_width=720,
+                camera_out_height=1280,
+                camera_out_framerate=10,
+                transcription_enabled=True
+            )
         )
 
         llm = OpenAILLMService(
@@ -148,27 +153,27 @@ async def main(room_url: str, token):
             },
         ]
 
-        tma_in = LLMUserContextAggregator(
-            messages, transport._my_participant_id)
-        tma_out = LLMAssistantContextAggregator(
-            messages, transport._my_participant_id
-        )
-        tf = TranscriptFilter(transport._my_participant_id)
+        tma_in = LLMUserContextAggregator(messages)
+        tma_out = LLMAssistantContextAggregator(messages)
         ncf = NameCheckFilter(["Santa Cat", "Santa"])
 
-        pipeline = Pipeline([isa, tf, ncf, tma_in, llm, tma_out, tts])
+        pipeline = Pipeline([transport.input(), isa, ncf, tma_in,
+                            llm, tma_out, tts, transport.output()])
 
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport, participant):
-            await transport.say(
-                "Hi! If you want to talk to me, just say 'hey Santa Cat'.",
-                tts,
-            )
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            # Send some greeting at the beginning.
+            await tts.say("Hi! If you want to talk to me, just say 'hey Santa Cat'.")
+            transport.capture_participant_transcription(participant["id"])
 
         async def starting_image():
-            await transport.send_queue.put(quiet_frame)
+            await transport.send_image(quiet_frame)
 
-        await asyncio.gather(transport.run(pipeline), starting_image())
+        runner = PipelineRunner()
+
+        task = PipelineTask(pipeline)
+
+        await asyncio.gather(runner.run(task), starting_image())
 
 
 if __name__ == "__main__":

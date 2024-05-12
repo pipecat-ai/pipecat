@@ -1,11 +1,11 @@
 import asyncio
-from dailyai.pipeline.openai_frames import OpenAILLMContextFrame
-from dailyai.services.openai_llm_context import OpenAILLMContext
+from pipecat.pipeline.openai_frames import OpenAILLMContextFrame
+from pipecat.services.openai_llm_context import OpenAILLMContext
 
 from openai.types.chat import (
     ChatCompletionSystemMessageParam,
 )
-from dailyai.services.ollama_ai_services import OLLamaLLMService
+from pipecat.services.ollama_ai_services import OLLamaLLMService
 
 if __name__ == "__main__":
     async def test_chat():

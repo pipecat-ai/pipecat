@@ -1,51 +1,55 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
-import logging
+import sys
 
-from dailyai.pipeline.frames import EndFrame, TranscriptionFrame
-from dailyai.transports.local_transport import LocalTransport
-from dailyai.services.whisper_ai_services import WhisperSTTService
-from dailyai.pipeline.pipeline import Pipeline
+from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.whisper import WhisperSTTService
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.local.audio import LocalAudioTransport
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.DEBUG)
+from runner import configure
+
+from loguru import logger
+
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
 
 
-async def main():
-    meeting_duration_minutes = 1
+class TranscriptionLogger(FrameProcessor):
 
-    transport = LocalTransport(
-        mic_enabled=True,
-        camera_enabled=False,
-        speaker_enabled=True,
-        duration_minutes=meeting_duration_minutes,
-    )
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, TranscriptionFrame):
+            print(f"Transcription: {frame.text}")
+
+
+async def main(room_url: str):
+    transport = LocalAudioTransport(TransportParams(audio_in_enabled=True))
 
     stt = WhisperSTTService()
 
-    transcription_output_queue = asyncio.Queue()
-    transport_done = asyncio.Event()
+    tl = TranscriptionLogger()
 
-    pipeline = Pipeline([stt], source=transport.receive_queue, sink=transcription_output_queue)
+    pipeline = Pipeline([transport.input(), stt, tl])
 
-    async def handle_transcription():
-        print("`````````TRANSCRIPTION`````````")
-        while not transport_done.is_set():
-            item = await transcription_output_queue.get()
-            print("got item from queue", item)
-            if isinstance(item, TranscriptionFrame):
-                print(item.text)
-            elif isinstance(item, EndFrame):
-                break
-        print("handle_transcription done")
+    task = PipelineTask(pipeline)
 
-    async def run_until_done():
-        await transport.run()
-        transport_done.set()
-        print("run_until_done done")
+    runner = PipelineRunner()
 
-    await asyncio.gather(run_until_done(), pipeline.run_pipeline(), handle_transcription())
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    (url, token) = configure()
+    asyncio.run(main(url))

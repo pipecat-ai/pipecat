@@ -9,20 +9,21 @@ import wave
 from typing import AsyncGenerator
 from PIL import Image
 
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.pipeline.frame_processor import FrameProcessor
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.services.fal_ai_services import FalImageGenService
-from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.services.deepgram_ai_services import DeepgramTTSService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.pipeline.aggregators import (
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.frame_processor import FrameProcessor
+from pipecat.services.live_stream import LiveStream
+from pipecat.transports.daily_transport import DailyTransport
+from pipecat.services.azure_ai_services import AzureLLMService, AzureTTSService
+from pipecat.services.fal_ai_services import FalImageGenService
+from pipecat.services.open_ai_services import OpenAILLMService
+from pipecat.services.deepgram_ai_services import DeepgramTTSService
+from pipecat.services.elevenlabs_ai_services import ElevenLabsTTSService
+from pipecat.pipeline.aggregators import (
     LLMAssistantContextAggregator,
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator,
 )
-from dailyai.pipeline.frames import (
+from pipecat.pipeline.frames import (
     EndPipeFrame,
     LLMMessagesFrame,
     Frame,
@@ -32,7 +33,7 @@ from dailyai.pipeline.frames import (
     ImageFrame,
     UserStoppedSpeakingFrame,
 )
-from dailyai.services.ai_services import FrameLogger, AIService
+from pipecat.services.ai_services import FrameLogger, AIService
 
 from runner import configure
 
@@ -40,7 +41,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
+logger = logging.getLogger("pipecat")
 logger.setLevel(logging.DEBUG)
 
 sounds = {}
@@ -260,6 +261,10 @@ async def main(room_url: str, token):
                 ]
             )
             await local_pipeline.run_pipeline()
+
+            pipeline = Pipeline([llm, lca, tts, ls_sink])
+            pipeline.queue_frames([...])
+            pipeline.run()
 
             fl = FrameLogger("### After Image Generation")
             pipeline = Pipeline(

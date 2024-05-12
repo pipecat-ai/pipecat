@@ -3,14 +3,14 @@ import aiohttp
 import asyncio
 import logging
 import os
-from dailyai.pipeline.aggregators import SentenceAggregator
-from dailyai.pipeline.pipeline import Pipeline
+from pipecat.pipeline.aggregators import SentenceAggregator
+from pipecat.pipeline.pipeline import Pipeline
 
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.azure_ai_services import AzureLLMService, AzureTTSService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.services.fal_ai_services import FalImageGenService
-from dailyai.pipeline.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
+from pipecat.transports.daily_transport import DailyTransport
+from pipecat.services.azure_ai_services import AzureLLMService, AzureTTSService
+from pipecat.services.elevenlabs_ai_services import ElevenLabsTTSService
+from pipecat.services.fal_ai_services import FalImageGenService
+from pipecat.pipeline.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
 
 from runner import configure
 
@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
+logger = logging.getLogger("pipecat")
 logger.setLevel(logging.DEBUG)
 
 

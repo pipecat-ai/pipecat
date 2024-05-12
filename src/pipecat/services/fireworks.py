@@ -1,0 +1,24 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+from pipecat.services.openai import BaseOpenAILLMService
+
+from loguru import logger
+
+try:
+    from openai import AsyncOpenAI
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use Fireworks, you need to `pip install pipecat[fireworks]`. Also, set the `FIREWORKS_API_KEY` environment variable.")
+    raise Exception(f"Missing module: {e}")
+
+
+class FireworksLLMService(BaseOpenAILLMService):
+    def __init__(self,
+                 model="accounts/fireworks/models/firefunction-v1",
+                 base_url="https://api.fireworks.ai/inference/v1"):
+        super().__init__(model, base_url)

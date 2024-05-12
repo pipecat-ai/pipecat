@@ -1,64 +1,81 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
 import aiohttp
 import os
-import logging
+import sys
 
-from dataclasses import dataclass
-from typing import AsyncGenerator
+import daily
 
-from dailyai.pipeline.aggregators import (
-    GatedAggregator,
-    LLMFullResponseAggregator,
-    ParallelPipeline,
-    SentenceAggregator,
-)
-from dailyai.pipeline.frames import (
+from pipecat.frames.frames import (
+    AppFrame,
     Frame,
+    ImageRawFrame,
     TextFrame,
     EndFrame,
-    ImageFrame,
     LLMMessagesFrame,
     LLMResponseStartFrame,
 )
-from dailyai.pipeline.frame_processor import FrameProcessor
-
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.services.fal_ai_services import FalImageGenService
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.aggregators.gated import GatedAggregator
+from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
+from pipecat.processors.aggregators.sentence import SentenceAggregator
+from pipecat.processors.aggregators.parallel_task import ParallelTask
+from pipecat.services.openai import OpenAILLMService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.fal import FalImageGenService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from runner import configure
+
+from loguru import logger
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.DEBUG)
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
 
 
-@dataclass
-class MonthFrame(Frame):
+class MonthFrame(AppFrame):
+    def __init__(self, month):
+        super().__init__()
+        self.metadata["month"] = month
+
+    @ property
+    def month(self) -> str:
+        return self.metadata["month"]
+
+    def __str__(self):
+        return f"{self.name}(month: {self.month})"
+
     month: str
 
 
 class MonthPrepender(FrameProcessor):
     def __init__(self):
+        super().__init__()
         self.most_recent_month = "Placeholder, month frame not yet received"
         self.prepend_to_next_text_frame = False
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, MonthFrame):
             self.most_recent_month = frame.month
         elif self.prepend_to_next_text_frame and isinstance(frame, TextFrame):
-            yield TextFrame(f"{self.most_recent_month}: {frame.text}")
+            await self.push_frame(TextFrame(f"{self.most_recent_month}: {frame.data}"))
             self.prepend_to_next_text_frame = False
         elif isinstance(frame, LLMResponseStartFrame):
             self.prepend_to_next_text_frame = True
-            yield frame
+            await self.push_frame(frame)
         else:
-            yield frame
+            await self.push_frame(frame, direction)
 
 
 async def main(room_url):
@@ -67,11 +84,12 @@ async def main(room_url):
             room_url,
             None,
             "Month Narration Bot",
-            mic_enabled=True,
-            camera_enabled=True,
-            mic_sample_rate=16000,
-            camera_width=1024,
-            camera_height=1024,
+            DailyParams(
+                audio_out_enabled=True,
+                camera_out_enabled=True,
+                camera_out_width=1024,
+                camera_out_height=1024
+            )
         )
 
         tts = ElevenLabsTTSService(
@@ -93,24 +111,25 @@ async def main(room_url):
         )
 
         gated_aggregator = GatedAggregator(
-            gate_open_fn=lambda frame: isinstance(
-                frame, ImageFrame), gate_close_fn=lambda frame: isinstance(
-                frame, LLMResponseStartFrame), start_open=False, )
+            gate_open_fn=lambda frame: isinstance(frame, ImageRawFrame),
+            gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartFrame),
+            start_open=False
+        )
 
         sentence_aggregator = SentenceAggregator()
         month_prepender = MonthPrepender()
         llm_full_response_aggregator = LLMFullResponseAggregator()
 
-        pipeline = Pipeline(
-            processors=[
-                llm,
-                sentence_aggregator,
-                ParallelPipeline(
-                    [[month_prepender, tts], [llm_full_response_aggregator, imagegen]]
-                ),
-                gated_aggregator,
-            ],
-        )
+        pipeline = Pipeline([
+            llm,
+            sentence_aggregator,
+            ParallelTask(
+                [month_prepender, tts],
+                [llm_full_response_aggregator, imagegen]
+            ),
+            gated_aggregator,
+            transport.output()
+        ])
 
         frames = []
         for month in [
@@ -137,9 +156,14 @@ async def main(room_url):
             frames.append(LLMMessagesFrame(messages))
 
         frames.append(EndFrame())
-        await pipeline.queue_frames(frames)
 
-        await transport.run(pipeline, override_pipeline_source_queue=False)
+        runner = PipelineRunner()
+
+        task = PipelineTask(pipeline)
+
+        await task.queue_frames(frames)
+
+        await runner.run(task)
 
 
 if __name__ == "__main__":

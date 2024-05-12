@@ -1,43 +1,59 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
-import os
-import logging
-from typing import AsyncGenerator
 import aiohttp
+import os
+import sys
+
 from PIL import Image
 
-from dailyai.pipeline.frames import ImageFrame, Frame, TextFrame
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.ai_services import AIService
-from dailyai.pipeline.aggregators import (
+from pipecat.frames.frames import ImageRawFrame, Frame, SystemFrame, TextFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_context import (
     LLMAssistantContextAggregator,
     LLMUserContextAggregator,
 )
-from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.openai import OpenAILLMService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.transports.services.daily import DailyTransport
 
+from pipecat.transports.services.daily import DailyParams
 from runner import configure
+
+from loguru import logger
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.DEBUG)
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
 
 
-class ImageSyncAggregator(AIService):
+class ImageSyncAggregator(FrameProcessor):
     def __init__(self, speaking_path: str, waiting_path: str):
+        super().__init__()
         self._speaking_image = Image.open(speaking_path)
+        self._speaking_image_format = self._speaking_image.format
         self._speaking_image_bytes = self._speaking_image.tobytes()
 
         self._waiting_image = Image.open(waiting_path)
+        self._waiting_image_format = self._waiting_image.format
         self._waiting_image_bytes = self._waiting_image.tobytes()
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        yield ImageFrame(self._speaking_image_bytes, (1024, 1024))
-        yield frame
-        yield ImageFrame(self._waiting_image_bytes, (1024, 1024))
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if not isinstance(frame, SystemFrame):
+            await self.push_frame(ImageRawFrame(self._speaking_image_bytes, (1024, 1024), self._speaking_image_format))
+            await self.push_frame(frame)
+            await self.push_frame(ImageRawFrame(self._waiting_image_bytes, (1024, 1024), self._waiting_image_format))
+        else:
+            await self.push_frame(frame)
 
 
 async def main(room_url: str, token):
@@ -46,12 +62,12 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Respond bot",
-            5,
-            camera_enabled=True,
-            camera_width=1024,
-            camera_height=1024,
-            mic_enabled=True,
-            mic_sample_rate=16000,
+            DailyParams(
+                audio_out_enabled=True,
+                camera_out_width=1024,
+                camera_out_height=1024,
+                transcription_enabled=True
+            )
         )
 
         tts = ElevenLabsTTSService(
@@ -67,27 +83,32 @@ async def main(room_url: str, token):
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so it should not include any special characters. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so it should not contain special characters. Respond to what the user said in a creative and helpful way.",
             },
         ]
 
-        tma_in = LLMUserContextAggregator(
-            messages, transport._my_participant_id)
-        tma_out = LLMAssistantContextAggregator(
-            messages, transport._my_participant_id
-        )
+        tma_in = LLMUserContextAggregator(messages)
+        tma_out = LLMAssistantContextAggregator(messages)
+
         image_sync_aggregator = ImageSyncAggregator(
             os.path.join(os.path.dirname(__file__), "assets", "speaking.png"),
             os.path.join(os.path.dirname(__file__), "assets", "waiting.png"),
         )
 
-        pipeline = Pipeline([image_sync_aggregator, tma_in, llm, tma_out, tts])
+        pipeline = Pipeline([transport.input(), image_sync_aggregator,
+                            tma_in, llm, tma_out, tts, transport.output()])
 
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport, participant):
-            await pipeline.queue_frames([TextFrame("Hi, I'm listening!")])
+        task = PipelineTask(pipeline)
 
-        await transport.run(pipeline)
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            participant_name = participant["info"]["userName"] or ''
+            transport.capture_participant_transcription(participant["id"])
+            await task.queue_frames([TextFrame(f"Hi, this is {participant_name}.")])
+
+        runner = PipelineRunner()
+
+        await runner.run(task)
 
 
 if __name__ == "__main__":
