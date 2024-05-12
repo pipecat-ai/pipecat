@@ -21,7 +21,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Azure TTS, you need to `pip install pipecat[azure]`. Also, set `AZURE_SPEECH_API_KEY` and `AZURE_SPEECH_REGION` environment variables.")
+        "In order to use Azure TTS, you need to `pip install pipecat-ai[azure]`. Also, set `AZURE_SPEECH_API_KEY` and `AZURE_SPEECH_REGION` environment variables.")
     raise Exception(f"Missing module: {e}")
 
 from pipecat.services.openai_api_llm_service import BaseOpenAILLMService

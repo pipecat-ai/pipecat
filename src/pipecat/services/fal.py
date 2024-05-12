@@ -23,7 +23,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Fal, you need to `pip install pipecat[fal]`. Also, set `FAL_KEY` environment variable.")
+        "In order to use Fal, you need to `pip install pipecat-ai[fal]`. Also, set `FAL_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
 
 

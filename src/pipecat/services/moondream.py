@@ -19,7 +19,7 @@ try:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Moondream, you need to `pip install pipecat[moondream]`.")
+    logger.error("In order to use Moondream, you need to `pip install pipecat-ai[moondream]`.")
     raise Exception(f"Missing module(s): {e}")
 
 
