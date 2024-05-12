@@ -15,7 +15,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.audio import AudioLocalTransport
+from pipecat.transports.local.audio import LocalAudioTransport
 
 from loguru import logger
 
@@ -28,7 +28,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        transport = AudioLocalTransport(TransportParams(audio_out_enabled=True))
+        transport = LocalAudioTransport(TransportParams(audio_out_enabled=True))
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,

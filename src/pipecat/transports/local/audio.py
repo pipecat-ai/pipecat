@@ -22,7 +22,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class AudioInputTransport(BaseInputTransport):
+class LocalAudioInputTransport(BaseInputTransport):
 
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
@@ -46,7 +46,7 @@ class AudioInputTransport(BaseInputTransport):
         await super().cleanup()
 
 
-class AudioOutputTransport(BaseOutputTransport):
+class LocalAudioOutputTransport(BaseOutputTransport):
 
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
@@ -75,8 +75,8 @@ class LocalAudioTransport(BaseTransport):
         self._params = params
         self._pyaudio = pyaudio.PyAudio()
 
-        self._input: AudioInputTransport | None = None
-        self._output: AudioOutputTransport | None = None
+        self._input: LocalAudioInputTransport | None = None
+        self._output: LocalAudioOutputTransport | None = None
 
     #
     # BaseTransport
@@ -84,10 +84,10 @@ class LocalAudioTransport(BaseTransport):
 
     def input(self) -> FrameProcessor:
         if not self._input:
-            self._input = AudioInputTransport(self._pyaudio, self._params)
+            self._input = LocalAudioInputTransport(self._pyaudio, self._params)
         return self._input
 
     def output(self) -> FrameProcessor:
         if not self._output:
-            self._output = AudioOutputTransport(self._pyaudio, self._params)
+            self._output = LocalAudioOutputTransport(self._pyaudio, self._params)
         return self._output
