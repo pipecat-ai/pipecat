@@ -1,79 +1,122 @@
-[![PyPI](https://img.shields.io/pypi/v/pipecat-ai)](https://pypi.org/project/pipecat-ai)
+<div align="center">
+ <img alt="pipecat" width="300px" height="auto" src="image.png">
+</div>
 
-# Pipecat — an open source framework for voice (and multimodal) assistants
+# Pipecat
+
+[![PyPI](https://img.shields.io/pypi/v/dailyai)](https://pypi.org/project/dailyai)
+
+`pipecat` is a framework for building voice (and multimodal) conversational agents. Things like personal coaches, meeting assistants, story-telling toys for kids, customer support bots, and snarky social companions.
 
 Build things like this:
 
 [![AI-powered voice patient intake for healthcare](https://img.youtube.com/vi/lDevgsp9vn0/0.jpg)](https://www.youtube.com/watch?v=lDevgsp9vn0)
 
-[ [pipecat starter kits repository](https://github.com/daily-co/pipecat-examples) ]
+## Getting started with voice agents
 
-**`Pipecat` started as a toolkit for implementing generative AI voice bots.** Things like personal coaches, meeting assistants, story-telling toys for kids, customer support bots, and snarky social companions.
+You can get started with Pipecat running on your local machine, then move your agent processes to the cloud when you’re ready. You can also add a telephone number, image output, video input, use different LLMs, and more.
 
-In 2023 a _lot_ of us got excited about the possibility of having open-ended conversations with LLMs. It became clear pretty quickly that we were all solving the same [low-level problems](https://www.daily.co/blog/how-to-talk-to-an-llm-with-your-voice/):
-
-- low-latency, reliable audio transport
-- echo cancellation
-- phrase endpointing (knowing when the bot should respond to human speech)
-- interruptibility
-- writing clean code to stream data through "pipelines" of speech-to-text, LLM inference, and text-to-speech models
-
-As our applications expanded to include additional things like image generation, function calling, and vision models, we started to think about what a complete framework for these kinds of apps could look like.
-
-Today, `pipecat` is:
-
-1. a set of code building blocks for interacting with generative AI services and creating low-latency, interruptible data pipelines that use multiple services
-2. transport services that moves audio, video, and events across the Internet
-3. implementations of specific generative AI services
-
-Currently implemented services:
-
-- Speech-to-text
-  - Deepgram
-  - Whisper
-- LLMs
-  - Azure
-  - Fireworks
-  - OpenAI
-- Image generation
-  - Azure
-  - Fal
-  - OpenAI
-- Text-to-speech
-  - Azure
-  - Deepgram
-  - ElevenLabs
-- Transport
-  - Daily
-  - Local
-- Vision
-  - Moondream
-
-If you'd like to [implement a service](<(https://github.com/daily-co/pipecat/tree/main/src/pipecat/services)>), we welcome PRs! Our goal is to support lots of services in all of the above categories, plus new categories (like real-time video) as they emerge.
-
-## Getting started
-
-Today, the easiest way to get started with `pipecat` is to use [Daily](https://www.daily.co/) as your transport service. This toolkit started life as an internal SDK at Daily and millions of minutes of AI conversation have been served using it and its earlier prototype incarnations.
-
-```
+```shell
 # install the module
-pip install pipecat
+pip install pipecat-ai
 
 # set up an .env file with API keys
 cp dot-env.template .env
 ```
 
-By default, in order to minimize dependencies, only the basic framework functionality is available. Some third-party AI services require additional
-dependencies that you can install with:
+By default, in order to minimize dependencies, only the basic framework functionality is available. Some third-party AI services require additional dependencies that you can install with:
 
-```
-pip install "pipecat[option,...]"
+```shell
+pip install "pipecat-ai[option,...]"
 ```
 
 Your project may or may not need these, so they're made available as optional requirements. Here is a list:
 
 - **AI services**: `anthropic`, `azure`, `fal`, `moondream`, `openai`, `playht`, `silero`, `whisper`
 - **Transports**: `daily`, `local`, `websocket`
+
+## A simple voice agent running locally
+
+If you’re doing AI-related stuff, you probably have an OpenAI API key.
+
+To generate voice output, one service that’s easy to get started with is ElevenLabs. If you don’t already have an ElevenLabs developer account, you can sign up for one [here].
+
+So let’s run a really simple agent that’s just a GPT-4 prompt, wired up to voice input and speaker output.
+
+You can change the prompt, in the code. The current prompt is “Tell me something interesting about the Roman Empire.”
+
+`cd examples/getting-started` to run the following examples …
+
+```shell
+# Talk to a local pipecat process with your voice. Specify GPT-4 as the LLM.
+
+export OPENAI_API_KEY=...
+export ELEVENLABS_API_KEY=...
+python ./local-mic.py | ./pipecat-pipes-gpt-4.py | ./local-speaker.py
+```
+
+## WebSockets instead of pipes
+
+To run your agent in the cloud, you can switch the Pipecat transport layer to use a WebSocket instead of Unix pipes.
+
+```shell
+# Talk to a local pipecat process with your voice. Specify GPT-4 as the LLM.
+
+export OPENAI_API_KEY=...
+export ELEVENLABS_API_KEY=...
+python ./local-mic-and-speaker-wss.py wss://localhost:8088
+```
+
+## WebRTC for production use
+
+WebSockets are fine for server-to-server communication or for initial development. But for production use, you’ll need client-server audio to use a protocol designed for real-time media transport. (For an explanation of the difference between WebSockets and WebRTC, see [this post.])
+
+One way to get up and running quickly with WebRTC is to sign up for a Daily developer account. Daily gives you SDKs and global infrastructure for audio (and video) routing. Every account gets 10,000 audio/video/transcription minutes free each month.
+
+Sign up [here](https://dashboard.daily.co/u/signup) and [create a room](https://docs.daily.co/reference/rest-api/rooms) in the developer Dashboard. Then run the examples, this time connecting via WebRTC instead of a WebSocket.
+
+```shell
+# 1. Run the pipecat process. Provide your Daily API key and a Daily room
+export DAILY_API_KEY=...
+export OPENAI_API_KEY=...
+export ELEVENLABS_API_KEY=...
+python pipecat-daily-gpt-4.py --daily-room https://example.daily.co/pipecat
+
+# 2. Visit the Daily room link in any web browser to talk to the pipecat process.
+#    You'll want to use a Daily SDK to embed the client-side code into your own
+#    app. But visiting the room URL in a browser is a quick way to start building
+#    agents because you can focus on just the agent code at first.
+open -a "Google Chrome" https://example.daily.co/pipecat
+```
+
+## Deploy your agent to the cloud
+Now that you’ve decoupled client and server, and have a Pipecat process that can run anywhere you can run Python, you can deploy this example agent to the cloud.
+
+`TBC`
+
+## Taking it further
+
+### Add a telephone number
+Daily supports telephone connections in addition to WebRTC streams. You can add a telephone number to your Daily room with the following REST API call. Once you’ve done that, you can call your agent on the phone.
+
+You’ll need to add a credit card to your Daily account to enable telephone numbers.
+
+`TBC`
+
+
+### Add image output
+
+Daily supports telephone connections in addition to WebRTC streams. You can add a telephone number to your Daily room with the following REST API call. Once you’ve done that, you can call your agent on the phone.
+
+You’ll need to add a credit card to your Daily account to enable telephone numbers.
+
+`TBC`
+
+### Add video output
+
+
+`TBC`
+
 
 ## Code examples
 
