@@ -106,7 +106,7 @@ source venv/bin/activate
 From the root of this repo, run the following:
 
 ```
-pip install -r {env}-requirements.txt -r dev-requirements.txt
+pip install -r dev-requirements.txt -r {env}-requirements.txt
 python -m build
 ```
 
