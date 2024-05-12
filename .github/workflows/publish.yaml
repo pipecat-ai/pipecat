@@ -46,7 +46,7 @@ jobs:
     needs: [ build ]
     environment:
       name: pypi
-      url: https://pypi.org/p/pipecat
+      url: https://pypi.org/p/pipecat-ai
     permissions:
       id-token: write
     steps:
@@ -67,7 +67,7 @@ jobs:
     needs: [ build ]
     environment:
       name: testpypi
-      url: https://pypi.org/p/pipecat
+      url: https://pypi.org/p/pipecat-ai
     permissions:
       id-token: write
     steps:

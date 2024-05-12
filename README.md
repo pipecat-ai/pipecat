@@ -1,4 +1,4 @@
-[![PyPI](https://img.shields.io/pypi/v/pipecat)](https://pypi.org/project/pipecat)
+[![PyPI](https://img.shields.io/pypi/v/pipecat-ai)](https://pypi.org/project/pipecat-ai)
 
 # Pipecat — an open source framework for voice (and multimodal) assistants
 

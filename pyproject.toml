@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pipecat"
+name = "pipecat-ai"
 dynamic = ["version"]
 description = "An open source framework for voice (and multimodal) assistants"
 license = { text = "BSD 2-Clause License" }
@@ -28,8 +28,8 @@ dependencies = [
 ]
 
 [project.urls]
-Source = "https://github.com/daily-co/pipecat"
-Website = "https://daily.co"
+Source = "https://github.com/pipecat-ai/pipecat"
+Website = "https://pipecat.ai"
 
 [project.optional-dependencies]
 anthropic = [ "anthropic~=0.25.7" ]
