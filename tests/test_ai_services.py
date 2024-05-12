@@ -2,8 +2,8 @@ import unittest
 
 from typing import AsyncGenerator
 
-from dailyai.services.ai_services import AIService
-from dailyai.pipeline.frames import EndFrame, Frame, TextFrame
+from pipecat.services.ai_services import AIService
+from pipecat.pipeline.frames import EndFrame, Frame, TextFrame
 
 
 class SimpleAIService(AIService):

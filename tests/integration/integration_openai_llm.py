@@ -1,7 +1,7 @@
 import asyncio
 import os
-from dailyai.pipeline.openai_frames import OpenAILLMContextFrame
-from dailyai.services.openai_llm_context import OpenAILLMContext
+from pipecat.pipeline.openai_frames import OpenAILLMContextFrame
+from pipecat.services.openai_llm_context import OpenAILLMContext
 
 from openai.types.chat import (
     ChatCompletionSystemMessageParam,
@@ -9,7 +9,7 @@ from openai.types.chat import (
     ChatCompletionUserMessageParam,
 )
 
-from dailyai.services.openai_api_llm_service import BaseOpenAILLMService
+from pipecat.services.openai_api_llm_service import BaseOpenAILLMService
 
 if __name__ == "__main__":
     async def test_functions():

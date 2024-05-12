@@ -2,9 +2,9 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch, Mock
 
-from dailyai.pipeline.frames import AudioFrame, EndFrame, TextFrame, TTSEndFrame, TTSStartFrame
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.transports.websocket_transport import WebSocketFrameProcessor, WebsocketTransport
+from pipecat.pipeline.frames import AudioFrame, EndFrame, TextFrame, TTSEndFrame, TTSStartFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.transports.websocket_transport import WebSocketFrameProcessor, WebsocketTransport
 
 
 class TestWebSocketTransportService(unittest.IsolatedAsyncioTestCase):

@@ -28,7 +28,7 @@
 
         const proto = protobuf.load("frames.proto", (err, root) => {
             if (err) throw err;
-            frame = root.lookupType("dailyai_proto.Frame");
+            frame = root.lookupType("pipecat_proto.Frame");
         });
 
         function initWebSocket() {

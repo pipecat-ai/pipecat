@@ -4,7 +4,7 @@ import unittest
 class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
 
     async def test_event_handler(self):
-        from dailyai.transports.daily_transport import DailyTransport
+        from pipecat.transports.daily_transport import DailyTransport
 
         transport = DailyTransport("mock.daily.co/mock", "token", "bot")
 
@@ -22,7 +22,7 @@ class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
     """
     TODO: fix this test, it broke when I added the `.result` call in the patch.
     async def test_event_handler_async(self):
-        from dailyai.services.daily_transport_service import DailyTransportService
+        from pipecat.services.daily_transport_service import DailyTransportService
 
         transport = DailyTransportService("mock.daily.co/mock", "token", "bot")
 
@@ -46,10 +46,10 @@ class TestDailyTransport(unittest.IsolatedAsyncioTestCase):
     """
 
     """
-    @patch("dailyai.services.daily_transport_service.CallClient")
-    @patch("dailyai.services.daily_transport_service.Daily")
+    @patch("pipecat.services.daily_transport_service.CallClient")
+    @patch("pipecat.services.daily_transport_service.Daily")
     async def test_run_with_camera_and_mic(self, daily_mock, callclient_mock):
-        from dailyai.services.daily_transport_service import DailyTransportService
+        from pipecat.services.daily_transport_service import DailyTransportService
         transport = DailyTransportService(
             "https://mock.daily.co/mock",
             "token",
