@@ -8,16 +8,7 @@ Small snippets that build on each other, introducing one or two concepts at a ti
 ➡️ [Take a look](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational)
 
 ## Chatbot examples
-Collection of self-contained real-time voice and video AI demo applications built with [pipecat](https://github.com/pipecat-ai/pipecat/).
-
-<p float="left">
-    <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/examples/simple-chatbot"><img src="simple-chatbot/image.png" width="280" /></a>&nbsp;
-    <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/examples/storytelling-chatbot"><img src="storytelling-chatbot/image.png" width="280" /></a>
-    <br/>
-    <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/examples/translation-chatbot"><img src="translation-chatbot/image.png" width="280" />&nbsp;
-    <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/examples/moondream-chatbot"><img src="moondream-chatbot/image.png" width="280" /></a>
-</p>
-
+Collection of self-contained real-time voice and video AI demo applications built with Pipecat.
 
 ### Quickstart
 
