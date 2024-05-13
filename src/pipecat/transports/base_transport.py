@@ -33,8 +33,8 @@ class BaseTransport(ABC):
 
     @abstractmethod
     def input(self) -> FrameProcessor:
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def output(self) -> FrameProcessor:
-        pass
+        raise NotImplementedError
