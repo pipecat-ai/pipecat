@@ -6,7 +6,6 @@
 
 [![PyPI](https://img.shields.io/pypi/v/pipecat-ai)](https://pypi.org/project/pipecat-ai) [![Discord](https://img.shields.io/discord/1239284677165056021
 )](https://discord.gg/pipecat)
-[![Docs](https://img.shields.io/badge/docs-docusaurus)](https://daily-co.github.io/dailyai-docs/docs/intro)
 
 `pipecat` is a framework for building voice (and multimodal) conversational agents. Things like personal coaches, meeting assistants, [story-telling toys for kids](https://storytelling-chatbot.fly.dev/), customer support bots, [intake flows](https://www.youtube.com/watch?v=lDevgsp9vn0), and snarky social companions.
 
