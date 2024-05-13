@@ -1,0 +1,5 @@
+python-dotenv
+requests
+fastapi[all]
+uvicorn
+dailyai[daily,openai]
