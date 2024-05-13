@@ -33,7 +33,7 @@ class BaseInputTransport(FrameProcessor):
         self._running = True
 
         # Start media threads.
-        if self._params.audio_in_enabled:
+        if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_queue = queue.Queue()
             self._audio_in_thread = threading.Thread(target=self._audio_in_thread_handler)
             self._audio_out_thread = threading.Thread(target=self._audio_out_thread_handler)
@@ -41,7 +41,7 @@ class BaseInputTransport(FrameProcessor):
         self._stopped_event = asyncio.Event()
 
     async def start(self):
-        if self._params.audio_in_enabled:
+        if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_thread.start()
             self._audio_out_thread.start()
 
@@ -62,7 +62,7 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def cleanup(self):
-        if self._params.audio_in_enabled:
+        if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_thread.join()
             self._audio_out_thread.join()
 
