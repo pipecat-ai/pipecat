@@ -1,43 +1,46 @@
 import asyncio
-
 import aiohttp
-import logging
 import os
+import sys
+
 from PIL import Image
 from typing import AsyncGenerator
 
-from dailyai.pipeline.aggregators import (
-    LLMUserResponseAggregator,
-    ParallelPipeline,
-    VisionImageFrameAggregator,
-    SentenceAggregator
-)
-from dailyai.pipeline.frames import (
-    ImageFrame,
+from pipecat.frames.frames import (
+    ImageRawFrame,
     SpriteFrame,
     Frame,
     LLMMessagesFrame,
-    AudioFrame,
-    PipelineStartedFrame,
-    TTSEndFrame,
+    AudioRawFrame,
+    TTSStoppedFrame,
     TextFrame,
-    UserImageFrame,
+    UserImageRawFrame,
     UserImageRequestFrame,
 )
-from dailyai.services.moondream_ai_service import MoondreamService
-from dailyai.pipeline.pipeline import FrameProcessor, Pipeline
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
+
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_response import LLMUserResponseAggregator
+from pipecat.processors.aggregators.sentence import SentenceAggregator
+from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.moondream import MoondreamService
+from pipecat.services.openai import OpenAILLMService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.vad.silero import SileroVAD
 
 from runner import configure
+
+from loguru import logger
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.DEBUG)
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
 
 user_request_answer = "Let me take a look."
 
@@ -51,13 +54,13 @@ for i in range(1, 26):
     # Get the filename without the extension to use as the dictionary key
     # Open the image and convert it to bytes
     with Image.open(full_path) as img:
-        sprites.append(img.tobytes())
+        sprites.append(ImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
 
 flipped = sprites[::-1]
 sprites.extend(flipped)
 
 # When the bot isn't talking, show a static image of the cat listening
-quiet_frame = ImageFrame(sprites[0], (1024, 576))
+quiet_frame = sprites[0]
 talking_frame = SpriteFrame(images=sprites)
 
 
@@ -71,37 +74,18 @@ class TalkingAnimation(FrameProcessor):
         super().__init__()
         self._is_talking = False
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, AudioFrame):
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, AudioRawFrame):
             if not self._is_talking:
-                yield talking_frame
-                yield frame
+                await self.push_frame(talking_frame)
                 self._is_talking = True
-            else:
-                yield frame
-        elif isinstance(frame, TTSEndFrame):
-            yield quiet_frame
-            yield frame
+        elif isinstance(frame, TTSStoppedFrame):
+            await self.push_frame(quiet_frame)
             self._is_talking = False
-        else:
-            yield frame
-
-
-class AnimationInitializer(FrameProcessor):
-    def __init__(self):
-        super().__init__()
-
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if isinstance(frame, PipelineStartedFrame):
-            yield quiet_frame
-            yield frame
-        else:
-            yield frame
+        await self.push_frame(frame)
 
 
 class UserImageRequester(FrameProcessor):
-    participant_id: str | None
-
     def __init__(self):
         super().__init__()
         self.participant_id = None
@@ -109,33 +93,32 @@ class UserImageRequester(FrameProcessor):
     def set_participant_id(self, participant_id: str):
         self.participant_id = participant_id
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
         if self.participant_id and isinstance(frame, TextFrame):
             if frame.text == user_request_answer:
-                yield UserImageRequestFrame(self.participant_id)
-                yield TextFrame("Describe the image in a short sentence.")
-        elif isinstance(frame, UserImageFrame):
-            yield frame
+                await self.push_frame(UserImageRequestFrame(self.participant_id), FrameDirection.UPSTREAM)
+                await self.push_frame(TextFrame("Describe the image in a short sentence."))
+        elif isinstance(frame, UserImageRawFrame):
+            await self.push_frame(frame)
 
 
 class TextFilterProcessor(FrameProcessor):
-    text: str
-
     def __init__(self, text: str):
+        super().__init__()
         self.text = text
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
             if frame.text != self.text:
-                yield frame
+                await self.push_frame(frame)
         else:
-            yield frame
+            await self.push_frame(frame)
 
 
 class ImageFilterProcessor(FrameProcessor):
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        if not isinstance(frame, ImageFrame):
-            yield frame
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if not isinstance(frame, ImageRawFrame):
+            await self.push_frame(frame)
 
 
 async def main(room_url: str, token):
@@ -144,16 +127,17 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Chatbot",
-            duration_minutes=5,
-            start_transcription=True,
-            mic_enabled=True,
-            mic_sample_rate=16000,
-            camera_enabled=True,
-            camera_width=1024,
-            camera_height=576,
-            vad_enabled=True,
-            video_rendering_enabled=True
+            DailyParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                camera_out_enabled=True,
+                camera_out_width=1024,
+                camera_out_height=576,
+                transcription_enabled=True
+            )
         )
+
+        vad = SileroVAD()
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -166,11 +150,11 @@ async def main(room_url: str, token):
             model="gpt-4-turbo-preview")
 
         ta = TalkingAnimation()
-        ai = AnimationInitializer()
 
         sa = SentenceAggregator()
         ir = UserImageRequester()
         va = VisionImageFrameAggregator()
+
         # If you run into weird description, try with use_cpu=True
         moondream = MoondreamService()
 
@@ -186,23 +170,25 @@ async def main(room_url: str, token):
 
         ura = LLMUserResponseAggregator(messages)
 
-        pipeline = Pipeline([
-            ai, ura, llm, ParallelPipeline(
-                [[sa, ir, va, moondream], [tf, imgf]]
-            ),
-            tts, ta
-        ])
+        pipeline = Pipeline([transport.input(), vad, ura, llm,
+                             ParallelPipeline(
+                                 [sa, ir, va, moondream],
+                                 [tf, imgf]),
+                             tts, ta, transport.output()])
 
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport, participant):
-            transport.render_participant_video(participant["id"], framerate=0)
+        task = PipelineTask(pipeline)
+        await task.queue_frame(quiet_frame)
+
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
+            transport.capture_participant_video(participant["id"], framerate=0)
             ir.set_participant_id(participant["id"])
-            await pipeline.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([LLMMessagesFrame(messages)])
 
-        transport.transcription_settings["extra"]["endpointing"] = True
-        transport.transcription_settings["extra"]["punctuate"] = True
+        runner = PipelineRunner()
 
-        await asyncio.gather(transport.run(pipeline))
+        await runner.run(task)
 
 
 if __name__ == "__main__":
