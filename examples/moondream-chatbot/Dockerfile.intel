@@ -1,0 +1,76 @@
+FROM ubuntu:22.04
+
+# environment variables for Intel OneAPI components
+ENV DPCPPROOT=/opt/intel/oneapi/compiler/latest
+ENV MKLROOT=/opt/intel/oneapi/mkl/latest
+ENV CCLROOT=/opt/intel/oneapi/ccl/latest
+ENV MPIROOT=/opt/intel/oneapi/mpi/latest
+
+# Install necessary dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    wget \
+    lsb-release \
+    pciutils \
+    gnupg2 \
+    python3-pip
+
+# Add Intel OneAPI repository and GPG key
+# Intel GPU repository and GPG key
+# Install Intel OneAPI components and source the environment scripts
+RUN wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null && \
+    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | tee /etc/apt/sources.list.d/oneAPI.list && \
+    /bin/bash -c ' \
+    . /etc/os-release && \
+    if [[ " jammy " =~ " ${VERSION_CODENAME} " ]]; then \
+        wget -qO - https://repositories.intel.com/gpu/intel-graphics.key | gpg --dearmor --output /usr/share/keyrings/intel-graphics.gpg && \
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu ${VERSION_CODENAME}/lts/2350 unified" | \
+        tee /etc/apt/sources.list.d/intel-gpu-${VERSION_CODENAME}.list && \
+        apt-get update && \
+        apt-get install -y --no-install-recommends intel-opencl-icd \
+            intel-level-zero-gpu level-zero intel-media-va-driver-non-free \
+            libmfx1 libmfxgen1 libvpl2 libegl-mesa0 libegl1-mesa \
+            libegl1-mesa-dev libgbm1 libgl1-mesa-dev libgl1-mesa-dri \
+            libglapi-mesa libgles2-mesa-dev libglx-mesa0 libigdgmm12 \
+            libxatracker2 mesa-va-drivers mesa-vdpau-drivers \
+            mesa-vulkan-drivers va-driver-all; \
+    else \
+        echo "Ubuntu version ${VERSION_CODENAME} not supported. Exiting..."; \
+        exit 1; \
+    fi' && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    intel-oneapi-dpcpp-cpp-2024.1=2024.1.0-963 intel-oneapi-mkl-devel=2024.1.0-691 \
+    intel-oneapi-ccl-devel=2021.12.0-309 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    groupadd -r render && usermod -aG render root && \
+    echo "source ${DPCPPROOT}/env/vars.sh" >> ~/.bashrc && \
+    echo "source ${MKLROOT}/env/vars.sh" >> ~/.bashrc && \
+    echo "source ${CCLROOT}/env/vars.sh" >> ~/.bashrc && \
+    echo "source ${MPIROOT}/env/vars.sh" >> ~/.bashrc && \
+    echo "export LD_LIBRARY_PATH=${MKLROOT}/lib:${DPCPPROOT}/linux/compiler/lib/intel64_lin:$LD_LIBRARY_PATH" >> ~/.bashrc
+
+WORKDIR /app
+COPY . /app
+RUN mkdir -p /app /app/assets /app/utils
+COPY *.py requirements.txt assets/* utils/* /app/
+
+# Install the Intel-specific versions of torch
+RUN python3 -m pip install --no-cache-dir -r requirements.txt && \
+    pip uninstall -y torch && \
+    pip freeze | grep 'nvidia-' | xargs pip uninstall -y && \
+    pip install --no-cache-dir --force-reinstall torch==2.1.0.post2 torchvision==0.16.0.post2 torchaudio==2.1.0.post2 \
+    intel-extension-for-pytorch==2.1.30+xpu oneccl_bind_pt==2.1.300+xpu \
+    --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/  
+
+RUN echo '#!/bin/bash\n\
+source ${DPCPPROOT}/env/vars.sh\n\
+source ${MKLROOT}/env/vars.sh\n\
+source ${CCLROOT}/env/vars.sh\n\
+source ${MPIROOT}/env/vars.sh\n\
+export LD_LIBRARY_PATH=${MKLROOT}/lib:${DPCPPROOT}/linux/compiler/lib/intel64_lin:$LD_LIBRARY_PATH\n\
+python3 server.py' > /usr/local/bin/run_app.sh && \
+    chmod +x /usr/local/bin/run_app.sh && \
+    find / -type d -name "__pycache__" -exec rm -rf {} + 
+
+EXPOSE 7860
+ENTRYPOINT ["/usr/local/bin/run_app.sh"]

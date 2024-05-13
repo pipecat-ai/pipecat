@@ -27,6 +27,12 @@ def detect_device():
     """
     Detects the appropriate device to run on, and return the device and dtype.
     """
+    try:
+        import intel_extension_for_pytorch
+        if torch.xpu.is_available():
+            return torch.device("xpu"), torch.float32
+    except ImportError:
+        pass
     if torch.cuda.is_available():
         return torch.device("cuda"), torch.float16
     elif torch.backends.mps.is_available():

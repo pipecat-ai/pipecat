@@ -34,4 +34,11 @@ docker build -t moonbot .
 docker run --env-file .env -p 7860:7860 moonbot
 ```
 
+### For Intel GPUs (Arc, Max and Flex series)
+
+```
+docker build -t moonbot -f Dockerfile.intel .
+docker run --env-file .env -p 7860:7860 --device /dev/dri moonbot
+```
+
 You can try to visit `http://localhost:7860/start` again.
