@@ -49,9 +49,9 @@ class ImageSyncAggregator(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if not isinstance(frame, SystemFrame):
-            await self.push_frame(ImageRawFrame(self._speaking_image_bytes, (1024, 1024), self._speaking_image_format))
+            await self.push_frame(ImageRawFrame(image=self._speaking_image_bytes, size=(1024, 1024), format=self._speaking_image_format))
             await self.push_frame(frame)
-            await self.push_frame(ImageRawFrame(self._waiting_image_bytes, (1024, 1024), self._waiting_image_format))
+            await self.push_frame(ImageRawFrame(image=self._waiting_image_bytes, size=(1024, 1024), format=self._waiting_image_format))
         else:
             await self.push_frame(frame)
 

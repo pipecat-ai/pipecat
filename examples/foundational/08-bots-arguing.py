@@ -92,7 +92,7 @@ async def main(room_url: str):
                 if isinstance(frame, TextFrame):
                     message += frame.text
                 elif isinstance(frame, AudioFrame):
-                    all_audio.extend(frame.data)
+                    all_audio.extend(frame.audio)
 
             return (message, all_audio)
 

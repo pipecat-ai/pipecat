@@ -46,14 +46,14 @@ class TTSService(AIService):
         pass
 
     async def say(self, text: str):
-        await self.process_frame(TextFrame(text), FrameDirection.DOWNSTREAM)
+        await self.process_frame(TextFrame(text=text), FrameDirection.DOWNSTREAM)
 
     async def _process_text_frame(self, frame: TextFrame):
         text: str | None = None
         if not self._aggregate_sentences:
-            text = frame.data
+            text = frame.text
         else:
-            self._current_sentence += frame.data
+            self._current_sentence += frame.text
             if self._current_sentence.strip().endswith((".", "?", "!")):
                 text = self._current_sentence
                 self._current_sentence = ""
@@ -78,11 +78,13 @@ class STTService(AIService):
     def __init__(self,
                  min_rms: int = 400,
                  max_silence_frames: int = 3,
-                 sample_rate: int = 16000):
+                 sample_rate: int = 16000,
+                 num_channels: int = 1):
         super().__init__()
         self._min_rms = min_rms
         self._max_silence_frames = max_silence_frames
         self._sample_rate = sample_rate
+        self._num_channels = num_channels
         self._current_silence_frames = 0
         (self._content, self._wave) = self._new_wave()
 
@@ -94,8 +96,8 @@ class STTService(AIService):
     def _new_wave(self):
         content = io.BufferedRandom(io.BytesIO())
         ww = wave.open(content, "wb")
-        ww.setnchannels(1)
         ww.setsampwidth(2)
+        ww.setnchannels(self._num_channels)
         ww.setframerate(self._sample_rate)
         return (content, ww)
 
@@ -113,14 +115,14 @@ class STTService(AIService):
             await self.push_frame(frame, direction)
             return
 
-        data = frame.data
+        audio = frame.audio
 
         # Try to filter out empty background noise
         # (Very rudimentary approach, can be improved)
-        rms = self._get_volume(data)
+        rms = self._get_volume(audio)
         if rms >= self._min_rms:
             # If volume is high enough, write new data to wave file
-            self._wave.writeframesraw(data)
+            self._wave.writeframes(audio)
 
         # If buffer is not empty and we detect a 3-frame pause in speech,
         # transcribe the audio gathered so far.
@@ -146,7 +148,7 @@ class ImageGenService(AIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
-            await self.run_image_gen(frame.data)
+            await self.run_image_gen(frame.text)
         else:
             await self.push_frame(frame, direction)
 

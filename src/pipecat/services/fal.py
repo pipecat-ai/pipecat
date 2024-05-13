@@ -75,5 +75,9 @@ class FalImageGenService(ImageGenService):
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
 
-            frame = URLImageRawFrame(image_url, image.tobytes(), image.size, image.format)
+            frame = URLImageRawFrame(
+                url=image_url,
+                image=image.tobytes(),
+                size=image.size,
+                format=image.format)
             await self.push_frame(frame)

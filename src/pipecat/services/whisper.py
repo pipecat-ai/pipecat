@@ -54,11 +54,10 @@ class WhisperSTTService(STTService):
         """Loads the Whisper model. Note that if this is the first time
         this model is being run, it will take time to download."""
         logger.debug("Loading Whisper model...")
-        model = WhisperModel(
+        self._model = WhisperModel(
             self._model_name.value,
             device=self._device,
             compute_type=self._compute_type)
-        self._model = model
         logger.debug("Loaded Whisper model")
 
     async def run_stt(self, audio: BinaryIO):

@@ -108,7 +108,10 @@ class BaseInputTransport(FrameProcessor):
             try:
                 audio_frames = self.read_raw_audio_frames(num_frames)
                 if len(audio_frames) > 0:
-                    frame = AudioRawFrame(audio_frames, sample_rate, num_channels)
+                    frame = AudioRawFrame(
+                        audio=audio_frames,
+                        sample_rate=sample_rate,
+                        num_channels=num_channels)
                     self._audio_in_queue.put(frame)
             except BaseException as e:
                 logger.error(f"Error reading audio frames: {e}")
@@ -124,7 +127,7 @@ class BaseInputTransport(FrameProcessor):
                 # Check VAD and push event if necessary. We just care about changes
                 # from QUIET to SPEAKING and vice versa.
                 if self._params.vad_enabled:
-                    vad_state = self._handle_vad(frame.data, vad_state)
+                    vad_state = self._handle_vad(frame.audio, vad_state)
                     audio_passthrough = self._params.vad_audio_passthrough
 
                 # Push audio downstream if passthrough.

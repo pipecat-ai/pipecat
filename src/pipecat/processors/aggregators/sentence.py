@@ -36,12 +36,12 @@ class SentenceAggregator(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
-            m = re.search("(.*[?.!])(.*)", frame.data)
+            m = re.search("(.*[?.!])(.*)", frame.text)
             if m:
                 await self.push_frame(TextFrame(self._aggregation + m.group(1)))
                 self._aggregation = m.group(2)
             else:
-                self._aggregation += frame.data
+                self._aggregation += frame.text
         elif isinstance(frame, EndFrame):
             if self._aggregation:
                 await self.push_frame(TextFrame(self._aggregation))

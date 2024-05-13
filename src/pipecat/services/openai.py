@@ -14,8 +14,7 @@ from pipecat.frames.frames import (
     TextFrame,
     URLImageRawFrame
 )
-from pipecat.frames.openai_frames import OpenAILLMContextFrame
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService, ImageGenService
 
@@ -137,9 +136,9 @@ class BaseOpenAILLMService(LLMService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
-            context: OpenAILLMContext = frame.data
+            context: OpenAILLMContext = frame.context
         elif isinstance(frame, LLMMessagesFrame):
-            context = OpenAILLMContext.from_messages(frame.data)
+            context = OpenAILLMContext.from_messages(frame.messages)
         else:
             await self.push_frame(frame, direction)
 

@@ -69,7 +69,7 @@ class MoondreamService(VisionService):
         logger.debug(f"Analyzing image: {frame}")
 
         def get_image_description(frame: VisionImageRawFrame):
-            image = Image.frombytes(frame.format, (frame.size[0], frame.size[1]), frame.data)
+            image = Image.frombytes(frame.format, (frame.size[0], frame.size[1]), frame.image)
             image_embeds = self._model.encode_image(image)
             description = self._model.answer_question(
                 image_embeds=image_embeds,
@@ -79,4 +79,4 @@ class MoondreamService(VisionService):
 
         description = await asyncio.to_thread(get_image_description, frame)
 
-        await self.push_frame(TextFrame(description))
+        await self.push_frame(TextFrame(text=description))

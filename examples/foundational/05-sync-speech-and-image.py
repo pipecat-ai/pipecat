@@ -9,7 +9,7 @@ import aiohttp
 import os
 import sys
 
-import daily
+from dataclasses import dataclass
 
 from pipecat.frames.frames import (
     AppFrame,
@@ -44,19 +44,12 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
+@dataclass
 class MonthFrame(AppFrame):
-    def __init__(self, month):
-        super().__init__()
-        self.metadata["month"] = month
-
-    @ property
-    def month(self) -> str:
-        return self.metadata["month"]
+    month: str
 
     def __str__(self):
         return f"{self.name}(month: {self.month})"
-
-    month: str
 
 
 class MonthPrepender(FrameProcessor):
@@ -69,7 +62,7 @@ class MonthPrepender(FrameProcessor):
         if isinstance(frame, MonthFrame):
             self.most_recent_month = frame.month
         elif self.prepend_to_next_text_frame and isinstance(frame, TextFrame):
-            await self.push_frame(TextFrame(f"{self.most_recent_month}: {frame.data}"))
+            await self.push_frame(TextFrame(f"{self.most_recent_month}: {frame.text}"))
             self.prepend_to_next_text_frame = False
         elif isinstance(frame, LLMResponseStartFrame):
             self.prepend_to_next_text_frame = True
@@ -152,7 +145,7 @@ async def main(room_url):
                     "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
                 }
             ]
-            frames.append(MonthFrame(month))
+            frames.append(MonthFrame(month=month))
             frames.append(LLMMessagesFrame(messages))
 
         frames.append(EndFrame())

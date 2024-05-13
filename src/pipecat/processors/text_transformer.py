@@ -28,7 +28,7 @@ class StatelessTextTransformer(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
-            result = self._transform_fn(frame.data)
+            result = self._transform_fn(frame.text)
             if isinstance(result, Coroutine):
                 result = await result
             await self.push_frame(result)

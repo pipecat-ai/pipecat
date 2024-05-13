@@ -61,7 +61,7 @@ async def main():
 
                 async def process_frame(self, frame: Frame, direction: FrameDirection):
                     if isinstance(frame, AudioRawFrame):
-                        self.audio.extend(frame.data)
+                        self.audio.extend(frame.audio)
                         self.frame = AudioRawFrame(
                             bytes(self.audio), frame.sample_rate, frame.num_channels)
 

@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+from dataclasses import dataclass
+
 from typing import AsyncGenerator, Callable, List
 
 from pipecat.frames.frames import (
@@ -15,7 +17,6 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.frames.openai_frames import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
 from openai._types import NOT_GIVEN, NotGiven
@@ -162,3 +163,13 @@ class OpenAIAssistantContextAggregator(OpenAIContextAggregator):
             accumulator_frame=TextFrame,
             pass_through=True,
         )
+
+
+@dataclass
+class OpenAILLMContextFrame(Frame):
+    """Like an LLMMessagesFrame, but with extra context specific to the OpenAI
+    API. The context in this message is also mutable, and will be changed by the
+    OpenAIContextAggregator frame processor.
+
+    """
+    context: OpenAILLMContext
