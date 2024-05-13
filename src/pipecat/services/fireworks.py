@@ -13,7 +13,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Fireworks, you need to `pip install pipecat[fireworks]`. Also, set the `FIREWORKS_API_KEY` environment variable.")
+        "In order to use Fireworks, you need to `pip install pipecat-ai[fireworks]`. Also, set the `FIREWORKS_API_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
 
 

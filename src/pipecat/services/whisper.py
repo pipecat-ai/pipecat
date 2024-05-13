@@ -22,7 +22,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Whisper, you need to `pip install pipecat[whisper]`.")
+        "In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
     raise Exception(f"Missing module: {e}")
 
 

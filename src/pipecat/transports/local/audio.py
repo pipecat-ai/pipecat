@@ -18,7 +18,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use local audio, you need to `pip install pipecat[audio]`. On MacOS, you also need to `brew install portaudio`.")
+        "In order to use local audio, you need to `pip install pipecat-ai[local]`. On MacOS, you also need to `brew install portaudio`.")
     raise Exception(f"Missing module: {e}")
 
 
