@@ -11,6 +11,7 @@ import threading
 import time
 import types
 
+from dataclasses import dataclass
 from functools import partial
 from typing import Any, Callable, Mapping
 
@@ -30,6 +31,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     SpriteFrame,
     TranscriptionFrame,
+    TransportMessageFrame,
     UserImageRawFrame,
     UserImageRequestFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -49,6 +51,11 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 VAD_RESET_PERIOD_MS = 2000
+
+
+@dataclass
+class DailyTransportMessageFrame(TransportMessageFrame):
+    participant_id: str | None = None
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -168,6 +175,9 @@ class DailySession(EventHandler):
         if self._vad_analyzer:
             state = self._vad_analyzer.analyze_audio(audio_frames)
         return state
+
+    def send_message(self, frame: DailyTransportMessageFrame):
+        self._client.send_app_message(frame.message, frame.participant_id)
 
     def read_raw_audio_frames(self, frame_count: int) -> bytes:
         return self._speaker.read_frames(frame_count)
