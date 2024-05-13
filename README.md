@@ -80,7 +80,7 @@ async def main():
       voice_id=...,
       )
 
-    # Simple pipeline that will process turn text to speech and output the result
+    # Simple pipeline that will process text to speech and output the result
     pipeline = Pipeline([tts, transport.output()])
 
     # Create Pipecat processor that can run one or more pipelines tasks
