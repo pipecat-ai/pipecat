@@ -8,7 +8,7 @@ import asyncio
 from asyncio import AbstractEventLoop
 from enum import Enum
 
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import ErrorFrame, Frame
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
@@ -41,6 +41,9 @@ class FrameProcessor:
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         pass
+
+    async def push_error(self, error: ErrorFrame):
+        await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         if direction == FrameDirection.DOWNSTREAM and self._next:
