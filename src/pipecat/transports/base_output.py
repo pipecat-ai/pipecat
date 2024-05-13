@@ -21,7 +21,8 @@ from pipecat.frames.frames import (
     StartFrame,
     EndFrame,
     Frame,
-    ImageRawFrame)
+    ImageRawFrame,
+    TransportMessageFrame)
 from pipecat.transports.base_transport import TransportParams
 
 from loguru import logger
@@ -59,6 +60,9 @@ class BaseOutputTransport(FrameProcessor):
         self._running = False
 
         self._stopped_event.set()
+
+    def send_message(self, frame: TransportMessageFrame):
+        pass
 
     def write_frame_to_camera(self, frame: ImageRawFrame):
         pass
@@ -98,6 +102,7 @@ class BaseOutputTransport(FrameProcessor):
         return (isinstance(frame, AudioRawFrame)
                 or isinstance(frame, ImageRawFrame)
                 or isinstance(frame, SpriteFrame)
+                or isinstance(frame, TransportMessageFrame)
                 or isinstance(frame, CancelFrame)
                 or isinstance(frame, EndFrame))
 
@@ -121,6 +126,8 @@ class BaseOutputTransport(FrameProcessor):
                     self._set_camera_image(frame)
                 elif isinstance(frame, SpriteFrame) and self._params.camera_out_enabled:
                     self._set_camera_images(frame.images)
+                elif isinstance(frame, TransportMessageFrame):
+                    self.send_message(frame)
             except queue.Empty:
                 pass
             except BaseException as e:
