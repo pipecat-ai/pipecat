@@ -122,7 +122,7 @@ One way to get up and running quickly with WebRTC is to sign up for a Daily deve
 
 Sign up [here](https://dashboard.daily.co/u/signup) and [create a room](https://docs.daily.co/reference/rest-api/rooms) in the developer Dashboard.
 
-### What is VAD?
+## What is VAD?
 
 Voice Activity Detection &mdash; very important for knowing when a user has finished speaking to your bot. If you are not using press-to-talk, and want Pipecat to detect when the user has finished talking, VAD is an essential component for a natural feeling conversation.
 
