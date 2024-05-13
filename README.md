@@ -10,7 +10,7 @@
 
 `pipecat` is a framework for building voice (and multimodal) conversational agents. Things like personal coaches, meeting assistants, [story-telling toys for kids](https://storytelling-chatbot.fly.dev/), customer support bots, [intake flows](https://www.youtube.com/watch?v=lDevgsp9vn0), and snarky social companions.
 
-Take a lot at some example apps:
+Take a look at some example apps:
 
 <p float="left">
     <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/simple-chatbot"><img src="examples/simple-chatbot/image.png" width="280" /></a>&nbsp;
