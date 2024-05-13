@@ -41,7 +41,7 @@ pip install "pipecat-ai[option,...]"
 Your project may or may not need these, so they're made available as optional requirements. Here is a list:
 
 - **AI services**: `anthropic`, `azure`, `fal`, `moondream`, `openai`, `playht`, `silero`, `whisper`
-- **Transports**: `local`, `websocket`, `daily` 
+- **Transports**: `local`, `websocket`, `daily`
 
 ## Code examples
 
@@ -96,8 +96,9 @@ async def main():
       participant_name = participant["info"]["userName"] or ''
       # Queue a TextFrame that will get spoken by the TTS service (Eleven Labs)
       await task.queue_frames([TextFrame(f"Hello there, {participant_name}!"), EndFrame()])
-      # Run the pipeline task
-      await runner.run(task)
+
+    # Run the pipeline task
+    await runner.run(task)
 
 if __name__ == "__main__":
   asyncio.run(main())
