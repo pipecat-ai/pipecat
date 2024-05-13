@@ -115,7 +115,7 @@ class BaseOutputTransport(FrameProcessor):
                     future.result()
                 elif isinstance(frame, AudioRawFrame):
                     if self._params.audio_out_enabled:
-                        buffer.extend(frame.data)
+                        buffer.extend(frame.audio)
                         buffer = self._send_audio_truncated(buffer, bytes_size_10ms)
                 elif isinstance(frame, ImageRawFrame) and self._params.camera_out_enabled:
                     self._set_camera_image(frame)

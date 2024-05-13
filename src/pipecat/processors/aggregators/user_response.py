@@ -47,8 +47,8 @@ class ResponseAggregator(FrameProcessor):
         *,
         start_frame,
         end_frame,
-        accumulator_frame,
-        interim_accumulator_frame=None
+        accumulator_frame: TextFrame,
+        interim_accumulator_frame: TextFrame | None = None
     ):
         super().__init__()
 
@@ -102,7 +102,7 @@ class ResponseAggregator(FrameProcessor):
             send_aggregation = not self._aggregating
         elif isinstance(frame, self._accumulator_frame):
             if self._aggregating:
-                self._aggregation += f" {frame.data}"
+                self._aggregation += f" {frame.text}"
                 # We have recevied a complete sentence, so if we have seen the
                 # end frame and we were still aggregating, it means we should
                 # send the aggregation.

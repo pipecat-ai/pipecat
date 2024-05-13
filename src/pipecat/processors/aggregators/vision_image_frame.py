@@ -35,7 +35,10 @@ class VisionImageFrameAggregator(FrameProcessor):
         elif isinstance(frame, ImageRawFrame):
             if self._describe_text:
                 frame = VisionImageRawFrame(
-                    self._describe_text, frame.image, frame.size, frame.format)
+                    text=self._describe_text,
+                    image=frame.image,
+                    size=frame.size,
+                    format=frame.format)
                 await self.push_frame(frame)
                 self._describe_text = None
         else:

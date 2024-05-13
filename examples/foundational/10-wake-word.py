@@ -63,7 +63,7 @@ for file in image_files:
     filename = os.path.splitext(os.path.basename(full_path))[0]
     # Open the image and convert it to bytes
     with Image.open(full_path) as img:
-        sprites[file] = ImageRawFrame(img.tobytes(), img.size, img.format)
+        sprites[file] = ImageRawFrame(image=img.tobytes(), size=img.size, format=img.format)
 
 # When the bot isn't talking, show a static image of the cat listening
 quiet_frame = sprites["sc-listen-1.png"]
@@ -99,7 +99,7 @@ class NameCheckFilter(FrameProcessor):
 
         # TODO: split up transcription by participant
         if isinstance(frame, TranscriptionFrame):
-            content = frame.data
+            content = frame.text
             self._sentence += content
             if self._sentence.endswith((".", "?", "!")):
                 if any(name in self._sentence for name in self._names):

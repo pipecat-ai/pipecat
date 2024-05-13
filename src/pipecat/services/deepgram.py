@@ -32,5 +32,5 @@ class DeepgramTTSService(TTSService):
         body = {"text": text}
         async with self._aiohttp_session.post(request_url, headers=headers, json=body) as r:
             async for data in r.content:
-                frame = AudioRawFrame(data, 16000, 1)
+                frame = AudioRawFrame(audio=data, sample_rate=16000, num_channels=1)
                 await self.push_frame(frame)

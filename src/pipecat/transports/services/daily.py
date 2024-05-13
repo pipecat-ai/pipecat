@@ -176,7 +176,7 @@ class DailySession(EventHandler):
         self._mic.write_frames(frames)
 
     def write_frame_to_camera(self, frame: ImageRawFrame):
-        self._camera.write_frame(frame.data)
+        self._camera.write_frame(frame.image)
 
     async def join(self):
         # Transport already joined, ignore.
@@ -498,7 +498,11 @@ class DailyInputTransport(BaseInputTransport):
             render_frame = True
 
         if render_frame:
-            frame = UserImageRawFrame(participant_id, buffer, size, format)
+            frame = UserImageRawFrame(
+                user_id=participant_id,
+                image=buffer,
+                size=size,
+                format=format)
             self._camera_in_queue.put(frame)
 
         self._video_renderers[participant_id]["timestamp"] = curr_time

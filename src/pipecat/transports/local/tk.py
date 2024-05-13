@@ -92,7 +92,7 @@ class TkOutputTransport(BaseOutputTransport):
     async def _write_frame_to_tk(self, frame: ImageRawFrame):
         width = frame.size[0]
         height = frame.size[1]
-        data = f"P6 {width} {height} 255 ".encode() + frame.data
+        data = f"P6 {width} {height} 255 ".encode() + frame.image
         photo = tk.PhotoImage(
             width=width,
             height=height,

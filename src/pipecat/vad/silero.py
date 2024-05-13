@@ -89,7 +89,7 @@ class SileroVAD(FrameProcessor, VADAnalyzer):
     async def _analyze_audio(self, frame: AudioRawFrame):
         # Check VAD and push event if necessary. We just care about changes
         # from QUIET to SPEAKING and vice versa.
-        new_vad_state = self.analyze_audio(frame.data)
+        new_vad_state = self.analyze_audio(frame.audio)
         if new_vad_state != self._processor_vad_state and new_vad_state != VADState.STARTING and new_vad_state != VADState.STOPPING:
             new_frame = None
 

@@ -26,8 +26,8 @@ class LLMResponseAggregator(FrameProcessor):
         role: str,
         start_frame,
         end_frame,
-        accumulator_frame,
-        interim_accumulator_frame=None
+        accumulator_frame: TextFrame,
+        interim_accumulator_frame: TextFrame | None = None
     ):
         super().__init__()
 
@@ -86,7 +86,7 @@ class LLMResponseAggregator(FrameProcessor):
             send_aggregation = not self._aggregating
         elif isinstance(frame, self._accumulator_frame):
             if self._aggregating:
-                self._aggregation += f" {frame.data}"
+                self._aggregation += f" {frame.text}"
                 # We have recevied a complete sentence, so if we have seen the
                 # end frame and we were still aggregating, it means we should
                 # send the aggregation.
@@ -181,7 +181,7 @@ class LLMFullResponseAggregator(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
-            self._aggregation += frame.data
+            self._aggregation += frame.text
         elif isinstance(frame, LLMResponseEndFrame):
             await self.push_frame(TextFrame(self._aggregation))
             await self.push_frame(frame)
