@@ -1,5 +1,5 @@
 <div align="center">
- <img alt="pipecat" width="300px" height="auto" src="image.png">
+ <img alt="pipecat" width="300px" height="auto" src="pipecat.png">
 </div>
 
 # Pipecat
