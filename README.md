@@ -52,11 +52,7 @@ There are two directories of examples:
 
 
 ## A simple voice agent running locally
-If you’re doing AI-related stuff, you probably have an OpenAI API key.
-
-To generate voice output, one service that’s easy to get started with is ElevenLabs. If you don’t already have an ElevenLabs developer account, you can sign up for one [here].
-
-So let’s run a really simple agent that’s just a GPT-4 prompt, wired up to voice input and speaker output. 
+Here is a very basic Pipecat bot that greets a user when they join a real-time session. We'll use [Daily](https://daily.co) for real-time media transport, and [ElevenLabs](https://elevenlabs.io/) for text-to-speech.
 
 ```python
 #app.py
