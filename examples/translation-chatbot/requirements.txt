@@ -1,4 +1,4 @@
 python-dotenv
 requests
 fastapi[all]
-dailyai[daily,openai,azure]
+pipecat-ai[daily,openai,azure]

@@ -4,7 +4,6 @@ import os
 import sys
 
 from PIL import Image
-from typing import AsyncGenerator
 
 from pipecat.frames.frames import (
     ImageRawFrame,
