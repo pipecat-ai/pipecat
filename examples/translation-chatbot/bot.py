@@ -1,35 +1,29 @@
 import asyncio
 import aiohttp
-import logging
 import os
-from typing import AsyncGenerator
+import sys
 
-from dailyai.pipeline.aggregators import (
-    SentenceAggregator,
-)
-from dailyai.pipeline.frames import (
-    Frame,
-    LLMMessagesFrame,
-    TextFrame,
-    SendAppMessageFrame,
-)
-from dailyai.pipeline.frame_processor import FrameProcessor
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.azure_ai_services import AzureTTSService
-from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.pipeline.aggregators import LLMFullResponseAggregator
+from pipecat.frames.frames import Frame, LLMMessagesFrame, TextFrame, TransportMessageFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
+from pipecat.processors.aggregators.sentence import SentenceAggregator
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.azure import AzureTTSService
+from pipecat.services.openai import OpenAILLMService
+from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyTransportMessageFrame
 
 from runner import configure
 
+from loguru import logger
+
 from dotenv import load_dotenv
-
-
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.DEBUG)
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
+
 
 """
 This example looks a bit different than the chatbot example, because it isn't waiting on the user to stop talking to start translating.
@@ -40,10 +34,11 @@ It also isn't saving what the user or bot says into the context object for use i
 # We need to use a custom service here to yield LLM frames without saving
 # any context
 class TranslationProcessor(FrameProcessor):
+
     def __init__(self, language):
         self._language = language
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
             context = [
                 {
@@ -52,25 +47,24 @@ class TranslationProcessor(FrameProcessor):
                 },
                 {"role": "user", "content": frame.text},
             ]
-            yield LLMMessagesFrame(context)
+            await self.push_frame(LLMMessagesFrame(context))
         else:
-            yield frame
+            await self.push_frame(frame)
 
 
 class TranslationSubtitles(FrameProcessor):
     def __init__(self, language):
         self._language = language
 
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
-            app_message = {
+            message = {
                 "language": self._language,
                 "text": frame.text
             }
-            yield SendAppMessageFrame(app_message, None)
-            yield frame
-        else:
-            yield frame
+            await self.push_frame(DailyTransportMessageFrame(message))
+
+        await self.push_frame(frame)
 
 
 async def main(room_url: str, token):
@@ -79,29 +73,34 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Translator",
-            duration_minutes=5,
-            start_transcription=True,
-            mic_enabled=True,
-            mic_sample_rate=16000,
-            camera_enabled=False,
+            DailyParams(
+                audio_out_enabled=True,
+                transcription_enabled=True,
+            )
         )
+
         tts = AzureTTSService(
             api_key=os.getenv("AZURE_SPEECH_API_KEY"),
             region=os.getenv("AZURE_SPEECH_REGION"),
             voice="es-ES-AlvaroNeural",
         )
+
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4-turbo-preview"
         )
+
         sa = SentenceAggregator()
         tp = TranslationProcessor("Spanish")
         lfra = LLMFullResponseAggregator()
         ts = TranslationSubtitles("spanish")
-        pipeline = Pipeline([sa, tp, llm, lfra, ts, tts])
 
-        transport.transcription_settings["extra"]["endpointing"] = True
-        transport.transcription_settings["extra"]["punctuate"] = True
-        await transport.run(pipeline)
+        pipeline = Pipeline([transport.input(), sa, tp, llm, lfra, ts, tts, transport.output()])
+
+        task = PipelineTask(pipeline)
+
+        runner = PipelineRunner()
+
+        await runner.run(task)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ class FrameSerializer:
 
     @abstractmethod
     def serialize(self, frame: Frame) -> bytes:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abstractmethod
     def deserialize(self, data: bytes) -> Frame:
