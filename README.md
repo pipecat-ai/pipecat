@@ -34,38 +34,52 @@ pip install "pipecat-ai[option,...]"
 Your project may or may not need these, so they're made available as optional requirements. Here is a list:
 
 - **AI services**: `anthropic`, `azure`, `fal`, `moondream`, `openai`, `playht`, `silero`, `whisper`
-- **Transports**: `daily`, `local`, `websocket`
+- **Transports**: `local`, `websocket`, `daily`, 
+
+## Code examples
+
+There are two directories of examples:
+
+- [foundational](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational) — examples that build on each other, introducing one or two concepts at a time
+- [example apps](https://github.com/pipecat-ai/pipecat-examples) — complete applications that you can use as starting points for development
+
+Before running the examples you need to install the dependencies (which will install all the dependencies to run all of the examples):
+
+```
+pip install -r requirements.txt
+```
 
 ## A simple voice agent running locally
-
 If you’re doing AI-related stuff, you probably have an OpenAI API key.
 
 To generate voice output, one service that’s easy to get started with is ElevenLabs. If you don’t already have an ElevenLabs developer account, you can sign up for one [here].
 
-So let’s run a really simple agent that’s just a GPT-4 prompt, wired up to voice input and speaker output.
+So let’s run a really simple agent that’s just a GPT-4 prompt, wired up to voice input and speaker output. 
 
-You can change the prompt, in the code. The current prompt is “Tell me something interesting about the Roman Empire.”
+```python
+TBC
+```
 
-`cd examples/getting-started` to run the following examples …
+Run it with:
 
 ```shell
-# Talk to a local pipecat process with your voice. Specify GPT-4 as the LLM.
+TBC
+```
 
-export OPENAI_API_KEY=...
-export ELEVENLABS_API_KEY=...
-python ./local-mic.py | ./pipecat-pipes-gpt-4.py | ./local-speaker.py
+
+## Example projects
+
+We've created a seperate repo [here](https://github.com/pipecat-ai/pipecat-examples) that have fully featured example projects to help you get started.
+
+```shell
+git@github.com:pipecat-ai/pipecat-examples.git
 ```
 
 ## WebSockets instead of pipes
-
 To run your agent in the cloud, you can switch the Pipecat transport layer to use a WebSocket instead of Unix pipes.
 
 ```shell
-# Talk to a local pipecat process with your voice. Specify GPT-4 as the LLM.
-
-export OPENAI_API_KEY=...
-export ELEVENLABS_API_KEY=...
-python ./local-mic-and-speaker-wss.py wss://localhost:8088
+TBC
 ```
 
 ## WebRTC for production use
@@ -76,67 +90,6 @@ One way to get up and running quickly with WebRTC is to sign up for a Daily deve
 
 Sign up [here](https://dashboard.daily.co/u/signup) and [create a room](https://docs.daily.co/reference/rest-api/rooms) in the developer Dashboard. Then run the examples, this time connecting via WebRTC instead of a WebSocket.
 
-```shell
-# 1. Run the pipecat process. Provide your Daily API key and a Daily room
-export DAILY_API_KEY=...
-export OPENAI_API_KEY=...
-export ELEVENLABS_API_KEY=...
-python pipecat-daily-gpt-4.py --daily-room https://example.daily.co/pipecat
-
-# 2. Visit the Daily room link in any web browser to talk to the pipecat process.
-#    You'll want to use a Daily SDK to embed the client-side code into your own
-#    app. But visiting the room URL in a browser is a quick way to start building
-#    agents because you can focus on just the agent code at first.
-open -a "Google Chrome" https://example.daily.co/pipecat
-```
-
-## Deploy your agent to the cloud
-Now that you’ve decoupled client and server, and have a Pipecat process that can run anywhere you can run Python, you can deploy this example agent to the cloud.
-
-`TBC`
-
-## Taking it further
-
-### Add a telephone number
-Daily supports telephone connections in addition to WebRTC streams. You can add a telephone number to your Daily room with the following REST API call. Once you’ve done that, you can call your agent on the phone.
-
-You’ll need to add a credit card to your Daily account to enable telephone numbers.
-
-`TBC`
-
-
-### Add image output
-
-Daily supports telephone connections in addition to WebRTC streams. You can add a telephone number to your Daily room with the following REST API call. Once you’ve done that, you can call your agent on the phone.
-
-You’ll need to add a credit card to your Daily account to enable telephone numbers.
-
-`TBC`
-
-### Add video output
-
-
-`TBC`
-
-
-## Code examples
-
-There are two directories of examples:
-
-- [foundational](https://github.com/daily-co/pipecat/tree/main/examples/foundational) — examples that build on each other, introducing one or two concepts at a time
-- [starter apps](https://github.com/daily-co/pipecat/tree/main/examples/starter-apps) — complete applications that you can use as starting points for development
-
-Before running the examples you need to install the dependencies (which will install all the dependencies to run all of the examples):
-
-```
-pip install -r {env}-requirements.txt
-```
-
-To run the example below you need to sign up for a [free Daily account](https://dashboard.daily.co/u/signup) and create a Daily room (so you can hear the LLM talking). After that, join the room's URL directly from a browser tab and run:
-
-```
-python examples/foundational/02-llm-say-one-thing.py
-```
 
 ## Hacking on the framework itself
 
