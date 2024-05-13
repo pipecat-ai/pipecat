@@ -68,10 +68,11 @@ from pipecat.transports.services.daily import DailyParams, DailyTransport
 async def main():
   async with aiohttp.ClientSession() as session:
     # Use Daily as a real-time media transport (WebRTC)
-    daily_room = ...
-    daily_token = ...
     transport = DailyTransport(
-      daily_room, daily_token, "Bot Name", DailyParams(audio_out_enabled=True))
+      room_url=...,
+      token=...,
+      "Bot Name",
+      DailyParams(audio_out_enabled=True))
 
     # Use Eleven Labs for Text-to-Speech
     tts = ElevenLabsTTSService(
