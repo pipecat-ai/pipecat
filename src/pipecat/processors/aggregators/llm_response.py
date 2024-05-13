@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+from typing import List
+
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     Frame,
@@ -22,7 +24,7 @@ class LLMResponseAggregator(FrameProcessor):
     def __init__(
         self,
         *,
-        messages: list[dict] | None,
+        messages: List[dict],
         role: str,
         start_frame,
         end_frame,
@@ -65,9 +67,6 @@ class LLMResponseAggregator(FrameProcessor):
     # and T2 would be dropped.
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if not self._messages:
-            return
-
         send_aggregation = False
 
         if isinstance(frame, self._start_frame):
@@ -116,7 +115,7 @@ class LLMResponseAggregator(FrameProcessor):
 
 
 class LLMAssistantResponseAggregator(LLMResponseAggregator):
-    def __init__(self, messages: list[dict]):
+    def __init__(self, messages: List[dict] = []):
         super().__init__(
             messages=messages,
             role="assistant",
@@ -127,7 +126,7 @@ class LLMAssistantResponseAggregator(LLMResponseAggregator):
 
 
 class LLMUserResponseAggregator(LLMResponseAggregator):
-    def __init__(self, messages: list[dict]):
+    def __init__(self, messages: List[dict] = []):
         super().__init__(
             messages=messages,
             role="user",
