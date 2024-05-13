@@ -1,0 +1,42 @@
+.container{
+    position: absolute;
+    color:white;
+    z-index: 50;    
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    @apply gap-4 inset-6;
+    align-items: center;
+    justify-content: end;
+    text-align: center;
+}
+
+.transcript{
+    @apply font-semibold;
+}
+
+.transcript span{
+    box-decoration-break: clone;
+    @apply bg-gray-900/80 rounded-md px-4 py-2;
+}
+
+.sentence{
+    opacity: 1;
+    animation: fadeOut 2.5s linear forwards;
+    animation-delay: 1s;
+}
+@keyframes fadeOut {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    20% {
+        transform: scale(1);
+        filter: blur(0);
+    }
+    100% {
+        transform: scale(0.8) translateY(-50%);
+        filter: blur(25px);
+        opacity: 0;
+    }
+}
