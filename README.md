@@ -41,17 +41,15 @@ pip install "pipecat-ai[option,...]"
 Your project may or may not need these, so they're made available as optional requirements. Here is a list:
 
 - **AI services**: `anthropic`, `azure`, `fal`, `moondream`, `openai`, `playht`, `silero`, `whisper`
-- **Transports**: `local`, `websocket`, `daily`, 
+- **Transports**: `local`, `websocket`, `daily` 
 
 ## Code examples
-
-There are two directories of examples:
 
 - [foundational](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational) — small snippets that build on each other, introducing one or two concepts at a time
 - [example apps](https://github.com/pipecat-ai/pipecat/tree/main/examples/) — complete applications that you can use as starting points for development
 
-
 ## A simple voice agent running locally
+
 Here is a very basic Pipecat bot that greets a user when they join a real-time session. We'll use [Daily](https://daily.co) for real-time media transport, and [ElevenLabs](https://elevenlabs.io/) for text-to-speech.
 
 ```python
@@ -82,7 +80,7 @@ async def main():
       voice_id=...,
       )
 
-    # Simple pipeline that will process tunr text to speech and output the result
+    # Simple pipeline that will process turn text to speech and output the result
     pipeline = Pipeline([tts, transport.output()])
 
     # Create Pipecat processor that can run one or more pipelines tasks
