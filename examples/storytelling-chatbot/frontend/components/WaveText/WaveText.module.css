@@ -1,0 +1,68 @@
+.waveText{
+    color: white;
+    text-shadow: 3px 3px 0px rgba(0,0,0,0.5);
+    opacity: 0;
+    transition: opacity 2s ease;
+    position: relative;
+    @apply text-4xl font-bold;
+}
+
+.active{
+    opacity: 1;
+}
+
+@keyframes jump {
+    0% {
+        opacity: 0.5;
+        transform:translateY(0px)
+    }
+    50% {
+        opacity: 1;
+        transform:translateY(-30px);
+    }
+    100% {
+        opacity: 0.55;
+        transform:translateY(0px) 
+    }
+  }
+
+.waveText span{
+    display:inline-block;
+    animation:jump 2s infinite ease-in-out;
+
+}
+
+.waveText span:nth-child(1) {
+    animation-delay:0s;
+}
+
+.waveText span:nth-child(1) {
+    animation-delay:0.1s;
+}
+.waveText span:nth-child(2) {
+    animation-delay:0.2s;
+}
+.waveText span:nth-child(3) {
+    animation-delay:0.3s;
+}
+.waveText span:nth-child(4) {
+    animation-delay:0.4s;
+}
+.waveText span:nth-child(5) {
+    animation-delay:0.5s;
+}
+.waveText span:nth-child(6) {
+    animation-delay:0.6s;
+}
+.waveText span:nth-child(7) {
+    animation-delay:0.7s;
+}
+.waveText span:nth-child(8) {
+    animation-delay:0.8s;
+}
+.waveText span:nth-child(9) {
+    animation-delay:0.9s;
+}
+.waveText span:nth-child(10) {
+    animation-delay:1s;
+}

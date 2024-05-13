@@ -1,0 +1,82 @@
+.panel{
+    width: 100%;
+    pointer-events: none;
+    color: #ffffff;
+    text-align: center;
+    position: relative;
+    @apply pb-8;
+}
+
+.panel::after{
+    content: "";
+    position: absolute;
+    inset: 0px;
+    z-index: 10;
+    opacity: 0;
+    transition: all 0.3s ease;
+    @apply bg-gradient-to-t from-gray-950 to-transparent;
+}
+
+.active::after{ opacity: 1;}
+
+.micIcon{
+    position: relative;
+    width: 120px;
+    height: 120px;
+    border-radius: 120px;
+    border: 6px solid;
+    outline: 6px solid;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0 auto;
+    z-index: 20;
+    transition: all 0.5s ease;
+    @apply bg-gray-700/60 border-gray-600 outline-gray-900/20;
+
+}
+
+.micIcon svg{
+    position: relative;
+    z-index: 20;
+    opacity: 0.25;
+    transition: opacity 0.5s ease; 
+}
+
+
+@keyframes pulse {
+    0% {
+        outline-width: 6px;
+        @apply  outline-teal-500/10; 
+    }
+    50% {
+        outline-width: 24px;
+        @apply  outline-teal-500/50; 
+    }
+    100% {
+        outline-width: 6px;
+        @apply  outline-teal-500/10; 
+    }
+}
+
+.micIconActive{
+    @apply bg-teal-950 border-teal-500 outline-teal-500/20;
+    animation: pulse 2s infinite ease-in-out;
+}
+
+.micIconActive svg{
+    opacity: 1;
+}
+
+.transcript{
+    flex: 0;
+    align-self: center;
+    opacity: 0.25;
+    transition: opacity 1s ease;
+    transition-delay: 2.5s;
+    @apply bg-gray-900/90 font-medium py-1 px-2 rounded-sm mt-4;
+}
+
+.active .transcript{
+    opacity: 1;
+}
