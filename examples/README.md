@@ -15,7 +15,7 @@ Collection of self-contained real-time voice and video AI demo applications buil
 Each project has its own set of dependencies and configuration variables. They intentionally avoids shared code across projects &mdash; you can grab whichever demo folder you want to work with as a starting point.
 
 We recommend you start with a virtual environment:
- 
+
 ```shell
 cd pipecat-ai/examples/simple-chatbot
 
