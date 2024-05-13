@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 from dataclasses import dataclass, field
 
@@ -156,6 +156,14 @@ class LLMMessagesFrame(DataFrame):
 
     """
     messages: List[dict]
+
+
+@dataclass
+class TransportMessageFrame(DataFrame):
+    message: Any
+
+    def __str__(self):
+        return f"{self.name}(message: {self.message})"
 
 #
 # App frames. Application user-defined frames.
