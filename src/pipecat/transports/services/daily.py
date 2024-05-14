@@ -411,9 +411,12 @@ class DailyInputTransport(BaseInputTransport):
         self._video_renderers = {}
         self._camera_in_queue = queue.Queue()
         self._camera_in_thread = threading.Thread(target=self._camera_in_thread_handler)
-        self._camera_in_thread.start()
 
     async def start(self):
+        if self._running:
+            return
+
+        self._camera_in_thread.start()
         await self._session.join()
         await super().start()
 
@@ -443,27 +446,6 @@ class DailyInputTransport(BaseInputTransport):
             self.request_participant_image(frame.user_id)
 
         await super().process_frame(frame, direction)
-
-    #
-    # Transcription
-    #
-
-    def capture_participant_transcription(self, participant_id: str):
-        self._session.capture_participant_transcription(
-            participant_id,
-            self._on_transcription_message
-        )
-
-    def _on_transcription_message(self, participant_id, message):
-        text = message["text"]
-        timestamp = message["timestamp"]
-        is_final = message["rawResponse"]["is_final"]
-        if is_final:
-            frame = TranscriptionFrame(text, participant_id, timestamp)
-        else:
-            frame = InterimTranscriptionFrame(text, participant_id, timestamp)
-        future = asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
-        future.result()
 
     #
     # Camera in
@@ -538,6 +520,9 @@ class DailyOutputTransport(BaseOutputTransport):
         self._session = session
 
     async def start(self):
+        if self._running:
+            return
+
         await self._session.join()
         await super().start()
 
@@ -613,8 +598,10 @@ class DailyTransport(BaseTransport):
             await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
 
     def capture_participant_transcription(self, participant_id: str):
-        if self._input:
-            self._input.capture_participant_transcription(participant_id)
+        self._session.capture_participant_transcription(
+            participant_id,
+            self._on_transcription_message
+        )
 
     def capture_participant_video(
             self,
@@ -642,6 +629,20 @@ class DailyTransport(BaseTransport):
 
     def _on_first_participant_joined(self, participant):
         self.on_first_participant_joined(participant)
+
+    def _on_transcription_message(self, participant_id, message):
+        text = message["text"]
+        timestamp = message["timestamp"]
+        is_final = message["rawResponse"]["is_final"]
+        if is_final:
+            frame = TranscriptionFrame(text, participant_id, timestamp)
+        else:
+            frame = InterimTranscriptionFrame(text, participant_id, timestamp)
+
+        if self._input:
+            future = asyncio.run_coroutine_threadsafe(
+                self._input.push_frame(frame), self._input.get_event_loop())
+            future.result()
 
     #
     # Decorators (event handlers)
@@ -698,25 +699,6 @@ class DailyTransport(BaseTransport):
             logger.error(f"Exception in event handler {event_name}: {e}")
             raise e
 
-    #     def send_app_message(self, message: Any, participant_id: str | None):
-    #         self.client.send_app_message(message, participant_id)
-
-    #     def process_interrupt_handler(self, signum, frame):
-    #         self._post_run()
-    #         if callable(self.original_sigint_handler):
-    #             self.original_sigint_handler(signum, frame)
-
-    #     def _post_run(self):
-    #         self.client.leave()
-    #         self.client.release()
-
-    #     def on_first_other_participant_joined(self, participant):
-    #         pass
-
-    #     def call_joined(self, join_data, client_error):
-    #         # self._logger.info(f"Call_joined: {join_data}, {client_error}")
-    #         pass
-
     #     def dialout(self, number):
     #         self.client.start_dialout({"phoneNumber": number})
 
@@ -725,11 +707,6 @@ class DailyTransport(BaseTransport):
 
     #     def on_error(self, error):
     #         self._logger.error(f"on_error: {error}")
-
-    #     def on_participant_joined(self, participant):
-    #         if not self._other_participant_has_joined and participant["id"] != self._my_participant_id:
-    #             self._other_participant_has_joined = True
-    #             self.on_first_other_participant_joined(participant)
 
     #     def on_participant_left(self, participant, reason):
     #         if len(self.client.participants()) < self._min_others_count + 1:
