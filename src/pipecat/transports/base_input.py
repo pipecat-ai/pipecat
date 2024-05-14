@@ -30,7 +30,7 @@ class BaseInputTransport(FrameProcessor):
 
         self._params = params
 
-        self._running = True
+        self._running = False
 
         # Start media threads.
         if self._params.audio_in_enabled or self._params.vad_enabled:
@@ -41,6 +41,11 @@ class BaseInputTransport(FrameProcessor):
         self._stopped_event = asyncio.Event()
 
     async def start(self):
+        if self._running:
+            return
+
+        self._running = True
+
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_thread.start()
             self._audio_out_thread.start()
