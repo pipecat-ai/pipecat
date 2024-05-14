@@ -15,7 +15,6 @@ from pipecat.services.fal import FalImageGenService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyTransportMessageFrame
 
-from pipecat.vad.silero import SileroVAD
 from processors import StoryProcessor, StoryImageProcessor
 from prompts import LLM_BASE_PROMPT, LLM_INTRO_PROMPT, CUE_USER_TURN
 from utils.helpers import load_sounds, load_images
@@ -42,7 +41,6 @@ async def main(room_url, token=None):
             token,
             "Storytelling Bot",
             DailyParams(
-                audio_in_enabled=True,
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=768,
@@ -55,8 +53,6 @@ async def main(room_url, token=None):
         logger.debug("Transport created for room:" + room_url)
 
         # -------------- Services --------------- #
-
-#        vad = SileroVAD()
 
         llm_service = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
@@ -132,7 +128,6 @@ async def main(room_url, token=None):
         # input.
         main_pipeline = Pipeline([
             transport.input(),
-            #            vad,
             user_responses,
             llm_service,
             story_processor,
