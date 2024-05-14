@@ -3,7 +3,7 @@ import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import Frame, LLMMessagesFrame, TextFrame, TransportMessageFrame
+from pipecat.frames.frames import Frame, InterimTranscriptionFrame, LLMMessagesFrame, TextFrame, TranscriptionFrame, TransportMessageFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -36,6 +36,7 @@ It also isn't saving what the user or bot says into the context object for use i
 class TranslationProcessor(FrameProcessor):
 
     def __init__(self, language):
+        super().__init__()
         self._language = language
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -54,8 +55,15 @@ class TranslationProcessor(FrameProcessor):
 
 class TranslationSubtitles(FrameProcessor):
     def __init__(self, language):
+        super().__init__()
         self._language = language
 
+    #
+    # This doesn't do anything unless the receiver recognizes the message being
+    # sent. For example, in this case, we are sending a message to the transport
+    # so an application running at the other end of the transport could display
+    # subtitles.
+    #
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
             message = {
@@ -76,6 +84,7 @@ async def main(room_url: str, token):
             DailyParams(
                 audio_out_enabled=True,
                 transcription_enabled=True,
+                transcription_interim_results=False,
             )
         )
 
@@ -97,6 +106,10 @@ async def main(room_url: str, token):
         pipeline = Pipeline([transport.input(), sa, tp, llm, lfra, ts, tts, transport.output()])
 
         task = PipelineTask(pipeline)
+
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
 
         runner = PipelineRunner()
 

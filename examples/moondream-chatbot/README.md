@@ -10,8 +10,8 @@ This app connects you to a chatbot powered by GPT-4, complete with animations ge
 ## Get started
 
 ```python
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 
 cp env.example .env # and add your credentials
