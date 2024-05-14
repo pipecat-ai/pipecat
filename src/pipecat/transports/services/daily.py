@@ -80,21 +80,23 @@ class WebRTCVADAnalyzer(VADAnalyzer):
         return confidence
 
 
+class DailyTranscriptionSettings(BaseModel):
+    language: str = "en"
+    tier: str = "nova"
+    model: str = "2-conversationalai"
+    profanity_filter: bool = True
+    redact: bool = False
+    endpointing: bool = True
+    punctuate: bool = True
+    includeRawResponse: bool = True
+    extra: Mapping[str, Any] = {
+        "interim_results": True
+    }
+
+
 class DailyParams(TransportParams):
     transcription_enabled: bool = False
-    transcription_settings: Mapping[str, Any] = {
-        "language": "en",
-        "tier": "nova",
-        "model": "2-conversationalai",
-        "profanity_filter": True,
-        "redact": False,
-        "endpointing": True,
-        "punctuate": True,
-        "includeRawResponse": True,
-        "extra": {
-            "interim_results": True,
-        }
-    }
+    transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
 
 
 class DailyCallbacks(BaseModel):
@@ -265,7 +267,8 @@ class DailySession(EventHandler):
                 if self._token and self._params.transcription_enabled:
                     logger.info(
                         f"Enabling transcription with settings {self._params.transcription_settings}")
-                    self._client.start_transcription(self._params.transcription_settings)
+                    self._client.start_transcription(
+                        self._params.transcription_settings.model_dump())
 
                 self._callbacks.on_joined(data["participants"]["local"])
             else:
