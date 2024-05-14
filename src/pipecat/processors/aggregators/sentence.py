@@ -6,9 +6,7 @@
 
 import re
 
-from typing import List
-
-from pipecat.frames.frames import EndFrame, Frame, TextFrame
+from pipecat.frames.frames import EndFrame, Frame, InterimTranscriptionFrame, TextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -35,6 +33,10 @@ class SentenceAggregator(FrameProcessor):
         self._aggregation = ""
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        # We ignore interim description at this point.
+        if isinstance(frame, InterimTranscriptionFrame):
+            return
+
         if isinstance(frame, TextFrame):
             m = re.search("(.*[?.!])(.*)", frame.text)
             if m:
