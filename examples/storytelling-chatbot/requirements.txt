@@ -1,5 +1,5 @@
-dailyai[daily,openai,fal]==0.0.8
 fastapi
 uvicorn
 requests
 python-dotenv
+pipecat-ai[daily,openai,fal]

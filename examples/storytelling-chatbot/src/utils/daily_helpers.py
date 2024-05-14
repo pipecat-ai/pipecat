@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-daily_api_path = os.getenv("DAILY_API_URL")
+daily_api_path = os.getenv("DAILY_API_URL") or "api.daily.co/v1"
 daily_api_key = os.getenv("DAILY_API_KEY")
 
 

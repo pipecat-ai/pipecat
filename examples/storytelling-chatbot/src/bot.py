@@ -1,37 +1,32 @@
+import argparse
 import asyncio
 import aiohttp
-import logging
 import os
-import argparse
+import sys
 
-from dailyai.pipeline.pipeline import Pipeline
-from dailyai.pipeline.frames import (
-    AudioFrame,
-    ImageFrame,
-    EndPipeFrame,
-    LLMMessagesFrame,
-    SendAppMessageFrame
-)
-from dailyai.pipeline.aggregators import (
-    LLMUserResponseAggregator,
-    LLMAssistantResponseAggregator,
-)
-from dailyai.transports.daily_transport import DailyTransport
-from dailyai.services.elevenlabs_ai_service import ElevenLabsTTSService
-from dailyai.services.open_ai_services import OpenAILLMService
-from dailyai.services.fal_ai_services import FalImageGenService
 
+from pipecat.frames.frames import LLMMessagesFrame, StopTaskFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.fal import FalImageGenService
+from pipecat.services.openai import OpenAILLMService
+from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyTransportMessageFrame
+
+from pipecat.vad.silero import SileroVAD
 from processors import StoryProcessor, StoryImageProcessor
 from prompts import LLM_BASE_PROMPT, LLM_INTRO_PROMPT, CUE_USER_TURN
 from utils.helpers import load_sounds, load_images
 
+from loguru import logger
+
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"[STORYBOT] %(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("dailyai")
-logger.setLevel(logging.INFO)
-
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
 
 sounds = load_sounds(["listening.wav"])
 images = load_images(["book1.png", "book2.png"])
@@ -46,21 +41,22 @@ async def main(room_url, token=None):
             room_url,
             token,
             "Storytelling Bot",
-            duration_minutes=5,
-            start_transcription=True,
-            mic_enabled=True,
-            mic_sample_rate=16000,
-            vad_enabled=True,
-            camera_framerate=30,
-            camera_bitrate=680000,
-            camera_enabled=True,
-            camera_width=768,
-            camera_height=768,
+            DailyParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                camera_out_enabled=True,
+                camera_out_width=768,
+                camera_out_height=768,
+                transcription_enabled=True,
+                vad_enabled=True,
+            )
         )
 
         logger.debug("Transport created for room:" + room_url)
 
         # -------------- Services --------------- #
+
+#        vad = SileroVAD()
 
         llm_service = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
@@ -103,68 +99,55 @@ async def main(room_url, token=None):
 
         # -------------- Story Loop ------------- #
 
+        runner = PipelineRunner()
+
+        # The intro pipeline is used to start
+        # the story (as per LLM_INTRO_PROMPT)
+        intro_pipeline = Pipeline([llm_service, tts_service, transport.output()])
+
+        intro_task = PipelineTask(intro_pipeline)
+
         logger.debug("Waiting for participant...")
 
-        start_storytime_event = asyncio.Event()
-
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport, participant):
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
             logger.debug("Participant joined, storytime commence!")
-            start_storytime_event.set()
-
-        # The storytime coroutine will wait for the start_storytime_event
-        # to be set before starting the storytime pipeline
-        async def storytime():
-            await start_storytime_event.wait()
-
-            # The intro pipeline is used to start
-            # the story (as per LLM_INTRO_PROMPT)
-            intro_pipeline = Pipeline(processors=[
-                llm_service,
-                tts_service,
-            ], sink=transport.send_queue)
-
-            await intro_pipeline.queue_frames(
+            transport.capture_participant_transcription(participant["id"])
+            await intro_task.queue_frames(
                 [
-                    ImageFrame(images['book1'], (768, 768)),
+                    images['book1'],
                     LLMMessagesFrame([LLM_INTRO_PROMPT]),
-                    SendAppMessageFrame(CUE_USER_TURN, None),
-                    AudioFrame(sounds["listening"]),
-                    ImageFrame(images['book2'], (768, 768)),
-                    EndPipeFrame(),
+                    DailyTransportMessageFrame(CUE_USER_TURN),
+                    sounds["listening"],
+                    images['book2'],
+                    StopTaskFrame()
                 ]
             )
 
-            # We start the pipeline as soon as the user joins
-            await intro_pipeline.run_pipeline()
+        # We run the intro pipeline. This will start the transport. The intro
+        # task will exit after StopTaskFrame is processed.
+        await runner.run(intro_task)
 
-            # The main story pipeline is used to continue the
-            # story based on user input
-            pipeline = Pipeline(processors=[
-                user_responses,
-                llm_service,
-                story_processor,
-                image_processor,
-                tts_service,
-                llm_responses,
-            ])
+        # The main story pipeline is used to continue the story based on user
+        # input.
+        main_pipeline = Pipeline([
+            transport.input(),
+            #            vad,
+            user_responses,
+            llm_service,
+            story_processor,
+            image_processor,
+            tts_service,
+            llm_responses,
+            transport.output()
+        ])
 
-            await transport.run_pipeline(pipeline)
+        main_task = PipelineTask(main_pipeline)
 
-        transport.transcription_settings["extra"]["endpointing"] = True
-        transport.transcription_settings["extra"]["punctuate"] = True
-
-        try:
-            await asyncio.gather(transport.run(), storytime())
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            transport.stop()
-
-        logger.debug("Pipeline finished. Exiting.")
-
+        await runner.run(main_task)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Daily Storyteller Bot")
+    parser = argparse.ArgumentParser(description="Daily Storyteller Bot")
     parser.add_argument("-u", type=str, help="Room URL")
     parser.add_argument("-t", type=str, help="Token")
     config = parser.parse_args()

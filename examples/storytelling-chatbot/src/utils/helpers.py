@@ -2,6 +2,8 @@ import os
 import wave
 from PIL import Image
 
+from pipecat.frames.frames import AudioRawFrame, ImageRawFrame
+
 script_dir = os.path.dirname(__file__)
 
 
@@ -14,7 +16,7 @@ def load_images(image_files):
         filename = os.path.splitext(os.path.basename(full_path))[0]
         # Open the image and convert it to bytes
         with Image.open(full_path) as img:
-            images[filename] = img.tobytes()
+            images[filename] = ImageRawFrame(image=img.tobytes(), size=img.size, format=img.format)
     return images
 
 
@@ -28,6 +30,8 @@ def load_sounds(sound_files):
         filename = os.path.splitext(os.path.basename(full_path))[0]
         # Open the sound and convert it to bytes
         with wave.open(full_path) as audio_file:
-            sounds[filename] = audio_file.readframes(-1)
+            sounds[filename] = AudioRawFrame(audio=audio_file.readframes(-1),
+                                             sample_rate=audio_file.getframerate(),
+                                             num_channels=audio_file.getnchannels())
 
     return sounds
