@@ -131,7 +131,7 @@ async def main(room_url: str, token):
                 #
                 # Spanish
                 #
-                # "content": "Eres Chatbot, un amigable y útil robot. Dile al usuario que eres capaz de conversar y de describir lo que ves. Tu objetivo es demostrar tus capacidades de una manera breve. Tus respuestas se convertiran a audio así que nunca no debes incluir caracteres especiales. Contesta a lo que el usuario pregunte de una manera creativa, útil y breve. Empieza por presentarte a ti mismo.",
+                # "content": "Eres Chatbot, un amigable y útil robot. Tu objetivo es demostrar tus capacidades de una manera breve. Tus respuestas se convertiran a audio así que nunca no debes incluir caracteres especiales. Contesta a lo que el usuario pregunte de una manera creativa, útil y breve. Empieza por presentarte a ti mismo.",
             },
         ]
 
