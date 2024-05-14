@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.services.daily import DailyParams, DailyTranscriptionSettings, DailyTransport
 from pipecat.vad.silero import SileroVAD
 
 from runner import configure
@@ -87,7 +87,15 @@ async def main(room_url: str, token):
                 camera_out_enabled=True,
                 camera_out_width=1024,
                 camera_out_height=576,
-                transcription_enabled=True
+                transcription_enabled=True,
+                #
+                # Spanish
+                #
+                # transcription_settings=DailyTranscriptionSettings(
+                #     language="es",
+                #     tier="nova",
+                #     model="2-general"
+                # )
             )
         )
 
@@ -96,7 +104,16 @@ async def main(room_url: str, token):
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
+            #
+            # English
+            #
             voice_id="pNInz6obpgDQGcFmaJgB",
+
+            #
+            # Spanish
+            #
+            # model="eleven_multilingual_v2",
+            # voice_id="gD1IexrzCvsXPHUuT0s3",
         )
 
         llm = OpenAILLMService(
@@ -106,7 +123,15 @@ async def main(room_url: str, token):
         messages = [
             {
                 "role": "system",
+                #
+                # English
+                #
                 "content": "You are Chatbot, a friendly, helpful robot. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by introducing yourself.",
+
+                #
+                # Spanish
+                #
+                # "content": "Eres Chatbot, un amigable y útil robot. Dile al usuario que eres capaz de conversar y de describir lo que ves. Tu objetivo es demostrar tus capacidades de una manera breve. Tus respuestas se convertiran a audio así que nunca no debes incluir caracteres especiales. Contesta a lo que el usuario pregunte de una manera creativa, útil y breve. Empieza por presentarte a ti mismo.",
             },
         ]
 
