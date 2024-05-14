@@ -1,5 +1,5 @@
 <div align="center">
- <img alt="pipecat" width="300px" height="auto" src="pipecat.png">
+ <img alt="pipecat" width="300px" height="auto" src="https://raw.githubusercontent.com/pipecat-ai/pipecat/main/pipecat.png">
 </div>
 
 # Pipecat
@@ -12,11 +12,11 @@
 Take a look at some example apps:
 
 <p float="left">
-    <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/simple-chatbot"><img src="examples/simple-chatbot/image.png" width="280" /></a>&nbsp;
-    <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/storytelling-chatbot"><img src="examples/storytelling-chatbot/image.png" width="280" /></a>
+    <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/simple-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat/main/examples/simple-chatbot/image.png" width="280" /></a>&nbsp;
+    <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/storytelling-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat/main/examples/storytelling-chatbot/image.png" width="280" /></a>
     <br/>
-    <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/translation-chatbot"><img src="examples/translation-chatbot/image.png" width="280" /></a>&nbsp;
-    <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/moondream-chatbot"><img src="examples/moondream-chatbot/image.png" width="280" /></a>
+    <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/translation-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat/main/examples/translation-chatbot/image.png" width="280" /></a>&nbsp;
+    <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/moondream-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat/main/examples/moondream-chatbot/image.png" width="280" /></a>
 </p>
 
 ## Getting started with voice agents
