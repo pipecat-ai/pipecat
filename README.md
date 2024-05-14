@@ -218,4 +218,4 @@ Install the
 
 ➡️ [Join our Discord](https://discord.gg/pipecat)
 
-➡️ [Reach us on Twitter](https://x.com/pipecat_ai)
+➡️ [Reach us on X](https://x.com/pipecat_ai)
