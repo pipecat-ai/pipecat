@@ -8,7 +8,7 @@ import asyncio
 
 from typing import AsyncIterable, Iterable
 
-from pipecat.frames.frames import CancelFrame, EndFrame, ErrorFrame, Frame, StartFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, ErrorFrame, Frame, StartFrame, StopTaskFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -74,7 +74,9 @@ class PipelineTask:
             frame = await self._task_queue.get()
             await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
             self._task_queue.task_done()
-            running = not (isinstance(frame, CancelFrame) or isinstance(frame, EndFrame))
+            running = not (isinstance(frame, StopTaskFrame) or
+                           isinstance(frame, CancelFrame) or
+                           isinstance(frame, EndFrame))
         # We just enqueue None to terminate the task.
         await self._up_queue.put(None)
 

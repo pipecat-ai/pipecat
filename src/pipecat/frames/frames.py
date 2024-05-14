@@ -205,6 +205,17 @@ class ErrorFrame(SystemFrame):
     def __str__(self):
         return f"{self.name}(error: {self.error})"
 
+
+@dataclass
+class StopTaskFrame(SystemFrame):
+    """Indicates that a pipeline task should be stopped. This should inform the
+    pipeline processors that they should stop pushing frames but that they
+    should be kept in a running state.
+
+    """
+    pass
+
+
 #
 # Control frames
 #
