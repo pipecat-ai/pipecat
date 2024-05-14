@@ -6,7 +6,9 @@
 
 import aiohttp
 
-from pipecat.frames.frames import AudioRawFrame, TTSStartedFrame, TTSStoppedFrame
+from typing import AsyncGenerator
+
+from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, TTSStartedFrame, TTSStoppedFrame
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -29,7 +31,7 @@ class ElevenLabsTTSService(TTSService):
         self._aiohttp_session = aiohttp_session
         self._model = model
 
-    async def run_tts(self, text: str):
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Transcribing text: {text}")
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}/stream"
@@ -48,11 +50,12 @@ class ElevenLabsTTSService(TTSService):
         async with self._aiohttp_session.post(url, json=payload, headers=headers, params=querystring) as r:
             if r.status != 200:
                 logger.error(f"Audio fetch status code: {r.status}, error: {r.text}")
+                yield ErrorFrame(f"Audio fetch status code: {r.status}, error: {r.text}")
                 return
 
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
             async for chunk in r.content:
                 if len(chunk) > 0:
                     frame = AudioRawFrame(chunk, 16000, 1)
-                    await self.push_frame(frame)
-            await self.push_frame(TTSStoppedFrame())
+                    yield frame
+            yield TTSStoppedFrame()

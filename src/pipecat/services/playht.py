@@ -7,7 +7,9 @@
 import io
 import struct
 
-from pipecat.frames.frames import AudioRawFrame
+from typing import AsyncGenerator
+
+from pipecat.frames.frames import AudioRawFrame, Frame
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -44,7 +46,7 @@ class PlayHTAIService(TTSService):
     def __del__(self):
         self._client.close()
 
-    async def run_tts(self, text: str):
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         b = bytearray()
         in_header = True
         for chunk in self._client.tts(text, self._options):
@@ -69,4 +71,4 @@ class PlayHTAIService(TTSService):
             else:
                 if len(chunk):
                     frame = AudioRawFrame(chunk, 16000, 1)
-                    await self.push_frame(frame)
+                    yield frame

@@ -6,10 +6,12 @@
 
 import asyncio
 
-from pipecat.frames.frames import TextFrame, VisionImageRawFrame
-from pipecat.services.ai_services import VisionService
-
 from PIL import Image
+
+from typing import AsyncGenerator
+
+from pipecat.frames.frames import ErrorFrame, Frame, TextFrame, VisionImageRawFrame
+from pipecat.services.ai_services import VisionService
 
 from loguru import logger
 
@@ -67,9 +69,10 @@ class MoondreamService(VisionService):
 
         logger.debug("Loaded Moondream model")
 
-    async def run_vision(self, frame: VisionImageRawFrame):
+    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
         if not self._model:
             logger.error("Moondream model not available")
+            yield ErrorFrame("Moondream model not available")
             return
 
         logger.debug(f"Analyzing image: {frame}")
@@ -85,4 +88,4 @@ class MoondreamService(VisionService):
 
         description = await asyncio.to_thread(get_image_description, frame)
 
-        await self.push_frame(TextFrame(text=description))
+        yield TextFrame(text=description)
