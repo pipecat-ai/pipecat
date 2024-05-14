@@ -35,7 +35,7 @@ class BaseOutputTransport(FrameProcessor):
 
         self._params = params
 
-        self._running = True
+        self._running = False
 
         # These are the images that we should send to the camera at our desired
         # framerate.
@@ -45,7 +45,6 @@ class BaseOutputTransport(FrameProcessor):
         if self._params.camera_out_enabled:
             self._camera_out_queue = queue.Queue()
             self._camera_out_thread = threading.Thread(target=self._camera_out_thread_handler)
-            self._camera_out_thread.start()
 
         self._sink_queue = queue.Queue()
         self._sink_thread = threading.Thread(target=self._sink_thread_handler)
@@ -53,6 +52,14 @@ class BaseOutputTransport(FrameProcessor):
         self._stopped_event = asyncio.Event()
 
     async def start(self):
+        if self._running:
+            return
+
+        self._running = True
+
+        if self._params.camera_out_enabled:
+            self._camera_out_thread.start()
+
         self._sink_thread.start()
 
     async def stop(self):
