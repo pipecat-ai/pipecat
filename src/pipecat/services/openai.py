@@ -8,11 +8,13 @@ import io
 import json
 import time
 import aiohttp
+
 from PIL import Image
 
-from typing import List, Literal
+from typing import AsyncGenerator, List, Literal
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     LLMMessagesFrame,
     LLMResponseEndFrame,
@@ -174,7 +176,7 @@ class OpenAIImageGenService(ImageGenService):
         self._client = AsyncOpenAI(api_key=api_key)
         self._aiohttp_session = aiohttp_session
 
-    async def run_image_gen(self, prompt: str):
+    async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating image from prompt: {prompt}")
 
         image = await self._client.images.generate(
@@ -187,11 +189,13 @@ class OpenAIImageGenService(ImageGenService):
         image_url = image.data[0].url
 
         if not image_url:
-            logger.error(f"no image provided in response: {image}")
+            logger.error(f"No image provided in response: {image}")
+            yield ErrorFrame("Image generation failed")
+            return
 
         # Load the image from the url
         async with self._aiohttp_session.get(image_url) as response:
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
             frame = URLImageRawFrame(image_url, image.tobytes(), image.size, image.format)
-            await self.push_frame(frame)
+            yield frame

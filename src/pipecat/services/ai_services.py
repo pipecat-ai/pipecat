@@ -10,11 +10,12 @@ import math
 import wave
 
 from abc import abstractmethod
-from typing import BinaryIO
+from typing import AsyncGenerator, BinaryIO
 
 from pipecat.frames.frames import (
     AudioRawFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     TextFrame,
     VisionImageRawFrame,
@@ -25,6 +26,13 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 class AIService(FrameProcessor):
     def __init__(self):
         super().__init__()
+
+    async def process_generator(self, generator: AsyncGenerator[Frame, None]):
+        async for f in generator:
+            if isinstance(f, ErrorFrame):
+                await self.push_error(f)
+            else:
+                await self.push_frame(f)
 
 
 class LLMService(AIService):
@@ -42,7 +50,7 @@ class TTSService(AIService):
 
     # Converts the text to audio.
     @abstractmethod
-    async def run_tts(self, text: str):
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         pass
 
     async def say(self, text: str):
@@ -59,14 +67,14 @@ class TTSService(AIService):
                 self._current_sentence = ""
 
         if text:
-            await self.run_tts(text)
+            await self.process_generator(self.run_tts(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)
         elif isinstance(frame, EndFrame):
             if self._current_sentence:
-                await self.run_tts(self._current_sentence)
+                await self.process_generator(self.run_tts(self._current_sentence))
             await self.push_frame(frame)
         else:
             await self.push_frame(frame, direction)
@@ -89,7 +97,7 @@ class STTService(AIService):
         (self._content, self._wave) = self._new_wave()
 
     @abstractmethod
-    async def run_stt(self, audio: BinaryIO):
+    async def run_stt(self, audio: BinaryIO) -> AsyncGenerator[Frame, None]:
         """Returns transcript as a string"""
         pass
 
@@ -130,7 +138,7 @@ class STTService(AIService):
             self._current_silence_frames = 0
             self._wave.close()
             self._content.seek(0)
-            await self.run_stt(self._content)
+            await self.process_generator(self.run_stt(self._content))
             (self._content, self._wave) = self._new_wave()
         # If we get this far, this is a frame of silence
         self._current_silence_frames += 1
@@ -143,12 +151,12 @@ class ImageGenService(AIService):
 
     # Renders the image. Returns an Image object.
     @abstractmethod
-    async def run_image_gen(self, prompt: str):
+    async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
-            await self.run_image_gen(frame.text)
+            await self.process_generator(self.run_image_gen(frame.text))
         else:
             await self.push_frame(frame, direction)
 
@@ -161,11 +169,11 @@ class VisionService(AIService):
         self._describe_text = None
 
     @abstractmethod
-    async def run_vision(self, frame: VisionImageRawFrame):
+    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, VisionImageRawFrame):
-            await self.run_vision(frame)
+            await self.process_generator(self.run_vision(frame))
         else:
             await self.push_frame(frame, direction)
