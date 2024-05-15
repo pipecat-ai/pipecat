@@ -35,8 +35,8 @@ except ModuleNotFoundError as e:
 
 
 class AzureTTSService(TTSService):
-    def __init__(self, *, api_key, region, voice="en-US-SaraNeural"):
-        super().__init__()
+    def __init__(self, *, api_key: str, region: str, voice="en-US-SaraNeural", **kwargs):
+        super().__init__(**kwargs)
 
         self.speech_config = SpeechConfig(subscription=api_key, region=region)
         self.speech_synthesizer = SpeechSynthesizer(

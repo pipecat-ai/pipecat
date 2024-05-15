@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import aiohttp
+
 from typing import AsyncGenerator
 
 from pipecat.frames.frames import AudioRawFrame, Frame
@@ -17,10 +19,11 @@ class DeepgramTTSService(TTSService):
     def __init__(
             self,
             *,
-            aiohttp_session,
-            api_key,
-            voice="alpha-asteria-en-v2"):
-        super().__init__()
+            aiohttp_session: aiohttp.ClientSession,
+            api_key: str,
+            voice: str = "alpha-asteria-en-v2",
+            **kwargs):
+        super().__init__(**kwargs)
 
         self._voice = voice
         self._api_key = api_key
