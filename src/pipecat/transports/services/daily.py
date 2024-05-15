@@ -104,6 +104,7 @@ class DailyCallbacks(BaseModel):
     on_participant_joined: Callable[[Mapping[str, Any]], None]
     on_participant_left: Callable[[Mapping[str, Any], str], None]
     on_first_participant_joined: Callable[[Mapping[str, Any]], None]
+    on_app_message: Callable[[Any, str], None]
     on_error: Callable[[str], None]
 
 
@@ -400,6 +401,10 @@ class DailyTransportClient(EventHandler):
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
         logger.debug("Transcription stopped")
 
+    def on_app_message(self, message: Any, sender: str):
+        self._callbacks.on_app_message(message, sender)
+
+    #
     # Daily (CallClient callbacks)
     #
 
@@ -467,6 +472,15 @@ class DailyInputTransport(BaseInputTransport):
             self.request_participant_image(frame.user_id)
 
         await super().process_frame(frame, direction)
+
+    #
+    # App Message
+    #
+
+    def push_app_message(self, message: Any, sender: str):
+        frame = DailyTransportMessageFrame(message=message, participant_id=sender)
+        future = asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+        future.result()
 
     #
     # Camera in
@@ -576,6 +590,7 @@ class DailyTransport(BaseTransport):
             on_first_participant_joined=self._on_first_participant_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
+            on_app_message=self._on_app_message,
             on_error=self._on_error,
         )
         self._params = params
@@ -694,6 +709,10 @@ class DailyTransport(BaseTransport):
     def on_first_participant_joined(self, participant):
         pass
 
+    def on_app_message(self, message: Any, sender: str):
+        if self._input:
+            self._input.push_app_message(message, sender)
+
     def event_handler(self, event_name: str):
         def decorator(handler):
             self._add_event_handler(event_name, handler)
@@ -738,17 +757,3 @@ class DailyTransport(BaseTransport):
 
     #     def start_recording(self):
     #         self.client.start_recording()
-
-    #     def on_error(self, error):
-    #         self._logger.error(f"on_error: {error}")
-
-    #     def on_participant_left(self, participant, reason):
-    #         if len(self.client.participants()) < self._min_others_count + 1:
-    #             self._stop_threads.set()
-
-    #     def on_app_message(self, message: Any, sender: str):
-    #         if self._loop:
-    #             frame = ReceivedAppMessageFrame(message, sender)
-    #             asyncio.run_coroutine_threadsafe(
-    #                 self.receive_queue.put(frame), self._loop
-    #             )
