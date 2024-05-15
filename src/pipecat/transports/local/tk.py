@@ -48,6 +48,14 @@ class TkInputTransport(BaseInputTransport):
     def read_raw_audio_frames(self, frame_count: int) -> bytes:
         return self._in_stream.read(frame_count, exception_on_overflow=False)
 
+    async def start(self):
+        await super().start()
+        self._in_stream.start_stream()
+
+    async def stop(self):
+        await super().stop()
+        self._in_stream.stop_stream()
+
     async def cleanup(self):
         # This is not very pretty (taken from PyAudio docs).
         while self._in_stream.is_active():
@@ -79,7 +87,17 @@ class TkOutputTransport(BaseOutputTransport):
         self._out_stream.write(frames)
 
     def write_frame_to_camera(self, frame: ImageRawFrame):
-        asyncio.run_coroutine_threadsafe(self._write_frame_to_tk(frame), self.get_event_loop())
+        future = asyncio.run_coroutine_threadsafe(
+            self._write_frame_to_tk(frame), self.get_event_loop())
+        future.result()
+
+    async def start(self):
+        await super().start()
+        self._out_stream.start_stream()
+
+    async def stop(self):
+        await super().stop()
+        self._out_stream.stop_stream()
 
     async def cleanup(self):
         # This is not very pretty (taken from PyAudio docs).

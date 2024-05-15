@@ -53,6 +53,8 @@ class PipelineTask:
 
     async def run(self):
         await asyncio.gather(self._process_task_queue(), self._process_up_queue())
+        await self._source.cleanup()
+        await self._pipeline.cleanup()
 
     async def queue_frame(self, frame: Frame):
         await self._task_queue.put(frame)
