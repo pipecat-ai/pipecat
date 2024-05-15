@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `MoondreamService` argument `model_id` is now `model`.
+
 - `VADAnalyzer` arguments have been renamed for more clarity.
 
 ## [0.0.12] - 2024-05-14

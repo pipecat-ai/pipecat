@@ -46,7 +46,7 @@ def detect_device():
 class MoondreamService(VisionService):
     def __init__(
         self,
-        model_id="vikhyatk/moondream2",
+        model="vikhyatk/moondream2",
         revision="2024-04-02",
         use_cpu=False
     ):
@@ -58,12 +58,12 @@ class MoondreamService(VisionService):
             device = torch.device("cpu")
             dtype = torch.float32
 
-        self._tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
+        self._tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
 
         logger.debug("Loading Moondream model...")
 
         self._model = AutoModelForCausalLM.from_pretrained(
-            model_id, trust_remote_code=True, revision=revision
+            model, trust_remote_code=True, revision=revision
         ).to(device=device, dtype=dtype)
         self._model.eval()
 
