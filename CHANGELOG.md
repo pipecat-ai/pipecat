@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `DailyTransport` that would not allow the processor to
+  shutdown if no participant ever joined the room.
+
 - Fixed transport start and stop. In some situation processors would halt or not
   shutdown properly.
 
