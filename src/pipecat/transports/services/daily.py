@@ -421,13 +421,13 @@ class DailyInputTransport(BaseInputTransport):
         await self._session.join()
 
     async def stop(self):
-        await super().stop()
         await self._session.leave()
+        await super().stop()
 
     async def cleanup(self):
-        await super().cleanup()
         self._camera_in_thread.join()
         await self._session.cleanup()
+        await super().cleanup()
 
     def vad_analyze(self, audio_frames: bytes) -> VADState:
         return self._session.vad_analyze(audio_frames)
@@ -522,12 +522,12 @@ class DailyOutputTransport(BaseOutputTransport):
         await self._session.join()
 
     async def stop(self):
-        await super().stop()
         await self._session.leave()
+        await super().stop()
 
     async def cleanup(self):
-        await super().cleanup()
         await self._session.cleanup()
+        await super().cleanup()
 
     def write_raw_audio_frames(self, frames: bytes):
         self._session.write_raw_audio_frames(frames)
