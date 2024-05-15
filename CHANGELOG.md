@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Images are now resized to the size of the output camera.
+
 - Fixed an issue in `DailyTransport` that would not allow the processor to
   shutdown if no participant ever joined the room.
 
