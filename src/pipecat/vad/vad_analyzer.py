@@ -19,22 +19,22 @@ class VADAnalyzer:
 
     def __init__(
             self,
-            sample_rate,
-            num_channels,
-            vad_confidence=0.5,
-            vad_start_s=0.2,
-            vad_stop_s=0.8):
+            sample_rate: int,
+            num_channels: int,
+            vad_confidence: float = 0.5,
+            vad_start_secs: float = 0.2,
+            vad_stop_secs: float = 0.8):
         self._sample_rate = sample_rate
         self._vad_confidence = vad_confidence
-        self._vad_start_s = vad_start_s
-        self._vad_stop_s = vad_stop_s
+        self._vad_start_secs = vad_start_secs
+        self._vad_stop_secs = vad_stop_secs
         self._vad_frames = self.num_frames_required()
         self._vad_frames_num_bytes = self._vad_frames * num_channels * 2
 
-        vad_frame_s = self._vad_frames / self._sample_rate
+        vad_frames_per_sec = self._vad_frames / self._sample_rate
 
-        self._vad_start_frames = round(self._vad_start_s / vad_frame_s)
-        self._vad_stop_frames = round(self._vad_stop_s / vad_frame_s)
+        self._vad_start_frames = round(self._vad_start_secs / vad_frames_per_sec)
+        self._vad_stop_frames = round(self._vad_stop_secs / vad_frames_per_sec)
         self._vad_starting_count = 0
         self._vad_stopping_count = 0
         self._vad_state: VADState = VADState.QUIET
