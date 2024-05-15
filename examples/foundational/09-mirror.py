@@ -27,8 +27,8 @@ async def main(room_url, token):
     transport = DailyTransport(
         room_url, token, "Test",
         DailyParams(
-            #            audio_in_enabled=True,
-            #            audio_out_enabled=True,
+            audio_in_enabled=True,
+            audio_out_enabled=True,
             camera_out_enabled=True,
             camera_out_width=1280,
             camera_out_height=720
