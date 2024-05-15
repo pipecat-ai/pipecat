@@ -17,14 +17,14 @@ from loguru import logger
 class ElevenLabsTTSService(TTSService):
 
     def __init__(
-        self,
-        *,
-        aiohttp_session: aiohttp.ClientSession,
-        api_key: str,
-        voice_id: str,
-        model: str = "eleven_turbo_v2",
-    ):
-        super().__init__()
+            self,
+            *,
+            aiohttp_session: aiohttp.ClientSession,
+            api_key: str,
+            voice_id: str,
+            model: str = "eleven_turbo_v2",
+            **kwargs):
+        super().__init__(**kwargs)
 
         self._api_key = api_key
         self._voice_id = voice_id

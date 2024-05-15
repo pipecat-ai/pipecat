@@ -27,8 +27,8 @@ except ModuleNotFoundError as e:
 
 class PlayHTAIService(TTSService):
 
-    def __init__(self, *, api_key, user_id, voice_url):
-        super().__init__()
+    def __init__(self, *, api_key: str, user_id: str, voice_url: str, **kwargs):
+        super().__init__(**kwargs)
 
         self._user_id = user_id
         self._speech_key = api_key
