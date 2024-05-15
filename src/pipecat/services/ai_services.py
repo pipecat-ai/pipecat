@@ -10,10 +10,11 @@ import math
 import wave
 
 from abc import abstractmethod
-from typing import AsyncGenerator, BinaryIO
+from typing import AsyncGenerator
 
 from pipecat.frames.frames import (
     AudioRawFrame,
+    CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -84,64 +85,80 @@ class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
     def __init__(self,
-                 min_rms: int = 400,
-                 max_silence_frames: int = 3,
+                 min_rms: int = 75,
+                 max_silence_secs: float = 0.3,
+                 max_buffer_secs: float = 1.5,
                  sample_rate: int = 16000,
                  num_channels: int = 1):
         super().__init__()
         self._min_rms = min_rms
-        self._max_silence_frames = max_silence_frames
+        self._max_silence_secs = max_silence_secs
+        self._max_buffer_secs = max_buffer_secs
         self._sample_rate = sample_rate
         self._num_channels = num_channels
-        self._current_silence_frames = 0
         (self._content, self._wave) = self._new_wave()
+        self._silence_num_frames = 0
+        # Exponential smoothing
+        self._smoothing_factor = 0.08
+        self._prev_rms = 1 - self._smoothing_factor
 
     @abstractmethod
-    async def run_stt(self, audio: BinaryIO) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Returns transcript as a string"""
         pass
 
     def _new_wave(self):
-        content = io.BufferedRandom(io.BytesIO())
+        content = io.BytesIO()
         ww = wave.open(content, "wb")
         ww.setsampwidth(2)
         ww.setnchannels(self._num_channels)
         ww.setframerate(self._sample_rate)
         return (content, ww)
 
-    def _get_volume(self, audio: bytes) -> float:
+    def _exp_smoothing(self, value: float, prev_value: float, factor: float) -> float:
+        return prev_value + factor * (value - prev_value)
+
+    def _get_smoothed_volume(self, audio: bytes, prev_rms: float, factor: float) -> float:
         # https://docs.python.org/3/library/array.html
         audio_array = array.array('h', audio)
         squares = [sample**2 for sample in audio_array]
         mean = sum(squares) / len(audio_array)
         rms = math.sqrt(mean)
-        return rms
+        return self._exp_smoothing(rms, prev_rms, factor)
+
+    async def _append_audio(self, frame: AudioRawFrame):
+        # Try to filter out empty background noise
+        # (Very rudimentary approach, can be improved)
+        rms = self._get_smoothed_volume(frame.audio, self._prev_rms, self._smoothing_factor)
+        if rms >= self._min_rms:
+            # If volume is high enough, write new data to wave file
+            self._wave.writeframes(frame.audio)
+            self._silence_num_frames = 0
+        else:
+            self._silence_num_frames += frame.num_frames
+        self._prev_rms = rms
+
+        # If buffer is not empty and we have enough data or there's been a long
+        # silence, transcribe the audio gathered so far.
+        silence_secs = self._silence_num_frames / self._sample_rate
+        buffer_secs = self._wave.getnframes() / self._sample_rate
+        if self._content.tell() > 0 and (
+                buffer_secs > self._max_buffer_secs or silence_secs > self._max_silence_secs):
+            self._silence_num_frames = 0
+            self._wave.close()
+            self._content.seek(0)
+            await self.process_generator(self.run_stt(self._content.read()))
+            (self._content, self._wave) = self._new_wave()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes a frame of audio data, either buffering or transcribing it."""
-        if not isinstance(frame, AudioRawFrame):
-            await self.push_frame(frame, direction)
-            return
-
-        audio = frame.audio
-
-        # Try to filter out empty background noise
-        # (Very rudimentary approach, can be improved)
-        rms = self._get_volume(audio)
-        if rms >= self._min_rms:
-            # If volume is high enough, write new data to wave file
-            self._wave.writeframes(audio)
-
-        # If buffer is not empty and we detect a 3-frame pause in speech,
-        # transcribe the audio gathered so far.
-        if self._content.tell() > 0 and self._current_silence_frames > self._max_silence_frames:
-            self._current_silence_frames = 0
+        if isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
             self._wave.close()
-            self._content.seek(0)
-            await self.process_generator(self.run_stt(self._content))
-            (self._content, self._wave) = self._new_wave()
-        # If we get this far, this is a frame of silence
-        self._current_silence_frames += 1
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, AudioRawFrame):
+            await self._append_audio(frame)
+        else:
+            await self.push_frame(frame, direction)
 
 
 class ImageGenService(AIService):
@@ -150,7 +167,7 @@ class ImageGenService(AIService):
         super().__init__()
 
     # Renders the image. Returns an Image object.
-    @abstractmethod
+    @ abstractmethod
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         pass
 
@@ -168,7 +185,7 @@ class VisionService(AIService):
         super().__init__()
         self._describe_text = None
 
-    @abstractmethod
+    @ abstractmethod
     async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
         pass
 
