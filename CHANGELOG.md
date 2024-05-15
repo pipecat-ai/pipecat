@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `DailyInputTransport` and `DailyOutputTransport` that
+  could cause some threads to not start properly.
+
 - Fixed `STTService`. Add `max_silence_secs` and `max_buffer_secs` to handle
   better what's being passed to the STT service. Also add exponential smoothing
   to the RMS.
