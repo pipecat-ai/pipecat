@@ -182,7 +182,14 @@ class DailyTransportClient(EventHandler):
         self._client.send_app_message(frame.message, frame.participant_id)
 
     def read_raw_audio_frames(self, frame_count: int) -> bytes:
-        return self._speaker.read_frames(frame_count)
+        if self._other_participant_has_joined:
+            return self._speaker.read_frames(frame_count)
+        else:
+            # If no one has ever joined the meeting `read_frames()` would block,
+            # instead we just wait a bit. daily-python should probably return
+            # silence instead.
+            time.sleep(0.01)
+            return b''
 
     def write_raw_audio_frames(self, frames: bytes):
         self._mic.write_frames(frames)
