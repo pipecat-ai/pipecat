@@ -165,7 +165,7 @@ class DailySession(EventHandler):
                 sample_rate=self._params.audio_in_sample_rate,
                 num_channels=self._params.audio_in_channels)
 
-    @ property
+    @property
     def participant_id(self) -> str:
         return self._participant_id
 
@@ -416,23 +416,18 @@ class DailyInputTransport(BaseInputTransport):
         self._camera_in_thread = threading.Thread(target=self._camera_in_thread_handler)
 
     async def start(self):
-        if self._running:
-            return
-
+        await super().start()
         self._camera_in_thread.start()
         await self._session.join()
-        await super().start()
 
     async def stop(self):
-        await self._session.leave()
         await super().stop()
+        await self._session.leave()
 
     async def cleanup(self):
-        self._camera_in_thread.join()
-
-        await self._session.cleanup()
-
         await super().cleanup()
+        self._camera_in_thread.join()
+        await self._session.cleanup()
 
     def vad_analyze(self, audio_frames: bytes) -> VADState:
         return self._session.vad_analyze(audio_frames)
@@ -523,19 +518,16 @@ class DailyOutputTransport(BaseOutputTransport):
         self._session = session
 
     async def start(self):
-        if self._running:
-            return
-
-        await self._session.join()
         await super().start()
+        await self._session.join()
 
     async def stop(self):
-        await self._session.leave()
         await super().stop()
+        await self._session.leave()
 
     async def cleanup(self):
-        await self._session.cleanup()
         await super().cleanup()
+        await self._session.cleanup()
 
     def write_raw_audio_frames(self, frames: bytes):
         self._session.write_raw_audio_frames(frames)
