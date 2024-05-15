@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `VADAnalyzer` arguments have been renamed for more clarity.
 
+### Fixed
+
+- Fixed `STTService`. Add `max_silence_secs` and `max_buffer_secs` to handle
+  better what's being passed to the STT service. Also add exponential smoothing
+  to the RMS.
+
+- Fixed `WhisperSTTService`. Add `no_speech_prob` to avoid garbage output text.
+
 ## [0.0.12] - 2024-05-14
 
 ### Added

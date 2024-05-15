@@ -10,9 +10,11 @@ import asyncio
 import time
 
 from enum import Enum
-from typing import BinaryIO
+from typing_extensions import AsyncGenerator
 
-from pipecat.frames.frames import TranscriptionFrame
+import numpy as np
+
+from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.ai_services import STTService
 
 from loguru import logger
@@ -39,14 +41,18 @@ class Model(Enum):
 class WhisperSTTService(STTService):
     """Class to transcribe audio with a locally-downloaded Whisper model"""
 
-    def __init__(self, model_name: Model = Model.DISTIL_MEDIUM_EN,
+    def __init__(self,
+                 model: Model = Model.DISTIL_MEDIUM_EN,
                  device: str = "auto",
-                 compute_type: str = "default"):
+                 compute_type: str = "default",
+                 no_speech_prob: float = 0.1,
+                 **kwargs):
 
-        super().__init__()
+        super().__init__(**kwargs)
         self._device: str = device
         self._compute_type = compute_type
-        self._model_name: Model = model_name
+        self._model_name: Model = model
+        self._no_speech_prob = no_speech_prob
         self._model: WhisperModel | None = None
         self._load()
 
@@ -60,15 +66,21 @@ class WhisperSTTService(STTService):
             compute_type=self._compute_type)
         logger.debug("Loaded Whisper model")
 
-    async def run_stt(self, audio: BinaryIO):
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribes given audio using Whisper"""
         if not self._model:
+            yield ErrorFrame("Whisper model not available")
             logger.error("Whisper model not available")
             return
 
-        segments, _ = await asyncio.to_thread(self._model.transcribe, audio)
+        # Divide by 32768 because we have signed 16-bit data.
+        audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
+
+        segments, _ = await asyncio.to_thread(self._model.transcribe, audio_float)
         text: str = ""
         for segment in segments:
-            text += f"{segment.text} "
+            if segment.no_speech_prob < self._no_speech_prob:
+                text += f"{segment.text} "
 
-        await self.push_frame(TranscriptionFrame(text, "", int(time.time_ns() / 1000000)))
+        if text:
+            yield TranscriptionFrame(text, "", int(time.time_ns() / 1000000))
