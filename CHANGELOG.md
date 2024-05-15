@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `DailyTransport` event `on_participant_left`.
+
 ### Fixed
 
-- Fixed `DailyInputTransport` and `DailyOutputTransport` stop/cleanup ordering.
+- Fixed transport start and stop. In some situation processors would halt or not
+  shutdown properly.
 
 ## [0.0.13] - 2024-05-14
 

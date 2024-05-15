@@ -7,7 +7,6 @@
 import asyncio
 import inspect
 import queue
-import threading
 import time
 import types
 
@@ -108,7 +107,7 @@ class DailyCallbacks(BaseModel):
     on_error: Callable[[str], None]
 
 
-class DailySession(EventHandler):
+class DailyTransportClient(EventHandler):
 
     _daily_initialized: bool = False
 
@@ -413,34 +412,44 @@ class DailySession(EventHandler):
 
 class DailyInputTransport(BaseInputTransport):
 
-    def __init__(self, session: DailySession, params: DailyParams):
+    def __init__(self, client: DailyTransportClient, params: DailyParams):
         super().__init__(params)
 
-        self._session = session
+        self._client = client
 
         self._video_renderers = {}
         self._camera_in_queue = queue.Queue()
-        self._camera_in_thread = threading.Thread(target=self._camera_in_thread_handler)
 
     async def start(self):
+        if self._running:
+            return
+        # Join the room.
+        await self._client.join()
+        # This will set _running=True
         await super().start()
-        self._camera_in_thread.start()
-        await self._session.join()
+        # Create camera in thread (runs if _running is true).
+        loop = asyncio.get_running_loop()
+        self._camera_in_thread = loop.run_in_executor(None, self._camera_in_thread_handler)
 
     async def stop(self):
-        await self._session.leave()
+        if not self._running:
+            return
+        # Leave the room.
+        await self._client.leave()
+        # This will set _running=False
         await super().stop()
+        # The thread will stop.
+        await self._camera_in_thread
 
     async def cleanup(self):
-        self._camera_in_thread.join()
-        await self._session.cleanup()
         await super().cleanup()
+        await self._client.cleanup()
 
     def vad_analyze(self, audio_frames: bytes) -> VADState:
-        return self._session.vad_analyze(audio_frames)
+        return self._client.vad_analyze(audio_frames)
 
     def read_raw_audio_frames(self, frame_count: int) -> bytes:
-        return self._session.read_raw_audio_frames(frame_count)
+        return self._client.read_raw_audio_frames(frame_count)
 
     #
     # FrameProcessor
@@ -468,7 +477,7 @@ class DailyInputTransport(BaseInputTransport):
             "render_next_frame": False,
         }
 
-        self._session.capture_participant_video(
+        self._client.capture_participant_video(
             participant_id,
             self._on_participant_video_frame,
             framerate,
@@ -519,28 +528,36 @@ class DailyInputTransport(BaseInputTransport):
 
 class DailyOutputTransport(BaseOutputTransport):
 
-    def __init__(self, session: DailySession, params: DailyParams):
+    def __init__(self, client: DailyTransportClient, params: DailyParams):
         super().__init__(params)
 
-        self._session = session
+        self._client = client
 
     async def start(self):
+        if self._running:
+            return
+        # This will set _running=True
         await super().start()
-        await self._session.join()
+        # Join the room.
+        await self._client.join()
 
     async def stop(self):
-        await self._session.leave()
+        if not self._running:
+            return
+        # This will set _running=False
         await super().stop()
+        # Leave the room.
+        await self._client.leave()
 
     async def cleanup(self):
-        await self._session.cleanup()
         await super().cleanup()
+        await self._client.cleanup()
 
     def write_raw_audio_frames(self, frames: bytes):
-        self._session.write_raw_audio_frames(frames)
+        self._client.write_raw_audio_frames(frames)
 
     def write_frame_to_camera(self, frame: ImageRawFrame):
-        self._session.write_frame_to_camera(frame)
+        self._client.write_frame_to_camera(frame)
 
 
 class DailyTransport(BaseTransport):
@@ -556,7 +573,7 @@ class DailyTransport(BaseTransport):
         )
         self._params = params
 
-        self._session = DailySession(room_url, token, bot_name, params, callbacks)
+        self._client = DailyTransportClient(room_url, token, bot_name, params, callbacks)
         self._input: DailyInputTransport | None = None
         self._output: DailyOutputTransport | None = None
         self._loop = asyncio.get_running_loop()
@@ -577,12 +594,12 @@ class DailyTransport(BaseTransport):
 
     def input(self) -> FrameProcessor:
         if not self._input:
-            self._input = DailyInputTransport(self._session, self._params)
+            self._input = DailyInputTransport(self._client, self._params)
         return self._input
 
     def output(self) -> FrameProcessor:
         if not self._output:
-            self._output = DailyOutputTransport(self._session, self._params)
+            self._output = DailyOutputTransport(self._client, self._params)
         return self._output
 
     #
@@ -591,7 +608,7 @@ class DailyTransport(BaseTransport):
 
     @property
     def participant_id(self) -> str:
-        return self._session.participant_id
+        return self._client.participant_id
 
     async def send_image(self, frame: ImageRawFrame | SpriteFrame):
         if self._output:
@@ -602,7 +619,7 @@ class DailyTransport(BaseTransport):
             await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
 
     def capture_participant_transcription(self, participant_id: str):
-        self._session.capture_participant_transcription(
+        self._client.capture_participant_transcription(
             participant_id,
             self._on_transcription_message
         )

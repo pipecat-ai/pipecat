@@ -8,7 +8,6 @@
 import asyncio
 import itertools
 import queue
-import threading
 import time
 
 from typing import List
@@ -41,13 +40,10 @@ class BaseOutputTransport(FrameProcessor):
         # framerate.
         self._camera_images = None
 
-        # Start media threads.
+        # Create media threads queues.
         if self._params.camera_out_enabled:
             self._camera_out_queue = queue.Queue()
-            self._camera_out_thread = threading.Thread(target=self._camera_out_thread_handler)
-
         self._sink_queue = queue.Queue()
-        self._sink_thread = threading.Thread(target=self._sink_thread_handler)
 
         self._stopped_event = asyncio.Event()
 
@@ -57,12 +53,17 @@ class BaseOutputTransport(FrameProcessor):
 
         self._running = True
 
-        if self._params.camera_out_enabled:
-            self._camera_out_thread.start()
+        loop = asyncio.get_running_loop()
 
-        self._sink_thread.start()
+        if self._params.camera_out_enabled:
+            self._camera_out_thread = loop.run_in_executor(None, self._camera_out_thread_handler)
+
+        self._sink_thread = loop.run_in_executor(None, self._sink_thread_handler)
 
     async def stop(self):
+        if not self._running:
+            return
+
         # This will exit all threads.
         self._running = False
 
@@ -82,26 +83,28 @@ class BaseOutputTransport(FrameProcessor):
     #
 
     async def cleanup(self):
+        # Wait on the threads to finish.
         if self._params.camera_out_enabled:
-            self._camera_out_thread.join()
+            await self._camera_out_thread
 
-        self._sink_thread.join()
+        await self._sink_thread
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
-            await self.push_frame(frame, direction)
             await self.start()
+            await self.push_frame(frame, direction)
         # EndFrame is managed in the queue handler.
         elif isinstance(frame, CancelFrame):
-            await self.push_frame(frame, direction)
             await self.stop()
+            await self.push_frame(frame, direction)
         elif self._frame_managed_by_sink(frame):
             self._sink_queue.put(frame)
         else:
             await self.push_frame(frame, direction)
 
         # If we are finishing, wait here until we have stopped, otherwise we might
-        # close things too early upstream.
+        # close things too early upstream. We need this event because we don't
+        # know when the internal threads will finish.
         if isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
             await self._stopped_event.wait()
 
@@ -110,7 +113,6 @@ class BaseOutputTransport(FrameProcessor):
                 or isinstance(frame, ImageRawFrame)
                 or isinstance(frame, SpriteFrame)
                 or isinstance(frame, TransportMessageFrame)
-                or isinstance(frame, CancelFrame)
                 or isinstance(frame, EndFrame))
 
     def _sink_thread_handler(self):
@@ -120,7 +122,7 @@ class BaseOutputTransport(FrameProcessor):
         while self._running:
             try:
                 frame = self._sink_queue.get(timeout=1)
-                if isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
+                if isinstance(frame, EndFrame):
                     # Send all remaining audio before stopping (multiple of 10ms of audio).
                     self._send_audio_truncated(buffer, bytes_size_10ms)
                     future = asyncio.run_coroutine_threadsafe(self.stop(), self.get_event_loop())

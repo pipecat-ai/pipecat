@@ -6,7 +6,6 @@
 
 import asyncio
 import queue
-import threading
 
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
@@ -35,10 +34,6 @@ class BaseInputTransport(FrameProcessor):
         # Start media threads.
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_queue = queue.Queue()
-            self._audio_in_thread = threading.Thread(target=self._audio_in_thread_handler)
-            self._audio_out_thread = threading.Thread(target=self._audio_out_thread_handler)
-
-        self._stopped_event = asyncio.Event()
 
     async def start(self):
         if self._running:
@@ -47,14 +42,21 @@ class BaseInputTransport(FrameProcessor):
         self._running = True
 
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_thread.start()
-            self._audio_out_thread.start()
+            loop = asyncio.get_running_loop()
+            self._audio_in_thread = loop.run_in_executor(None, self._audio_in_thread_handler)
+            self._audio_out_thread = loop.run_in_executor(None, self._audio_out_thread_handler)
 
     async def stop(self):
+        if not self._running:
+            return
+
         # This will exit all threads.
         self._running = False
 
-        self._stopped_event.set()
+        # Wait for the threads to finish.
+        if self._params.audio_in_enabled or self._params.vad_enabled:
+            await self._audio_in_thread
+            await self._audio_out_thread
 
     def vad_analyze(self, audio_frames: bytes) -> VADState:
         pass
@@ -67,24 +69,17 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def cleanup(self):
-        if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_thread.join()
-            self._audio_out_thread.join()
+        pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
-            await self.push_frame(frame, direction)
             await self.start()
-        elif isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
             await self.push_frame(frame, direction)
+        elif isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
             await self.stop()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
-
-        # If we are finishing, wait here until we have stopped, otherwise we
-        # might close things too early upstream.
-        if isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
-            await self._stopped_event.wait()
 
     #
     # Audio input
