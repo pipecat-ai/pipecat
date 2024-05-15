@@ -11,15 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `DailyTransport` event `on_participant_left`.
 
+- Added support for receiving `DailyTransportMessage`.
+
 ### Fixed
 
 - Images are now resized to the size of the output camera.
 
-- Fixed an issue in `DailyTransport` that would not allow the processor to
+- Fixed an issue in `DailyTransport` that would not allow the input processor to
   shutdown if no participant ever joined the room.
 
-- Fixed transport start and stop. In some situation processors would halt or not
-  shutdown properly.
+- Fixed base transports start and stop. In some situation processors would halt
+  or not shutdown properly.
 
 ## [0.0.13] - 2024-05-14
 
