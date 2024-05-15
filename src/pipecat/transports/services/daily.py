@@ -102,7 +102,7 @@ class DailyCallbacks(BaseModel):
     on_joined: Callable[[Mapping[str, Any]], None]
     on_left: Callable[[], None]
     on_participant_joined: Callable[[Mapping[str, Any]], None]
-    on_participant_left: Callable[[Mapping[str, Any]], None]
+    on_participant_left: Callable[[Mapping[str, Any], str], None]
     on_first_participant_joined: Callable[[Mapping[str, Any]], None]
     on_error: Callable[[str], None]
 
@@ -376,11 +376,11 @@ class DailyTransportClient(EventHandler):
 
         self._callbacks.on_participant_joined(participant)
 
-    def on_participant_leave(self, participant):
+    def on_participant_left(self, participant, reason):
         id = participant["id"]
         logger.info(f"Participant left {id}")
 
-        self._callbacks.on_participant_left(participant)
+        self._callbacks.on_participant_left(participant, reason)
 
     def on_transcription_message(self, message: Mapping[str, Any]):
         participant_id = ""
@@ -655,8 +655,8 @@ class DailyTransport(BaseTransport):
     def _on_participant_joined(self, participant):
         self.on_participant_joined(participant)
 
-    def _on_participant_left(self, participant):
-        self.on_participant_left(participant)
+    def _on_participant_left(self, participant, reason):
+        self.on_participant_left(participant, reason)
 
     def _on_first_participant_joined(self, participant):
         self.on_first_participant_joined(participant)
@@ -688,7 +688,7 @@ class DailyTransport(BaseTransport):
     def on_participant_joined(self, participant):
         pass
 
-    def on_participant_left(self, participant):
+    def on_participant_left(self, participant, reason):
         pass
 
     def on_first_participant_joined(self, participant):
