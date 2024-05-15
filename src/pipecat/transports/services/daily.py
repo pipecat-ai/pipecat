@@ -103,6 +103,7 @@ class DailyCallbacks(BaseModel):
     on_joined: Callable[[Mapping[str, Any]], None]
     on_left: Callable[[], None]
     on_participant_joined: Callable[[Mapping[str, Any]], None]
+    on_participant_left: Callable[[Mapping[str, Any]], None]
     on_first_participant_joined: Callable[[Mapping[str, Any]], None]
     on_error: Callable[[str], None]
 
@@ -369,6 +370,12 @@ class DailySession(EventHandler):
 
         self._callbacks.on_participant_joined(participant)
 
+    def on_participant_leave(self, participant):
+        id = participant["id"]
+        logger.info(f"Participant left {id}")
+
+        self._callbacks.on_participant_left(participant)
+
     def on_transcription_message(self, message: Mapping[str, Any]):
         participant_id = ""
         if "participantId" in message:
@@ -544,6 +551,7 @@ class DailyTransport(BaseTransport):
             on_left=self._on_left,
             on_first_participant_joined=self._on_first_participant_joined,
             on_participant_joined=self._on_participant_joined,
+            on_participant_left=self._on_participant_left,
             on_error=self._on_error,
         )
         self._params = params
@@ -560,6 +568,7 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
         self._register_event_handler("on_participant_joined")
+        self._register_event_handler("on_participant_left")
         self._register_event_handler("on_first_participant_joined")
 
     #
@@ -616,11 +625,14 @@ class DailyTransport(BaseTransport):
 
     def _on_error(self, error):
         # TODO(aleix): Report error to input/output transports. The one managing
-        # the session should report the error.
+        # the client should report the error.
         pass
 
     def _on_participant_joined(self, participant):
         self.on_participant_joined(participant)
+
+    def _on_participant_left(self, participant):
+        self.on_participant_left(participant)
 
     def _on_first_participant_joined(self, participant):
         self.on_first_participant_joined(participant)
@@ -650,6 +662,9 @@ class DailyTransport(BaseTransport):
         pass
 
     def on_participant_joined(self, participant):
+        pass
+
+    def on_participant_left(self, participant):
         pass
 
     def on_first_participant_joined(self, participant):
