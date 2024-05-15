@@ -7,9 +7,11 @@
 
 import asyncio
 import itertools
+from multiprocessing.context import _force_start_method
 import queue
 import time
 
+from PIL import Image
 from typing import List
 
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -149,15 +151,17 @@ class BaseOutputTransport(FrameProcessor):
     async def send_image(self, frame: ImageRawFrame | SpriteFrame):
         await self.process_frame(frame, FrameDirection.DOWNSTREAM)
 
-    def _draw_image(self, image: ImageRawFrame):
+    def _draw_image(self, frame: ImageRawFrame):
         desired_size = (self._params.camera_out_width, self._params.camera_out_height)
 
-        if image.size != desired_size:
+        if frame.size != desired_size:
+            image = Image.frombytes(frame.format, frame.size, frame.image)
+            resized_image = image.resize(desired_size)
             logger.warning(
-                f"{image} does not have the expected size {desired_size}, ignoring")
-            return
+                f"{frame} does not have the expected size {desired_size}, resizing")
+            frame = ImageRawFrame(resized_image.tobytes(), resized_image.size, resized_image.format)
 
-        self.write_frame_to_camera(image)
+        self.write_frame_to_camera(frame)
 
     def _set_camera_image(self, image: ImageRawFrame):
         if self._params.camera_out_is_live:

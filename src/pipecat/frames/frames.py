@@ -55,7 +55,7 @@ class ImageRawFrame(DataFrame):
     """
     image: bytes
     size: Tuple[int, int]
-    format: str
+    format: str | None
 
     def __str__(self):
         return f"{self.name}(size: {self.size}, format: {self.format})"
