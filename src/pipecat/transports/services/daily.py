@@ -590,7 +590,7 @@ class DailyTransport(BaseTransport):
             on_first_participant_joined=self._on_first_participant_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
-            on_app_message=self._on_app_message,
+            on_app_message=self.on_app_message,
             on_error=self._on_error,
         )
         self._params = params
