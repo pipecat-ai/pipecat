@@ -18,7 +18,6 @@ class PipelineRunner:
     def __init__(self, name: str | None = None, handle_sigint: bool = True):
         self.id: int = obj_id()
         self.name: str = name or f"{self.__class__.__name__}#{obj_count(self)}"
-        self._loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
 
         self._tasks = {}
         self._running = True
@@ -47,7 +46,8 @@ class PipelineRunner:
         return self._running
 
     def _setup_sigint(self):
-        self._loop.add_signal_handler(
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(
             signal.SIGINT,
             lambda *args: asyncio.create_task(self._sigint_handler())
         )
