@@ -229,13 +229,13 @@ class DailyTransportClient(EventHandler):
             client_settings={
                 "inputs": {
                     "camera": {
-                        "isEnabled": True,
+                        "isEnabled": self._params.camera_out_enabled,
                         "settings": {
                             "deviceId": "camera",
                         },
                     },
                     "microphone": {
-                        "isEnabled": True,
+                        "isEnabled": self._params.audio_out_enabled,
                         "settings": {
                             "deviceId": "mic",
                             "customConstraints": {
