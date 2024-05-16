@@ -35,6 +35,13 @@ class BaseInputTransport(FrameProcessor):
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_queue = queue.Queue()
 
+        # Start push frame task. This is the task that will push frames in
+        # order. So, a transport guarantees that all frames are pushed in the
+        # same task.
+        loop = self.get_event_loop()
+        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
+        self._push_queue = asyncio.Queue()
+
     async def start(self):
         if self._running:
             return
@@ -74,12 +81,30 @@ class BaseInputTransport(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
             await self.start()
-            await self.push_frame(frame, direction)
+            await self._internal_push_frame(frame, direction)
         elif isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
             await self.stop()
-            await self.push_frame(frame, direction)
+            await self._internal_push_frame(frame, direction)
         else:
-            await self.push_frame(frame, direction)
+            await self._internal_push_frame(frame, direction)
+
+    #
+    # Push frames task
+    #
+
+    async def _internal_push_frame(
+            self,
+            frame: Frame,
+            direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        await self._push_queue.put((frame, direction))
+
+    async def _push_frame_task_handler(self):
+        running = True
+        while running:
+            (frame, direction) = await self._push_queue.get()
+            if frame:
+                await self.push_frame(frame, direction)
+            running = frame is not None
 
     #
     # Audio input
@@ -95,7 +120,7 @@ class BaseInputTransport(FrameProcessor):
                 frame = UserStoppedSpeakingFrame()
             if frame:
                 future = asyncio.run_coroutine_threadsafe(
-                    self.push_frame(frame), self.get_event_loop())
+                    self._internal_push_frame(frame), self.get_event_loop())
                 future.result()
                 vad_state = new_vad_state
         return vad_state
@@ -133,7 +158,7 @@ class BaseInputTransport(FrameProcessor):
                 # Push audio downstream if passthrough.
                 if audio_passthrough:
                     future = asyncio.run_coroutine_threadsafe(
-                        self.push_frame(frame), self.get_event_loop())
+                        self._internal_push_frame(frame), self.get_event_loop())
                     future.result()
             except queue.Empty:
                 pass

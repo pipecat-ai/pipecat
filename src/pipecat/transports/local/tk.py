@@ -87,9 +87,7 @@ class TkOutputTransport(BaseOutputTransport):
         self._out_stream.write(frames)
 
     def write_frame_to_camera(self, frame: ImageRawFrame):
-        future = asyncio.run_coroutine_threadsafe(
-            self._write_frame_to_tk(frame), self.get_event_loop())
-        future.result()
+        self.get_event_loop().call_soon(self._write_frame_to_tk, frame)
 
     async def start(self):
         await super().start()
@@ -107,7 +105,7 @@ class TkOutputTransport(BaseOutputTransport):
 
         await super().cleanup()
 
-    async def _write_frame_to_tk(self, frame: ImageRawFrame):
+    def _write_frame_to_tk(self, frame: ImageRawFrame):
         width = frame.size[0]
         height = frame.size[1]
         data = f"P6 {width} {height} 255 ".encode() + frame.image
