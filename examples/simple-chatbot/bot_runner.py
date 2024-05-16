@@ -35,7 +35,7 @@ SERVE_STATIC = True
 STATIC_DIR = "../web-ui/dist"
 STATIC_ROUTE = "/static"
 STATIC_INDEX = "index.html"
-USE_OPEN_MIC = False  # Can the user freely talk, or do they need to wait their turn?
+USE_OPEN_MIC = True  # Can the user freely talk, or do they need to wait their turn?
 
 # ----------------- API ----------------- #
 
@@ -87,7 +87,7 @@ async def start_bot(request: Request) -> JSONResponse:
 
     if not room_url:
         try:
-            room_url, room_name = create_room()
+            room_url = create_room()
         except Exception:
             raise HTTPException(
                 status_code=500,
