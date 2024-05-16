@@ -23,7 +23,7 @@ export default function App() {
 
   const [state, setState] = useState<State>("idle");
   const [error, setError] = useState<string | null>(null);
-  //const [room, setRoom] = useState<string | null>(null);
+  const [config, setConfig] = useState<{ open_mic?: boolean }>({});
 
   async function start() {
     if (!daily) return;
@@ -45,6 +45,7 @@ export default function App() {
       });
 
       data = await res.json();
+      setConfig(data.config || {});
 
       if (!res.ok) {
         setError(data.detail);
@@ -85,7 +86,7 @@ export default function App() {
   }
 
   if (state === "connected") {
-    return <Session onLeave={() => leave()} />;
+    return <Session onLeave={() => leave()} openMic={config?.open_mic} />;
   }
 
   const status_text = {

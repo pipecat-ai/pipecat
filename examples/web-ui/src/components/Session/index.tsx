@@ -9,11 +9,21 @@ import UserMicBubble from "../UserMicBubble";
 
 import styles from "./styles.module.css";
 
-export const Session: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
+interface SessionProps {
+  onLeave: () => void;
+  openMic?: boolean;
+}
+
+export const Session: React.FC<SessionProps> = ({
+  onLeave,
+  openMic = false,
+}) => {
   const daily = useDaily();
   const [showDevices, setShowDevices] = useState(false);
   const modalRef = useRef<HTMLDialogElement>(null);
-  const [talkState, setTalkState] = useState<"user" | "assistant">("assistant");
+  const [talkState, setTalkState] = useState<"user" | "assistant" | "open">(
+    openMic ? "open" : "assistant"
+  );
 
   useAppMessage({
     onAppMessage: (e) => {
@@ -52,7 +62,7 @@ export const Session: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
 
       <div className={styles.agentContainer}>
         <Agent />
-        <UserMicBubble active={talkState === "user"} />
+        <UserMicBubble openMic={openMic} active={talkState !== "assistant"} />
         <DailyAudio />
       </div>
 

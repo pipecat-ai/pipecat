@@ -108,3 +108,12 @@
     background: var(--color-orange-400);
   }
 }
+
+.statusGreen {
+  color: var(--color-green-800);
+  background: var(--color-green-100);
+
+  > span {
+    background: var(--color-green-400);
+  }
+}

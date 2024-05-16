@@ -1,6 +1,5 @@
 from daily_helpers import create_room, get_token, check_room_url
 import os
-import sys
 import argparse
 import subprocess
 import atexit
@@ -129,7 +128,11 @@ async def start_bot(request: Request) -> JSONResponse:
      # Grab a token for the user to join with
     user_token = get_token(room_url)
 
-    return JSONResponse({"bot_id": proc.pid, "room_url": room_url, "token": user_token})
+    return JSONResponse({
+        "bot_id": proc.pid,
+        "room_url": room_url,
+        "token": user_token,
+        "config": {"open_mic": True}})
 
 
 # ----------------- Main ----------------- #

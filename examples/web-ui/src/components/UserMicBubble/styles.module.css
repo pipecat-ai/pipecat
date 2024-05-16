@@ -1,7 +1,3 @@
-.active::after {
-  opacity: 1;
-}
-
 .bubbleContainer {
   color: #ffffff;
   position: relative;
@@ -56,6 +52,16 @@
   }
 }
 
+.micIconOpen {
+  background-color: var(--color-gray-500);
+  background-image: radial-gradient(
+    var(--color-gray-500),
+    var(--color-gray-600)
+  );
+  border: 6px solid color-mix(in srgb, var(--color-gray-200), transparent 60%);
+  outline: 6px solid color-mix(in srgb, var(--color-gray-400), transparent 70%);
+}
+
 .micIconActive {
   background-color: var(--color-green-500);
   background-image: radial-gradient(
@@ -67,6 +73,7 @@
   animation: pulse 2s infinite ease-in-out;
 }
 
+.micIconOpen svg,
 .micIconActive svg {
   opacity: 1;
 }

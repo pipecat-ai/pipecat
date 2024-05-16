@@ -35,9 +35,10 @@ const AudioIndicatorBubble: React.FC = () => {
 
 interface Props {
   active: boolean;
+  openMic: boolean;
 }
 
-export default function UserMicBubble({ active }: Props) {
+export default function UserMicBubble({ active, openMic = false }: Props) {
   /*
   const [transcription, setTranscription] = useState<string[]>([]);
   useAppMessage({
@@ -56,13 +57,13 @@ export default function UserMicBubble({ active }: Props) {
     return () => clearTimeout(t);
   }, [active]);*/
 
+  const cx = openMic ? styles.micIconOpen : active && styles.micIconActive;
+
   return (
-    <div className={`${styles.bubbleContainer} ${active ? styles.active : ""}`}>
-      <div
-        className={`${styles.micIcon} ${active ? styles.micIconActive : ""}`}
-      >
-        {active ? <Mic size={42} /> : <MicOff size={42} />}
-        {active && <AudioIndicatorBubble />}
+    <div className={`${styles.bubbleContainer}`}>
+      <div className={`${styles.micIcon} ${cx}`}>
+        {!openMic && !active ? <MicOff size={42} /> : <Mic size={42} />}
+        {(openMic || active) && <AudioIndicatorBubble />}
       </div>
       <footer className={styles.transcript}></footer>
     </div>
