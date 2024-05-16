@@ -169,6 +169,8 @@ class BaseOutputTransport(FrameProcessor):
                     # Send any remaining audio
                     self._send_audio_truncated(buffer, bytes_size_10ms)
                     buffer = bytearray()
+
+                self._sink_queue.task_done()
             except queue.Empty:
                 pass
             except BaseException as e:
@@ -208,6 +210,7 @@ class BaseOutputTransport(FrameProcessor):
                 if self._params.camera_out_is_live:
                     image = self._camera_out_queue.get(timeout=1)
                     self._draw_image(image)
+                    self._camera_out_queue.task_done()
                 elif self._camera_images:
                     image = next(self._camera_images)
                     self._draw_image(image)

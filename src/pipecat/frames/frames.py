@@ -119,7 +119,7 @@ class TextFrame(DataFrame):
     text: str
 
     def __str__(self):
-        return f'{self.name}: "{self.text}"'
+        return f"{self.name}(text: {self.text})"
 
 
 @dataclass
@@ -132,7 +132,7 @@ class TranscriptionFrame(TextFrame):
     timestamp: str
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -143,7 +143,7 @@ class InterimTranscriptionFrame(TextFrame):
     timestamp: str
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
 
 
 @dataclass
