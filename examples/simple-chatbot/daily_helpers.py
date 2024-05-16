@@ -1,4 +1,5 @@
 
+from re import X
 import urllib.parse
 import os
 import time
@@ -9,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-daily_api_path = os.getenv("DAILY_API_URL") or "api.daily.co/v1"
+daily_api_path = os.getenv("DAILY_API_URL", "api.daily.co/v1")
 daily_api_key = os.getenv("DAILY_API_KEY")
 
 
@@ -48,6 +49,31 @@ def create_room() -> tuple[str, str]:
         raise Exception("Missing room URL or room name in response")
 
     return room_url, room_name
+
+
+def check_room_url(room_url: str) -> bool:
+    """
+    Checks if a room exists in Daily.
+    # See: https://docs.daily.co/reference/rest-api/rooms/get-room-config
+
+    Args:
+        room_name (str): The url of the room to check for
+
+    Returns:
+        bool: True if 200 OK, Exception otherwise.
+    """
+
+    room_name = get_name_from_url(room_url)
+
+    res: requests.Response = requests.get(
+        f"https://{daily_api_path}/rooms/{room_name}",
+        headers={"Authorization": f"Bearer {daily_api_key}"}
+    )
+
+    if res.status_code != 200:
+        raise Exception(f"Room not found: {room_name}")
+
+    return True
 
 
 def get_name_from_url(room_url: str) -> str:

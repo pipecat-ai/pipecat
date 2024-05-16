@@ -9,7 +9,7 @@ import UserMicBubble from "../UserMicBubble";
 
 import styles from "./styles.module.css";
 
-export const Session: React.FC = () => {
+export const Session: React.FC<{ onLeave: () => void }> = ({ onLeave }) => {
   const daily = useDaily();
   const [showDevices, setShowDevices] = useState(false);
   const modalRef = useRef<HTMLDialogElement>(null);
@@ -65,7 +65,7 @@ export const Session: React.FC = () => {
           >
             <Settings />
           </Button>
-          <Button>
+          <Button onClick={() => onLeave()}>
             <LogOut size={16} />
             End
           </Button>

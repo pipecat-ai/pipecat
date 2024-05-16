@@ -4,3 +4,4 @@ uvicorn
 requests
 python-dotenv
 loguru
+requests

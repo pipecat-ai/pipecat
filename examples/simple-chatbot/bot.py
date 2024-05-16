@@ -2,6 +2,7 @@ import asyncio
 import aiohttp
 import os
 import sys
+import argparse
 
 from PIL import Image
 
@@ -23,8 +24,6 @@ from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTranscriptionSettings, DailyTransport
 from pipecat.vad.silero import SileroVAD
 
-from runner import configure
-
 from loguru import logger
 
 from dotenv import load_dotenv
@@ -43,7 +42,8 @@ for i in range(1, 26):
     # Get the filename without the extension to use as the dictionary key
     # Open the image and convert it to bytes
     with Image.open(full_path) as img:
-        sprites.append(ImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
+        sprites.append(ImageRawFrame(image=img.tobytes(),
+                       size=img.size, format=img.format))
 
 flipped = sprites[::-1]
 sprites.extend(flipped)
@@ -156,5 +156,9 @@ async def main(room_url: str, token):
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url, token))
+    parser = argparse.ArgumentParser(description="Daily Storyteller Bot")
+    parser.add_argument("-u", type=str, help="Room URL")
+    parser.add_argument("-t", type=str, help="Token")
+    config = parser.parse_args()
+
+    asyncio.run(main(config.u, config.t))

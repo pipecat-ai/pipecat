@@ -37,14 +37,11 @@ export default function App() {
     let data;
 
     try {
-      const res = await fetch(`${serverUrl}/start_bot`, {
+      const res = await fetch(`${serverUrl}start_bot`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          room_url: import.meta.env.VITE_TRANSPORT_ROOM_URL || null,
-        }),
       });
 
       data = await res.json();
@@ -52,6 +49,7 @@ export default function App() {
       if (!res.ok) {
         setError(data.detail);
         setState("error");
+        return;
       }
     } catch (e) {
       setError(
@@ -65,7 +63,7 @@ export default function App() {
 
     await daily.join({
       url: data.room_url,
-      token: data.user_token,
+      token: data.token,
       videoSource: false,
       startAudioOff: true,
     });
@@ -73,10 +71,10 @@ export default function App() {
     setState("connected");
   }
 
-  /*async function leave() {
+  async function leave() {
     await daily?.leave();
-    setState("finished");
-  }*/
+    setState("idle");
+  }
 
   if (state === "error") {
     return (
@@ -87,7 +85,7 @@ export default function App() {
   }
 
   if (state === "connected") {
-    return <Session />;
+    return <Session onLeave={() => leave()} />;
   }
 
   const status_text = {
