@@ -187,7 +187,7 @@ class SystemFrame(Frame):
 @dataclass
 class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
-    pass
+    allow_interruptions: bool = False
 
 
 @dataclass

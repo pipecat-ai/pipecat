@@ -6,6 +6,7 @@
 
 import asyncio
 
+from pipecat.frames.frames import StartFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -37,8 +38,8 @@ class LocalAudioInputTransport(BaseInputTransport):
     def read_raw_audio_frames(self, frame_count: int) -> bytes:
         return self._in_stream.read(frame_count, exception_on_overflow=False)
 
-    async def start(self):
-        await super().start()
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
         self._in_stream.start_stream()
 
     async def stop(self):
@@ -68,8 +69,8 @@ class LocalAudioOutputTransport(BaseOutputTransport):
     def write_raw_audio_frames(self, frames: bytes):
         self._out_stream.write(frames)
 
-    async def start(self):
-        await super().start()
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
         self._out_stream.start_stream()
 
     async def stop(self):

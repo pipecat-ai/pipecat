@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     ImageRawFrame,
     InterimTranscriptionFrame,
     SpriteFrame,
+    StartFrame,
     TranscriptionFrame,
     TransportMessageFrame,
     UserImageRawFrame,
@@ -283,6 +284,7 @@ class DailyTransportClient(EventHandler):
                 error_msg = f"Error joining {self._room_url}: {error}"
                 logger.error(error_msg)
                 self._callbacks.on_error(error_msg)
+            self._sync_response["join"].task_done()
         except queue.Empty:
             error_msg = f"Time out joining {self._room_url}"
             logger.error(error_msg)
@@ -320,6 +322,7 @@ class DailyTransportClient(EventHandler):
                 error_msg = f"Error leaving {self._room_url}: {error}"
                 logger.error(error_msg)
                 self._callbacks.on_error(error_msg)
+            self._sync_response["leave"].task_done()
         except queue.Empty:
             error_msg = f"Time out leaving {self._room_url}"
             logger.error(error_msg)
@@ -432,13 +435,13 @@ class DailyInputTransport(BaseInputTransport):
         self._video_renderers = {}
         self._camera_in_queue = queue.Queue()
 
-    async def start(self):
+    async def start(self, frame: StartFrame):
         if self._running:
             return
         # Join the room.
         await self._client.join()
         # This will set _running=True
-        await super().start()
+        await super().start(frame)
         # Create camera in thread (runs if _running is true).
         loop = asyncio.get_running_loop()
         self._camera_in_thread = loop.run_in_executor(None, self._camera_in_thread_handler)
@@ -547,6 +550,7 @@ class DailyInputTransport(BaseInputTransport):
                 future = asyncio.run_coroutine_threadsafe(
                     self._internal_push_frame(frame), self.get_event_loop())
                 future.result()
+                self._camera_in_queue.task_done()
             except queue.Empty:
                 pass
             except BaseException as e:
@@ -560,11 +564,11 @@ class DailyOutputTransport(BaseOutputTransport):
 
         self._client = client
 
-    async def start(self):
+    async def start(self, frame: StartFrame):
         if self._running:
             return
         # This will set _running=True
-        await super().start()
+        await super().start(frame)
         # Join the room.
         await self._client.join()
 
