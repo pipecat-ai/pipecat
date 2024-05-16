@@ -594,7 +594,7 @@ class DailyTransport(BaseTransport):
             on_first_participant_joined=self._on_first_participant_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
-            on_app_message=self.on_app_message,
+            on_app_message=self._on_app_message,
             on_error=self._on_error,
         )
         self._params = params
@@ -680,6 +680,10 @@ class DailyTransport(BaseTransport):
     def _on_first_participant_joined(self, participant):
         self.on_first_participant_joined(participant)
 
+    def _on_app_message(self, message: Any, sender: str):
+        if self._input:
+            self._input.push_app_message(message, sender)
+
     def _on_transcription_message(self, participant_id, message):
         text = message["text"]
         timestamp = message["timestamp"]
@@ -710,10 +714,6 @@ class DailyTransport(BaseTransport):
 
     def on_first_participant_joined(self, participant):
         pass
-
-    def on_app_message(self, message: Any, sender: str):
-        if self._input:
-            self._input.push_app_message(message, sender)
 
     def event_handler(self, event_name: str):
         def decorator(handler):
