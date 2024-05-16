@@ -474,8 +474,12 @@ class DailyInputTransport(BaseInputTransport):
         await super().process_frame(frame, direction)
 
     #
-    # App Message
+    # Frames
     #
+
+    def push_transcription_frame(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
+        future = asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+        future.result()
 
     def push_app_message(self, message: Any, sender: str):
         frame = DailyTransportMessageFrame(message=message, participant_id=sender)
@@ -686,9 +690,7 @@ class DailyTransport(BaseTransport):
             frame = InterimTranscriptionFrame(text, participant_id, timestamp)
 
         if self._input:
-            future = asyncio.run_coroutine_threadsafe(
-                self._input.push_frame(frame), self._input.get_event_loop())
-            future.result()
+            self._input.push_transcription_frame(frame)
 
     #
     # Decorators (event handlers)

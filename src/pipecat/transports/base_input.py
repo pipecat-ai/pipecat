@@ -42,7 +42,7 @@ class BaseInputTransport(FrameProcessor):
         self._running = True
 
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            loop = asyncio.get_running_loop()
+            loop = self.get_event_loop()
             self._audio_in_thread = loop.run_in_executor(None, self._audio_in_thread_handler)
             self._audio_out_thread = loop.run_in_executor(None, self._audio_out_thread_handler)
 

@@ -55,7 +55,7 @@ class BaseOutputTransport(FrameProcessor):
 
         self._running = True
 
-        loop = asyncio.get_running_loop()
+        loop = self.get_event_loop()
 
         if self._params.camera_out_enabled:
             self._camera_out_thread = loop.run_in_executor(None, self._camera_out_thread_handler)
