@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `DailyTransport`: don't publish camera and audio tracks if not enabled.
 
+- Fixed an issue in `BaseInputTransport` that was causing frames pushed
+  downstream not pushed in the right order.
+
 ## [0.0.15] - 2024-05-15
 
 ### Fixed
