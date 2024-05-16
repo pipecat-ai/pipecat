@@ -1,0 +1,39 @@
+.deviceSelect {
+  display: flex;
+  flex-flow: column wrap;
+  width: 100%;
+  gap: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-flow: column wrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.label {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.selectContainer {
+  position: relative;
+  width: 100%;
+
+  > svg {
+    position: absolute;
+    size: 24px;
+    top: 0;
+    bottom: 0;
+    margin: auto 0;
+    left: 0.75rem;
+    color: var(--color-gray-400);
+  }
+}
+
+.deviceSelectField {
+  width: 100%;
+  padding-left: 2.875rem;
+  margin-top: auto;
+}
