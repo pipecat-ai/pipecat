@@ -185,6 +185,8 @@ class BaseInputTransport(FrameProcessor):
                     future = asyncio.run_coroutine_threadsafe(
                         self._internal_push_frame(frame), self.get_event_loop())
                     future.result()
+
+                self._audio_in_queue.task_done()
             except queue.Empty:
                 pass
             except BaseException as e:
