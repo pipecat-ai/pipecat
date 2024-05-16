@@ -89,6 +89,8 @@ class ResponseAggregator(FrameProcessor):
         if isinstance(frame, self._start_frame):
             self._seen_start_frame = True
             self._aggregating = True
+
+            await self.push_frame(frame, direction)
         elif isinstance(frame, self._end_frame):
             self._seen_end_frame = True
 
@@ -100,6 +102,8 @@ class ResponseAggregator(FrameProcessor):
             # Send the aggregation if we are not aggregating anymore (i.e. no
             # more interim results received).
             send_aggregation = not self._aggregating
+
+            await self.push_frame(frame, direction)
         elif isinstance(frame, self._accumulator_frame):
             if self._aggregating:
                 self._aggregation += f" {frame.text}"
@@ -124,6 +128,7 @@ class ResponseAggregator(FrameProcessor):
 
             # Reset
             self._aggregation = ""
+            self._aggregating = False
             self._seen_start_frame = False
             self._seen_end_frame = False
             self._seen_interim_results = False

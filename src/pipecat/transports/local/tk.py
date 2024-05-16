@@ -9,7 +9,7 @@ import asyncio
 import numpy as np
 import tkinter as tk
 
-from pipecat.frames.frames import ImageRawFrame
+from pipecat.frames.frames import ImageRawFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -48,8 +48,8 @@ class TkInputTransport(BaseInputTransport):
     def read_raw_audio_frames(self, frame_count: int) -> bytes:
         return self._in_stream.read(frame_count, exception_on_overflow=False)
 
-    async def start(self):
-        await super().start()
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
         self._in_stream.start_stream()
 
     async def stop(self):
@@ -89,8 +89,8 @@ class TkOutputTransport(BaseOutputTransport):
     def write_frame_to_camera(self, frame: ImageRawFrame):
         self.get_event_loop().call_soon(self._write_frame_to_tk, frame)
 
-    async def start(self):
-        await super().start()
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
         self._out_stream.start_stream()
 
     async def stop(self):

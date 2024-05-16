@@ -8,7 +8,7 @@ import asyncio
 from asyncio import AbstractEventLoop
 from enum import Enum
 
-from pipecat.frames.frames import ErrorFrame, Frame
+from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
@@ -47,7 +47,8 @@ class FrameProcessor:
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         if direction == FrameDirection.DOWNSTREAM and self._next:
-            logger.trace(f"Pushing {frame} from {self} to {self._next}")
+            if not isinstance(frame, AudioRawFrame):
+                logger.trace(f"Pushing {frame} from {self} to {self._next}")
             await self._next.process_frame(frame, direction)
         elif direction == FrameDirection.UPSTREAM and self._prev:
             logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")

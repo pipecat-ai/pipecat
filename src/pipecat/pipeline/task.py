@@ -31,11 +31,12 @@ class Source(FrameProcessor):
 
 class PipelineTask:
 
-    def __init__(self, pipeline: FrameProcessor):
+    def __init__(self, pipeline: FrameProcessor, allow_interruptions=False):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
 
         self._pipeline = pipeline
+        self._allow_interruptions = allow_interruptions
 
         self._task_queue = asyncio.Queue()
         self._up_queue = asyncio.Queue()
@@ -70,7 +71,8 @@ class PipelineTask:
             raise Exception("Frames must be an iterable or async iterable")
 
     async def _process_task_queue(self):
-        await self._source.process_frame(StartFrame(), FrameDirection.DOWNSTREAM)
+        await self._source.process_frame(
+            StartFrame(allow_interruptions=self._allow_interruptions), FrameDirection.DOWNSTREAM)
         running = True
         while running:
             frame = await self._task_queue.get()

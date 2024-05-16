@@ -7,9 +7,9 @@
 
 import asyncio
 import itertools
-from multiprocessing.context import _force_start_method
 import queue
 import time
+import threading
 
 from PIL import Image
 from typing import List
@@ -23,7 +23,9 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     ImageRawFrame,
-    TransportMessageFrame)
+    TransportMessageFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame)
 from pipecat.transports.base_transport import TransportParams
 
 from loguru import logger
@@ -37,6 +39,7 @@ class BaseOutputTransport(FrameProcessor):
         self._params = params
 
         self._running = False
+        self._allow_interruptions = False
 
         # These are the images that we should send to the camera at our desired
         # framerate.
@@ -48,12 +51,14 @@ class BaseOutputTransport(FrameProcessor):
         self._sink_queue = queue.Queue()
 
         self._stopped_event = asyncio.Event()
+        self._is_interrupted = threading.Event()
 
-    async def start(self):
+    async def start(self, frame: StartFrame):
         if self._running:
             return
 
         self._running = True
+        self._allow_interruptions = frame.allow_interruptions
 
         loop = self.get_event_loop()
 
@@ -93,11 +98,14 @@ class BaseOutputTransport(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
-            await self.start()
+            await self.start(frame)
             await self.push_frame(frame, direction)
         # EndFrame is managed in the queue handler.
         elif isinstance(frame, CancelFrame):
             await self.stop()
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStartedSpeakingFrame) or isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
         elif self._frame_managed_by_sink(frame):
             self._sink_queue.put(frame)
@@ -117,28 +125,50 @@ class BaseOutputTransport(FrameProcessor):
                 or isinstance(frame, TransportMessageFrame)
                 or isinstance(frame, EndFrame))
 
+    async def _handle_interruptions(self, frame: Frame):
+        if not self._allow_interruptions:
+            return
+
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._is_interrupted.set()
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._is_interrupted.clear()
+
     def _sink_thread_handler(self):
-        buffer = bytearray()
+        # 10ms bytes
         bytes_size_10ms = int(self._params.audio_out_sample_rate / 100) * \
             self._params.audio_out_channels * 2
+
+        # We will send at least 100ms bytes.
+        smallest_write_size = bytes_size_10ms * 10
+
+        # Audio accumlation buffer
+        buffer = bytearray()
         while self._running:
             try:
                 frame = self._sink_queue.get(timeout=1)
+
                 if isinstance(frame, EndFrame):
                     # Send all remaining audio before stopping (multiple of 10ms of audio).
                     self._send_audio_truncated(buffer, bytes_size_10ms)
                     future = asyncio.run_coroutine_threadsafe(self.stop(), self.get_event_loop())
                     future.result()
-                elif isinstance(frame, AudioRawFrame):
-                    if self._params.audio_out_enabled:
-                        buffer.extend(frame.audio)
-                        buffer = self._send_audio_truncated(buffer, bytes_size_10ms)
-                elif isinstance(frame, ImageRawFrame) and self._params.camera_out_enabled:
-                    self._set_camera_image(frame)
-                elif isinstance(frame, SpriteFrame) and self._params.camera_out_enabled:
-                    self._set_camera_images(frame.images)
-                elif isinstance(frame, TransportMessageFrame):
-                    self.send_message(frame)
+
+                if not self._is_interrupted.is_set():
+                    if isinstance(frame, AudioRawFrame):
+                        if self._params.audio_out_enabled:
+                            buffer.extend(frame.audio)
+                            buffer = self._send_audio_truncated(buffer, smallest_write_size)
+                    elif isinstance(frame, ImageRawFrame) and self._params.camera_out_enabled:
+                        self._set_camera_image(frame)
+                    elif isinstance(frame, SpriteFrame) and self._params.camera_out_enabled:
+                        self._set_camera_images(frame.images)
+                    elif isinstance(frame, TransportMessageFrame):
+                        self.send_message(frame)
+                else:
+                    # Send any remaining audio
+                    self._send_audio_truncated(buffer, bytes_size_10ms)
+                    buffer = bytearray()
             except queue.Empty:
                 pass
             except BaseException as e:
