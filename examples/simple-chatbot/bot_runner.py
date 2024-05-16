@@ -35,7 +35,7 @@ SERVE_STATIC = True
 STATIC_DIR = "../web-ui/dist"
 STATIC_ROUTE = "/static"
 STATIC_INDEX = "index.html"
-
+USE_OPEN_MIC = False  # Can the user freely talk, or do they need to wait their turn?
 
 # ----------------- API ----------------- #
 
@@ -132,7 +132,7 @@ async def start_bot(request: Request) -> JSONResponse:
         "bot_id": proc.pid,
         "room_url": room_url,
         "token": user_token,
-        "config": {"open_mic": True}})
+        "config": {"open_mic": USE_OPEN_MIC}})
 
 
 # ----------------- Main ----------------- #
