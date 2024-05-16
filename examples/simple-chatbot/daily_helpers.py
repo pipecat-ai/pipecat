@@ -14,7 +14,7 @@ daily_api_path = os.getenv("DAILY_API_URL", "api.daily.co/v1")
 daily_api_key = os.getenv("DAILY_API_KEY")
 
 
-def create_room() -> tuple[str, str]:
+def create_room(expiry_time=5 * 60) -> tuple[str, str]:
     """
     Helper function to create a Daily room.
     # See: https://docs.daily.co/reference/rest-api/rooms
@@ -26,7 +26,7 @@ def create_room() -> tuple[str, str]:
         Exception: If the request to create the room fails or if the response does not contain the room URL or room name.
     """
     room_props = {
-        "exp": time.time() + 60 * 60,  # 1 hour
+        "exp": time.time() * expiry_time,
         "enable_chat": True,
         "enable_emoji_reactions": True,
         "eject_at_room_exp": True,

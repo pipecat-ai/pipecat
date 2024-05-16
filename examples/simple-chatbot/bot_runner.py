@@ -29,7 +29,7 @@ atexit.register(cleanup)
 
 # ------------ Configuration ------------ #
 
-MAX_SESSION_TIME = 5 * 1000
+MAX_SESSION_TIME = + 5 * 60  # 5 minutes
 BOT_CAN_IDLE = True
 SERVE_STATIC = True
 STATIC_DIR = "../web-ui/dist"
@@ -87,7 +87,7 @@ async def start_bot(request: Request) -> JSONResponse:
 
     if not room_url:
         try:
-            room_url = create_room()
+            room_url = create_room(MAX_SESSION_TIME)
         except Exception:
             raise HTTPException(
                 status_code=500,
