@@ -1,17 +1,35 @@
 import React, { useEffect, useRef, useState } from "react";
 import { LogOut, Settings } from "lucide-react";
-import { DailyAudio } from "@daily-co/daily-react";
+import { DailyAudio, useAppMessage, useDaily } from "@daily-co/daily-react";
 
 import DeviceSelect from "../DeviceSelect";
 import Agent from "./agent";
 import { Button } from "../button";
-import styles from "./styles.module.css";
 import UserMicBubble from "../UserMicBubble";
 
+import styles from "./styles.module.css";
+
 export const Session: React.FC = () => {
+  const daily = useDaily();
   const [showDevices, setShowDevices] = useState(false);
-  const [canTalk, setCanTalk] = useState(false);
   const modalRef = useRef<HTMLDialogElement>(null);
+  const [talkState, setTalkState] = useState<"user" | "assistant">("assistant");
+
+  useAppMessage({
+    onAppMessage: (e) => {
+      if (!daily || !e.data?.cue) return;
+
+      // Determine the UI state from the cue sent by the bot
+      if (e.data?.cue === "user_turn") {
+        // Delay enabling local mic input to avoid feedback from LLM
+        setTimeout(() => daily.setLocalAudio(true), 500);
+        setTalkState("user");
+      } else {
+        daily.setLocalAudio(false);
+        setTalkState("assistant");
+      }
+    },
+  });
 
   useEffect(() => {
     const current = modalRef.current;
@@ -34,7 +52,7 @@ export const Session: React.FC = () => {
 
       <div className={styles.agentContainer}>
         <Agent />
-        <UserMicBubble active={canTalk} />
+        <UserMicBubble active={talkState === "user"} />
         <DailyAudio />
       </div>
 

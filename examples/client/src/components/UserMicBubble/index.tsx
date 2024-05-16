@@ -1,12 +1,12 @@
-import React, { useCallback, useRef, useState, useEffect } from "react";
+import React, { useCallback, useRef } from "react";
 
 import {
   useAudioLevel,
   useAudioTrack,
   useLocalSessionId,
-  useAppMessage,
+  //useAppMessage,
 } from "@daily-co/daily-react";
-import { DailyEventObjectAppMessage } from "@daily-co/daily-js";
+//import { DailyEventObjectAppMessage } from "@daily-co/daily-js";
 import { Mic, MicOff } from "lucide-react";
 //import { TypewriterEffect } from "../ui/typewriter";
 import styles from "./styles.module.css";
@@ -38,13 +38,13 @@ interface Props {
 }
 
 export default function UserMicBubble({ active }: Props) {
+  /*
   const [transcription, setTranscription] = useState<string[]>([]);
-
   useAppMessage({
     onAppMessage: (e: DailyEventObjectAppMessage<any>) => {
       if (e.fromId && e.fromId === "transcription") {
         if (e.data.user_id === "" && e.data.is_final) {
-          setTranscription((t) => [...t, ...e.data.text.split(" ")]);
+          //setTranscription((t) => [...t, ...e.data.text.split(" ")]);
         }
       }
     },
@@ -54,7 +54,7 @@ export default function UserMicBubble({ active }: Props) {
     if (active) return;
     const t = setTimeout(() => setTranscription([]), 4000);
     return () => clearTimeout(t);
-  }, [active]);
+  }, [active]);*/
 
   return (
     <div className={`${styles.bubbleContainer} ${active ? styles.active : ""}`}>
