@@ -5,10 +5,13 @@
 #
 
 from dataclasses import dataclass
+import io
 
 from typing import List
 
-from pipecat.frames.frames import Frame
+from PIL import Image
+
+from pipecat.frames.frames import Frame, VisionImageRawFrame
 
 from openai._types import NOT_GIVEN, NotGiven
 
@@ -41,6 +44,31 @@ class OpenAILLMContext:
                 "role": message["role"],
                 "name": message["name"] if "name" in message else message["role"]
             })
+        return context
+
+    @staticmethod
+    def from_image_frame(frame: VisionImageRawFrame) -> "OpenAILLMContext":
+        """
+        For images, we are deviating from the OpenAI messages shape. OpenAI
+        expects images to be base64 encoded, but other vision models may not.
+        So we'll store the image as bytes and do the base64 encoding as needed
+        in the LLM service.
+        """
+        context = OpenAILLMContext()
+        buffer = io.BytesIO()
+        Image.frombytes(
+            frame.format,
+            frame.size,
+            frame.image
+        ).save(
+            buffer,
+            format="JPEG")
+        context.add_message({
+            "content": frame.text,
+            "role": "user",
+            "data": buffer.getvalue(),
+            "mime_type": "image/jpeg"
+        })
         return context
 
     def add_message(self, message: ChatCompletionMessageParam):
