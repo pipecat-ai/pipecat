@@ -61,8 +61,6 @@ class PipelineTask:
         self._process_up_task = asyncio.create_task(self._process_up_queue())
         self._process_down_task = asyncio.create_task(self._process_down_queue())
         await asyncio.gather(self._process_up_task, self._process_down_task)
-        await self._source.cleanup()
-        await self._pipeline.cleanup()
 
     async def queue_frame(self, frame: Frame):
         await self._down_queue.put(frame)
@@ -81,14 +79,20 @@ class PipelineTask:
         await self._source.process_frame(
             StartFrame(allow_interruptions=self._allow_interruptions), FrameDirection.DOWNSTREAM)
         running = True
+        should_cleanup = True
         while running:
             try:
                 frame = await self._down_queue.get()
                 await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
-                self._down_queue.task_done()
                 running = not (isinstance(frame, StopTaskFrame) or isinstance(frame, EndFrame))
+                should_cleanup = not isinstance(frame, StopTaskFrame)
+                self._down_queue.task_done()
             except asyncio.CancelledError:
                 break
+        # Cleanup only if we need to.
+        if should_cleanup:
+            await self._source.cleanup()
+            await self._pipeline.cleanup()
         # We just enqueue None to terminate the task gracefully.
         self._process_up_task.cancel()
 

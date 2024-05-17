@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed issues with Ctrl-C program termination.
 
+- Fixed an issue that was causing `StopTaskFrame` to actually not exit the
+  `PipelineTask`.
+
 ## [0.0.16] - 2024-05-16
 
 ### Fixed
