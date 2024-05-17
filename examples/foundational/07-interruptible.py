@@ -18,6 +18,7 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -41,6 +42,7 @@ async def main(room_url: str, token):
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer()
             )
         )
 
