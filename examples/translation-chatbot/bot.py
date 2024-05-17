@@ -3,7 +3,7 @@ import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import Frame, InterimTranscriptionFrame, LLMMessagesFrame, TextFrame, TranscriptionFrame, TransportMessageFrame
+from pipecat.frames.frames import Frame, LLMMessagesFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -12,7 +12,7 @@ from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.azure import AzureTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyTransportMessageFrame
+from pipecat.transports.services.daily import DailyParams, DailyTranscriptionSettings, DailyTransport, DailyTransportMessageFrame
 
 from runner import configure
 
@@ -84,7 +84,9 @@ async def main(room_url: str, token):
             DailyParams(
                 audio_out_enabled=True,
                 transcription_enabled=True,
-                transcription_interim_results=False,
+                transcription_settings=DailyTranscriptionSettings(extra={
+                    "interim_results": False
+                })
             )
         )
 
