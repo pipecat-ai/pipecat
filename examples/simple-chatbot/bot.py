@@ -138,8 +138,14 @@ async def main(room_url: str, token):
 
         ta = TalkingAnimation()
 
-        pipeline = Pipeline([transport.input(), user_response,
-                            llm, tts, ta, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            user_response,
+            llm,
+            tts,
+            ta,
+            transport.output()
+        ])
 
         task = PipelineTask(pipeline, allow_interruptions=True)
         await task.queue_frame(quiet_frame)

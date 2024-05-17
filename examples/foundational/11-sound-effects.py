@@ -111,8 +111,18 @@ async def main(room_url: str, token):
         fl = FrameLogger("LLM Out")
         fl2 = FrameLogger("Transcription In")
 
-        pipeline = Pipeline([transport.input(), tma_in, in_sound, fl2, llm,
-                            tma_out, fl, tts, out_sound, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            tma_in,
+            in_sound,
+            fl2,
+            llm,
+            fl,
+            tts,
+            out_sound,
+            transport.output(),
+            tma_out
+        ])
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

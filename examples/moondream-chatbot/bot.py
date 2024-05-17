@@ -168,11 +168,17 @@ async def main(room_url: str, token):
 
         ura = LLMUserResponseAggregator(messages)
 
-        pipeline = Pipeline([transport.input(), ura, llm,
-                             ParallelPipeline(
-                                 [sa, ir, va, moondream],
-                                 [tf, imgf]),
-                             tts, ta, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            ura,
+            llm,
+            ParallelPipeline(
+                [sa, ir, va, moondream],
+                [tf, imgf]),
+            tts,
+            ta,
+            transport.output()
+        ])
 
         task = PipelineTask(pipeline)
         await task.queue_frame(quiet_frame)
