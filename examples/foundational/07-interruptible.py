@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 logger.remove(0)
-logger.add(sys.stderr, level="TRACE")
+logger.add(sys.stderr, level="DEBUG")
 
 
 async def main(room_url: str, token):

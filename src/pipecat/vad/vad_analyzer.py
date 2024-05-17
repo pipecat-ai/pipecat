@@ -20,7 +20,7 @@ class VADState(Enum):
 
 
 class VADParams(BaseModel):
-    confidence: float = 0.8
+    confidence: float = 0.6
     start_secs: float = 0.2
     stop_secs: float = 0.8
 
@@ -43,6 +43,10 @@ class VADAnalyzer:
 
         self._vad_buffer = b""
 
+        # Exponential smoothing
+        self._smoothing_factor = 0.6
+        self._prev_confidence = 1 - self._smoothing_factor
+
     @property
     def sample_rate(self):
         return self._sample_rate
@@ -55,6 +59,11 @@ class VADAnalyzer:
     def voice_confidence(self, buffer) -> float:
         pass
 
+    def _smoothed_confidence(self, audio_frames, prev_confidence, factor):
+        confidence = self.voice_confidence(audio_frames)
+        smoothed = exp_smoothing(confidence, prev_confidence, factor)
+        return smoothed
+
     def analyze_audio(self, buffer) -> VADState:
         self._vad_buffer += buffer
 
@@ -65,7 +74,10 @@ class VADAnalyzer:
         audio_frames = self._vad_buffer[:num_required_bytes]
         self._vad_buffer = self._vad_buffer[num_required_bytes:]
 
-        confidence = self.voice_confidence(audio_frames)
+        confidence = self._smoothed_confidence(
+            audio_frames, self._prev_confidence, self._smoothing_factor)
+        self._prev_confidence = confidence
+
         speaking = confidence >= self._params.confidence
 
         if speaking:
