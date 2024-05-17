@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.utils import exp_smoothing
 
 
 class AIService(FrameProcessor):
@@ -115,16 +116,13 @@ class STTService(AIService):
         ww.setframerate(self._sample_rate)
         return (content, ww)
 
-    def _exp_smoothing(self, value: float, prev_value: float, factor: float) -> float:
-        return prev_value + factor * (value - prev_value)
-
     def _get_smoothed_volume(self, audio: bytes, prev_rms: float, factor: float) -> float:
         # https://docs.python.org/3/library/array.html
         audio_array = array.array('h', audio)
         squares = [sample**2 for sample in audio_array]
         mean = sum(squares) / len(audio_array)
         rms = math.sqrt(mean)
-        return self._exp_smoothing(rms, prev_rms, factor)
+        return exp_smoothing(rms, prev_rms, factor)
 
     async def _append_audio(self, frame: AudioRawFrame):
         # Try to filter out empty background noise
