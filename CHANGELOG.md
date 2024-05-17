@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added initial interruptions support.
 
+### Fixed
+
+- Fixed issues with Ctrl-C program termination.
+
 ## [0.0.16] - 2024-05-16
 
 ### Fixed
