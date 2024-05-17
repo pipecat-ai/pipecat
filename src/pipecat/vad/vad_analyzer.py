@@ -20,7 +20,7 @@ class VADState(Enum):
 
 
 class VADParams(BaseModel):
-    confidence: float = 0.6
+    confidence: float = 0.5
     start_secs: float = 0.2
     stop_secs: float = 0.8
 
