@@ -478,12 +478,14 @@ class DailyInputTransport(BaseInputTransport):
     #
 
     def push_transcription_frame(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
-        future = asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+        future = asyncio.run_coroutine_threadsafe(
+            self._internal_push_frame(frame), self.get_event_loop())
         future.result()
 
     def push_app_message(self, message: Any, sender: str):
         frame = DailyTransportMessageFrame(message=message, participant_id=sender)
-        future = asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+        future = asyncio.run_coroutine_threadsafe(
+            self._internal_push_frame(frame), self.get_event_loop())
         future.result()
 
     #
@@ -543,7 +545,7 @@ class DailyInputTransport(BaseInputTransport):
             try:
                 frame = self._camera_in_queue.get(timeout=1)
                 future = asyncio.run_coroutine_threadsafe(
-                    self.push_frame(frame), self.get_event_loop())
+                    self._internal_push_frame(frame), self.get_event_loop())
                 future.result()
             except queue.Empty:
                 pass
