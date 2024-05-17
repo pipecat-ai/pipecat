@@ -65,8 +65,7 @@ class BaseInputTransport(FrameProcessor):
             await self._audio_in_thread
             await self._audio_out_thread
 
-        await self._internal_push_frame(None, None)
-        await self._push_frame_task
+        self._push_frame_task.cancel()
 
     def vad_analyze(self, audio_frames: bytes) -> VADState:
         pass
@@ -112,12 +111,12 @@ class BaseInputTransport(FrameProcessor):
         await self._push_queue.put((frame, direction))
 
     async def _push_frame_task_handler(self):
-        running = True
-        while running:
-            (frame, direction) = await self._push_queue.get()
-            if frame:
+        while True:
+            try:
+                (frame, direction) = await self._push_queue.get()
                 await self.push_frame(frame, direction)
-            running = frame is not None
+            except asyncio.CancelledError:
+                break
 
     #
     # Handle interruptions
