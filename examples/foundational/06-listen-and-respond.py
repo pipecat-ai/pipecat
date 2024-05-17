@@ -21,7 +21,7 @@ from pipecat.processors.logger import FrameLogger
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVAD
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -41,13 +41,12 @@ async def main(room_url: str, token):
             token,
             "Respond bot",
             DailyParams(
-                audio_in_enabled=True,  # This is so Silero VAD can get audio data
                 audio_out_enabled=True,
-                transcription_enabled=True
+                transcription_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer()
             )
         )
-
-        vad = SileroVAD()
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -71,7 +70,7 @@ async def main(room_url: str, token):
         tma_in = LLMUserResponseAggregator(messages)
         tma_out = LLMAssistantResponseAggregator(messages)
 
-        pipeline = Pipeline([fl_in, transport.input(), vad, tma_in, llm,
+        pipeline = Pipeline([fl_in, transport.input(), tma_in, llm,
                             fl_out, tts, tma_out, transport.output()])
 
         task = PipelineTask(pipeline)

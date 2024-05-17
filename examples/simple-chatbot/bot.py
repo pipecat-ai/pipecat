@@ -21,7 +21,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTranscriptionSettings, DailyTransport
-from pipecat.vad.silero import SileroVAD
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -82,11 +82,12 @@ async def main(room_url: str, token):
             token,
             "Chatbot",
             DailyParams(
-                audio_in_enabled=True,
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,
                 camera_out_height=576,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
                 transcription_enabled=True,
                 #
                 # Spanish
@@ -98,8 +99,6 @@ async def main(room_url: str, token):
                 # )
             )
         )
-
-        vad = SileroVAD()
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -139,10 +138,10 @@ async def main(room_url: str, token):
 
         ta = TalkingAnimation()
 
-        pipeline = Pipeline([transport.input(), vad, user_response,
+        pipeline = Pipeline([transport.input(), user_response,
                             llm, tts, ta, transport.output()])
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(pipeline, allow_interruptions=True)
         await task.queue_frame(quiet_frame)
 
         @transport.event_handler("on_first_participant_joined")

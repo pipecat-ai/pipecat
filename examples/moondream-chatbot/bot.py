@@ -29,7 +29,7 @@ from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.moondream import MoondreamService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVAD
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -127,16 +127,15 @@ async def main(room_url: str, token):
             token,
             "Chatbot",
             DailyParams(
-                audio_in_enabled=True,
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,
                 camera_out_height=576,
-                transcription_enabled=True
+                transcription_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer()
             )
         )
-
-        vad = SileroVAD()
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -169,7 +168,7 @@ async def main(room_url: str, token):
 
         ura = LLMUserResponseAggregator(messages)
 
-        pipeline = Pipeline([transport.input(), vad, ura, llm,
+        pipeline = Pipeline([transport.input(), ura, llm,
                              ParallelPipeline(
                                  [sa, ir, va, moondream],
                                  [tf, imgf]),
