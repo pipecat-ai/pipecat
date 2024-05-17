@@ -14,6 +14,8 @@ from pipecat.frames.frames import (
     StartFrame,
     EndFrame,
     Frame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame)
 from pipecat.transports.base_transport import TransportParams
@@ -123,9 +125,14 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def _handle_interruptions(self, frame: Frame):
-        if self._allow_interruptions and isinstance(frame, UserStartedSpeakingFrame):
-            self._push_frame_task.cancel()
-            self._create_push_task()
+        if self._allow_interruptions:
+            # Make sure we notify about interruptions quickly out-of-band
+            if isinstance(frame, UserStartedSpeakingFrame):
+                self._push_frame_task.cancel()
+                self._create_push_task()
+                await self.push_frame(StartInterruptionFrame())
+            elif isinstance(frame, UserStoppedSpeakingFrame):
+                await self.push_frame(StopInterruptionFrame())
         await self._internal_push_frame(frame)
 
     #

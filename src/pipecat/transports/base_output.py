@@ -23,9 +23,9 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     ImageRawFrame,
-    TransportMessageFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame)
+    StartInterruptionFrame,
+    StopInterruptionFrame,
+    TransportMessageFrame)
 from pipecat.transports.base_transport import TransportParams
 
 from loguru import logger
@@ -104,7 +104,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.stop()
             await self.push_frame(frame, direction)
-        elif isinstance(frame, UserStartedSpeakingFrame) or isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
             await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
         elif self._frame_managed_by_sink(frame):
@@ -129,9 +129,9 @@ class BaseOutputTransport(FrameProcessor):
         if not self._allow_interruptions:
             return
 
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, StartInterruptionFrame):
             self._is_interrupted.set()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, StopInterruptionFrame):
             self._is_interrupted.clear()
 
     def _sink_thread_handler(self):
