@@ -26,19 +26,6 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module(s): {e}")
 
 
-# Provided by Alexander Veysov
-def int2float(sound):
-    try:
-        abs_max = np.abs(sound).max()
-        sound = sound.astype("float32")
-        if abs_max > 0:
-            sound *= 1 / 32768
-        sound = sound.squeeze()  # depends on the use case
-        return sound
-    except ValueError:
-        return sound
-
-
 class SileroVADAnalyzer(VADAnalyzer):
 
     def __init__(self, sample_rate=16000):
@@ -64,7 +51,8 @@ class SileroVADAnalyzer(VADAnalyzer):
     def voice_confidence(self, buffer) -> float:
         try:
             audio_int16 = np.frombuffer(buffer, np.int16)
-            audio_float32 = int2float(audio_int16)
+            # Divide by 32768 because we have signed 16-bit data.
+            audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
             new_confidence = self._model(torch.from_numpy(audio_float32), self.sample_rate).item()
             return new_confidence
         except BaseException as e:
