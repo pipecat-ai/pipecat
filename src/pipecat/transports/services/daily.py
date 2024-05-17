@@ -161,24 +161,12 @@ class DailyTransportClient(EventHandler):
             "speaker", sample_rate=self._params.audio_in_sample_rate, channels=self._params.audio_in_channels)
         Daily.select_speaker_device("speaker")
 
-        self._vad_analyzer = None
-        if self._params.vad_enabled:
-            self._vad_analyzer = WebRTCVADAnalyzer(
-                sample_rate=self._params.audio_in_sample_rate,
-                num_channels=self._params.audio_in_channels)
-
     @property
     def participant_id(self) -> str:
         return self._participant_id
 
     def set_callbacks(self, callbacks: DailyCallbacks):
         self._callbacks = callbacks
-
-    def vad_analyze(self, audio_frames: bytes) -> VADState:
-        state = VADState.QUIET
-        if self._vad_analyzer:
-            state = self._vad_analyzer.analyze_audio(audio_frames)
-        return state
 
     def send_message(self, frame: DailyTransportMessageFrame):
         self._client.send_app_message(frame.message, frame.participant_id)
@@ -435,6 +423,12 @@ class DailyInputTransport(BaseInputTransport):
         self._video_renderers = {}
         self._camera_in_queue = queue.Queue()
 
+        self._vad_analyzer = params.vad_analyzer
+        if params.vad_enabled and not params.vad_analyzer:
+            self._vad_analyzer = WebRTCVADAnalyzer(
+                sample_rate=self._params.audio_in_sample_rate,
+                num_channels=self._params.audio_in_channels)
+
     async def start(self, frame: StartFrame):
         if self._running:
             return
@@ -461,7 +455,10 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.cleanup()
 
     def vad_analyze(self, audio_frames: bytes) -> VADState:
-        return self._client.vad_analyze(audio_frames)
+        state = VADState.QUIET
+        if self._vad_analyzer:
+            state = self._vad_analyzer.analyze_audio(audio_frames)
+        return state
 
     def read_raw_audio_frames(self, frame_count: int) -> bytes:
         return self._client.read_raw_audio_frames(frame_count)

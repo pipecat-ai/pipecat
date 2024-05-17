@@ -39,11 +39,10 @@ def int2float(sound):
         return sound
 
 
-class SileroVAD(FrameProcessor, VADAnalyzer):
+class SileroVADAnalyzer(VADAnalyzer):
 
-    def __init__(self, sample_rate=16000, audio_passthrough=False):
-        FrameProcessor.__init__(self)
-        VADAnalyzer.__init__(self, sample_rate=sample_rate, num_channels=1)
+    def __init__(self, sample_rate=16000):
+        super().__init__(sample_rate=sample_rate, num_channels=1)
 
         logger.debug("Loading Silero VAD model...")
 
@@ -52,7 +51,6 @@ class SileroVAD(FrameProcessor, VADAnalyzer):
         )
 
         self._processor_vad_state: VADState = VADState.QUIET
-        self._audio_passthrough = audio_passthrough
 
         logger.debug("Loaded Silero VAD")
 
@@ -74,6 +72,15 @@ class SileroVAD(FrameProcessor, VADAnalyzer):
             logger.error(f"Error analyzing audio with Silero VAD: {e}")
             return 0
 
+
+class SileroVAD(FrameProcessor):
+
+    def __init__(self, sample_rate=16000, audio_passthrough=False):
+        super().__init__()
+
+        self._vad_analyzer = SileroVADAnalyzer(sample_rate=sample_rate)
+        self._audio_passthrough = audio_passthrough
+
     #
     # FrameProcessor
     #
@@ -89,7 +96,7 @@ class SileroVAD(FrameProcessor, VADAnalyzer):
     async def _analyze_audio(self, frame: AudioRawFrame):
         # Check VAD and push event if necessary. We just care about changes
         # from QUIET to SPEAKING and vice versa.
-        new_vad_state = self.analyze_audio(frame.audio)
+        new_vad_state = self._vad_analyzer.analyze_audio(frame.audio)
         if new_vad_state != self._processor_vad_state and new_vad_state != VADState.STARTING and new_vad_state != VADState.STOPPING:
             new_frame = None
 
