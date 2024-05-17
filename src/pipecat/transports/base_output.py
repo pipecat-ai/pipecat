@@ -54,11 +54,15 @@ class BaseOutputTransport(FrameProcessor):
         self._is_interrupted = threading.Event()
 
     async def start(self, frame: StartFrame):
+        # Make sure we have the latest params. Note that this transport might
+        # have been started on another task that might not need interruptions,
+        # for example.
+        self._allow_interruptions = frame.allow_interruptions
+
         if self._running:
             return
 
         self._running = True
-        self._allow_interruptions = frame.allow_interruptions
 
         loop = self.get_event_loop()
 
