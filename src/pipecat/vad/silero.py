@@ -8,7 +8,7 @@ import numpy as np
 
 from pipecat.frames.frames import AudioRawFrame, Frame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
+from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 
 from loguru import logger
 
@@ -28,8 +28,8 @@ except ModuleNotFoundError as e:
 
 class SileroVADAnalyzer(VADAnalyzer):
 
-    def __init__(self, sample_rate=16000):
-        super().__init__(sample_rate=sample_rate, num_channels=1)
+    def __init__(self, sample_rate=16000, params: VADParams = VADParams()):
+        super().__init__(sample_rate=sample_rate, num_channels=1, params=params)
 
         logger.debug("Loading Silero VAD model...")
 
@@ -63,10 +63,14 @@ class SileroVADAnalyzer(VADAnalyzer):
 
 class SileroVAD(FrameProcessor):
 
-    def __init__(self, sample_rate=16000, audio_passthrough=False):
+    def __init__(
+            self,
+            sample_rate: int = 16000,
+            vad_params: VADParams = VADParams(),
+            audio_passthrough: bool = False):
         super().__init__()
 
-        self._vad_analyzer = SileroVADAnalyzer(sample_rate=sample_rate)
+        self._vad_analyzer = SileroVADAnalyzer(sample_rate=sample_rate, params=vad_params)
         self._audio_passthrough = audio_passthrough
 
     #
