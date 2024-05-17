@@ -103,7 +103,16 @@ async def main(room_url: str, token):
         lfra = LLMFullResponseAggregator()
         ts = TranslationSubtitles("spanish")
 
-        pipeline = Pipeline([transport.input(), sa, tp, llm, lfra, ts, tts, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            sa,
+            tp,
+            llm,
+            lfra,
+            ts,
+            tts,
+            transport.output()
+        ])
 
         task = PipelineTask(pipeline)
 

@@ -89,8 +89,15 @@ async def main(room_url: str, token):
             transport.capture_participant_transcription(participant["id"])
             image_requester.set_participant_id(participant["id"])
 
-        pipeline = Pipeline([transport.input(), user_response, image_requester,
-                             vision_aggregator, moondream, tts, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            user_response,
+            image_requester,
+            vision_aggregator,
+            moondream,
+            tts,
+            transport.output()
+        ])
 
         task = PipelineTask(pipeline)
 

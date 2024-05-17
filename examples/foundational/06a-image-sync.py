@@ -95,8 +95,15 @@ async def main(room_url: str, token):
             os.path.join(os.path.dirname(__file__), "assets", "waiting.png"),
         )
 
-        pipeline = Pipeline([transport.input(), image_sync_aggregator,
-                            tma_in, llm, tma_out, tts, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            image_sync_aggregator,
+            tma_in,
+            llm,
+            tts,
+            transport.output(),
+            tma_out
+        ])
 
         task = PipelineTask(pipeline)
 
