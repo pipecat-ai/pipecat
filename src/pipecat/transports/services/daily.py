@@ -38,7 +38,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
+from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 
 from loguru import logger
 
@@ -60,8 +60,8 @@ class DailyTransportMessageFrame(TransportMessageFrame):
 
 class WebRTCVADAnalyzer(VADAnalyzer):
 
-    def __init__(self, sample_rate=16000, num_channels=1):
-        super().__init__(sample_rate, num_channels)
+    def __init__(self, sample_rate=16000, num_channels=1, params: VADParams = VADParams()):
+        super().__init__(sample_rate, num_channels, params)
 
         self._webrtc_vad = Daily.create_native_vad(
             reset_period_ms=VAD_RESET_PERIOD_MS,

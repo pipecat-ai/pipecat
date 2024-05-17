@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added initial interruptions support.
 
+- Added `VADParams` so you can control voice confidence level and others.
+
 ### Fixed
 
 - Fixed issues with Ctrl-C program termination.
