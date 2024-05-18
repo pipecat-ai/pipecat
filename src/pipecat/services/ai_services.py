@@ -74,10 +74,12 @@ class TTSService(AIService):
             await self._push_tts_frames(text)
 
     async def _push_tts_frames(self, text: str):
-        await self.push_frame(TextFrame(text))
         await self.push_frame(TTSStartedFrame())
         await self.process_generator(self.run_tts(text))
         await self.push_frame(TTSStoppedFrame())
+        # We send the original text after the audio. This way, if we are
+        # interrupted, the text is not added to the assistant context.
+        await self.push_frame(TextFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):

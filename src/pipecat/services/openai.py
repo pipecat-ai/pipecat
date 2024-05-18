@@ -100,8 +100,6 @@ class BaseOpenAILLMService(LLMService):
         function_name = ""
         arguments = ""
 
-        await self.push_frame(LLMResponseStartFrame())
-
         chunk_stream: AsyncStream[ChatCompletionChunk] = (
             await self._stream_chat_completions(context)
         )
@@ -132,14 +130,14 @@ class BaseOpenAILLMService(LLMService):
                     # completes
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
+                await self.push_frame(LLMResponseStartFrame())
                 await self.push_frame(TextFrame(chunk.choices[0].delta.content))
+                await self.push_frame(LLMResponseEndFrame())
 
         # if we got a function name and arguments, yield the frame with all the info so
         # frame consumers can take action based on the function call.
         # if function_name and arguments:
         #     yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
-
-        await self.push_frame(LLMResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         context = None

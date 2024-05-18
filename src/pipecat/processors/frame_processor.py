@@ -47,8 +47,7 @@ class FrameProcessor:
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         if direction == FrameDirection.DOWNSTREAM and self._next:
-            if not isinstance(frame, AudioRawFrame):
-                logger.trace(f"Pushing {frame} from {self} to {self._next}")
+            logger.trace(f"Pushing {frame} from {self} to {self._next}")
             await self._next.process_frame(frame, direction)
         elif direction == FrameDirection.UPSTREAM and self._prev:
             logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")

@@ -71,7 +71,8 @@ async def main(room_url: str, token):
             llm,
             tts,
             transport.output(),
-            tma_out])
+            tma_out
+        ])
 
         task = PipelineTask(pipeline, allow_interruptions=True)
 
