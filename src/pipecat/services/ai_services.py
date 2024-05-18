@@ -94,7 +94,7 @@ class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
     def __init__(self,
-                 min_rms: int = 75,
+                 min_rms: int = 100,
                  max_silence_secs: float = 0.3,
                  max_buffer_secs: float = 1.5,
                  sample_rate: int = 16000,
@@ -107,8 +107,8 @@ class STTService(AIService):
         self._num_channels = num_channels
         (self._content, self._wave) = self._new_wave()
         self._silence_num_frames = 0
-        # Exponential smoothing
-        self._smoothing_factor = 0.08
+        # Volume exponential smoothing
+        self._smoothing_factor = 0.5
         self._prev_rms = 1 - self._smoothing_factor
 
     @abstractmethod

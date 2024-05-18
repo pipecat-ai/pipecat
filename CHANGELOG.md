@@ -13,9 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `VADParams` so you can control voice confidence level and others.
 
-- `VADAnalyzer` now uses an exponential smoothing to avoid sudden changes.
+- `VADAnalyzer` now uses an exponential smoothed volume to improve speech
+  detection. This is useful when voice confidence is high (because there's
+  someone talking near you) but volume is low.
 
 ### Fixed
+
+- Fixed an issue where TTSService was not pushing TextFrames downstream.
 
 - Fixed issues with Ctrl-C program termination.
 
