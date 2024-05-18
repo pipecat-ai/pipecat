@@ -66,12 +66,12 @@ async def main(room_url: str, token):
         tma_out = LLMAssistantResponseAggregator(messages)
 
         pipeline = Pipeline([
-            transport.input(),
-            tma_in,
-            llm,
-            tts,
-            transport.output(),
-            tma_out
+            transport.input(),   # Transport user input
+            tma_in,              # User responses
+            llm,                 # LLM
+            tts,                 # TTS
+            transport.output(),  # Transport bot output
+            tma_out              # Assistant spoken responses
         ])
 
         task = PipelineTask(pipeline, allow_interruptions=True)

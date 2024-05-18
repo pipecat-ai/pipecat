@@ -13,12 +13,12 @@ from dataclasses import dataclass
 
 from pipecat.frames.frames import (
     AppFrame,
+    EndFrame,
     Frame,
     ImageRawFrame,
-    TextFrame,
-    EndFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    LLMResponseStartFrame,
+    TextFrame
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -64,7 +64,7 @@ class MonthPrepender(FrameProcessor):
         elif self.prepend_to_next_text_frame and isinstance(frame, TextFrame):
             await self.push_frame(TextFrame(f"{self.most_recent_month}: {frame.text}"))
             self.prepend_to_next_text_frame = False
-        elif isinstance(frame, LLMResponseStartFrame):
+        elif isinstance(frame, LLMFullResponseStartFrame):
             self.prepend_to_next_text_frame = True
             await self.push_frame(frame)
         else:
@@ -105,7 +105,7 @@ async def main(room_url):
 
         gated_aggregator = GatedAggregator(
             gate_open_fn=lambda frame: isinstance(frame, ImageRawFrame),
-            gate_close_fn=lambda frame: isinstance(frame, LLMResponseStartFrame),
+            gate_close_fn=lambda frame: isinstance(frame, LLMFullResponseStartFrame),
             start_open=False
         )
 
@@ -114,14 +114,14 @@ async def main(room_url):
         llm_full_response_aggregator = LLMFullResponseAggregator()
 
         pipeline = Pipeline([
-            llm,
-            sentence_aggregator,
-            ParallelTask(
-                [month_prepender, tts],
-                [llm_full_response_aggregator, imagegen]
+            llm,                     # LLM
+            sentence_aggregator,     # Aggregates LLM output into full sentences
+            ParallelTask(            # Run pipelines in parallel aggregating the result
+                [month_prepender, tts],                   # Create "Month: sentence" and output audio
+                [llm_full_response_aggregator, imagegen]  # Aggregate full LLM response
             ),
-            gated_aggregator,
-            transport.output()
+            gated_aggregator,        # Queues everything until an image is available
+            transport.output()       # Transport output
         ])
 
         frames = []
