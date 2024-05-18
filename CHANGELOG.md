@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added initial interruptions support.
+- Added initial interruptions support. The assitant contexts (or aggregators)
+  should now be placed after the output transport. This way, only the completed
+  spoken context is added to the assistant context.
 
 - Added `VADParams` so you can control voice confidence level and others.
 
