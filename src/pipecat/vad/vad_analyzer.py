@@ -4,6 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import array
+import math
+
 from abc import abstractmethod
 from enum import Enum
 
@@ -20,9 +23,10 @@ class VADState(Enum):
 
 
 class VADParams(BaseModel):
-    confidence: float = 0.5
+    confidence: float = 0.6
     start_secs: float = 0.2
     stop_secs: float = 0.8
+    min_rms: int = 1000
 
 
 class VADAnalyzer:
@@ -43,9 +47,9 @@ class VADAnalyzer:
 
         self._vad_buffer = b""
 
-        # Exponential smoothing
-        self._smoothing_factor = 0.6
-        self._prev_confidence = 1 - self._smoothing_factor
+        # Volume exponential smoothing
+        self._smoothing_factor = 0.5
+        self._prev_rms = 1 - self._smoothing_factor
 
     @property
     def sample_rate(self):
@@ -59,10 +63,13 @@ class VADAnalyzer:
     def voice_confidence(self, buffer) -> float:
         pass
 
-    def _smoothed_confidence(self, audio_frames, prev_confidence, factor):
-        confidence = self.voice_confidence(audio_frames)
-        smoothed = exp_smoothing(confidence, prev_confidence, factor)
-        return smoothed
+    def _get_smoothed_volume(self, audio: bytes, prev_rms: float, factor: float) -> float:
+        # https://docs.python.org/3/library/array.html
+        audio_array = array.array('h', audio)
+        squares = [sample**2 for sample in audio_array]
+        mean = sum(squares) / len(audio_array)
+        rms = math.sqrt(mean)
+        return exp_smoothing(rms, prev_rms, factor)
 
     def analyze_audio(self, buffer) -> VADState:
         self._vad_buffer += buffer
@@ -74,11 +81,11 @@ class VADAnalyzer:
         audio_frames = self._vad_buffer[:num_required_bytes]
         self._vad_buffer = self._vad_buffer[num_required_bytes:]
 
-        confidence = self._smoothed_confidence(
-            audio_frames, self._prev_confidence, self._smoothing_factor)
-        self._prev_confidence = confidence
+        confidence = self.voice_confidence(audio_frames)
+        rms = self._get_smoothed_volume(audio_frames, self._prev_rms, self._smoothing_factor)
+        self._prev_rms = rms
 
-        speaking = confidence >= self._params.confidence
+        speaking = confidence >= self._params.confidence and rms >= self._params.min_rms
 
         if speaking:
             match self._vad_state:
