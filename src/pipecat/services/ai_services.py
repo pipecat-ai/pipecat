@@ -18,6 +18,8 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     TextFrame,
     VisionImageRawFrame,
 )
@@ -69,14 +71,20 @@ class TTSService(AIService):
                 self._current_sentence = ""
 
         if text:
-            await self.process_generator(self.run_tts(text))
+            await self._push_tts_frames(text)
+
+    async def _push_tts_frames(self, text: str):
+        await self.push_frame(TextFrame(text))
+        await self.push_frame(TTSStartedFrame())
+        await self.process_generator(self.run_tts(text))
+        await self.push_frame(TTSStoppedFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)
         elif isinstance(frame, EndFrame):
             if self._current_sentence:
-                await self.process_generator(self.run_tts(self._current_sentence))
+                await self._push_tts_frames(self._current_sentence)
             await self.push_frame(frame)
         else:
             await self.push_frame(frame, direction)
@@ -154,6 +162,8 @@ class STTService(AIService):
             self._wave.close()
             await self.push_frame(frame, direction)
         elif isinstance(frame, AudioRawFrame):
+            # In this service we accumulate audio internally and at the end we
+            # push a TextFrame. We don't really want to push audio frames down.
             await self._append_audio(frame)
         else:
             await self.push_frame(frame, direction)
@@ -171,6 +181,7 @@ class ImageGenService(AIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
+            await self.push_frame(frame, direction)
             await self.process_generator(self.run_image_gen(frame.text))
         else:
             await self.push_frame(frame, direction)
