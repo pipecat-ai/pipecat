@@ -8,7 +8,7 @@ from PIL import Image
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMUserResponseAggregator
+from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
 from pipecat.frames.frames import (
     AudioRawFrame,
     ImageRawFrame,
@@ -135,6 +135,7 @@ async def main(room_url: str, token):
         ]
 
         user_response = LLMUserResponseAggregator()
+        assistant_response = LLMAssistantResponseAggregator()
 
         ta = TalkingAnimation()
 
@@ -144,7 +145,8 @@ async def main(room_url: str, token):
             llm,
             tts,
             ta,
-            transport.output()
+            transport.output(),
+            assistant_response,
         ])
 
         task = PipelineTask(pipeline, allow_interruptions=True)
