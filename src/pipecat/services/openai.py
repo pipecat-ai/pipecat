@@ -16,6 +16,8 @@ from typing import AsyncGenerator, List, Literal
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
@@ -104,6 +106,8 @@ class BaseOpenAILLMService(LLMService):
             await self._stream_chat_completions(context)
         )
 
+        await self.push_frame(LLMFullResponseStartFrame())
+
         async for chunk in chunk_stream:
             if len(chunk.choices) == 0:
                 continue
@@ -133,6 +137,8 @@ class BaseOpenAILLMService(LLMService):
                 await self.push_frame(LLMResponseStartFrame())
                 await self.push_frame(TextFrame(chunk.choices[0].delta.content))
                 await self.push_frame(LLMResponseEndFrame())
+
+        await self.push_frame(LLMFullResponseEndFrame())
 
         # if we got a function name and arguments, yield the frame with all the info so
         # frame consumers can take action based on the function call.

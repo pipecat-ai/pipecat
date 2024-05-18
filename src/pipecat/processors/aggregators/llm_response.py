@@ -10,6 +10,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
+    LLMFullResponseEndFrame,
     LLMMessagesFrame,
     LLMResponseStartFrame,
     TextFrame,
@@ -182,7 +183,7 @@ class LLMFullResponseAggregator(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
             self._aggregation += frame.text
-        elif isinstance(frame, LLMResponseEndFrame):
+        elif isinstance(frame, LLMFullResponseEndFrame):
             await self.push_frame(TextFrame(self._aggregation))
             await self.push_frame(frame)
             self._aggregation = ""
