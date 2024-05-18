@@ -39,8 +39,7 @@ class BaseInputTransport(FrameProcessor):
             self._audio_in_queue = queue.Queue()
 
         # Create push frame task. This is the task that will push frames in
-        # order. So, a transport guarantees that all frames are pushed in the
-        # same task.
+        # order. We also guarantee that all frames are pushed in the same task.
         self._create_push_task()
 
     async def start(self, frame: StartFrame):
