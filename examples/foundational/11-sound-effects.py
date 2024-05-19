@@ -13,7 +13,7 @@ import wave
 from pipecat.frames.frames import (
     Frame,
     AudioRawFrame,
-    LLMResponseEndFrame,
+    LLMFullResponseEndFrame,
     LLMMessagesFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -59,7 +59,7 @@ for file in sound_files:
 class OutboundSoundEffectWrapper(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, LLMResponseEndFrame):
+        if isinstance(frame, LLMFullResponseEndFrame):
             await self.push_frame(sounds["ding1.wav"])
             # In case anything else downstream needs it
             await self.push_frame(frame, direction)
