@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `google.generativeai` model support, including vision. This new `google` service defaults to using
+  `gemini-1.5-flash-latest`. Example in `examples/foundational/12a-describe-video-gemini-flash.py`.
+
+- Added vision support to `openai` service. Example in
+  `examples/foundational/12a-describe-video-gemini-flash.py`.
+
+## [Unreleased]
+
+### Added
+
 - Added initial interruptions support. The assistant contexts (or aggregators)
   should now be placed after the output transport. This way, only the completed
   spoken context is added to the assistant context.

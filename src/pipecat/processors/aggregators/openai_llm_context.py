@@ -91,7 +91,6 @@ class OpenAILLMContext:
 
     def get_messages_json(self) -> str:
         return json.dumps(self.messages, cls=CustomEncoder)
-        # return json.dumps(self.messages)
 
     def set_tool_choice(
         self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven
