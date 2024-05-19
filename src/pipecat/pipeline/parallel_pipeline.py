@@ -63,7 +63,7 @@ class ParallelPipeline(FrameProcessor):
             if not isinstance(processors, list):
                 raise TypeError(f"ParallelPipeline argument {processors} is not a list")
 
-            # We add a source at before the pipeline and a sink after.
+            # We will add a source before the pipeline and a sink after.
             source = Source(self._up_queue)
             sink = Sink(self._down_queue)
             self._sources.append(source)

@@ -8,7 +8,7 @@ import aiohttp
 
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, TTSStartedFrame, TTSStoppedFrame
+from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, TTSStartedFrame, TTSStoppedFrame, TextFrame
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -53,9 +53,7 @@ class ElevenLabsTTSService(TTSService):
                 yield ErrorFrame(f"Audio fetch status code: {r.status}, error: {r.text}")
                 return
 
-            yield TTSStartedFrame()
             async for chunk in r.content:
                 if len(chunk) > 0:
                     frame = AudioRawFrame(chunk, 16000, 1)
                     yield frame
-            yield TTSStoppedFrame()

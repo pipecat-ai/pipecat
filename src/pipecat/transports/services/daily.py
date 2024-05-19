@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     ImageRawFrame,
     InterimTranscriptionFrame,
     SpriteFrame,
+    StartFrame,
     TranscriptionFrame,
     TransportMessageFrame,
     UserImageRawFrame,
@@ -37,7 +38,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
+from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 
 from loguru import logger
 
@@ -59,8 +60,8 @@ class DailyTransportMessageFrame(TransportMessageFrame):
 
 class WebRTCVADAnalyzer(VADAnalyzer):
 
-    def __init__(self, sample_rate=16000, num_channels=1):
-        super().__init__(sample_rate, num_channels)
+    def __init__(self, sample_rate=16000, num_channels=1, params: VADParams = VADParams()):
+        super().__init__(sample_rate, num_channels, params)
 
         self._webrtc_vad = Daily.create_native_vad(
             reset_period_ms=VAD_RESET_PERIOD_MS,
@@ -160,24 +161,12 @@ class DailyTransportClient(EventHandler):
             "speaker", sample_rate=self._params.audio_in_sample_rate, channels=self._params.audio_in_channels)
         Daily.select_speaker_device("speaker")
 
-        self._vad_analyzer = None
-        if self._params.vad_enabled:
-            self._vad_analyzer = WebRTCVADAnalyzer(
-                sample_rate=self._params.audio_in_sample_rate,
-                num_channels=self._params.audio_in_channels)
-
     @property
     def participant_id(self) -> str:
         return self._participant_id
 
     def set_callbacks(self, callbacks: DailyCallbacks):
         self._callbacks = callbacks
-
-    def vad_analyze(self, audio_frames: bytes) -> VADState:
-        state = VADState.QUIET
-        if self._vad_analyzer:
-            state = self._vad_analyzer.analyze_audio(audio_frames)
-        return state
 
     def send_message(self, frame: DailyTransportMessageFrame):
         self._client.send_app_message(frame.message, frame.participant_id)
@@ -283,6 +272,7 @@ class DailyTransportClient(EventHandler):
                 error_msg = f"Error joining {self._room_url}: {error}"
                 logger.error(error_msg)
                 self._callbacks.on_error(error_msg)
+            self._sync_response["join"].task_done()
         except queue.Empty:
             error_msg = f"Time out joining {self._room_url}"
             logger.error(error_msg)
@@ -320,6 +310,7 @@ class DailyTransportClient(EventHandler):
                 error_msg = f"Error leaving {self._room_url}: {error}"
                 logger.error(error_msg)
                 self._callbacks.on_error(error_msg)
+            self._sync_response["leave"].task_done()
         except queue.Empty:
             error_msg = f"Time out leaving {self._room_url}"
             logger.error(error_msg)
@@ -432,13 +423,19 @@ class DailyInputTransport(BaseInputTransport):
         self._video_renderers = {}
         self._camera_in_queue = queue.Queue()
 
-    async def start(self):
+        self._vad_analyzer = params.vad_analyzer
+        if params.vad_enabled and not params.vad_analyzer:
+            self._vad_analyzer = WebRTCVADAnalyzer(
+                sample_rate=self._params.audio_in_sample_rate,
+                num_channels=self._params.audio_in_channels)
+
+    async def start(self, frame: StartFrame):
         if self._running:
             return
         # Join the room.
         await self._client.join()
         # This will set _running=True
-        await super().start()
+        await super().start(frame)
         # Create camera in thread (runs if _running is true).
         loop = asyncio.get_running_loop()
         self._camera_in_thread = loop.run_in_executor(None, self._camera_in_thread_handler)
@@ -458,7 +455,10 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.cleanup()
 
     def vad_analyze(self, audio_frames: bytes) -> VADState:
-        return self._client.vad_analyze(audio_frames)
+        state = VADState.QUIET
+        if self._vad_analyzer:
+            state = self._vad_analyzer.analyze_audio(audio_frames)
+        return state
 
     def read_raw_audio_frames(self, frame_count: int) -> bytes:
         return self._client.read_raw_audio_frames(frame_count)
@@ -547,6 +547,7 @@ class DailyInputTransport(BaseInputTransport):
                 future = asyncio.run_coroutine_threadsafe(
                     self._internal_push_frame(frame), self.get_event_loop())
                 future.result()
+                self._camera_in_queue.task_done()
             except queue.Empty:
                 pass
             except BaseException as e:
@@ -560,11 +561,11 @@ class DailyOutputTransport(BaseOutputTransport):
 
         self._client = client
 
-    async def start(self):
+    async def start(self, frame: StartFrame):
         if self._running:
             return
         # This will set _running=True
-        await super().start()
+        await super().start(frame)
         # Join the room.
         await self._client.join()
 

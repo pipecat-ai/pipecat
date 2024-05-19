@@ -98,9 +98,13 @@ async def main():
 
             image_grabber = ImageGrabber()
 
-            pipeline = Pipeline([llm, aggregator, description,
-                                 ParallelPipeline([tts, audio_grabber],
-                                                  [imagegen, image_grabber])])
+            pipeline = Pipeline([
+                llm,
+                aggregator,
+                description,
+                ParallelPipeline([tts, audio_grabber],
+                                 [imagegen, image_grabber])
+            ])
 
             task = PipelineTask(pipeline)
             await task.queue_frame(LLMMessagesFrame(messages))

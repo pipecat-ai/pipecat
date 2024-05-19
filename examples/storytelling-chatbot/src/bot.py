@@ -133,8 +133,8 @@ async def main(room_url, token=None):
             story_processor,
             image_processor,
             tts_service,
-            llm_responses,
-            transport.output()
+            transport.output(),
+            llm_responses
         ])
 
         main_task = PipelineTask(main_pipeline)

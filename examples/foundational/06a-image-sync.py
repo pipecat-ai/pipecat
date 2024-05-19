@@ -83,7 +83,7 @@ async def main(room_url: str, token):
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so it should not contain special characters. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
             },
         ]
 
@@ -95,8 +95,15 @@ async def main(room_url: str, token):
             os.path.join(os.path.dirname(__file__), "assets", "waiting.png"),
         )
 
-        pipeline = Pipeline([transport.input(), image_sync_aggregator,
-                            tma_in, llm, tma_out, tts, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            image_sync_aggregator,
+            tma_in,
+            llm,
+            tts,
+            transport.output(),
+            tma_out
+        ])
 
         task = PipelineTask(pipeline)
 

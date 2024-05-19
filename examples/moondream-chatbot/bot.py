@@ -29,7 +29,7 @@ from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.moondream import MoondreamService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVAD
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -66,7 +66,7 @@ talking_frame = SpriteFrame(images=sprites)
 class TalkingAnimation(FrameProcessor):
     """
     This class starts a talking animation when it receives an first AudioFrame,
-    and then returns to a "quiet" sprite when it sees a LLMResponseEndFrame.
+    and then returns to a "quiet" sprite when it sees a TTSStoppedFrame.
     """
 
     def __init__(self):
@@ -127,16 +127,15 @@ async def main(room_url: str, token):
             token,
             "Chatbot",
             DailyParams(
-                audio_in_enabled=True,
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,
                 camera_out_height=576,
-                transcription_enabled=True
+                transcription_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer()
             )
         )
-
-        vad = SileroVAD()
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -163,17 +162,23 @@ async def main(room_url: str, token):
         messages = [
             {
                 "role": "system",
-                "content": f"You are Chatbot, a friendly, helpful robot. Let the user know that you are capable of chatting or describing what you see. Your goal is to demonstrate your capabilities in a succinct way. Reply with only '{user_request_answer}' if the user asks you to describe what you see. Your output will be converted to audio so never include special characters in your answers. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by introducing yourself.",
+                "content": f"You are Chatbot, a friendly, helpful robot. Let the user know that you are capable of chatting or describing what you see. Your goal is to demonstrate your capabilities in a succinct way. Reply with only '{user_request_answer}' if the user asks you to describe what you see. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by introducing yourself.",
             },
         ]
 
         ura = LLMUserResponseAggregator(messages)
 
-        pipeline = Pipeline([transport.input(), vad, ura, llm,
-                             ParallelPipeline(
-                                 [sa, ir, va, moondream],
-                                 [tf, imgf]),
-                             tts, ta, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            ura,
+            llm,
+            ParallelPipeline(
+                [sa, ir, va, moondream],
+                [tf, imgf]),
+            tts,
+            ta,
+            transport.output()
+        ])
 
         task = PipelineTask(pipeline)
         await task.queue_frame(quiet_frame)

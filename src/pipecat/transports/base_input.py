@@ -14,6 +14,8 @@ from pipecat.frames.frames import (
     StartFrame,
     EndFrame,
     Frame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame)
 from pipecat.transports.base_transport import TransportParams
@@ -30,19 +32,22 @@ class BaseInputTransport(FrameProcessor):
         self._params = params
 
         self._running = False
+        self._allow_interruptions = False
 
         # Start media threads.
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_queue = queue.Queue()
 
-        # Start push frame task. This is the task that will push frames in
-        # order. So, a transport guarantees that all frames are pushed in the
-        # same task.
-        loop = self.get_event_loop()
-        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
-        self._push_queue = asyncio.Queue()
+        # Create push frame task. This is the task that will push frames in
+        # order. We also guarantee that all frames are pushed in the same task.
+        self._create_push_task()
 
-    async def start(self):
+    async def start(self, frame: StartFrame):
+        # Make sure we have the latest params. Note that this transport might
+        # have been started on another task that might not need interruptions,
+        # for example.
+        self._allow_interruptions = frame.allow_interruptions
+
         if self._running:
             return
 
@@ -65,6 +70,8 @@ class BaseInputTransport(FrameProcessor):
             await self._audio_in_thread
             await self._audio_out_thread
 
+        self._push_frame_task.cancel()
+
     def vad_analyze(self, audio_frames: bytes) -> VADState:
         pass
 
@@ -79,10 +86,15 @@ class BaseInputTransport(FrameProcessor):
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, StartFrame):
-            await self.start()
+        if isinstance(frame, CancelFrame):
+            await self.stop()
+            # We don't queue a CancelFrame since we want to stop ASAP.
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, StartFrame):
+            self._allow_interruption = frame.allow_interruptions
+            await self.start(frame)
             await self._internal_push_frame(frame, direction)
-        elif isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
+        elif isinstance(frame, EndFrame):
             await self.stop()
             await self._internal_push_frame(frame, direction)
         else:
@@ -92,19 +104,39 @@ class BaseInputTransport(FrameProcessor):
     # Push frames task
     #
 
+    def _create_push_task(self):
+        loop = self.get_event_loop()
+        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
+        self._push_queue = asyncio.Queue()
+
     async def _internal_push_frame(
             self,
-            frame: Frame,
-            direction: FrameDirection = FrameDirection.DOWNSTREAM):
+            frame: Frame | None,
+            direction: FrameDirection | None = FrameDirection.DOWNSTREAM):
         await self._push_queue.put((frame, direction))
 
     async def _push_frame_task_handler(self):
-        running = True
-        while running:
-            (frame, direction) = await self._push_queue.get()
-            if frame:
+        while True:
+            try:
+                (frame, direction) = await self._push_queue.get()
                 await self.push_frame(frame, direction)
-            running = frame is not None
+            except asyncio.CancelledError:
+                break
+
+    #
+    # Handle interruptions
+    #
+
+    async def _handle_interruptions(self, frame: Frame):
+        if self._allow_interruptions:
+            # Make sure we notify about interruptions quickly out-of-band
+            if isinstance(frame, UserStartedSpeakingFrame):
+                self._push_frame_task.cancel()
+                self._create_push_task()
+                await self.push_frame(StartInterruptionFrame())
+            elif isinstance(frame, UserStoppedSpeakingFrame):
+                await self.push_frame(StopInterruptionFrame())
+        await self._internal_push_frame(frame)
 
     #
     # Audio input
@@ -118,11 +150,13 @@ class BaseInputTransport(FrameProcessor):
                 frame = UserStartedSpeakingFrame()
             elif new_vad_state == VADState.QUIET:
                 frame = UserStoppedSpeakingFrame()
+
             if frame:
                 future = asyncio.run_coroutine_threadsafe(
-                    self._internal_push_frame(frame), self.get_event_loop())
+                    self._handle_interruptions(frame), self.get_event_loop())
                 future.result()
-                vad_state = new_vad_state
+
+            vad_state = new_vad_state
         return vad_state
 
     def _audio_in_thread_handler(self):
@@ -160,6 +194,8 @@ class BaseInputTransport(FrameProcessor):
                     future = asyncio.run_coroutine_threadsafe(
                         self._internal_push_frame(frame), self.get_event_loop())
                     future.result()
+
+                self._audio_in_queue.task_done()
             except queue.Empty:
                 pass
             except BaseException as e:

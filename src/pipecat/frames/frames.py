@@ -119,7 +119,7 @@ class TextFrame(DataFrame):
     text: str
 
     def __str__(self):
-        return f'{self.name}: "{self.text}"'
+        return f"{self.name}(text: {self.text})"
 
 
 @dataclass
@@ -132,7 +132,7 @@ class TranscriptionFrame(TextFrame):
     timestamp: str
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -143,7 +143,7 @@ class InterimTranscriptionFrame(TextFrame):
     timestamp: str
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -187,7 +187,7 @@ class SystemFrame(Frame):
 @dataclass
 class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
-    pass
+    allow_interruptions: bool = False
 
 
 @dataclass
@@ -216,6 +216,28 @@ class StopTaskFrame(SystemFrame):
     pass
 
 
+@dataclass
+class StartInterruptionFrame(SystemFrame):
+    """Emitted by VAD to indicate that a user has started speaking (i.e. is
+    interruption). This is similar to UserStartedSpeakingFrame except that it
+    should be pushed concurrently with other frames (so the order is not
+    guaranteed).
+
+    """
+    pass
+
+
+@dataclass
+class StopInterruptionFrame(SystemFrame):
+    """Emitted by VAD to indicate that a user has stopped speaking (i.e. no more
+    interruptions). This is similar to UserStoppedSpeakingFrame except that it
+    should be pushed concurrently with other frames (so the order is not
+    guaranteed).
+
+    """
+    pass
+
+
 #
 # Control frames
 #
@@ -235,6 +257,20 @@ class EndFrame(ControlFrame):
     was sent (unline system frames).
 
     """
+    pass
+
+
+@dataclass
+class LLMFullResponseStartFrame(ControlFrame):
+    """Used to indicate the beginning of a full LLM response. Following
+    LLMResponseStartFrame, TextFrame and LLMResponseEndFrame for each sentence
+    until a LLMFullResponseEndFrame."""
+    pass
+
+
+@dataclass
+class LLMFullResponseEndFrame(ControlFrame):
+    """Indicates the end of a full LLM response."""
     pass
 
 

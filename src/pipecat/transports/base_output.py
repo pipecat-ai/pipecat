@@ -7,9 +7,9 @@
 
 import asyncio
 import itertools
-from multiprocessing.context import _force_start_method
 import queue
 import time
+import threading
 
 from PIL import Image
 from typing import List
@@ -23,6 +23,8 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     ImageRawFrame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
     TransportMessageFrame)
 from pipecat.transports.base_transport import TransportParams
 
@@ -37,6 +39,7 @@ class BaseOutputTransport(FrameProcessor):
         self._params = params
 
         self._running = False
+        self._allow_interruptions = False
 
         # These are the images that we should send to the camera at our desired
         # framerate.
@@ -48,8 +51,14 @@ class BaseOutputTransport(FrameProcessor):
         self._sink_queue = queue.Queue()
 
         self._stopped_event = asyncio.Event()
+        self._is_interrupted = threading.Event()
 
-    async def start(self):
+    async def start(self, frame: StartFrame):
+        # Make sure we have the latest params. Note that this transport might
+        # have been started on another task that might not need interruptions,
+        # for example.
+        self._allow_interruptions = frame.allow_interruptions
+
         if self._running:
             return
 
@@ -61,6 +70,10 @@ class BaseOutputTransport(FrameProcessor):
             self._camera_out_thread = loop.run_in_executor(None, self._camera_out_thread_handler)
 
         self._sink_thread = loop.run_in_executor(None, self._sink_thread_handler)
+
+        # Create push frame task. This is the task that will push frames in
+        # order. We also guarantee that all frames are pushed in the same task.
+        self._create_push_task()
 
     async def stop(self):
         if not self._running:
@@ -92,17 +105,23 @@ class BaseOutputTransport(FrameProcessor):
         await self._sink_thread
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        #
+        # Out-of-band frames like (CancelFrame or StartInterruptionFrame) are
+        # pushed immediately. Other frames require order so they are put in the
+        # sink queue.
+        #
         if isinstance(frame, StartFrame):
-            await self.start()
-            await self.push_frame(frame, direction)
+            await self.start(frame)
+            self._sink_queue.put(frame)
         # EndFrame is managed in the queue handler.
         elif isinstance(frame, CancelFrame):
             await self.stop()
             await self.push_frame(frame, direction)
-        elif self._frame_managed_by_sink(frame):
-            self._sink_queue.put(frame)
-        else:
+        elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
+            await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
+        else:
+            self._sink_queue.put(frame)
 
         # If we are finishing, wait here until we have stopped, otherwise we might
         # close things too early upstream. We need this event because we don't
@@ -110,39 +129,85 @@ class BaseOutputTransport(FrameProcessor):
         if isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
             await self._stopped_event.wait()
 
-    def _frame_managed_by_sink(self, frame: Frame):
-        return (isinstance(frame, AudioRawFrame)
-                or isinstance(frame, ImageRawFrame)
-                or isinstance(frame, SpriteFrame)
-                or isinstance(frame, TransportMessageFrame)
-                or isinstance(frame, EndFrame))
+    async def _handle_interruptions(self, frame: Frame):
+        if not self._allow_interruptions:
+            return
+
+        if isinstance(frame, StartInterruptionFrame):
+            self._is_interrupted.set()
+            self._push_frame_task.cancel()
+            self._create_push_task()
+        elif isinstance(frame, StopInterruptionFrame):
+            self._is_interrupted.clear()
 
     def _sink_thread_handler(self):
-        buffer = bytearray()
+        # 10ms bytes
         bytes_size_10ms = int(self._params.audio_out_sample_rate / 100) * \
             self._params.audio_out_channels * 2
+
+        # We will send at least 100ms bytes.
+        smallest_write_size = bytes_size_10ms * 10
+
+        # Audio accumlation buffer
+        buffer = bytearray()
         while self._running:
             try:
                 frame = self._sink_queue.get(timeout=1)
+
+                if not self._is_interrupted.is_set():
+                    if isinstance(frame, AudioRawFrame):
+                        if self._params.audio_out_enabled:
+                            buffer.extend(frame.audio)
+                            buffer = self._send_audio_truncated(buffer, smallest_write_size)
+                    elif isinstance(frame, ImageRawFrame) and self._params.camera_out_enabled:
+                        self._set_camera_image(frame)
+                    elif isinstance(frame, SpriteFrame) and self._params.camera_out_enabled:
+                        self._set_camera_images(frame.images)
+                    elif isinstance(frame, TransportMessageFrame):
+                        self.send_message(frame)
+                    else:
+                        future = asyncio.run_coroutine_threadsafe(
+                            self._internal_push_frame(frame), self.get_event_loop())
+                        future.result()
+                else:
+                    # Send any remaining audio
+                    self._send_audio_truncated(buffer, bytes_size_10ms)
+                    buffer = bytearray()
+
                 if isinstance(frame, EndFrame):
                     # Send all remaining audio before stopping (multiple of 10ms of audio).
                     self._send_audio_truncated(buffer, bytes_size_10ms)
                     future = asyncio.run_coroutine_threadsafe(self.stop(), self.get_event_loop())
                     future.result()
-                elif isinstance(frame, AudioRawFrame):
-                    if self._params.audio_out_enabled:
-                        buffer.extend(frame.audio)
-                        buffer = self._send_audio_truncated(buffer, bytes_size_10ms)
-                elif isinstance(frame, ImageRawFrame) and self._params.camera_out_enabled:
-                    self._set_camera_image(frame)
-                elif isinstance(frame, SpriteFrame) and self._params.camera_out_enabled:
-                    self._set_camera_images(frame.images)
-                elif isinstance(frame, TransportMessageFrame):
-                    self.send_message(frame)
+
+                self._sink_queue.task_done()
             except queue.Empty:
                 pass
             except BaseException as e:
                 logger.error(f"Error processing sink queue: {e}")
+
+    #
+    # Push frames task
+    #
+
+    def _create_push_task(self):
+        loop = self.get_event_loop()
+        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
+        self._push_queue = asyncio.Queue()
+
+    async def _internal_push_frame(
+            self,
+            frame: Frame | None,
+            direction: FrameDirection | None = FrameDirection.DOWNSTREAM):
+        await self._push_queue.put((frame, direction))
+
+    async def _push_frame_task_handler(self):
+        while True:
+            try:
+                (frame, direction) = await self._push_queue.get()
+                await self.push_frame(frame, direction)
+            except asyncio.CancelledError:
+                break
 
     #
     # Camera out
@@ -178,6 +243,7 @@ class BaseOutputTransport(FrameProcessor):
                 if self._params.camera_out_is_live:
                     image = self._camera_out_queue.get(timeout=1)
                     self._draw_image(image)
+                    self._camera_out_queue.task_done()
                 elif self._camera_images:
                     image = next(self._camera_images)
                     self._draw_image(image)

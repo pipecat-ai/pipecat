@@ -2,7 +2,11 @@ import re
 
 from async_timeout import timeout
 
-from pipecat.frames.frames import Frame, LLMResponseEndFrame, TextFrame, UserStoppedSpeakingFrame
+from pipecat.frames.frames import (
+    Frame,
+    LLMFullResponseEndFrame,
+    TextFrame,
+    UserStoppedSpeakingFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.services.daily import DailyTransportMessageFrame
 
@@ -128,9 +132,9 @@ class StoryProcessor(FrameProcessor):
                 # Clear the buffer
                 self._text = ""
 
-        # End of LLM response
+        # End of a full LLM response
         # Driven by the prompt, the LLM should have asked the user for input
-        elif isinstance(frame, LLMResponseEndFrame):
+        elif isinstance(frame, LLMFullResponseEndFrame):
             # We use a different frame type, as to avoid image generation ingest
             await self.push_frame(StoryPromptFrame(self._text))
             self._text = ""

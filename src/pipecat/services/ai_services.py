@@ -18,10 +18,13 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     TextFrame,
     VisionImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.utils import exp_smoothing
 
 
 class AIService(FrameProcessor):
@@ -68,14 +71,22 @@ class TTSService(AIService):
                 self._current_sentence = ""
 
         if text:
-            await self.process_generator(self.run_tts(text))
+            await self._push_tts_frames(text)
+
+    async def _push_tts_frames(self, text: str):
+        await self.push_frame(TTSStartedFrame())
+        await self.process_generator(self.run_tts(text))
+        await self.push_frame(TTSStoppedFrame())
+        # We send the original text after the audio. This way, if we are
+        # interrupted, the text is not added to the assistant context.
+        await self.push_frame(TextFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)
         elif isinstance(frame, EndFrame):
             if self._current_sentence:
-                await self.process_generator(self.run_tts(self._current_sentence))
+                await self._push_tts_frames(self._current_sentence)
             await self.push_frame(frame)
         else:
             await self.push_frame(frame, direction)
@@ -85,7 +96,7 @@ class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
     def __init__(self,
-                 min_rms: int = 75,
+                 min_rms: int = 100,
                  max_silence_secs: float = 0.3,
                  max_buffer_secs: float = 1.5,
                  sample_rate: int = 16000,
@@ -98,8 +109,8 @@ class STTService(AIService):
         self._num_channels = num_channels
         (self._content, self._wave) = self._new_wave()
         self._silence_num_frames = 0
-        # Exponential smoothing
-        self._smoothing_factor = 0.08
+        # Volume exponential smoothing
+        self._smoothing_factor = 0.5
         self._prev_rms = 1 - self._smoothing_factor
 
     @abstractmethod
@@ -115,16 +126,13 @@ class STTService(AIService):
         ww.setframerate(self._sample_rate)
         return (content, ww)
 
-    def _exp_smoothing(self, value: float, prev_value: float, factor: float) -> float:
-        return prev_value + factor * (value - prev_value)
-
     def _get_smoothed_volume(self, audio: bytes, prev_rms: float, factor: float) -> float:
         # https://docs.python.org/3/library/array.html
         audio_array = array.array('h', audio)
         squares = [sample**2 for sample in audio_array]
         mean = sum(squares) / len(audio_array)
         rms = math.sqrt(mean)
-        return self._exp_smoothing(rms, prev_rms, factor)
+        return exp_smoothing(rms, prev_rms, factor)
 
     async def _append_audio(self, frame: AudioRawFrame):
         # Try to filter out empty background noise
@@ -156,6 +164,8 @@ class STTService(AIService):
             self._wave.close()
             await self.push_frame(frame, direction)
         elif isinstance(frame, AudioRawFrame):
+            # In this service we accumulate audio internally and at the end we
+            # push a TextFrame. We don't really want to push audio frames down.
             await self._append_audio(frame)
         else:
             await self.push_frame(frame, direction)
@@ -173,6 +183,7 @@ class ImageGenService(AIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TextFrame):
+            await self.push_frame(frame, direction)
             await self.process_generator(self.run_image_gen(frame.text))
         else:
             await self.push_frame(frame, direction)

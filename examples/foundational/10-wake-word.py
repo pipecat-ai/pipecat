@@ -157,8 +157,16 @@ async def main(room_url: str, token):
         tma_out = LLMAssistantContextAggregator(messages)
         ncf = NameCheckFilter(["Santa Cat", "Santa"])
 
-        pipeline = Pipeline([transport.input(), isa, ncf, tma_in,
-                            llm, tma_out, tts, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            isa,
+            ncf,
+            tma_in,
+            llm,
+            tts,
+            transport.output(),
+            tma_out
+        ])
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
