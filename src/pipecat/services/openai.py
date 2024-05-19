@@ -83,7 +83,7 @@ class BaseOpenAILLMService(LLMService):
                 del message["mime_type"]
 
         # messages_for_log = json.dumps(messages)
-        # logger.debug(f"Generating chat: {messages_for_log}")
+        logger.debug(f"Generating chat: {messages_for_log}")
 
         start_time = time.time()
         chunks: AsyncStream[ChatCompletionChunk] = (
