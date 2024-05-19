@@ -68,12 +68,14 @@ class BaseOpenAILLMService(LLMService):
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
+        logger.debug(f"Generating chat: {context.get_messages_json()}")
+
         messages: List[ChatCompletionMessageParam] = context.get_messages()
 
         # base64 encode any images
         for message in messages:
             if message.get("mime_type") == "image/jpeg":
-                encoded_image = base64.b64encode(message["data"]).decode("utf-8")
+                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
                 text = message["content"]
                 message["content"] = [
                     {"type": "text", "text": text},
@@ -81,9 +83,6 @@ class BaseOpenAILLMService(LLMService):
                 ]
                 del message["data"]
                 del message["mime_type"]
-
-        messages_for_log = json.dumps(messages)
-        logger.debug(f"Generating chat: {messages_for_log}")
 
         start_time = time.time()
         chunks: AsyncStream[ChatCompletionChunk] = (
@@ -101,10 +100,6 @@ class BaseOpenAILLMService(LLMService):
         return chunks
 
     async def _chat_completions(self, messages) -> str | None:
-        messages_for_log = json.dumps(messages)
-
-        logger.debug(f"Generating chat: {messages_for_log}")
-
         response: ChatCompletion = await self._client.chat.completions.create(
             model=self._model, stream=False, messages=messages
         )

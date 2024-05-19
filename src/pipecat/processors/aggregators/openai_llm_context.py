@@ -6,6 +6,7 @@
 
 from dataclasses import dataclass
 import io
+import json
 
 from typing import List
 
@@ -20,6 +21,17 @@ from openai.types.chat import (
     ChatCompletionToolChoiceOptionParam,
     ChatCompletionMessageParam
 )
+
+# JSON custom encoder to handle bytes arrays so that we can log contexts
+# with images to the console.
+
+
+class CustomEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, io.BytesIO):
+            # Convert the first 8 bytes to an ASCII hex string
+            return (f"{obj.getbuffer()[0:8].hex()}...")
+        return super().default(obj)
 
 
 class OpenAILLMContext:
@@ -66,7 +78,7 @@ class OpenAILLMContext:
         context.add_message({
             "content": frame.text,
             "role": "user",
-            "data": buffer.getvalue(),
+            "data": buffer,
             "mime_type": "image/jpeg"
         })
         return context
@@ -76,6 +88,10 @@ class OpenAILLMContext:
 
     def get_messages(self) -> List[ChatCompletionMessageParam]:
         return self.messages
+
+    def get_messages_json(self) -> str:
+        return json.dumps(self.messages, cls=CustomEncoder)
+        # return json.dumps(self.messages)
 
     def set_tool_choice(
         self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven

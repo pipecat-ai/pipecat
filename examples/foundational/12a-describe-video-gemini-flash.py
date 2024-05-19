@@ -19,7 +19,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.google import GoogleLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVAD
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -56,11 +56,11 @@ async def main(room_url: str, token):
             DailyParams(
                 audio_in_enabled=True,  # This is so Silero VAD can get audio data
                 audio_out_enabled=True,
-                transcription_enabled=True
+                transcription_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer()
             )
         )
-
-        vad = SileroVAD()
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -89,8 +89,15 @@ async def main(room_url: str, token):
             transport.capture_participant_transcription(participant["id"])
             image_requester.set_participant_id(participant["id"])
 
-        pipeline = Pipeline([transport.input(), vad, user_response, image_requester,
-                             vision_aggregator, google, tts, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            user_response,
+            image_requester,
+            vision_aggregator,
+            google,
+            tts,
+            transport.output()
+        ])
 
         task = PipelineTask(pipeline)
 
