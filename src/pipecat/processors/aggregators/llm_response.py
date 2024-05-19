@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMMessagesFrame,
     LLMResponseStartFrame,
+    StartInterruptionFrame,
     TextFrame,
     LLMResponseEndFrame,
     TranscriptionFrame,
@@ -40,12 +41,9 @@ class LLMResponseAggregator(FrameProcessor):
         self._end_frame = end_frame
         self._accumulator_frame = accumulator_frame
         self._interim_accumulator_frame = interim_accumulator_frame
-        self._seen_start_frame = False
-        self._seen_end_frame = False
-        self._seen_interim_results = False
 
-        self._aggregation = ""
-        self._aggregating = False
+        # Reset our accumulator state.
+        self._reset()
 
     #
     # Frame processor
@@ -96,6 +94,9 @@ class LLMResponseAggregator(FrameProcessor):
             self._seen_interim_results = False
         elif self._interim_accumulator_frame and isinstance(frame, self._interim_accumulator_frame):
             self._seen_interim_results = True
+        elif isinstance(frame, StartInterruptionFrame):
+            self._reset()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -108,12 +109,15 @@ class LLMResponseAggregator(FrameProcessor):
             frame = LLMMessagesFrame(self._messages)
             await self.push_frame(frame)
 
-            # Reset
-            self._aggregation = ""
-            self._aggregating = False
-            self._seen_start_frame = False
-            self._seen_end_frame = False
-            self._seen_interim_results = False
+            # Reset our accumulator state.
+            self._reset()
+
+    def _reset(self):
+        self._aggregation = ""
+        self._aggregating = False
+        self._seen_start_frame = False
+        self._seen_end_frame = False
+        self._seen_interim_results = False
 
 
 class LLMAssistantResponseAggregator(LLMResponseAggregator):
