@@ -6,12 +6,16 @@
 
 from abc import ABC, abstractmethod
 
+from pydantic import ConfigDict
 from pydantic.main import BaseModel
 
 from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.vad.vad_analyzer import VADAnalyzer
 
 
 class TransportParams(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     camera_out_enabled: bool = False
     camera_out_is_live: bool = False
     camera_out_width: int = 1024
@@ -27,6 +31,7 @@ class TransportParams(BaseModel):
     audio_in_channels: int = 1
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
+    vad_analyzer: VADAnalyzer | None = None
 
 
 class BaseTransport(ABC):

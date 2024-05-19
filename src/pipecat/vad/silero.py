@@ -8,7 +8,7 @@ import numpy as np
 
 from pipecat.frames.frames import AudioRawFrame, Frame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
+from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 
 from loguru import logger
 
@@ -26,24 +26,10 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module(s): {e}")
 
 
-# Provided by Alexander Veysov
-def int2float(sound):
-    try:
-        abs_max = np.abs(sound).max()
-        sound = sound.astype("float32")
-        if abs_max > 0:
-            sound *= 1 / 32768
-        sound = sound.squeeze()  # depends on the use case
-        return sound
-    except ValueError:
-        return sound
+class SileroVADAnalyzer(VADAnalyzer):
 
-
-class SileroVAD(FrameProcessor, VADAnalyzer):
-
-    def __init__(self, sample_rate=16000, audio_passthrough=False):
-        FrameProcessor.__init__(self)
-        VADAnalyzer.__init__(self, sample_rate=sample_rate, num_channels=1)
+    def __init__(self, sample_rate=16000, params: VADParams = VADParams()):
+        super().__init__(sample_rate=sample_rate, num_channels=1, params=params)
 
         logger.debug("Loading Silero VAD model...")
 
@@ -52,7 +38,6 @@ class SileroVAD(FrameProcessor, VADAnalyzer):
         )
 
         self._processor_vad_state: VADState = VADState.QUIET
-        self._audio_passthrough = audio_passthrough
 
         logger.debug("Loaded Silero VAD")
 
@@ -66,13 +51,27 @@ class SileroVAD(FrameProcessor, VADAnalyzer):
     def voice_confidence(self, buffer) -> float:
         try:
             audio_int16 = np.frombuffer(buffer, np.int16)
-            audio_float32 = int2float(audio_int16)
+            # Divide by 32768 because we have signed 16-bit data.
+            audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
             new_confidence = self._model(torch.from_numpy(audio_float32), self.sample_rate).item()
             return new_confidence
         except BaseException as e:
             # This comes from an empty audio array
             logger.error(f"Error analyzing audio with Silero VAD: {e}")
             return 0
+
+
+class SileroVAD(FrameProcessor):
+
+    def __init__(
+            self,
+            sample_rate: int = 16000,
+            vad_params: VADParams = VADParams(),
+            audio_passthrough: bool = False):
+        super().__init__()
+
+        self._vad_analyzer = SileroVADAnalyzer(sample_rate=sample_rate, params=vad_params)
+        self._audio_passthrough = audio_passthrough
 
     #
     # FrameProcessor
@@ -89,7 +88,7 @@ class SileroVAD(FrameProcessor, VADAnalyzer):
     async def _analyze_audio(self, frame: AudioRawFrame):
         # Check VAD and push event if necessary. We just care about changes
         # from QUIET to SPEAKING and vice versa.
-        new_vad_state = self.analyze_audio(frame.audio)
+        new_vad_state = self._vad_analyzer.analyze_audio(frame.audio)
         if new_vad_state != self._processor_vad_state and new_vad_state != VADState.STARTING and new_vad_state != VADState.STOPPING:
             new_frame = None
 

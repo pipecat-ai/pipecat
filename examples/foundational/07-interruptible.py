@@ -1,26 +1,34 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
 import aiohttp
-import logging
 import os
-from pipecat.pipeline.aggregators import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+import sys
 
+from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.services.ai_services import FrameLogger
-from pipecat.transports.daily_transport import DailyTransport
-from pipecat.services.open_ai_services import OpenAILLMService
-from pipecat.services.elevenlabs_ai_services import ElevenLabsTTSService
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.openai import OpenAILLMService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
+
+from loguru import logger
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
-logger = logging.getLogger("pipecat")
-logger.setLevel(logging.DEBUG)
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
 
 
 async def main(room_url: str, token):
@@ -29,12 +37,12 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Respond bot",
-            duration_minutes=5,
-            start_transcription=True,
-            mic_enabled=True,
-            mic_sample_rate=16000,
-            camera_enabled=False,
-            vad_enabled=True,
+            DailyParams(
+                audio_out_enabled=True,
+                transcription_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer()
+            )
         )
 
         tts = ElevenLabsTTSService(
@@ -47,27 +55,38 @@ async def main(room_url: str, token):
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4-turbo-preview")
 
-        pipeline = Pipeline([FrameLogger(), llm, FrameLogger(), tts])
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            },
+        ]
 
-        @transport.event_handler("on_first_other_participant_joined")
-        async def on_first_other_participant_joined(transport, participant):
-            await transport.say("Hi, I'm listening!", tts)
+        tma_in = LLMUserResponseAggregator(messages)
+        tma_out = LLMAssistantResponseAggregator(messages)
 
-        async def run_conversation():
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio. Respond to what the user said in a creative and helpful way.",
-                },
-            ]
+        pipeline = Pipeline([
+            transport.input(),   # Transport user input
+            tma_in,              # User responses
+            llm,                 # LLM
+            tts,                 # TTS
+            transport.output(),  # Transport bot output
+            tma_out              # Assistant spoken responses
+        ])
 
-            await transport.run_interruptible_pipeline(
-                pipeline,
-                post_processor=LLMAssistantResponseAggregator(messages),
-                pre_processor=LLMUserResponseAggregator(messages),
-            )
+        task = PipelineTask(pipeline, allow_interruptions=True)
 
-        await asyncio.gather(transport.run(), run_conversation())
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
+            # Kick off the conversation.
+            messages.append(
+                {"role": "system", "content": "Please introduce yourself to the user."})
+            await task.queue_frames([LLMMessagesFrame(messages)])
+
+        runner = PipelineRunner()
+
+        await runner.run(task)
 
 
 if __name__ == "__main__":

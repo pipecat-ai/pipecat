@@ -8,7 +8,7 @@ from PIL import Image
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMUserResponseAggregator
+from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
 from pipecat.frames.frames import (
     AudioRawFrame,
     ImageRawFrame,
@@ -21,7 +21,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTranscriptionSettings, DailyTransport
-from pipecat.vad.silero import SileroVAD
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -56,7 +56,7 @@ talking_frame = SpriteFrame(images=sprites)
 class TalkingAnimation(FrameProcessor):
     """
     This class starts a talking animation when it receives an first AudioFrame,
-    and then returns to a "quiet" sprite when it sees a LLMResponseEndFrame.
+    and then returns to a "quiet" sprite when it sees a TTSStoppedFrame.
     """
 
     def __init__(self):
@@ -82,11 +82,12 @@ async def main(room_url: str, token):
             token,
             "Chatbot",
             DailyParams(
-                audio_in_enabled=True,
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,
                 camera_out_height=576,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
                 transcription_enabled=True,
                 #
                 # Spanish
@@ -98,8 +99,6 @@ async def main(room_url: str, token):
                 # )
             )
         )
-
-        vad = SileroVAD()
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
@@ -136,13 +135,21 @@ async def main(room_url: str, token):
         ]
 
         user_response = LLMUserResponseAggregator()
+        assistant_response = LLMAssistantResponseAggregator()
 
         ta = TalkingAnimation()
 
-        pipeline = Pipeline([transport.input(), vad, user_response,
-                            llm, tts, ta, transport.output()])
+        pipeline = Pipeline([
+            transport.input(),
+            user_response,
+            llm,
+            tts,
+            ta,
+            transport.output(),
+            assistant_response,
+        ])
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(pipeline, allow_interruptions=True)
         await task.queue_frame(quiet_frame)
 
         @transport.event_handler("on_first_participant_joined")
