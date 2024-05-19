@@ -1,7 +1,8 @@
-import google.generativeai as gai
-import google.ai.generativelanguage as glm
+
+import json
 import os
 import asyncio
+import time
 
 from typing import List
 
@@ -10,13 +11,25 @@ from pipecat.frames.frames import (
     TextFrame,
     VisionImageRawFrame,
     LLMMessagesFrame,
+    LLMFullResponseStartFrame,
     LLMResponseStartFrame,
-    LLMResponseEndFrame)
+    LLMResponseEndFrame,
+    LLMFullResponseEndFrame
+)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
 
 from loguru import logger
+
+try:
+    import google.generativeai as gai
+    import google.ai.generativelanguage as glm
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_API_KEY` environment variable.")
+    raise Exception(f"Missing module: {e}")
 
 
 class GoogleLLMService(LLMService):
@@ -54,7 +67,7 @@ class GoogleLLMService(LLMService):
                 parts.append(
                     glm.Part(inline_data=glm.Blob(
                         mime_type=message["mime_type"],
-                        data=message["data"]
+                        data=message["data"].getvalue()
                     )))
             google_messages.append({"role": role, "parts": parts})
 
@@ -66,19 +79,25 @@ class GoogleLLMService(LLMService):
             await asyncio.sleep(0)
 
     async def _process_context(self, context: OpenAILLMContext):
+        await self.push_frame(LLMFullResponseStartFrame())
         try:
+            logger.debug(f"Generating chat: {context.get_messages_json()}")
+
             messages = self._get_messages_from_openai_context(context)
 
-            await self.push_frame(LLMResponseStartFrame())
+            start_time = time.time()
             response = self._client.generate_content(messages, stream=True)
+            logger.debug(f"Google LLM TTFB: {time.time() - start_time}")
 
             async for chunk in self._async_generator_wrapper(response):
-                logger.debug(f"Pushing inference text: {chunk.text}")
+                await self.push_frame(LLMResponseStartFrame())
                 await self.push_frame(TextFrame(chunk.text))
+                await self.push_frame(LLMResponseEndFrame())
 
-            await self.push_frame(LLMResponseEndFrame())
         except Exception as e:
             logger.error(f"Exception: {e}")
+        finally:
+            await self.push_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         context = None
