@@ -45,6 +45,14 @@ class LLMResponseAggregator(FrameProcessor):
         # Reset our accumulator state.
         self._reset()
 
+    @property
+    def messages(self):
+        return self._messages
+
+    @property
+    def role(self):
+        return self._role
+
     #
     # Frame processor
     #
