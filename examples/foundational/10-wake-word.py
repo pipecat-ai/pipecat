@@ -23,14 +23,15 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_context import (
-    LLMUserContextAggregator,
-    LLMAssistantContextAggregator,
+from pipecat.processors.aggregators.llm_response import (
+    LLMUserResponseAggregator,
+    LLMAssistantResponseAggregator,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -131,7 +132,9 @@ async def main(room_url: str, token):
                 camera_out_width=720,
                 camera_out_height=1280,
                 camera_out_framerate=10,
-                transcription_enabled=True
+                transcription_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer()
             )
         )
 
@@ -153,8 +156,8 @@ async def main(room_url: str, token):
             },
         ]
 
-        tma_in = LLMUserContextAggregator(messages)
-        tma_out = LLMAssistantContextAggregator(messages)
+        tma_in = LLMUserResponseAggregator(messages)
+        tma_out = LLMAssistantResponseAggregator(messages)
         ncf = NameCheckFilter(["Santa Cat", "Santa"])
 
         pipeline = Pipeline([

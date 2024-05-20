@@ -17,6 +17,7 @@ from typing import AsyncGenerator, List, Literal
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    LLMFunctionCallFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -152,8 +153,8 @@ class BaseOpenAILLMService(LLMService):
 
         # if we got a function name and arguments, yield the frame with all the info so
         # frame consumers can take action based on the function call.
-        # if function_name and arguments:
-        #     yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
+        if function_name and arguments:
+            await self.push_frame(LLMFunctionCallFrame(function_name=function_name, arguments=arguments))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         context = None

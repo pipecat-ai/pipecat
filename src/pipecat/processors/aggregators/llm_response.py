@@ -67,7 +67,7 @@ class LLMResponseAggregator(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         send_aggregation = False
-
+        print(f"Got frame: {frame}")
         if isinstance(frame, self._start_frame):
             self._seen_start_frame = True
             self._aggregating = True
