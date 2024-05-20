@@ -8,6 +8,7 @@ import io
 import json
 import time
 import aiohttp
+import base64
 
 from PIL import Image
 
@@ -22,7 +23,8 @@ from pipecat.frames.frames import (
     LLMResponseEndFrame,
     LLMResponseStartFrame,
     TextFrame,
-    URLImageRawFrame
+    URLImageRawFrame,
+    VisionImageRawFrame
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection
@@ -66,9 +68,21 @@ class BaseOpenAILLMService(LLMService):
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
+        logger.debug(f"Generating chat: {context.get_messages_json()}")
+
         messages: List[ChatCompletionMessageParam] = context.get_messages()
-        messages_for_log = json.dumps(messages)
-        logger.debug(f"Generating chat: {messages_for_log}")
+
+        # base64 encode any images
+        for message in messages:
+            if message.get("mime_type") == "image/jpeg":
+                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
+                text = message["content"]
+                message["content"] = [
+                    {"type": "text", "text": text},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}}
+                ]
+                del message["data"]
+                del message["mime_type"]
 
         start_time = time.time()
         chunks: AsyncStream[ChatCompletionChunk] = (
@@ -86,10 +100,6 @@ class BaseOpenAILLMService(LLMService):
         return chunks
 
     async def _chat_completions(self, messages) -> str | None:
-        messages_for_log = json.dumps(messages)
-
-        logger.debug(f"Generating chat: {messages_for_log}")
-
         response: ChatCompletion = await self._client.chat.completions.create(
             model=self._model, stream=False, messages=messages
         )
@@ -151,6 +161,8 @@ class BaseOpenAILLMService(LLMService):
             context: OpenAILLMContext = frame.context
         elif isinstance(frame, LLMMessagesFrame):
             context = OpenAILLMContext.from_messages(frame.messages)
+        elif isinstance(frame, VisionImageRawFrame):
+            context = OpenAILLMContext.from_image_frame(frame)
         else:
             await self.push_frame(frame, direction)
 
