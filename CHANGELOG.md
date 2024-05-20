@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LLMUserResponseAggregator` and `LLMAssistantResponseAggregator` internal
   messages are now exposed through the `messages` property.
 
+### Fixed
+
+- Fixed an issue where `LLMAssistantResponseAggregator` was not accumulating the
+  full response but short sentences instead. If there's an interruption we only
+  accumulate what the bot has spoken until now in a long response as well.
+
 ## [0.0.18] - 2024-05-20
 
 ### Fixed
