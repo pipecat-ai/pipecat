@@ -2,9 +2,11 @@ name: publish-test
 
 on:
   workflow_dispatch:
-  push:
+  pull_request:
     branches:
-      - main
+      - "**"
+    paths-ignore:
+      - "docs/**"
 
 jobs:
   build:
