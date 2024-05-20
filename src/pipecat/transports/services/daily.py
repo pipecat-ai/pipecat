@@ -581,6 +581,9 @@ class DailyOutputTransport(BaseOutputTransport):
         await super().cleanup()
         await self._client.cleanup()
 
+    def send_message(self, frame: DailyTransportMessageFrame):
+        self._client.send_message(frame)
+
     def write_raw_audio_frames(self, frames: bytes):
         self._client.write_raw_audio_frames(frames)
 
