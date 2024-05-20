@@ -5,13 +5,13 @@
 #    pip-compile --all-extras pyproject.toml
 #
 aiohttp==3.9.5
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 aiosignal==1.3.1
     # via aiohttp
 annotated-types==0.6.0
     # via pydantic
-anthropic==0.25.8
-    # via pipecat (pyproject.toml)
+anthropic==0.25.9
+    # via pipecat-ai (pyproject.toml)
 anyio==4.3.0
     # via
     #   anthropic
@@ -24,9 +24,11 @@ attrs==23.2.0
 av==12.0.0
     # via faster-whisper
 azure-cognitiveservices-speech==1.37.0
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 blinker==1.8.2
     # via flask
+cachetools==5.3.3
+    # via google-auth
 certifi==2024.2.2
     # via
     #   httpcore
@@ -38,22 +40,22 @@ click==8.1.7
     # via flask
 coloredlogs==15.0.1
     # via onnxruntime
-ctranslate2==4.2.1
+ctranslate2==4.3.0
     # via faster-whisper
 daily-python==0.7.4
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 distro==1.9.0
     # via
     #   anthropic
     #   openai
 einops==0.8.0
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 exceptiongroup==1.2.1
     # via anyio
 fal-client==0.4.0
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 faster-whisper==1.0.2
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 filelock==3.14.0
     # via
     #   huggingface-hub
@@ -64,25 +66,58 @@ filelock==3.14.0
 flask==3.0.3
     # via
     #   flask-cors
-    #   pipecat (pyproject.toml)
+    #   pipecat-ai (pyproject.toml)
 flask-cors==4.0.1
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 flatbuffers==24.3.25
     # via onnxruntime
 frozenlist==1.4.1
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2024.3.1
+fsspec==2024.5.0
     # via
     #   huggingface-hub
     #   torch
+google-ai-generativelanguage==0.6.4
+    # via google-generativeai
+google-api-core[grpc]==2.19.0
+    # via
+    #   google-ai-generativelanguage
+    #   google-api-python-client
+    #   google-generativeai
+google-api-python-client==2.129.0
+    # via google-generativeai
+google-auth==2.29.0
+    # via
+    #   google-ai-generativelanguage
+    #   google-api-core
+    #   google-api-python-client
+    #   google-auth-httplib2
+    #   google-generativeai
+google-auth-httplib2==0.2.0
+    # via google-api-python-client
+google-generativeai==0.5.4
+    # via pipecat-ai (pyproject.toml)
+googleapis-common-protos==1.63.0
+    # via
+    #   google-api-core
+    #   grpcio-status
 grpcio==1.63.0
-    # via pyht
+    # via
+    #   google-api-core
+    #   grpcio-status
+    #   pyht
+grpcio-status==1.62.2
+    # via google-api-core
 h11==0.14.0
     # via httpcore
 httpcore==1.0.5
     # via httpx
+httplib2==0.22.0
+    # via
+    #   google-api-python-client
+    #   google-auth-httplib2
 httpx==0.27.0
     # via
     #   anthropic
@@ -111,7 +146,7 @@ jinja2==3.1.4
     #   flask
     #   torch
 loguru==0.7.2
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 markupsafe==2.1.5
     # via
     #   jinja2
@@ -128,7 +163,7 @@ numpy==1.26.4
     # via
     #   ctranslate2
     #   onnxruntime
-    #   pipecat (pyproject.toml)
+    #   pipecat-ai (pyproject.toml)
     #   torchvision
     #   transformers
 nvidia-cublas-cu12==12.1.3.1
@@ -162,10 +197,10 @@ nvidia-nvjitlink-cu12==12.4.127
     #   nvidia-cusparse-cu12
 nvidia-nvtx-cu12==12.1.105
     # via torch
-onnxruntime==1.17.3
+onnxruntime==1.18.0
     # via faster-whisper
 openai==1.26.0
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 packaging==24.0
     # via
     #   huggingface-hub
@@ -173,37 +208,59 @@ packaging==24.0
     #   transformers
 pillow==10.3.0
     # via
-    #   pipecat (pyproject.toml)
+    #   pipecat-ai (pyproject.toml)
     #   torchvision
+proto-plus==1.23.0
+    # via
+    #   google-ai-generativelanguage
+    #   google-api-core
 protobuf==4.25.3
     # via
+    #   google-ai-generativelanguage
+    #   google-api-core
+    #   google-generativeai
+    #   googleapis-common-protos
+    #   grpcio-status
     #   onnxruntime
+    #   proto-plus
     #   pyht
+pyasn1==0.6.0
+    # via
+    #   pyasn1-modules
+    #   rsa
+pyasn1-modules==0.4.0
+    # via google-auth
 pyaudio==0.2.14
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 pydantic==2.7.1
     # via
     #   anthropic
+    #   google-generativeai
     #   openai
 pydantic-core==2.18.2
     # via pydantic
 pyht==0.0.28
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
+pyparsing==3.1.2
+    # via httplib2
 python-dotenv==1.0.1
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 pyyaml==6.0.1
     # via
     #   ctranslate2
     #   huggingface-hub
     #   timm
     #   transformers
-regex==2024.5.10
+regex==2024.5.15
     # via transformers
 requests==2.31.0
     # via
+    #   google-api-core
     #   huggingface-hub
     #   pyht
     #   transformers
+rsa==4.9
+    # via google-auth
 safetensors==0.4.3
     # via
     #   timm
@@ -219,7 +276,7 @@ sympy==1.12
     #   onnxruntime
     #   torch
 timm==0.9.16
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 tokenizers==0.19.1
     # via
     #   anthropic
@@ -227,37 +284,41 @@ tokenizers==0.19.1
     #   transformers
 torch==2.3.0
     # via
-    #   pipecat (pyproject.toml)
+    #   pipecat-ai (pyproject.toml)
     #   timm
     #   torchaudio
     #   torchvision
 torchaudio==2.3.0
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 torchvision==0.18.0
     # via timm
 tqdm==4.66.4
     # via
+    #   google-generativeai
     #   huggingface-hub
     #   openai
     #   transformers
 transformers==4.40.2
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 triton==2.3.0
     # via torch
 typing-extensions==4.11.0
     # via
     #   anthropic
     #   anyio
+    #   google-generativeai
     #   huggingface-hub
     #   openai
-    #   pipecat (pyproject.toml)
+    #   pipecat-ai (pyproject.toml)
     #   pydantic
     #   pydantic-core
     #   torch
+uritemplate==4.1.1
+    # via google-api-python-client
 urllib3==2.2.1
     # via requests
 websockets==12.0
-    # via pipecat (pyproject.toml)
+    # via pipecat-ai (pyproject.toml)
 werkzeug==3.0.3
     # via flask
 yarl==1.9.4
