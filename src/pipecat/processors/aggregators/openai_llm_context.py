@@ -5,10 +5,14 @@
 #
 
 from dataclasses import dataclass
+import io
+import json
 
 from typing import List
 
-from pipecat.frames.frames import Frame
+from PIL import Image
+
+from pipecat.frames.frames import Frame, VisionImageRawFrame
 
 from openai._types import NOT_GIVEN, NotGiven
 
@@ -17,6 +21,17 @@ from openai.types.chat import (
     ChatCompletionToolChoiceOptionParam,
     ChatCompletionMessageParam
 )
+
+# JSON custom encoder to handle bytes arrays so that we can log contexts
+# with images to the console.
+
+
+class CustomEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, io.BytesIO):
+            # Convert the first 8 bytes to an ASCII hex string
+            return (f"{obj.getbuffer()[0:8].hex()}...")
+        return super().default(obj)
 
 
 class OpenAILLMContext:
@@ -43,11 +58,39 @@ class OpenAILLMContext:
             })
         return context
 
+    @staticmethod
+    def from_image_frame(frame: VisionImageRawFrame) -> "OpenAILLMContext":
+        """
+        For images, we are deviating from the OpenAI messages shape. OpenAI
+        expects images to be base64 encoded, but other vision models may not.
+        So we'll store the image as bytes and do the base64 encoding as needed
+        in the LLM service.
+        """
+        context = OpenAILLMContext()
+        buffer = io.BytesIO()
+        Image.frombytes(
+            frame.format,
+            frame.size,
+            frame.image
+        ).save(
+            buffer,
+            format="JPEG")
+        context.add_message({
+            "content": frame.text,
+            "role": "user",
+            "data": buffer,
+            "mime_type": "image/jpeg"
+        })
+        return context
+
     def add_message(self, message: ChatCompletionMessageParam):
         self.messages.append(message)
 
     def get_messages(self) -> List[ChatCompletionMessageParam]:
         return self.messages
+
+    def get_messages_json(self) -> str:
+        return json.dumps(self.messages, cls=CustomEncoder)
 
     def set_tool_choice(
         self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven
