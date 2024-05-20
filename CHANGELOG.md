@@ -5,19 +5,16 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.17] - 2024-05-19
 
 ### Added
 
-- Added `google.generativeai` model support, including vision. This new `google` service defaults to using
-  `gemini-1.5-flash-latest`. Example in `examples/foundational/12a-describe-video-gemini-flash.py`.
+- Added `google.generativeai` model support, including vision. This new `google`
+  service defaults to using `gemini-1.5-flash-latest`. Example in
+  `examples/foundational/12a-describe-video-gemini-flash.py`.
 
 - Added vision support to `openai` service. Example in
   `examples/foundational/12a-describe-video-gemini-flash.py`.
-
-## [Unreleased]
-
-### Added
 
 - Added initial interruptions support. The assistant contexts (or aggregators)
   should now be placed after the output transport. This way, only the completed
