@@ -37,6 +37,8 @@ Adds pictures to our story (really fast!) Prompting is quite key for style consi
 **Install requirements**
 
 ```shell
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -52,7 +54,7 @@ This project uses a custom frontend, which needs to built. Note: this is done au
 
 ```shell
 cd frontend/
-npm install / yarn
+npm install
 npm run build
 ```
 
@@ -68,12 +70,7 @@ If you'd like to run a custom domain or port:
 
 `python src/server.py --host somehost --p 7777`
 
-➡️ Open the host URL in your browser
-
-> [!IMPORTANT]
-> Whilst working on the frontend code, please `yarn run dev`
-> and open the NextJS hosted service vs. the Python server.
-> (Usually localhost:3000.)
+➡️ Open the host URL in your browser `http://localhost:7860`
 
 ---
 
