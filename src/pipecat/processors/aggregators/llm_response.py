@@ -18,7 +18,9 @@ from pipecat.frames.frames import (
     LLMResponseEndFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame)
+    UserStoppedSpeakingFrame
+)
+from pipecat.services.openai import OpenAILLMContext, OpenAILLMContextFrame
 
 
 class LLMResponseAggregator(FrameProcessor):
@@ -35,7 +37,8 @@ class LLMResponseAggregator(FrameProcessor):
     ):
         super().__init__()
 
-        self._messages = messages
+        if messages:
+            self._messages = messages
         self._role = role
         self._start_frame = start_frame
         self._end_frame = end_frame
@@ -67,7 +70,6 @@ class LLMResponseAggregator(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         send_aggregation = False
-        print(f"Got frame: {frame}")
         if isinstance(frame, self._start_frame):
             self._seen_start_frame = True
             self._aggregating = True
@@ -193,3 +195,44 @@ class LLMFullResponseAggregator(FrameProcessor):
             self._aggregation = ""
         else:
             await self.push_frame(frame, direction)
+
+
+class LLMContextAggregator(LLMResponseAggregator):
+    def __init__(self, *, context: OpenAILLMContext, **kwargs):
+
+        self._context = context
+        super().__init__(**kwargs)
+
+    async def _push_aggregation(self):
+        if len(self._aggregation) > 0:
+            self._context.add_message({"role": self._role, "content": self._aggregation})
+            frame = OpenAILLMContextFrame(self._context)
+            await self.push_frame(frame)
+
+            # Reset our accumulator state.
+            self._reset()
+
+
+class LLMAssistantContextAggregator(LLMContextAggregator):
+    def __init__(self, context: OpenAILLMContext):
+        super().__init__(
+            messages=[],
+            context=context,
+            role="assistant",
+            start_frame=LLMResponseStartFrame,
+            end_frame=LLMResponseEndFrame,
+            accumulator_frame=TextFrame
+        )
+
+
+class LLMUserContextAggregator(LLMContextAggregator):
+    def __init__(self, context: OpenAILLMContext):
+        super().__init__(
+            messages=[],
+            context=context,
+            role="user",
+            start_frame=UserStartedSpeakingFrame,
+            end_frame=UserStoppedSpeakingFrame,
+            accumulator_frame=TranscriptionFrame,
+            interim_accumulator_frame=InterimTranscriptionFrame
+        )

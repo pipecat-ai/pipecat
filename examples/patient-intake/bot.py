@@ -17,7 +17,7 @@ from openai.types.chat import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMUserResponseAggregator, LLMAssistantResponseAggregator
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 from pipecat.processors.logger import FrameLogger
 from pipecat.frames.frames import (
     Frame,
@@ -62,8 +62,10 @@ for file in sound_files:
     filename = os.path.splitext(os.path.basename(full_path))[0]
     # Open the sound and convert it to bytes
     with wave.open(full_path) as audio_file:
-        sounds[file] = audio_file.readframes(-1)
+        sounds[file] = AudioRawFrame(audio_file.readframes(-1),
+                                     audio_file.getframerate(), audio_file.getnchannels())
 
+print(f"!!! sounds: {sounds['ding2.wav']}")
 steps = [{"prompt": "Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday, including the year. When they answer with their birthday, call the verify_birthday function.",
           "run_async": False,
           "failed": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function.",
@@ -216,7 +218,6 @@ class ChecklistProcessor(FrameProcessor):
         global current_step
         this_step = steps[current_step]
         self._context.set_tools(this_step["tools"])
-        print(f"tools are: {self._context.tools}")
         if isinstance(frame, LLMFunctionStartFrame):
             print(f"... Preparing function call: {frame.function_name}")
             self._function_name = frame.function_name
@@ -227,17 +228,14 @@ class ChecklistProcessor(FrameProcessor):
                 self._context.add_message(
                     {"role": "system", "content": steps[current_step]["prompt"]}
                 )
-                await self.push_frame(OpenAILLMContextFrame(self._context))
 
                 local_context = copy.deepcopy(self._context)
                 local_context.set_tool_choice("none")
-                async for frame in self._llm.process_frame(
-                    OpenAILLMContextFrame(local_context)
-                ):
-                    await self.push_frame(frame)
+                await self.push_frame(OpenAILLMContextFrame(local_context), FrameDirection.UPSTREAM)
             else:
                 # Insert a quick response while we run the function
-                await self.push_frame(AudioRawFrame(sounds["ding2.wav"]))
+                print(f"!!! pushing audio sound effect frame")
+                await self.push_frame(sounds["ding2.wav"])
                 pass
         elif isinstance(frame, LLMFunctionCallFrame):
 
@@ -255,36 +253,37 @@ class ChecklistProcessor(FrameProcessor):
                     )
                 fn = getattr(self, frame.function_name)
                 result = fn(json.loads(frame.arguments))
-
+                print(f"function result: {result}")
                 if not this_step["run_async"]:
                     if result:
                         current_step += 1
                         self._context.add_message(
                             {"role": "system", "content": steps[current_step]["prompt"]}
                         )
-                        await self.push_frame(OpenAILLMContextFrame(self._context))
+                        # await self.push_frame(OpenAILLMContextFrame(self._context))
 
                         local_context = copy.deepcopy(self._context)
                         local_context.set_tool_choice("none")
-                        async for frame in self._llm.process_frame(
-                            OpenAILLMContextFrame(local_context)
-                        ):
-                            await self.push_frame(frame)
+                        print(
+                            f"about to run completion with local context. messages: {local_context.messages}")
+
+                        # TODO-CB: Try pushing a frame instead of running completion here
+                        await self.push_frame(
+                            OpenAILLMContextFrame(local_context),
+                            FrameDirection.UPSTREAM)
                     else:
                         self._context.add_message(
                             {"role": "system", "content": this_step["failed"]}
                         )
-                        await self.push_frame(OpenAILLMContextFrame(self._context))
 
                         local_context = copy.deepcopy(self._context)
                         local_context.set_tool_choice("none")
-                        async for frame in self._llm.process_frame(
-                            OpenAILLMContextFrame(local_context)
-                        ):
-                            await self.push_frame(frame)
+                        await self.push_frame(OpenAILLMContextFrame(local_context), FrameDirection.UPSTREAM)
+
                     print(f"<-- Verify result: {result}\n")
 
         else:
+            print(f"!!! forwarding frame: {frame}")
             await self.push_frame(frame)
 
 
@@ -330,24 +329,26 @@ async def main(room_url: str, token):
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4-turbo")
+            model="gpt-4o")
 
         messages = []
         context = OpenAILLMContext(
             messages=messages,
         )
-        user_response = LLMUserResponseAggregator(messages)
-        assistant_response = LLMAssistantResponseAggregator(messages)
+        user_context = LLMUserContextAggregator(context)
+        assistant_context = LLMAssistantContextAggregator(context)
         checklist = ChecklistProcessor(context, llm)
         fl = FrameLogger("after transport output")
+        fltts = FrameLogger("### out of tts")
         pipeline = Pipeline([
             transport.input(),
-            user_response,
+            user_context,
             llm,
             checklist,
             tts,
+            fltts,
             transport.output(),
-            assistant_response,
+            assistant_context,
             fl
         ])
 

@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     LLMFunctionCallFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMFunctionStartFrame,
     LLMMessagesFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
@@ -138,7 +139,7 @@ class BaseOpenAILLMService(LLMService):
                 tool_call = chunk.choices[0].delta.tool_calls[0]
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
-                    # yield LLMFunctionStartFrame(function_name=tool_call.function.name)
+                    await self.push_frame(LLMFunctionStartFrame(function_name=tool_call.function.name))
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments and
                     # yield a complete LLMFunctionCallFrame after run_llm_async
@@ -149,12 +150,12 @@ class BaseOpenAILLMService(LLMService):
                 await self.push_frame(TextFrame(chunk.choices[0].delta.content))
                 await self.push_frame(LLMResponseEndFrame())
 
-        await self.push_frame(LLMFullResponseEndFrame())
-
         # if we got a function name and arguments, yield the frame with all the info so
         # frame consumers can take action based on the function call.
         if function_name and arguments:
             await self.push_frame(LLMFunctionCallFrame(function_name=function_name, arguments=arguments))
+
+        await self.push_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         context = None
