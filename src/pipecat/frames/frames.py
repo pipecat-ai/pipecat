@@ -132,7 +132,7 @@ class TranscriptionFrame(TextFrame):
     timestamp: str
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
+        return f"{self.name}(user_id: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
 
 
 @dataclass
