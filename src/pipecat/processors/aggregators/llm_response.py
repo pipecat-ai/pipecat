@@ -11,12 +11,11 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    LLMResponseStartFrame,
     StartInterruptionFrame,
-    TextFrame,
-    LLMResponseEndFrame,
     TranscriptionFrame,
+    TextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame)
 
@@ -103,6 +102,8 @@ class LLMResponseAggregator(FrameProcessor):
         elif self._interim_accumulator_frame and isinstance(frame, self._interim_accumulator_frame):
             self._seen_interim_results = True
         elif isinstance(frame, StartInterruptionFrame):
+            await self._push_aggregation()
+            # Reset anyways
             self._reset()
             await self.push_frame(frame, direction)
         else:
@@ -133,8 +134,8 @@ class LLMAssistantResponseAggregator(LLMResponseAggregator):
         super().__init__(
             messages=messages,
             role="assistant",
-            start_frame=LLMResponseStartFrame,
-            end_frame=LLMResponseEndFrame,
+            start_frame=LLMFullResponseStartFrame,
+            end_frame=LLMFullResponseEndFrame,
             accumulator_frame=TextFrame
         )
 
