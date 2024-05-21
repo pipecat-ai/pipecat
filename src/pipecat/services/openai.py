@@ -113,6 +113,7 @@ class BaseOpenAILLMService(LLMService):
     async def _process_context(self, context: OpenAILLMContext):
         function_name = ""
         arguments = ""
+        tool_call_id = ""
 
         chunk_stream: AsyncStream[ChatCompletionChunk] = (
             await self._stream_chat_completions(context)
@@ -138,8 +139,10 @@ class BaseOpenAILLMService(LLMService):
 
                 tool_call = chunk.choices[0].delta.tool_calls[0]
                 if tool_call.function and tool_call.function.name:
+                    print(f"!!! !!! !!! OMG TOOL CALL {tool_call}")
                     function_name += tool_call.function.name
-                    await self.push_frame(LLMFunctionStartFrame(function_name=tool_call.function.name))
+                    tool_call_id = tool_call.id
+                    await self.push_frame(LLMFunctionStartFrame(function_name=tool_call.function.name, tool_call_id=tool_call_id))
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments and
                     # yield a complete LLMFunctionCallFrame after run_llm_async
@@ -153,7 +156,7 @@ class BaseOpenAILLMService(LLMService):
         # if we got a function name and arguments, yield the frame with all the info so
         # frame consumers can take action based on the function call.
         if function_name and arguments:
-            await self.push_frame(LLMFunctionCallFrame(function_name=function_name, arguments=arguments))
+            await self.push_frame(LLMFunctionCallFrame(function_name=function_name, arguments=arguments, tool_call_id=tool_call_id))
 
         await self.push_frame(LLMFullResponseEndFrame())
 

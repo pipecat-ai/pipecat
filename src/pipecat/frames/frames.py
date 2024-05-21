@@ -117,12 +117,14 @@ class LLMFunctionStartFrame(Frame):
     start preparing to make a function call, if it can do so in the absence of
     any arguments."""
     function_name: str
+    tool_call_id: str
 
 
 @dataclass()
 class LLMFunctionCallFrame(Frame):
     """Emitted when the LLM has received an entire function call completion."""
     function_name: str
+    tool_call_id: str
     arguments: str
 
 
