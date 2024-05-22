@@ -4,9 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import array
 import io
-import math
 import wave
 
 from abc import abstractmethod
@@ -111,7 +109,7 @@ class STTService(AIService):
         (self._content, self._wave) = self._new_wave()
         self._silence_num_frames = 0
         # Volume exponential smoothing
-        self._smoothing_factor = 0.5
+        self._smoothing_factor = 0.4
         self._prev_volume = 1 - self._smoothing_factor
 
     @abstractmethod
@@ -127,17 +125,13 @@ class STTService(AIService):
         ww.setframerate(self._sample_rate)
         return (content, ww)
 
-    def _get_smoothed_volume(
-            self,
-            frame: AudioRawFrame,
-            prev_volume: float,
-            factor: float) -> float:
+    def _get_smoothed_volume(self, frame: AudioRawFrame) -> float:
         volume = calculate_audio_volume(frame.audio, frame.sample_rate)
-        return exp_smoothing(volume, prev_volume, factor)
+        return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
 
     async def _append_audio(self, frame: AudioRawFrame):
         # Try to filter out empty background noise
-        volume = self._get_smoothed_volume(frame, self._prev_volume, self._smoothing_factor)
+        volume = self._get_smoothed_volume(frame)
         if volume >= self._min_volume:
             # If volume is high enough, write new data to wave file
             self._wave.writeframes(frame.audio)
