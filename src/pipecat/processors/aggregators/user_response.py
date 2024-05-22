@@ -110,9 +110,6 @@ class ResponseAggregator(FrameProcessor):
             self._seen_interim_results = False
         elif self._interim_accumulator_frame and isinstance(frame, self._interim_accumulator_frame):
             self._seen_interim_results = True
-        elif isinstance(frame, StartInterruptionFrame):
-            self._reset()
-            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 

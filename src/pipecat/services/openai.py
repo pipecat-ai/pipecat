@@ -5,7 +5,6 @@
 #
 
 import io
-import json
 import time
 import aiohttp
 import base64
@@ -36,7 +35,6 @@ try:
     from openai import AsyncOpenAI, AsyncStream
 
     from openai.types.chat import (
-        ChatCompletion,
         ChatCompletionChunk,
         ChatCompletionMessageParam,
     )
@@ -98,15 +96,6 @@ class BaseOpenAILLMService(LLMService):
         logger.debug(f"OpenAI LLM TTFB: {time.time() - start_time}")
 
         return chunks
-
-    async def _chat_completions(self, messages) -> str | None:
-        response: ChatCompletion = await self._client.chat.completions.create(
-            model=self._model, stream=False, messages=messages
-        )
-        if response and len(response.choices) > 0:
-            return response.choices[0].message.content
-        else:
-            return None
 
     async def _process_context(self, context: OpenAILLMContext):
         function_name = ""
