@@ -5,6 +5,14 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed an issue where tasks and threads could be paused because the executor
+  didn't have more tasks available. This was causing issues when cancelling and
+  recreating tasks during interruptions.
+
 ## [0.0.19] - 2024-05-20
 
 ### Changed
