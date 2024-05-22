@@ -5,7 +5,16 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.20] - 2024-05-22
+
+### Added
+
+- In order to improve interruptions we now compute a loudness level using
+  [pyloudnorm](https://github.com/csteinmetz1/pyloudnorm). The audio coming
+  WebRTC transports (e.g. Daily) have an Automatic Gain Control (AGC) algorithm
+  applied to the signal, however we don't do that on our local PyAudio
+  signals. This means that currently incoming audio from PyAudio is kind of
+  broken. We will fix it in future releases.
 
 ### Fixed
 
