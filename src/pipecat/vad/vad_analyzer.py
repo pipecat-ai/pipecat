@@ -9,7 +9,7 @@ from enum import Enum
 
 from pydantic.main import BaseModel
 
-from pipecat.utils.audio import calculate_audio_volume
+from pipecat.utils.audio import calculate_audio_volume, exp_smoothing
 
 
 class VADState(Enum):
@@ -45,6 +45,10 @@ class VADAnalyzer:
 
         self._vad_buffer = b""
 
+        # Volume exponential smoothing
+        self._smoothing_factor = 0.4
+        self._prev_volume = 1 - self._smoothing_factor
+
     @property
     def sample_rate(self):
         return self._sample_rate
@@ -56,6 +60,10 @@ class VADAnalyzer:
     @abstractmethod
     def voice_confidence(self, buffer) -> float:
         pass
+
+    def _get_smoothed_volume(self, audio: bytes) -> float:
+        volume = calculate_audio_volume(audio, self._sample_rate)
+        return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
 
     def analyze_audio(self, buffer) -> VADState:
         self._vad_buffer += buffer
@@ -69,7 +77,8 @@ class VADAnalyzer:
 
         confidence = self.voice_confidence(audio_frames)
 
-        volume = calculate_audio_volume(audio_frames, self._sample_rate)
+        volume = self._get_smoothed_volume(audio_frames)
+        self._prev_volume = volume
 
         speaking = confidence >= self._params.confidence and volume >= self._params.min_volume
 
