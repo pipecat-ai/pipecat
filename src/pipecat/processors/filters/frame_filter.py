@@ -10,7 +10,7 @@ from pipecat.frames.frames import AppFrame, ControlFrame, Frame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
-class Filter(FrameProcessor):
+class FrameFilter(FrameProcessor):
 
     def __init__(self, types: List[type]):
         super().__init__()
