@@ -5,6 +5,7 @@
 #
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import inspect
 import queue
 import time
@@ -146,6 +147,8 @@ class DailyTransportClient(EventHandler):
         self._leaving = False
         self._sync_response = {k: queue.Queue() for k in ["join", "leave"]}
 
+        self._executor = ThreadPoolExecutor(max_workers=5)
+
         self._client: CallClient = CallClient(event_handler=self)
 
         self._camera: VirtualCameraDevice = Daily.create_camera_device(
@@ -195,7 +198,7 @@ class DailyTransportClient(EventHandler):
         self._joining = True
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._join)
+        await loop.run_in_executor(self._executor, self._join)
 
     def _join(self):
         logger.info(f"Joining {self._room_url}")
@@ -287,7 +290,7 @@ class DailyTransportClient(EventHandler):
         self._leaving = True
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._leave)
+        await loop.run_in_executor(self._executor, self._leave)
 
     def _leave(self):
         logger.info(f"Leaving {self._room_url}")
@@ -318,7 +321,7 @@ class DailyTransportClient(EventHandler):
 
     async def cleanup(self):
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._cleanup)
+        await loop.run_in_executor(self._executor, self._cleanup)
 
     def _cleanup(self):
         if self._client:
@@ -438,7 +441,8 @@ class DailyInputTransport(BaseInputTransport):
         await super().start(frame)
         # Create camera in thread (runs if _running is true).
         loop = asyncio.get_running_loop()
-        self._camera_in_thread = loop.run_in_executor(None, self._camera_in_thread_handler)
+        self._camera_in_thread = loop.run_in_executor(
+            self._in_executor, self._camera_in_thread_handler)
 
     async def stop(self):
         if not self._running:
