@@ -8,10 +8,6 @@ import numpy as np
 import pyloudnorm as pyln
 
 
-def compute_rms(audio: np.ndarray):
-    return np.sqrt(np.mean(audio**2))
-
-
 def normalize_value(value, min_value, max_value):
     normalized = (value - min_value) / (max_value - min_value)
     normalized_clamped = max(0, min(1, normalized))
