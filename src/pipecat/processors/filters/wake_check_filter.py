@@ -9,7 +9,7 @@ import time
 
 from enum import Enum
 
-from pipecat.frames.frames import Frame, TranscriptionFrame
+from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from loguru import logger
@@ -79,4 +79,6 @@ class WakeCheckFilter(FrameProcessor):
             else:
                 await self.push_frame(frame, direction)
         except Exception as e:
-            logger.error(f"Error in wake word filter: {e}")
+            error_msg = f"Error in wake word filter: {e}"
+            logger.error(error_msg)
+            await self.push_error(ErrorFrame(error_msg))
