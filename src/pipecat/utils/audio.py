@@ -13,7 +13,9 @@ def compute_rms(audio: np.ndarray):
 
 
 def normalize_value(value, min_value, max_value):
-    return (value - min_value) / (max_value - min_value)
+    normalized = (value - min_value) / (max_value - min_value)
+    normalized_clamped = max(0, min(1, normalized))
+    return normalized_clamped
 
 
 def calculate_audio_volume(audio: bytes, sample_rate: int) -> float:
