@@ -23,7 +23,7 @@ class VADParams(BaseModel):
     confidence: float = 0.6
     start_secs: float = 0.2
     stop_secs: float = 0.8
-    min_volume: float = 0.7
+    min_volume: float = 0.6
 
 
 class VADAnalyzer:
