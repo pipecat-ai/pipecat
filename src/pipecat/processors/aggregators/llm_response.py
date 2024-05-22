@@ -117,11 +117,14 @@ class LLMResponseAggregator(FrameProcessor):
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:
             self._messages.append({"role": self._role, "content": self._aggregation})
+
+            # Reset our accumulator state. Reset it before pushing it down,
+            # otherwise if the tasks gets cancelled we won't be able to clear
+            # things up.
+            self._reset()
+
             frame = LLMMessagesFrame(self._messages)
             await self.push_frame(frame)
-
-            # Reset our accumulator state.
-            self._reset()
 
     def _reset(self):
         self._aggregation = ""
