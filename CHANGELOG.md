@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where `StartInterruptionFrame` would cause
+  `LLMUserResponseAggregator` to push the accumulated text causing the LLM
+  respond in the wrong task. The `StartInterruptionFrame` should not trigger any
+  new LLM response because that would be spoken in a different task.
+
 - Fixed an issue where tasks and threads could be paused because the executor
   didn't have more tasks available. This was causing issues when cancelling and
   recreating tasks during interruptions.

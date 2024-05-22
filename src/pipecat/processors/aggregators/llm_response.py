@@ -30,7 +30,8 @@ class LLMResponseAggregator(FrameProcessor):
         start_frame,
         end_frame,
         accumulator_frame: TextFrame,
-        interim_accumulator_frame: TextFrame | None = None
+        interim_accumulator_frame: TextFrame | None = None,
+        handle_interruptions: bool = False
     ):
         super().__init__()
 
@@ -40,6 +41,7 @@ class LLMResponseAggregator(FrameProcessor):
         self._end_frame = end_frame
         self._accumulator_frame = accumulator_frame
         self._interim_accumulator_frame = interim_accumulator_frame
+        self._handle_interruptions = handle_interruptions
 
         # Reset our accumulator state.
         self._reset()
@@ -101,7 +103,7 @@ class LLMResponseAggregator(FrameProcessor):
             self._seen_interim_results = False
         elif self._interim_accumulator_frame and isinstance(frame, self._interim_accumulator_frame):
             self._seen_interim_results = True
-        elif isinstance(frame, StartInterruptionFrame):
+        elif self._handle_interruptions and isinstance(frame, StartInterruptionFrame):
             await self._push_aggregation()
             # Reset anyways
             self._reset()
@@ -136,7 +138,8 @@ class LLMAssistantResponseAggregator(LLMResponseAggregator):
             role="assistant",
             start_frame=LLMFullResponseStartFrame,
             end_frame=LLMFullResponseEndFrame,
-            accumulator_frame=TextFrame
+            accumulator_frame=TextFrame,
+            handle_interruptions=True
         )
 
 
