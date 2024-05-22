@@ -11,6 +11,8 @@ import queue
 import time
 import threading
 
+from concurrent.futures import ThreadPoolExecutor
+
 from PIL import Image
 from typing import List
 
@@ -41,6 +43,8 @@ class BaseOutputTransport(FrameProcessor):
         self._running = False
         self._allow_interruptions = False
 
+        self._out_executor = ThreadPoolExecutor(max_workers=5)
+
         # These are the images that we should send to the camera at our desired
         # framerate.
         self._camera_images = None
@@ -67,9 +71,10 @@ class BaseOutputTransport(FrameProcessor):
         loop = self.get_event_loop()
 
         if self._params.camera_out_enabled:
-            self._camera_out_thread = loop.run_in_executor(None, self._camera_out_thread_handler)
+            self._camera_out_thread = loop.run_in_executor(
+                self._out_executor, self._camera_out_thread_handler)
 
-        self._sink_thread = loop.run_in_executor(None, self._sink_thread_handler)
+        self._sink_thread = loop.run_in_executor(self._out_executor, self._sink_thread_handler)
 
         # Create push frame task. This is the task that will push frames in
         # order. We also guarantee that all frames are pushed in the same task.

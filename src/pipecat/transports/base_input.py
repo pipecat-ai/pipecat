@@ -7,6 +7,8 @@
 import asyncio
 import queue
 
+from concurrent.futures import ThreadPoolExecutor
+
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -34,7 +36,9 @@ class BaseInputTransport(FrameProcessor):
         self._running = False
         self._allow_interruptions = False
 
-        # Start media threads.
+        self._in_executor = ThreadPoolExecutor(max_workers=5)
+
+        # Create audio input queue if needed.
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_queue = queue.Queue()
 
@@ -55,8 +59,10 @@ class BaseInputTransport(FrameProcessor):
 
         if self._params.audio_in_enabled or self._params.vad_enabled:
             loop = self.get_event_loop()
-            self._audio_in_thread = loop.run_in_executor(None, self._audio_in_thread_handler)
-            self._audio_out_thread = loop.run_in_executor(None, self._audio_out_thread_handler)
+            self._audio_in_thread = loop.run_in_executor(
+                self._in_executor, self._audio_in_thread_handler)
+            self._audio_out_thread = loop.run_in_executor(
+                self._in_executor, self._audio_out_thread_handler)
 
     async def stop(self):
         if not self._running:
