@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Clear the audio output buffer if we are interrupted.
+
 - Re-add exponential smoothing after volume calculation. This makes sure the
   volume value being used doesn't fluctuate so much.
 
