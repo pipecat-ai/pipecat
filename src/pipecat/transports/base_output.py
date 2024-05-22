@@ -175,8 +175,7 @@ class BaseOutputTransport(FrameProcessor):
                             self._internal_push_frame(frame), self.get_event_loop())
                         future.result()
                 else:
-                    # Send any remaining audio
-                    self._send_audio_truncated(buffer, bytes_size_10ms)
+                    # If we get interrupted just clear the output buffer.
                     buffer = bytearray()
 
                 if isinstance(frame, EndFrame):
