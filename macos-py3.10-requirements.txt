@@ -8,7 +8,7 @@ aiohttp==3.9.5
     # via pipecat-ai (pyproject.toml)
 aiosignal==1.3.1
     # via aiohttp
-annotated-types==0.6.0
+annotated-types==0.7.0
     # via pydantic
 anthropic==0.25.9
     # via pipecat-ai (pyproject.toml)
@@ -40,7 +40,7 @@ click==8.1.7
     # via flask
 coloredlogs==15.0.1
     # via onnxruntime
-ctranslate2==4.2.1
+ctranslate2==4.3.0
     # via faster-whisper
 daily-python==0.7.4
     # via pipecat-ai (pyproject.toml)
@@ -78,7 +78,9 @@ fsspec==2024.5.0
     # via
     #   huggingface-hub
     #   torch
-google-ai-generativelanguage==0.6.3
+future==1.0.0
+    # via pyloudnorm
+google-ai-generativelanguage==0.6.4
     # via google-generativeai
 google-api-core[grpc]==2.19.0
     # via
@@ -96,13 +98,13 @@ google-auth==2.29.0
     #   google-generativeai
 google-auth-httplib2==0.2.0
     # via google-api-python-client
-google-generativeai==0.5.3
+google-generativeai==0.5.4
     # via pipecat-ai (pyproject.toml)
 googleapis-common-protos==1.63.0
     # via
     #   google-api-core
     #   grpcio-status
-grpcio==1.63.0
+grpcio==1.64.0
     # via
     #   google-api-core
     #   grpcio-status
@@ -124,7 +126,7 @@ httpx==0.27.0
     #   openai
 httpx-sse==0.4.0
     # via fal-client
-huggingface-hub==0.23.0
+huggingface-hub==0.23.1
     # via
     #   faster-whisper
     #   timm
@@ -163,9 +165,11 @@ numpy==1.26.4
     #   ctranslate2
     #   onnxruntime
     #   pipecat-ai (pyproject.toml)
+    #   pyloudnorm
+    #   scipy
     #   torchvision
     #   transformers
-onnxruntime==1.17.3
+onnxruntime==1.18.0
     # via faster-whisper
 openai==1.26.0
     # via pipecat-ai (pyproject.toml)
@@ -209,6 +213,8 @@ pydantic-core==2.18.2
     # via pydantic
 pyht==0.0.28
     # via pipecat-ai (pyproject.toml)
+pyloudnorm==0.1.1
+    # via pipecat-ai (pyproject.toml)
 pyparsing==3.1.2
     # via httplib2
 python-dotenv==1.0.1
@@ -221,7 +227,7 @@ pyyaml==6.0.1
     #   transformers
 regex==2024.5.15
     # via transformers
-requests==2.31.0
+requests==2.32.2
     # via
     #   google-api-core
     #   huggingface-hub
@@ -233,6 +239,8 @@ safetensors==0.4.3
     # via
     #   timm
     #   transformers
+scipy==1.13.0
+    # via pyloudnorm
 sniffio==1.3.1
     # via
     #   anthropic
