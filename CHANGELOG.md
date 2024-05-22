@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `WakeCheckFilter` which allows you to pass information downstream only
+  if you say a certain phrase/word.
+
+### Changed
+
+- `Filter` has been renamed to `FrameFilter` and it's now under
+  `processors/filters`.
+
 ### Fixed
 
 - Re-add exponential smoothing after volume calculation. This makes sure the
