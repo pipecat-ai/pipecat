@@ -12,14 +12,7 @@ import sys
 
 from PIL import Image
 
-from pipecat.frames.frames import (
-    Frame,
-    SystemFrame,
-    TextFrame,
-    ImageRawFrame,
-    SpriteFrame,
-    TranscriptionFrame,
-)
+from pipecat.frames.frames import Frame, ImageRawFrame, SpriteFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -27,6 +20,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMUserContextAggregator,
     LLMAssistantContextAggregator,
 )
+from pipecat.processors.filters.wake_check_filter import WakeCheckFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
@@ -84,33 +78,6 @@ thinking_list = [
 thinking_frame = SpriteFrame(thinking_list)
 
 
-class NameCheckFilter(FrameProcessor):
-    def __init__(self, names: list[str]):
-        super().__init__()
-        self._names = names
-        self._sentence = ""
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, SystemFrame):
-            await self.push_frame(frame, direction)
-            return
-
-        content: str = ""
-
-        # TODO: split up transcription by participant
-        if isinstance(frame, TranscriptionFrame):
-            content = frame.text
-            self._sentence += content
-            if self._sentence.endswith((".", "?", "!")):
-                if any(name in self._sentence for name in self._names):
-                    await self.push_frame(TextFrame(self._sentence))
-                    self._sentence = ""
-                else:
-                    self._sentence = ""
-        else:
-            await self.push_frame(frame, direction)
-
-
 class ImageSyncAggregator(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -155,17 +122,17 @@ async def main(room_url: str, token):
 
         tma_in = LLMUserContextAggregator(messages)
         tma_out = LLMAssistantContextAggregator(messages)
-        ncf = NameCheckFilter(["Santa Cat", "Santa"])
+        wcf = WakeCheckFilter(["Santa Cat", "Santa"])
 
         pipeline = Pipeline([
-            transport.input(),
-            isa,
-            ncf,
-            tma_in,
-            llm,
-            tts,
-            transport.output(),
-            tma_out
+            transport.input(),    # Transport user input
+            isa,                  # Cat talking/quiet images
+            wcf,                  # Filter out speech not directed at Santa Cat
+            tma_in,               # User responses
+            llm,                  # LLM
+            tts,                  # TTS
+            transport.output(),   # Transport bot output
+            tma_out               # Santa Cat spoken responses
         ])
 
         @transport.event_handler("on_first_participant_joined")
