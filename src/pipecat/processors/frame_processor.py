@@ -8,7 +8,7 @@ import asyncio
 from asyncio import AbstractEventLoop
 from enum import Enum
 
-from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame
+from pipecat.frames.frames import ErrorFrame, Frame
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
