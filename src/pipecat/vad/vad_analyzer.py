@@ -4,15 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import array
-import math
-
 from abc import abstractmethod
 from enum import Enum
 
 from pydantic.main import BaseModel
 
-from pipecat.utils.utils import exp_smoothing
+from pipecat.utils.audio import calculate_audio_volume
 
 
 class VADState(Enum):
@@ -26,13 +23,14 @@ class VADParams(BaseModel):
     confidence: float = 0.6
     start_secs: float = 0.2
     stop_secs: float = 0.8
-    min_rms: int = 1000
+    min_volume: float = 0.6
 
 
 class VADAnalyzer:
 
     def __init__(self, sample_rate: int, num_channels: int, params: VADParams):
         self._sample_rate = sample_rate
+        self._num_channels = num_channels
         self._params = params
         self._vad_frames = self.num_frames_required()
         self._vad_frames_num_bytes = self._vad_frames * num_channels * 2
@@ -47,10 +45,6 @@ class VADAnalyzer:
 
         self._vad_buffer = b""
 
-        # Volume exponential smoothing
-        self._smoothing_factor = 0.5
-        self._prev_rms = 1 - self._smoothing_factor
-
     @property
     def sample_rate(self):
         return self._sample_rate
@@ -63,14 +57,6 @@ class VADAnalyzer:
     def voice_confidence(self, buffer) -> float:
         pass
 
-    def _get_smoothed_volume(self, audio: bytes, prev_rms: float, factor: float) -> float:
-        # https://docs.python.org/3/library/array.html
-        audio_array = array.array('h', audio)
-        squares = [sample**2 for sample in audio_array]
-        mean = sum(squares) / len(audio_array)
-        rms = math.sqrt(mean)
-        return exp_smoothing(rms, prev_rms, factor)
-
     def analyze_audio(self, buffer) -> VADState:
         self._vad_buffer += buffer
 
@@ -82,10 +68,10 @@ class VADAnalyzer:
         self._vad_buffer = self._vad_buffer[num_required_bytes:]
 
         confidence = self.voice_confidence(audio_frames)
-        rms = self._get_smoothed_volume(audio_frames, self._prev_rms, self._smoothing_factor)
-        self._prev_rms = rms
 
-        speaking = confidence >= self._params.confidence and rms >= self._params.min_rms
+        volume = calculate_audio_volume(audio_frames, self._sample_rate)
+
+        speaking = confidence >= self._params.confidence and volume >= self._params.min_volume
 
         if speaking:
             match self._vad_state:

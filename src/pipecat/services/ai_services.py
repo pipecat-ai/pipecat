@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.utils import exp_smoothing
 
 
@@ -96,13 +97,13 @@ class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
     def __init__(self,
-                 min_rms: int = 100,
+                 min_volume: float = 0.6,
                  max_silence_secs: float = 0.3,
                  max_buffer_secs: float = 1.5,
                  sample_rate: int = 16000,
                  num_channels: int = 1):
         super().__init__()
-        self._min_rms = min_rms
+        self._min_volume = min_volume
         self._max_silence_secs = max_silence_secs
         self._max_buffer_secs = max_buffer_secs
         self._sample_rate = sample_rate
@@ -111,7 +112,7 @@ class STTService(AIService):
         self._silence_num_frames = 0
         # Volume exponential smoothing
         self._smoothing_factor = 0.5
-        self._prev_rms = 1 - self._smoothing_factor
+        self._prev_volume = 1 - self._smoothing_factor
 
     @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
@@ -126,25 +127,24 @@ class STTService(AIService):
         ww.setframerate(self._sample_rate)
         return (content, ww)
 
-    def _get_smoothed_volume(self, audio: bytes, prev_rms: float, factor: float) -> float:
-        # https://docs.python.org/3/library/array.html
-        audio_array = array.array('h', audio)
-        squares = [sample**2 for sample in audio_array]
-        mean = sum(squares) / len(audio_array)
-        rms = math.sqrt(mean)
-        return exp_smoothing(rms, prev_rms, factor)
+    def _get_smoothed_volume(
+            self,
+            frame: AudioRawFrame,
+            prev_volume: float,
+            factor: float) -> float:
+        volume = calculate_audio_volume(frame.audio, frame.sample_rate)
+        return exp_smoothing(volume, prev_volume, factor)
 
     async def _append_audio(self, frame: AudioRawFrame):
         # Try to filter out empty background noise
-        # (Very rudimentary approach, can be improved)
-        rms = self._get_smoothed_volume(frame.audio, self._prev_rms, self._smoothing_factor)
-        if rms >= self._min_rms:
+        volume = self._get_smoothed_volume(frame, self._prev_volume, self._smoothing_factor)
+        if volume >= self._min_volume:
             # If volume is high enough, write new data to wave file
             self._wave.writeframes(frame.audio)
             self._silence_num_frames = 0
         else:
             self._silence_num_frames += frame.num_frames
-        self._prev_rms = rms
+        self._prev_volume = volume
 
         # If buffer is not empty and we have enough data or there's been a long
         # silence, transcribe the audio gathered so far.
