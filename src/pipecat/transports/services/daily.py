@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import aiohttp
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import inspect
@@ -81,6 +82,11 @@ class WebRTCVADAnalyzer(VADAnalyzer):
         return confidence
 
 
+class DailyDialinSettings(BaseModel):
+    call_id: str = ""
+    call_domain: str = ""
+
+
 class DailyTranscriptionSettings(BaseModel):
     language: str = "en"
     tier: str = "nova"
@@ -96,6 +102,9 @@ class DailyTranscriptionSettings(BaseModel):
 
 
 class DailyParams(TransportParams):
+    api_url: str = "https://api.daily.co"
+    api_key: str = ""
+    dialin_settings: DailyDialinSettings = DailyDialinSettings()
     transcription_enabled: bool = False
     transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
 
@@ -648,7 +657,6 @@ class DailyTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
-        self._register_event_handler("on_dialin_ready")
         self._register_event_handler("on_dialout_connected")
         self._register_event_handler("on_dialout_stopped")
         self._register_event_handler("on_dialout_error")
@@ -721,8 +729,31 @@ class DailyTransport(BaseTransport):
         if self._input:
             self._input.push_app_message(message, sender)
 
+    async def _handle_dialin_ready(self, sip_endpoint: str):
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Authorization": f"Bearer {self._params.api_key}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            querystring = {
+                "callId": self._params.dialin_settings.call_id,
+                "callDomain": self._params.dialin_settings.call_domain,
+            }
+
+            url = f"{self._params.api_url}/dialin/pinlessCallUpdate"
+
+            async with session.post(url, headers=headers, params=querystring) as r:
+                if r.status != 200:
+                    logger.error(
+                        f"Unable to handle dialin-ready event (status: {r.status}, error: {r.text})")
+                    return
+
+                logger.debug("dialin-ready event handled successfully")
+
     def _on_dialin_ready(self, sip_endpoint):
-        self.on_dialin_ready(sip_endpoint)
+        future = asyncio.run_coroutine_threadsafe(
+            self._handle_dialin_ready(sip_endpoint), self._loop)
+        future.result()
 
     def _on_dialout_connected(self, data):
         self.on_dialout_connected(data)
@@ -766,9 +797,6 @@ class DailyTransport(BaseTransport):
         pass
 
     def on_left(self):
-        pass
-
-    def on_dialin_ready(self, sip_endpoint):
         pass
 
     def on_dialout_connected(self, data):
