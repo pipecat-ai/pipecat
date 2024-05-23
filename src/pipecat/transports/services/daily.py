@@ -103,11 +103,15 @@ class DailyParams(TransportParams):
 class DailyCallbacks(BaseModel):
     on_joined: Callable[[Mapping[str, Any]], None]
     on_left: Callable[[], None]
+    on_error: Callable[[str], None]
+    on_app_message: Callable[[Any, str], None]
+    on_dialout_connected: Callable[[Any], None]
+    on_dialout_stopped: Callable[[Any], None]
+    on_dialout_error: Callable[[Any], None]
+    on_dialout_warning: Callable[[Any], None]
+    on_first_participant_joined: Callable[[Mapping[str, Any]], None]
     on_participant_joined: Callable[[Mapping[str, Any]], None]
     on_participant_left: Callable[[Mapping[str, Any], str], None]
-    on_first_participant_joined: Callable[[Mapping[str, Any]], None]
-    on_app_message: Callable[[Any, str], None]
-    on_error: Callable[[str], None]
 
 
 class DailyTransportClient(EventHandler):
@@ -328,6 +332,9 @@ class DailyTransportClient(EventHandler):
             self._client.release()
             self._client = None
 
+    def start_dialout(self, settings):
+        self._client.start_dialout(settings)
+
     def capture_participant_transcription(self, participant_id: str, callback: Callable):
         if not self._params.transcription_enabled:
             return
@@ -360,6 +367,21 @@ class DailyTransportClient(EventHandler):
     #
     # Daily (EventHandler)
     #
+
+    def on_app_message(self, message: Any, sender: str):
+        self._callbacks.on_app_message(message, sender)
+
+    def on_dialout_connected(self, data: Any):
+        self._callbacks.on_dialout_connected(data)
+
+    def on_dialout_stopped(self, data: Any):
+        self._callbacks.on_dialout_stopped(data)
+
+    def on_dialout_error(self, data: Any):
+        self._callbacks.on_dialout_error(data)
+
+    def on_dialout_warning(self, data: Any):
+        self._callbacks.on_dialout_warning(data)
 
     def on_participant_joined(self, participant):
         id = participant["id"]
@@ -394,9 +416,6 @@ class DailyTransportClient(EventHandler):
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
         logger.debug("Transcription stopped")
-
-    def on_app_message(self, message: Any, sender: str):
-        self._callbacks.on_app_message(message, sender)
 
     #
     # Daily (CallClient callbacks)
@@ -601,11 +620,15 @@ class DailyTransport(BaseTransport):
         callbacks = DailyCallbacks(
             on_joined=self._on_joined,
             on_left=self._on_left,
+            on_error=self._on_error,
+            on_app_message=self._on_app_message,
+            on_dialout_connected=self._on_dialout_connected,
+            on_dialout_stopped=self._on_dialout_stopped,
+            on_dialout_error=self._on_dialout_error,
+            on_dialout_warning=self._on_dialout_warning,
             on_first_participant_joined=self._on_first_participant_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
-            on_app_message=self._on_app_message,
-            on_error=self._on_error,
         )
         self._params = params
 
@@ -620,9 +643,13 @@ class DailyTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
+        self._register_event_handler("on_dialout_connected")
+        self._register_event_handler("on_dialout_stopped")
+        self._register_event_handler("on_dialout_error")
+        self._register_event_handler("on_dialout_warning")
+        self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
-        self._register_event_handler("on_first_participant_joined")
 
     #
     # BaseTransport
@@ -654,6 +681,9 @@ class DailyTransport(BaseTransport):
         if self._output:
             await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
 
+    def start_dialout(self, settings):
+        self._client.start_dialout(settings)
+
     def capture_participant_transcription(self, participant_id: str):
         self._client.capture_participant_transcription(
             participant_id,
@@ -681,6 +711,22 @@ class DailyTransport(BaseTransport):
         # the client should report the error.
         pass
 
+    def _on_app_message(self, message: Any, sender: str):
+        if self._input:
+            self._input.push_app_message(message, sender)
+
+    def _on_dialout_connected(self, data):
+        self.on_dialout_connected(data)
+
+    def _on_dialout_stopped(self, data):
+        self.on_dialout_stopped(data)
+
+    def _on_dialout_error(self, data):
+        self.on_dialout_error(data)
+
+    def _on_dialout_warning(self, data):
+        self.on_dialout_warning(data)
+
     def _on_participant_joined(self, participant):
         self.on_participant_joined(participant)
 
@@ -689,10 +735,6 @@ class DailyTransport(BaseTransport):
 
     def _on_first_participant_joined(self, participant):
         self.on_first_participant_joined(participant)
-
-    def _on_app_message(self, message: Any, sender: str):
-        if self._input:
-            self._input.push_app_message(message, sender)
 
     def _on_transcription_message(self, participant_id, message):
         text = message["text"]
@@ -717,13 +759,25 @@ class DailyTransport(BaseTransport):
     def on_left(self):
         pass
 
+    def on_dialout_connected(self, data):
+        pass
+
+    def on_dialout_stopped(self, data):
+        pass
+
+    def on_dialout_error(self, data):
+        pass
+
+    def on_dialout_warning(self, data):
+        pass
+
+    def on_first_participant_joined(self, participant):
+        pass
+
     def on_participant_joined(self, participant):
         pass
 
     def on_participant_left(self, participant, reason):
-        pass
-
-    def on_first_participant_joined(self, participant):
         pass
 
     def event_handler(self, event_name: str):
@@ -764,9 +818,6 @@ class DailyTransport(BaseTransport):
         except Exception as e:
             logger.error(f"Exception in event handler {event_name}: {e}")
             raise e
-
-    #     def dialout(self, number):
-    #         self.client.start_dialout({"phoneNumber": number})
 
     #     def start_recording(self):
     #         self.client.start_recording()
