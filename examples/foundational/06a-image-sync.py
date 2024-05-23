@@ -15,14 +15,15 @@ from pipecat.frames.frames import ImageRawFrame, Frame, SystemFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_context import (
-    LLMAssistantContextAggregator,
-    LLMUserContextAggregator,
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.transports.services.daily import DailyTransport
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from pipecat.transports.services.daily import DailyParams
 from runner import configure
@@ -66,7 +67,9 @@ async def main(room_url: str, token):
                 audio_out_enabled=True,
                 camera_out_width=1024,
                 camera_out_height=1024,
-                transcription_enabled=True
+                transcription_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer()
             )
         )
 
@@ -87,8 +90,8 @@ async def main(room_url: str, token):
             },
         ]
 
-        tma_in = LLMUserContextAggregator(messages)
-        tma_out = LLMAssistantContextAggregator(messages)
+        tma_in = LLMUserResponseAggregator(messages)
+        tma_out = LLMAssistantResponseAggregator(messages)
 
         image_sync_aggregator = ImageSyncAggregator(
             os.path.join(os.path.dirname(__file__), "assets", "speaking.png"),

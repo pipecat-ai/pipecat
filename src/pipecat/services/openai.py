@@ -5,6 +5,7 @@
 #
 
 import io
+import json
 import time
 import aiohttp
 import base64
@@ -16,8 +17,10 @@ from typing import AsyncGenerator, List, Literal
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    LLMFunctionCallFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMFunctionStartFrame,
     LLMMessagesFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
@@ -35,6 +38,7 @@ try:
     from openai import AsyncOpenAI, AsyncStream
 
     from openai.types.chat import (
+        ChatCompletion,
         ChatCompletionChunk,
         ChatCompletionMessageParam,
     )
@@ -97,9 +101,19 @@ class BaseOpenAILLMService(LLMService):
 
         return chunks
 
+    async def _chat_completions(self, messages) -> str | None:
+        response: ChatCompletion = await self._client.chat.completions.create(
+            model=self._model, stream=False, messages=messages
+        )
+        if response and len(response.choices) > 0:
+            return response.choices[0].message.content
+        else:
+            return None
+
     async def _process_context(self, context: OpenAILLMContext):
         function_name = ""
         arguments = ""
+        tool_call_id = ""
 
         chunk_stream: AsyncStream[ChatCompletionChunk] = (
             await self._stream_chat_completions(context)
@@ -125,8 +139,10 @@ class BaseOpenAILLMService(LLMService):
 
                 tool_call = chunk.choices[0].delta.tool_calls[0]
                 if tool_call.function and tool_call.function.name:
+                    print(f"!!! !!! !!! OMG TOOL CALL {tool_call}")
                     function_name += tool_call.function.name
-                    # yield LLMFunctionStartFrame(function_name=tool_call.function.name)
+                    tool_call_id = tool_call.id
+                    await self.push_frame(LLMFunctionStartFrame(function_name=tool_call.function.name, tool_call_id=tool_call_id))
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments and
                     # yield a complete LLMFunctionCallFrame after run_llm_async
@@ -137,12 +153,12 @@ class BaseOpenAILLMService(LLMService):
                 await self.push_frame(TextFrame(chunk.choices[0].delta.content))
                 await self.push_frame(LLMResponseEndFrame())
 
-        await self.push_frame(LLMFullResponseEndFrame())
-
         # if we got a function name and arguments, yield the frame with all the info so
         # frame consumers can take action based on the function call.
-        # if function_name and arguments:
-        #     yield LLMFunctionCallFrame(function_name=function_name, arguments=arguments)
+        if function_name and arguments:
+            await self.push_frame(LLMFunctionCallFrame(function_name=function_name, arguments=arguments, tool_call_id=tool_call_id))
+
+        await self.push_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         context = None

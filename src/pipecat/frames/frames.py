@@ -110,6 +110,24 @@ class SpriteFrame(Frame):
         return f"{self.name}(size: {len(self.images)})"
 
 
+@dataclass()
+class LLMFunctionStartFrame(Frame):
+    """Emitted when the LLM receives the beginning of a function call
+    completion. A frame processor can use this frame to indicate that it should
+    start preparing to make a function call, if it can do so in the absence of
+    any arguments."""
+    function_name: str
+    tool_call_id: str
+
+
+@dataclass()
+class LLMFunctionCallFrame(Frame):
+    """Emitted when the LLM has received an entire function call completion."""
+    function_name: str
+    tool_call_id: str
+    arguments: str
+
+
 @dataclass
 class TextFrame(DataFrame):
     """A chunk of text. Emitted by LLM services, consumed by TTS services, can
@@ -119,7 +137,7 @@ class TextFrame(DataFrame):
     text: str
 
     def __str__(self):
-        return f"{self.name}(text: [{self.text}])"
+        return f"{self.name}(text: {self.text})"
 
 
 @dataclass
@@ -132,7 +150,7 @@ class TranscriptionFrame(TextFrame):
     timestamp: str
 
     def __str__(self):
-        return f"{self.name}(user_id: {self.user_id}, text: [{self.text}], timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -143,7 +161,7 @@ class InterimTranscriptionFrame(TextFrame):
     timestamp: str
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
 
 
 @dataclass

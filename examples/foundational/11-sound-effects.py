@@ -19,15 +19,16 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_context import (
-    LLMUserContextAggregator,
-    LLMAssistantContextAggregator,
+from pipecat.processors.aggregators.llm_response import (
+    LLMUserResponseAggregator,
+    LLMAssistantResponseAggregator,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.logger import FrameLogger
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -84,7 +85,12 @@ async def main(room_url: str, token):
             room_url,
             token,
             "Respond bot",
-            DailyParams(audio_out_enabled=True, transcription_enabled=True)
+            DailyParams(
+                audio_out_enabled=True,
+                transcription_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer()
+            )
         )
 
         llm = OpenAILLMService(
@@ -104,8 +110,8 @@ async def main(room_url: str, token):
             },
         ]
 
-        tma_in = LLMUserContextAggregator(messages)
-        tma_out = LLMAssistantContextAggregator(messages)
+        tma_in = LLMUserResponseAggregator(messages)
+        tma_out = LLMAssistantResponseAggregator(messages)
         out_sound = OutboundSoundEffectWrapper()
         in_sound = InboundSoundEffectWrapper()
         fl = FrameLogger("LLM Out")
