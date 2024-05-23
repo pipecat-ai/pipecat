@@ -735,17 +735,18 @@ class DailyTransport(BaseTransport):
                 "Authorization": f"Bearer {self._params.api_key}",
                 "Content-Type": "application/x-www-form-urlencoded"
             }
-            querystring = {
+            data = {
                 "callId": self._params.dialin_settings.call_id,
                 "callDomain": self._params.dialin_settings.call_domain,
+                "sipUri": sip_endpoint
             }
 
             url = f"{self._params.api_url}/dialin/pinlessCallUpdate"
 
-            async with session.post(url, headers=headers, params=querystring) as r:
+            async with session.post(url, headers=headers, data=data) as r:
                 if r.status != 200:
                     logger.error(
-                        f"Unable to handle dialin-ready event (status: {r.status}, error: {r.text})")
+                        f"Unable to handle dialin-ready event (status: {r.status}, error: {r.text()})")
                     return
 
                 logger.debug("dialin-ready event handled successfully")
