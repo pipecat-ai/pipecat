@@ -32,7 +32,7 @@ class WakeCheckFilter(FrameProcessor):
             self.wake_timer = 0.0
             self.accumulator = ""
 
-    def __init__(self, wake_phrases: list[str], keepalive_timeout: float = 2):
+    def __init__(self, wake_phrases: list[str], keepalive_timeout: float = 3):
         super().__init__()
         self._participant_states = {}
         self._keepalive_timeout = keepalive_timeout
@@ -55,7 +55,7 @@ class WakeCheckFilter(FrameProcessor):
                 if p.state == WakeCheckFilter.WakeState.AWAKE:
                     if time.time() - p.wake_timer < self._keepalive_timeout:
                         logger.debug(
-                            "Wake phrase keepalive timeout has not expired. Passing frame through.")
+                            f"Wake phrase keepalive timeout has not expired. Pushing {frame}")
                         p.wake_timer = time.time()
                         await self.push_frame(frame)
                         return
