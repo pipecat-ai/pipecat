@@ -49,8 +49,9 @@ class ElevenLabsTTSService(TTSService):
 
         async with self._aiohttp_session.post(url, json=payload, headers=headers, params=querystring) as r:
             if r.status != 200:
-                logger.error(f"Error getting audio (status: {r.status}, error: {r.text()})")
-                yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {r.text()})")
+                text = await r.text()
+                logger.error(f"Error getting audio (status: {r.status}, error: {text})")
+                yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
                 return
 
             async for chunk in r.content:
