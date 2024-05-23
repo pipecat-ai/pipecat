@@ -137,10 +137,12 @@ class BaseInputTransport(FrameProcessor):
         if self._allow_interruptions:
             # Make sure we notify about interruptions quickly out-of-band
             if isinstance(frame, UserStartedSpeakingFrame):
+                logger.debug("User started speaking")
                 self._push_frame_task.cancel()
                 self._create_push_task()
                 await self.push_frame(StartInterruptionFrame())
             elif isinstance(frame, UserStoppedSpeakingFrame):
+                logger.debug("User stopped speaking")
                 await self.push_frame(StopInterruptionFrame())
         await self._internal_push_frame(frame)
 
