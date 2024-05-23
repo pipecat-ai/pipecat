@@ -1,15 +1,27 @@
 import asyncio
 import os
-from pipecat.pipeline.openai_frames import OpenAILLMContextFrame
-from pipecat.services.openai_llm_context import OpenAILLMContext
+from typing import List
 
+from pipecat.services.openai import OpenAILLMContextFrame, OpenAILLMContext
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.frames.frames import (
+    LLMFullResponseStartFrame,
+    LLMFullResponseEndFrame,
+    LLMResponseEndFrame,
+    LLMResponseStartFrame,
+    LLMFunctionCallFrame,
+    LLMFunctionStartFrame,
+    TextFrame
+)
+from pipecat.utils.test_frame_processor import TestFrameProcessor
 from openai.types.chat import (
     ChatCompletionSystemMessageParam,
     ChatCompletionToolParam,
     ChatCompletionUserMessageParam,
 )
 
-from pipecat.services.openai_api_llm_service import BaseOpenAILLMService
+from pipecat.services.openai import OpenAILLMService
+
 
 if __name__ == "__main__":
     async def test_functions():
@@ -42,10 +54,19 @@ if __name__ == "__main__":
 
         api_key = os.getenv("OPENAI_API_KEY")
 
-        llm = BaseOpenAILLMService(
+        t = TestFrameProcessor([
+            LLMFullResponseStartFrame,
+            LLMFunctionStartFrame,
+            LLMFunctionCallFrame,
+            LLMFullResponseEndFrame
+        ])
+
+        llm = OpenAILLMService(
             api_key=api_key or "",
             model="gpt-4-1106-preview",
         )
+        llm.link(t)
+
         context = OpenAILLMContext(tools=tools)
         system_message: ChatCompletionSystemMessageParam = ChatCompletionSystemMessageParam(
             content="Ask the user to ask for a weather report", name="system", role="system"
@@ -58,23 +79,27 @@ if __name__ == "__main__":
         context.add_message(system_message)
         context.add_message(user_message)
         frame = OpenAILLMContextFrame(context)
-        async for s in llm.process_frame(frame):
-            print(s)
+        await llm.process_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def test_chat():
         api_key = os.getenv("OPENAI_API_KEY")
-
-        llm = BaseOpenAILLMService(
+        t = TestFrameProcessor([
+            LLMFullResponseStartFrame,
+            [LLMResponseStartFrame, TextFrame, LLMResponseEndFrame],
+            LLMFullResponseEndFrame
+        ])
+        llm = OpenAILLMService(
             api_key=api_key or "",
-            model="gpt-4-1106-preview",
+            model="gpt-4o",
         )
+        llm.link(t)
         context = OpenAILLMContext()
         message: ChatCompletionSystemMessageParam = ChatCompletionSystemMessageParam(
             content="Please tell the world hello.", name="system", role="system")
         context.add_message(message)
         frame = OpenAILLMContextFrame(context)
-        async for s in llm.process_frame(frame):
-            print(s)
+        print(f"starting chattest")
+        await llm.process_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def run_tests():
         await test_functions()

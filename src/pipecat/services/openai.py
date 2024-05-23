@@ -139,7 +139,6 @@ class BaseOpenAILLMService(LLMService):
 
                 tool_call = chunk.choices[0].delta.tool_calls[0]
                 if tool_call.function and tool_call.function.name:
-                    print(f"!!! !!! !!! OMG TOOL CALL {tool_call}")
                     function_name += tool_call.function.name
                     tool_call_id = tool_call.id
                     await self.push_frame(LLMFunctionStartFrame(function_name=tool_call.function.name, tool_call_id=tool_call_id))
