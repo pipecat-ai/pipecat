@@ -105,6 +105,7 @@ class DailyCallbacks(BaseModel):
     on_left: Callable[[], None]
     on_error: Callable[[str], None]
     on_app_message: Callable[[Any, str], None]
+    on_dialin_ready: Callable[[str], None]
     on_dialout_connected: Callable[[Any], None]
     on_dialout_stopped: Callable[[Any], None]
     on_dialout_error: Callable[[Any], None]
@@ -371,6 +372,9 @@ class DailyTransportClient(EventHandler):
     def on_app_message(self, message: Any, sender: str):
         self._callbacks.on_app_message(message, sender)
 
+    def on_dialin_ready(self, sip_endpoint: str):
+        self._callbacks.on_dialin_ready(sip_endpoint)
+
     def on_dialout_connected(self, data: Any):
         self._callbacks.on_dialout_connected(data)
 
@@ -622,6 +626,7 @@ class DailyTransport(BaseTransport):
             on_left=self._on_left,
             on_error=self._on_error,
             on_app_message=self._on_app_message,
+            on_dialin_ready=self._on_dialin_ready,
             on_dialout_connected=self._on_dialout_connected,
             on_dialout_stopped=self._on_dialout_stopped,
             on_dialout_error=self._on_dialout_error,
@@ -643,6 +648,7 @@ class DailyTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
+        self._register_event_handler("on_dialin_ready")
         self._register_event_handler("on_dialout_connected")
         self._register_event_handler("on_dialout_stopped")
         self._register_event_handler("on_dialout_error")
@@ -715,6 +721,9 @@ class DailyTransport(BaseTransport):
         if self._input:
             self._input.push_app_message(message, sender)
 
+    def _on_dialin_ready(self, sip_endpoint):
+        self.on_dialin_ready(sip_endpoint)
+
     def _on_dialout_connected(self, data):
         self.on_dialout_connected(data)
 
@@ -757,6 +766,9 @@ class DailyTransport(BaseTransport):
         pass
 
     def on_left(self):
+        pass
+
+    def on_dialin_ready(self, sip_endpoint):
         pass
 
     def on_dialout_connected(self, data):
