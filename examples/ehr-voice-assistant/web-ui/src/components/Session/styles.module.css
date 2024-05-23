@@ -1,0 +1,125 @@
+.footer {
+  display: flex;
+  flex-flow: row nowrap;
+  margin-top: auto;
+  align-self: flex-end;
+}
+
+.controls {
+  display: flex;
+  flex-flow: row nowrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.agentContainer {
+  flex: 1;
+  display: flex;
+  flex-flow: column wrap;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent {
+  margin-top: auto;
+  min-width: 420px;
+  padding: 0.75rem;
+  border-radius: var(--borderRadius-lg);
+  border-radius: 24px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  box-shadow: 0px 360px 101px 0px rgba(0, 0, 0, 0),
+    0px 231px 92px 0px rgba(0, 0, 0, 0), 0px 130px 78px 0px rgba(0, 0, 0, 0.02),
+    0px 58px 58px 0px rgba(0, 0, 0, 0.03), 0px 14px 32px 0px rgba(0, 0, 0, 0.03);
+  background-image: linear-gradient(90deg, white, white),
+    linear-gradient(0deg, var(--color-gray-300), var(--color-gray-200));
+  background-clip: padding-box, border-box;
+  background-origin: border-box;
+  border: 1px solid transparent;
+}
+
+.agentWindow {
+  min-width: 400px;
+  max-width: 480px;
+  aspect-ratio: 1.7777;
+  background: var(--color-gray-200);
+  border-radius: var(--borderRadius-md);
+}
+
+.agentWindow video {
+  max-width: 480px;
+  object-fit: fill;
+}
+
+.agentFooter {
+  margin: 1.5rem 0 0.75rem 0;
+  display: flex;
+  flex-flow: row nowrap;
+  justify-content: space-between;
+  width: 100%;
+
+  > :first-child {
+    border-right: 1px solid var(--color-gray-200);
+  }
+}
+
+.status {
+  flex: 1;
+  line-height: 1;
+  display: flex;
+  flex-flow: column wrap;
+  align-items: center;
+  gap: 0.5rem;
+
+  > span {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    line-height: 1;
+    letter-spacing: 0.7px;
+  }
+}
+
+.statusIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--borderRadius-xs);
+
+  > span {
+    display: block;
+    width: 9px;
+    height: 9px;
+    border-radius: 9px;
+    background: red;
+  }
+}
+
+.statusDefault {
+  color: var(--color-gray-500);
+  background: var(--color-gray-100);
+
+  > span {
+    background: var(--color-gray-400);
+  }
+}
+.statusOrange {
+  color: var(--color-orange-800);
+  background: var(--color-orange-100);
+
+  > span {
+    background: var(--color-orange-400);
+  }
+}
+
+.statusGreen {
+  color: var(--color-green-800);
+  background: var(--color-green-100);
+
+  > span {
+    background: var(--color-green-400);
+  }
+}

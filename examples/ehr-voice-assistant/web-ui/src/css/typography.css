@@ -1,0 +1,55 @@
+blockquote,
+dd,
+dl,
+figure,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+hr,
+p,
+pre {
+  margin: 0px;
+  font-family: var(--font-sans);
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+p {
+  line-height: 1.5rem;
+  margin: 0.75rem 0;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+samp {
+  font-family: var(--font-mono);
+  display: inline;
+  font-size: 0.75rem;
+  padding: 0 0.4em;
+  line-height: 1;
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, currentColor, transparent 92%);
+  letter-spacing: 0.05rem;
+}
+
+a {
+  color: var(--color-gray-950);
+  text-decoration: inherit;
+}
+
+a:hover {
+  text-decoration-line: underline;
+}
+
+.text-xl {
+  font-size: var(--font-size-lg);
+  line-height: 1.75rem;
+}

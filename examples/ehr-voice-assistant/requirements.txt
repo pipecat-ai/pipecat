@@ -1,5 +1,7 @@
-python-dotenv
-requests
-fastapi[all]
-uvicorn
 pipecat-ai[daily,openai,silero]
+fastapi
+uvicorn
+requests
+python-dotenv
+loguru
+requests

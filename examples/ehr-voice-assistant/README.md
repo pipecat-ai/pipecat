@@ -1,3 +1,6 @@
+deploy with `fly launch --org daily`
+Deploy with: `fly deploy`
+
 # Simple Chatbot
 
 <img src="image.png" width="420px">

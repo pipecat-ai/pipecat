@@ -144,7 +144,6 @@ async def main(room_url: str, token):
             user_response,
             llm,
             tts,
-            ta,
             transport.output(),
             assistant_response,
         ])

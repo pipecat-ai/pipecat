@@ -1,0 +1,110 @@
+.bubbleContainer {
+  color: #ffffff;
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  margin: auto;
+}
+
+.micIcon {
+  position: relative;
+  box-sizing: border-box;
+  -moz-box-sizing: border-box;
+  -webkit-box-sizing: border-box;
+  width: 120px;
+  height: 120px;
+  border-radius: 120px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0 auto;
+  z-index: 20;
+  transition: all 0.5s ease;
+  border: 6px solid color-mix(in srgb, var(--color-gray-300), transparent 70%);
+  outline: 6px solid color-mix(in srgb, var(--color-gray-300), transparent 70%);
+  background-color: var(--color-gray-500);
+  background-image: radial-gradient(
+    var(--color-gray-300),
+    var(--color-gray-400)
+  );
+}
+
+.micIcon svg {
+  position: relative;
+  z-index: 20;
+  opacity: 0.3;
+  transition: opacity 0.5s ease;
+}
+
+@keyframes pulse {
+  0% {
+    outline-width: 6px;
+    @apply outline-teal-500/10;
+  }
+  50% {
+    outline-width: 24px;
+    @apply outline-teal-500/50;
+  }
+  100% {
+    outline-width: 6px;
+    @apply outline-teal-500/10;
+  }
+}
+
+.micIconOpen {
+  background-color: var(--color-gray-500);
+  background-image: radial-gradient(
+    var(--color-gray-500),
+    var(--color-gray-600)
+  );
+  border: 6px solid color-mix(in srgb, var(--color-gray-200), transparent 60%);
+  outline: 6px solid color-mix(in srgb, var(--color-gray-400), transparent 70%);
+}
+
+.micIconActive {
+  background-color: var(--color-green-500);
+  background-image: radial-gradient(
+    var(--color-green-500),
+    var(--color-green-600)
+  );
+  border: 6px solid color-mix(in srgb, var(--color-green-200), transparent 60%);
+  outline: 6px solid color-mix(in srgb, var(--color-green-400), transparent 70%);
+  animation: pulse 2s infinite ease-in-out;
+}
+
+.micIconOpen svg,
+.micIconActive svg {
+  opacity: 1;
+}
+
+.transcript {
+  flex: 0;
+  align-self: center;
+  opacity: 0.25;
+  transition: opacity 1s ease;
+  transition-delay: 2.5s;
+}
+
+.active .transcript {
+  opacity: 1;
+}
+
+.volume {
+  position: absolute;
+  overflow: hidden;
+  inset: 0px;
+  z-index: 0;
+  border-radius: 999px;
+  transition: all 0.1s ease;
+  transform: scale(0);
+  opacity: 0.4;
+}
+
+.volBot {
+  background-color: var(--color-orange-500);
+}
+
+.volHuman {
+  background-color: var(--color-green-200);
+}

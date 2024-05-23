@@ -7,6 +7,7 @@ import re
 import sys
 import wave
 from typing import List
+from PIL import Image
 
 from openai._types import NotGiven, NOT_GIVEN
 
@@ -25,6 +26,9 @@ from pipecat.frames.frames import (
     LLMFunctionCallFrame,
     LLMFunctionStartFrame,
     AudioRawFrame,
+    ImageRawFrame,
+    SpriteFrame,
+    TTSStoppedFrame
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
@@ -43,6 +47,47 @@ load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+sprites = []
+
+script_dir = os.path.dirname(__file__)
+
+for i in range(1, 26):
+    # Build the full path to the image file
+    full_path = os.path.join(script_dir, f"assets/robot0{i}.png")
+    # Get the filename without the extension to use as the dictionary key
+    # Open the image and convert it to bytes
+    with Image.open(full_path) as img:
+        sprites.append(ImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
+
+flipped = sprites[::-1]
+sprites.extend(flipped)
+
+# When the bot isn't talking, show a static image of the cat listening
+quiet_frame = sprites[0]
+talking_frame = SpriteFrame(images=sprites)
+
+
+class TalkingAnimation(FrameProcessor):
+    """
+    This class starts a talking animation when it receives an first AudioFrame,
+    and then returns to a "quiet" sprite when it sees a TTSStoppedFrame.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._is_talking = False
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, AudioRawFrame):
+            if not self._is_talking:
+                await self.push_frame(talking_frame)
+                self._is_talking = True
+        elif isinstance(frame, TTSStoppedFrame):
+            await self.push_frame(quiet_frame)
+            self._is_talking = False
+
+        await self.push_frame(frame)
 
 
 def execute_function_call(frame):
@@ -187,7 +232,7 @@ tools = [
 messages = [
     {
         "role": "system",
-        "content": "You are a helpful assistant for physicians. I'm Dr. Chad. Bailey. I'm very busy, and you've worked with me for a long time, so you can skip the pleasantries and keep your responses short and to the point. You will not search the web unless explicitly requested. Emulate clear writers like Steinbeck, Hemingway, Orwell. Use British English. Use a sincere voice like David Foster Wallace or Kurt Vonnegut. Emulate great comedians like George Carlin. Favor short, clear sentences. Stay organized; be proactive. Treat me as an expert in all fields. Be accurate; mistakes erode my trust. Offer uncommon recommendations. Avoid the word “not”. Value reason over authority. Encourage contrarian ideas. Allow speculation; flag when used. Limit lectures on safety and morality. Be succinct. No introductions. No conclusions. Respect content policies; explain when needed. Keep a neutral tone, but be opinionated. Be specific, not abstract. Use rich language without prefaces or summaries. Never use cliches or platitudes. Begin by telling me 'good morning, Chad', how many appointments I have today, when my first appointment is, and the patient for that appointment. ",
+        "content": "You are a helpful assistant for physicians. I'm Dr. Bailey. I'm very busy, and you've worked with me for a long time, so you can skip the pleasantries and keep your responses short and to the point. You will not search the web unless explicitly requested. Don't provide extra information that I don't ask for directly. Emulate clear writers like Steinbeck, Hemingway, Orwell. Use British English. Use a sincere voice like David Foster Wallace or Kurt Vonnegut. Emulate great comedians like George Carlin. Favor short, clear sentences. Stay organized; be proactive. Treat me as an expert in all fields. Be accurate; mistakes erode my trust. Offer uncommon recommendations. Avoid the word “not”. Value reason over authority. Encourage contrarian ideas. Allow speculation; flag when used. Limit lectures on safety and morality. Be succinct. No introductions. No conclusions. Respect content policies; explain when needed. Keep a neutral tone, but be opinionated. Be specific, not abstract. Use rich language without prefaces or summaries. Never use cliches or platitudes. If I ask about my schedule for the day, just tell me about my first appointment. Begin by telling me 'good morning, Dr. Bailey', and asking how you can help me.",
     },
 ]
 
@@ -237,7 +282,9 @@ async def main(room_url: str, token):
             "Chatbot",
             DailyParams(
                 audio_out_enabled=True,
-                camera_out_enabled=False,
+                camera_out_enabled=True,
+                camera_out_width=1024,
+                camera_out_height=576,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 transcription_enabled=True,
@@ -265,6 +312,8 @@ async def main(room_url: str, token):
         fl3 = FrameLogger("$$$ after fcp, before tts")
         luca = LLMUserContextAggregator(context)
         laca = LLMAssistantContextAggregator(context)
+        ta = TalkingAnimation()
+
         pipeline = Pipeline([
             transport.input(),
             luca,
@@ -273,6 +322,7 @@ async def main(room_url: str, token):
             fcp,
             fl3,
             tts,
+            ta,
             transport.output(),
             laca
         ])

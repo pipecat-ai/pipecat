@@ -1,0 +1,15 @@
+.bar {
+  background: var(--color-gray-200);
+  height: 8px;
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+
+  > div {
+    background: var(--color-green-500);
+    height: 8px;
+    width: 0px;
+    border-radius: 999px;
+    transition: width 0.1s ease;
+  }
+}
