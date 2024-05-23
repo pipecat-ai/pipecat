@@ -55,7 +55,7 @@ class WakeCheckFilter(FrameProcessor):
                 if p.state == WakeCheckFilter.WakeState.AWAKE:
                     if time.time() - p.wake_timer < self._keepalive_timeout:
                         logger.debug(
-                            "Wake phrase keepalive timeout has not expired. Passing frame through.")
+                            f"Wake phrase keepalive timeout has not expired. Pushing {frame}")
                         p.wake_timer = time.time()
                         await self.push_frame(frame)
                         return
