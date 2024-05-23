@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added vision support to Anthropic service.
+
 - Added `WakeCheckFilter` which allows you to pass information downstream only
   if you say a certain phrase/word.
 
@@ -18,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `processors/filters`.
 
 ### Fixed
+
+- Fixed Anthropic service to use new frame types.
 
 - Fixed an issue in `LLMUserResponseAggregator` and `UserResponseAggregator`
   that would cause frames after a brief pause to not be pushed to the LLM.
