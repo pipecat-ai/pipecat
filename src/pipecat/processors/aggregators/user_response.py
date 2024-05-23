@@ -85,10 +85,13 @@ class ResponseAggregator(FrameProcessor):
         send_aggregation = False
 
         if isinstance(frame, self._start_frame):
-            self._seen_start_frame = True
             self._aggregating = True
+            self._seen_start_frame = True
+            self._seen_end_frame = False
+            self._seen_interim_results = False
         elif isinstance(frame, self._end_frame):
             self._seen_end_frame = True
+            self._seen_start_frame = False
 
             # We might have received the end frame but we might still be
             # aggregating (i.e. we have seen interim results but not the final
@@ -120,10 +123,9 @@ class ResponseAggregator(FrameProcessor):
         if len(self._aggregation) > 0:
             frame = TextFrame(self._aggregation.strip())
 
-            # Reset our accumulator state. Reset it before pushing it down,
-            # otherwise if the tasks gets cancelled we won't be able to clear
-            # things up.
-            self._reset()
+            # Reset the aggregation. Reset it before pushing it down, otherwise
+            # if the tasks gets cancelled we won't be able to clear things up.
+            self._aggregation = ""
 
             await self.push_frame(frame)
 

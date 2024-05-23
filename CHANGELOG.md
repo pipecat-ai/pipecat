@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `LLMUserResponseAggregator` and `UserResponseAggregator`
+  that would cause frames after a brief pause to not be pushed to the LLM.
+
 - Clear the audio output buffer if we are interrupted.
 
 - Re-add exponential smoothing after volume calculation. This makes sure the
