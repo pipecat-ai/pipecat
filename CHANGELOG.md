@@ -5,16 +5,18 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.22] - 2024-05-23
 
 ### Added
 
 - Added Daily transport `start_dialout()` to be able to make phone or SIP calls.
   See https://reference-python.daily.co/api_reference.html#daily.CallClient.start_dialout
 
-- Added Daily transport events: `on_dialin_ready`, `on_dialout_connected`,
-  `on_dialout_stopped`, `on_dialout_error` and `on_dialout_warning`.
-  See https://reference-python.daily.co/api_reference.html#daily.EventHandler
+- Added Daily transport support for dial-in use cases.
+
+- Added Daily transport events: `on_dialout_connected`, `on_dialout_stopped`,
+  `on_dialout_error` and `on_dialout_warning`.  See
+  https://reference-python.daily.co/api_reference.html#daily.EventHandler
 
 ## [0.0.21] - 2024-05-22
 
