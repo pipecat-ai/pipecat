@@ -700,6 +700,7 @@ class DailyTransport(BaseTransport):
         is_final = message["rawResponse"]["is_final"]
         if is_final:
             frame = TranscriptionFrame(text, participant_id, timestamp)
+            logger.debug(f"Transcription (from: {participant_id}): [{text}]")
         else:
             frame = InterimTranscriptionFrame(text, participant_id, timestamp)
 
