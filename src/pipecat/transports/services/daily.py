@@ -745,8 +745,9 @@ class DailyTransport(BaseTransport):
 
             async with session.post(url, headers=headers, data=data) as r:
                 if r.status != 200:
+                    text = await r.text()
                     logger.error(
-                        f"Unable to handle dialin-ready event (status: {r.status}, error: {r.text()})")
+                        f"Unable to handle dialin-ready event (status: {r.status}, error: {text})")
                     return
 
                 logger.debug("dialin-ready event handled successfully")
