@@ -84,11 +84,6 @@ async def main(room_url: str, token):
             transport.capture_participant_transcription(participant["id"])
             await tts.say("Hi! If you want to talk to me, just say 'Hey Robot'.")
 
-            # Kick off the conversation.
-            # messages.append(
-            #    {"role": "system", "content": "Please introduce yourself to the user."})
-            # await task.queue_frames([LLMMessagesFrame(messages)])
-
         runner = PipelineRunner()
 
         await runner.run(task)

@@ -32,7 +32,7 @@ class ElevenLabsTTSService(TTSService):
         self._model = model
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Transcribing text: {text}")
+        logger.debug(f"Transcribing text: [{text}]")
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}/stream"
 

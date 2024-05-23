@@ -66,7 +66,7 @@ class TTSService(AIService):
         else:
             self._current_sentence += frame.text
             if self._current_sentence.strip().endswith((".", "?", "!")):
-                text = self._current_sentence
+                text = self._current_sentence.strip()
                 self._current_sentence = ""
 
         if text:
