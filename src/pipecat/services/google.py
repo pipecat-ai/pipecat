@@ -42,12 +42,8 @@ class GoogleLLMService(LLMService):
 
     def __init__(self, model="gemini-1.5-flash-latest", api_key=None, **kwargs):
         super().__init__(**kwargs)
-        self.model = model
         gai.configure(api_key=api_key or os.environ["GOOGLE_API_KEY"])
-        self.create_client()
-
-    def create_client(self):
-        self._client = gai.GenerativeModel(self.model)
+        self._client = gai.GenerativeModel(model)
 
     def _get_messages_from_openai_context(
             self, context: OpenAILLMContext) -> List[glm.Content]:
