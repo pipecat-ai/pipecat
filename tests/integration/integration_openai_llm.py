@@ -98,7 +98,6 @@ if __name__ == "__main__":
             content="Please tell the world hello.", name="system", role="system")
         context.add_message(message)
         frame = OpenAILLMContextFrame(context)
-        print(f"starting chattest")
         await llm.process_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def run_tests():
