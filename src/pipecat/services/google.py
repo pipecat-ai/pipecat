@@ -40,9 +40,9 @@ class GoogleLLMService(LLMService):
     franca for all LLM services, so that it is easy to switch between different LLMs.
     """
 
-    def __init__(self, model="gemini-1.5-flash-latest", api_key=None, **kwargs):
+    def __init__(self, api_key: str, model: str = "gemini-1.5-flash-latest", **kwargs):
         super().__init__(**kwargs)
-        gai.configure(api_key=api_key or os.environ["GOOGLE_API_KEY"])
+        gai.configure(api_key=api_key)
         self._client = gai.GenerativeModel(model)
 
     def _get_messages_from_openai_context(

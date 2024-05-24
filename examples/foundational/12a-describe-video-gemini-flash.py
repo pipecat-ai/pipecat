@@ -62,19 +62,15 @@ async def main(room_url: str, token):
             )
         )
 
-        tts = ElevenLabsTTSService(
-            aiohttp_session=session,
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
-        )
-
         user_response = UserResponseAggregator()
 
         image_requester = UserImageRequester()
 
         vision_aggregator = VisionImageFrameAggregator()
 
-        google = GoogleLLMService(model="gemini-1.5-flash-latest")
+        google = GoogleLLMService(
+            model="gemini-1.5-flash-latest",
+            api_key=os.getenv("GOOGLE_API_KEY"))
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,

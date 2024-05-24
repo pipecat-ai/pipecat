@@ -44,9 +44,9 @@ class AnthropicLLMService(LLMService):
 
     def __init__(
             self,
-            api_key,
-            model="claude-3-opus-20240229",
-            max_tokens=1024):
+            api_key: str,
+            model: str = "claude-3-opus-20240229",
+            max_tokens: int = 1024):
         super().__init__()
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
