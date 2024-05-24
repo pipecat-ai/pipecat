@@ -11,6 +11,7 @@ import io
 from PIL import Image
 from typing import AsyncGenerator
 
+from numpy import str_
 from openai import AsyncAzureOpenAI
 
 from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, URLImageRawFrame
@@ -73,10 +74,10 @@ class AzureLLMService(BaseOpenAILLMService):
     def __init__(
             self,
             *,
-            api_key,
-            endpoint,
-            api_version="2023-12-01-preview",
-            model):
+            api_key: str,
+            endpoint: str,
+            model: str,
+            api_version: str = "2023-12-01-preview"):
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
         self._endpoint = endpoint
@@ -96,12 +97,12 @@ class AzureImageGenServiceREST(ImageGenService):
     def __init__(
         self,
         *,
-        api_version="2023-06-01-preview",
-        image_size: str,
         aiohttp_session: aiohttp.ClientSession,
-        api_key,
-        endpoint,
-        model,
+        image_size: str,
+        api_key: str,
+        endpoint: str,
+        model: str,
+        api_version="2023-06-01-preview",
     ):
         super().__init__()
 
