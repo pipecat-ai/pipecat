@@ -19,6 +19,6 @@ except ModuleNotFoundError as e:
 
 class FireworksLLMService(BaseOpenAILLMService):
     def __init__(self,
-                 model="accounts/fireworks/models/firefunction-v1",
-                 base_url="https://api.fireworks.ai/inference/v1"):
+                 model: str = "accounts/fireworks/models/firefunction-v1",
+                 base_url: str = "https://api.fireworks.ai/inference/v1"):
         super().__init__(model, base_url)

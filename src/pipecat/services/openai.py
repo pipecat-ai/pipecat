@@ -58,10 +58,10 @@ class BaseOpenAILLMService(LLMService):
     def __init__(self, model: str, api_key=None, base_url=None):
         super().__init__()
         self._model: str = model
-        self.create_client(api_key=api_key, base_url=base_url)
+        self._client = self.create_client(api_key=api_key, base_url=base_url)
 
     def create_client(self, api_key=None, base_url=None):
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
