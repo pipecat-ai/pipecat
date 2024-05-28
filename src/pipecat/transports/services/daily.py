@@ -345,6 +345,15 @@ class DailyTransportClient(EventHandler):
     def start_dialout(self, settings):
         self._client.start_dialout(settings)
 
+    def stop_dialout(self, participant_id):
+        self._client.stop_dialout(participant_id)
+
+    def start_recording(self, streaming_settings, stream_id, force_new):
+        self._client.start_recording(streaming_settings, stream_id, force_new)
+
+    def stop_recording(self, stream_id):
+        self._client.stop_recording(stream_id)
+
     def capture_participant_transcription(self, participant_id: str, callback: Callable):
         if not self._params.transcription_enabled:
             return
@@ -695,8 +704,17 @@ class DailyTransport(BaseTransport):
         if self._output:
             await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
 
-    def start_dialout(self, settings):
+    def start_dialout(self, settings=None):
         self._client.start_dialout(settings)
+
+    def stop_dialout(self, participant_id):
+        self._client.stop_dialout(participant_id)
+
+    def start_recording(self, streaming_settings=None, stream_id=None, force_new=None):
+        self._client.start_recording(streaming_settings, stream_id, force_new)
+
+    def stop_recording(self, stream_id=None):
+        self._client.stop_recording(stream_id)
 
     def capture_participant_transcription(self, participant_id: str):
         self._client.capture_participant_transcription(
