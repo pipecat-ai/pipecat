@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from typing import List
 
@@ -24,7 +25,7 @@ from pipecat.services.openai import OpenAILLMService
 
 
 if __name__ == "__main__":
-    async def test_functions():
+    async def test_functions(handle=False):
         tools = [
             ChatCompletionToolParam(
                 type="function",
@@ -52,19 +53,31 @@ if __name__ == "__main__":
                     },
                 })]
 
-        api_key = os.getenv("OPENAI_API_KEY")
+        async def get_weather_from_api(args):
+            print(f"get_weather_from_api called with {args}")
+            return json.dumps({"conditions": "nice", "temperature": "75"})
 
-        t = TestFrameProcessor([
-            LLMFullResponseStartFrame,
-            LLMFunctionStartFrame,
-            LLMFunctionCallFrame,
-            LLMFullResponseEndFrame
-        ])
+        api_key = os.getenv("OPENAI_API_KEY")
 
         llm = OpenAILLMService(
             api_key=api_key or "",
             model="gpt-4-1106-preview",
         )
+
+        if (handle):
+            llm.register_function("get_current_weather", get_weather_from_api)
+            t = TestFrameProcessor([
+                LLMFullResponseStartFrame,
+                [LLMResponseStartFrame, TextFrame, LLMResponseEndFrame],
+                LLMFullResponseEndFrame
+            ])
+        else:
+            t = TestFrameProcessor([
+                LLMFullResponseStartFrame,
+                LLMFunctionStartFrame,
+                LLMFunctionCallFrame,
+                LLMFullResponseEndFrame
+            ])
         llm.link(t)
 
         context = OpenAILLMContext(tools=tools)
@@ -101,7 +114,8 @@ if __name__ == "__main__":
         await llm.process_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def run_tests():
-        await test_functions()
+        await test_functions(True)
+        await test_functions(False)
         await test_chat()
 
     asyncio.run(run_tests())

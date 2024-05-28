@@ -31,7 +31,12 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService, ImageGenService
-
+from openai.types.chat import (
+    ChatCompletionSystemMessageParam,
+    ChatCompletionFunctionMessageParam,
+    ChatCompletionToolParam,
+    ChatCompletionUserMessageParam,
+)
 from loguru import logger
 
 try:
@@ -63,9 +68,17 @@ class BaseOpenAILLMService(LLMService):
         super().__init__()
         self._model: str = model
         self._client = self.create_client(api_key=api_key, base_url=base_url)
+        self._callbacks = {}
 
     def create_client(self, api_key=None, base_url=None):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
+
+    # TODO-CB: callback function type
+    def register_function(self, function_name, callback):
+        self._callbacks[function_name] = callback
+
+    def unregister_function(self, function_name):
+        del self._callbacks[function_name]
 
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
@@ -119,8 +132,6 @@ class BaseOpenAILLMService(LLMService):
             await self._stream_chat_completions(context)
         )
 
-        await self.push_frame(LLMFullResponseStartFrame())
-
         async for chunk in chunk_stream:
             if len(chunk.choices) == 0:
                 continue
@@ -141,7 +152,9 @@ class BaseOpenAILLMService(LLMService):
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
                     tool_call_id = tool_call.id
-                    await self.push_frame(LLMFunctionStartFrame(function_name=tool_call.function.name, tool_call_id=tool_call_id))
+                    # only send a function start frame if we're not handling the function call
+                    if function_name not in self._callbacks.keys():
+                        await self.push_frame(LLMFunctionStartFrame(function_name=tool_call.function.name, tool_call_id=tool_call_id))
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments and
                     # yield a complete LLMFunctionCallFrame after run_llm_async
@@ -152,12 +165,50 @@ class BaseOpenAILLMService(LLMService):
                 await self.push_frame(TextFrame(chunk.choices[0].delta.content))
                 await self.push_frame(LLMResponseEndFrame())
 
-        # if we got a function name and arguments, yield the frame with all the info so
-        # frame consumers can take action based on the function call.
+        # if we got a function name and arguments, check to see if it's a function with
+        # a registered handler. If so, run the registered callback, save the result to
+        # the context, and re-prompt to get a chat answer. If we don't have a registered
+        # handler, push an LLMFunctionCallFrame and let the pipeline deal with it.
         if function_name and arguments:
-            await self.push_frame(LLMFunctionCallFrame(function_name=function_name, arguments=arguments, tool_call_id=tool_call_id))
+            if function_name in self._callbacks.keys():
+                print(f"got a function call that im handling, {function_name}")
+                await self._handle_function_call(context, tool_call_id, function_name, arguments)
 
-        await self.push_frame(LLMFullResponseEndFrame())
+            else:
+                print(f"got a function call im NOT handling: {function_name}")
+                await self.push_frame(LLMFunctionCallFrame(function_name=function_name, arguments=arguments, tool_call_id=tool_call_id))
+
+    async def _handle_function_call(self, context, tool_call_id, function_name, arguments):
+        print("using a callback to handle this one")
+        result = await self._callbacks[function_name](arguments)
+        print(f"result is {result}")
+
+        tool_call = ChatCompletionFunctionMessageParam({
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": tool_call_id,
+                    "function": {
+                        "arguments": arguments,
+                        "name": function_name
+                    },
+                    "type": "function"
+                }
+            ]
+
+        })
+        context.add_message(tool_call)
+        if isinstance(result, List):
+            result = json.dumps(result)
+        tool_result = ChatCompletionToolParam({
+            "tool_call_id": tool_call_id,
+            "role": "tool",
+            "content": result
+        })
+        context.add_message(tool_result)
+        # re-prompt to get a human answer
+        print(f"about to re-prompt with {context}, {context.messages}")
+        await self._process_context(context)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         context = None
@@ -171,7 +222,9 @@ class BaseOpenAILLMService(LLMService):
             await self.push_frame(frame, direction)
 
         if context:
+            await self.push_frame(LLMFullResponseStartFrame())
             await self._process_context(context)
+            await self.push_frame(LLMFullResponseEndFrame())
 
 
 class OpenAILLMService(BaseOpenAILLMService):
