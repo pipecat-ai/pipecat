@@ -17,6 +17,10 @@ class LangchainProcessor(FrameProcessor):
         super().__init__()
         self._chain = chain
         self._transcript_key = transcript_key
+        self._participant_id: str | None = None
+
+    def set_participant_id(self, participant_id: str):
+        self._participant_id = participant_id
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, LLMMessagesFrame):
@@ -30,7 +34,10 @@ class LangchainProcessor(FrameProcessor):
             await self.push_frame(frame)
 
     async def _invoke(self, text: str):
-        response = await self._chain.ainvoke({self._transcript_key: text})
+        response = await self._chain.ainvoke(
+            {self._transcript_key: text},
+            config={"configurable": {"session_id": self._participant_id}},
+        )
         await self.push_frame(LLMFullResponseStartFrame())
         await self.push_frame(TextFrame(response))
         await self.push_frame(LLMFullResponseEndFrame())
@@ -49,7 +56,10 @@ class LangchainProcessor(FrameProcessor):
         logger.debug(f"Invoking chain with {text}")
         await self.push_frame(LLMFullResponseStartFrame())
         try:
-            async for token in self._chain.astream({self._transcript_key: text}):
+            async for token in self._chain.astream(
+                {self._transcript_key: text},
+                config={"configurable": {"session_id": self._participant_id}},
+            ):
                 await self.push_frame(LLMResponseStartFrame())
                 await self.push_frame(TextFrame(self.__get_token_value(token)))
                 await self.push_frame(LLMResponseEndFrame())
