@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+
 import asyncio
 import os
 import sys
@@ -27,8 +28,13 @@ from pipecat.vad.silero import SileroVADAnalyzer
 load_dotenv(override=True)
 
 try:
-    from langchain.prompts import ChatPromptTemplate
+    from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain_community.chat_message_histories import ChatMessageHistory
+    from langchain_core.chat_history import BaseChatMessageHistory
+    from langchain_core.runnables.history import (BaseChatMessageHistory,
+                                                  RunnableWithMessageHistory)
     from langchain_openai import ChatOpenAI
+
 except ModuleNotFoundError as e:
     logger.exception(
         "You need to `pip install langchain_openai` for this example. Also, be sure to set `OPENAI_API_KEY` in the environment variable."
@@ -37,6 +43,14 @@ except ModuleNotFoundError as e:
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+message_store = {}
+
+
+def get_session_history(session_id: str) -> BaseChatMessageHistory:
+    if session_id not in message_store:
+        message_store[session_id] = ChatMessageHistory()
+    return message_store[session_id]
 
 
 async def main(room_url: str, token):
@@ -59,17 +73,22 @@ async def main(room_url: str, token):
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         )
 
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
         prompt = ChatPromptTemplate.from_messages(
             [
                 ("system",
-                 "Be nice and helpful. Answer very briefly and without special characters like `#` or `*`. Your response will be synthesized to voice and those characters will create unnatural sounds.",
+                 "Be nice and helpful. Answer very briefly and without special characters like `#` or `*`. "
+                 "Your response will be synthesized to voice and those characters will create unnatural sounds.",
                  ),
-                ("human",
-                 "{input}"),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
             ])
-        chain = prompt | llm
-        lc = LangchainProcessor(chain)
+        chain = prompt | ChatOpenAI(model="gpt-4o", temperature=0.7)
+        history_chain = RunnableWithMessageHistory(
+            chain,
+            get_session_history,
+            history_messages_key="chat_history",
+            input_messages_key="input")
+        lc = LangchainProcessor(history_chain)
 
         tma_in = LLMUserResponseAggregator()
         tma_out = LLMAssistantResponseAggregator()
@@ -90,6 +109,7 @@ async def main(room_url: str, token):
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
+            lc.set_participant_id(participant["id"])
             # Kick off the conversation.
             # the `LLMMessagesFrame` will be picked up by the LangchainProcessor using
             # only the content of the last message to inject it in the prompt defined
