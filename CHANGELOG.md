@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Added `PipelineParams`. This replaces the `allow_interruptions` argument in
+  `PipelineTask` and will allow future parameters in the future.
+
 - Fixed Deepgram Aura TTS base_url and added ErrorFrame reporting.
+
 - GoogleLLMService `api_key` argument is now mandatory.
 
 ### Fixed
