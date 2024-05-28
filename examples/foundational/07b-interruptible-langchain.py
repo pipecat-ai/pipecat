@@ -31,13 +31,12 @@ try:
     from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain_community.chat_message_histories import ChatMessageHistory
     from langchain_core.chat_history import BaseChatMessageHistory
-    from langchain_core.runnables.history import (BaseChatMessageHistory,
-                                                  RunnableWithMessageHistory)
+    from langchain_core.runnables.history import RunnableWithMessageHistory
     from langchain_openai import ChatOpenAI
 
 except ModuleNotFoundError as e:
     logger.exception(
-        "You need to `pip install langchain_openai` for this example. Also, be sure to set `OPENAI_API_KEY` in the environment variable."
+        "You need to `pip install langchain_openai langchain_community` for this example. Also, be sure to set `OPENAI_API_KEY` in the environment variable."
     )
     raise Exception(f"Missing module: {e}")
 
