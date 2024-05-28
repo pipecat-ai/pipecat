@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Exposed `on_dialin_ready` for Daily transport SIP endpoint handling. This
+  notifies when the Daily room SIP endpoints are ready. This allows integrating
+  with third-party services like Twilio.
+
 - Exposed Daily transport `on_app_message` event.
 
 - Added Daily transport `on_call_state_updated` event.
@@ -26,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GoogleLLMService `api_key` argument is now mandatory.
 
 ### Fixed
+
+- Daily tranport `dialin-ready` doesn't not block anymore and it now handles
+  timeouts.
 
 - Fixed AzureLLMService.
 
