@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added Daily transport `start_recording()`, `stop_recording` and
+  `stop_dialout`.
+
 ### Changed
 
 - Added `PipelineParams`. This replaces the `allow_interruptions` argument in
