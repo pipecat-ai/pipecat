@@ -6,21 +6,22 @@
 
 from typing import List
 
+from pipecat.services.openai import OpenAILLMContextFrame, OpenAILLMContext
+
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
-    LLMMessagesFrame,
-    LLMResponseStartFrame,
-    StartInterruptionFrame,
-    TextFrame,
+    LLMFullResponseStartFrame,
     LLMResponseEndFrame,
+    LLMResponseStartFrame,
+    LLMMessagesFrame,
+    StartInterruptionFrame,
     TranscriptionFrame,
+    TextFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame
-)
-from pipecat.services.openai import OpenAILLMContext, OpenAILLMContextFrame
+    UserStoppedSpeakingFrame)
 
 
 class LLMResponseAggregator(FrameProcessor):
@@ -33,20 +34,29 @@ class LLMResponseAggregator(FrameProcessor):
         start_frame,
         end_frame,
         accumulator_frame: TextFrame,
-        interim_accumulator_frame: TextFrame | None = None
+        interim_accumulator_frame: TextFrame | None = None,
+        handle_interruptions: bool = False
     ):
         super().__init__()
 
-        if messages:
-            self._messages = messages
+        self._messages = messages
         self._role = role
         self._start_frame = start_frame
         self._end_frame = end_frame
         self._accumulator_frame = accumulator_frame
         self._interim_accumulator_frame = interim_accumulator_frame
+        self._handle_interruptions = handle_interruptions
 
         # Reset our accumulator state.
         self._reset()
+
+    @property
+    def messages(self):
+        return self._messages
+
+    @property
+    def role(self):
+        return self._role
 
     #
     # Frame processor
@@ -70,11 +80,16 @@ class LLMResponseAggregator(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         send_aggregation = False
+
         if isinstance(frame, self._start_frame):
-            self._seen_start_frame = True
+            self._aggregation = ""
             self._aggregating = True
+            self._seen_start_frame = True
+            self._seen_end_frame = False
+            self._seen_interim_results = False
         elif isinstance(frame, self._end_frame):
             self._seen_end_frame = True
+            self._seen_start_frame = False
 
             # We might have received the end frame but we might still be
             # aggregating (i.e. we have seen interim results but not the final
@@ -96,7 +111,9 @@ class LLMResponseAggregator(FrameProcessor):
             self._seen_interim_results = False
         elif self._interim_accumulator_frame and isinstance(frame, self._interim_accumulator_frame):
             self._seen_interim_results = True
-        elif isinstance(frame, StartInterruptionFrame):
+        elif self._handle_interruptions and isinstance(frame, StartInterruptionFrame):
+            await self._push_aggregation()
+            # Reset anyways
             self._reset()
             await self.push_frame(frame, direction)
         else:
@@ -108,11 +125,13 @@ class LLMResponseAggregator(FrameProcessor):
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:
             self._messages.append({"role": self._role, "content": self._aggregation})
+
+            # Reset the aggregation. Reset it before pushing it down, otherwise
+            # if the tasks gets cancelled we won't be able to clear things up.
+            self._aggregation = ""
+
             frame = LLMMessagesFrame(self._messages)
             await self.push_frame(frame)
-
-            # Reset our accumulator state.
-            self._reset()
 
     def _reset(self):
         self._aggregation = ""
@@ -127,9 +146,10 @@ class LLMAssistantResponseAggregator(LLMResponseAggregator):
         super().__init__(
             messages=messages,
             role="assistant",
-            start_frame=LLMResponseStartFrame,
-            end_frame=LLMResponseEndFrame,
-            accumulator_frame=TextFrame
+            start_frame=LLMFullResponseStartFrame,
+            end_frame=LLMFullResponseEndFrame,
+            accumulator_frame=TextFrame,
+            handle_interruptions=True
         )
 
 
