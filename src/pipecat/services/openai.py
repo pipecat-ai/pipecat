@@ -184,34 +184,51 @@ class BaseOpenAILLMService(LLMService):
             else:
                 await self.push_frame(LLMFunctionCallFrame(function_name=function_name, arguments=arguments, tool_call_id=tool_call_id))
 
-    async def _handle_function_call(self, context, tool_call_id, function_name, arguments):
+    async def _handle_function_call(
+            self,
+            context,
+            tool_call_id,
+            function_name,
+            arguments
+    ):
         result = await self._callbacks[function_name](self, arguments)
 
-        tool_call = ChatCompletionFunctionMessageParam({
-            "role": "assistant",
-            "tool_calls": [
-                {
-                    "id": tool_call_id,
-                    "function": {
-                        "arguments": arguments,
-                        "name": function_name
-                    },
-                    "type": "function"
-                }
-            ]
+        if isinstance(result, (str, dict)):
+            # Handle it in "full magic mode"
+            tool_call = ChatCompletionFunctionMessageParam({
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": tool_call_id,
+                        "function": {
+                            "arguments": arguments,
+                            "name": function_name
+                        },
+                        "type": "function"
+                    }
+                ]
 
-        })
-        context.add_message(tool_call)
-        if not isinstance(result, str):
-            result = json.dumps(result)
-        tool_result = ChatCompletionToolParam({
-            "tool_call_id": tool_call_id,
-            "role": "tool",
-            "content": result
-        })
-        context.add_message(tool_result)
-        # re-prompt to get a human answer
-        await self._process_context(context)
+            })
+            context.add_message(tool_call)
+            if not isinstance(result, str):
+                result = json.dumps(result)
+            tool_result = ChatCompletionToolParam({
+                "tool_call_id": tool_call_id,
+                "role": "tool",
+                "content": result
+            })
+            context.add_message(tool_result)
+            # re-prompt to get a human answer
+            await self._process_context(context)
+        elif isinstance(result, list):
+            # reduced magic
+            for msg in result:
+                context.add_message(msg)
+            await self._process_context(context)
+        elif isinstance(result, None):
+            pass
+        else:
+            raise BaseException(f"Unknown return type from function callback: {type(result)}")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         context = None
