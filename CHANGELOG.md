@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Fixed Deepgram Aura TTS base_url and added ErrorFrame reporting.
 - GoogleLLMService `api_key` argument is now mandatory.
 
 ### Fixed
