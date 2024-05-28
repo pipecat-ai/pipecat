@@ -75,7 +75,7 @@ class BaseOpenAILLMService(LLMService):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     # TODO-CB: callback function type
-    def register_function(self, function_name, callback, *, start_callback=None):
+    def register_function(self, function_name, callback, start_callback=None):
         self._callbacks[function_name] = callback
         if start_callback:
             self._start_callbacks[function_name] = start_callback
@@ -179,17 +179,13 @@ class BaseOpenAILLMService(LLMService):
         # handler, push an LLMFunctionCallFrame and let the pipeline deal with it.
         if function_name and arguments:
             if function_name in self._callbacks.keys():
-                print(f"got a function call that im handling, {function_name}")
                 await self._handle_function_call(context, tool_call_id, function_name, arguments)
 
             else:
-                print(f"got a function call im NOT handling: {function_name}")
                 await self.push_frame(LLMFunctionCallFrame(function_name=function_name, arguments=arguments, tool_call_id=tool_call_id))
 
     async def _handle_function_call(self, context, tool_call_id, function_name, arguments):
-        print("using a callback to handle this one")
         result = await self._callbacks[function_name](self, arguments)
-        print(f"result is {result}")
 
         tool_call = ChatCompletionFunctionMessageParam({
             "role": "assistant",
@@ -215,7 +211,6 @@ class BaseOpenAILLMService(LLMService):
         })
         context.add_message(tool_result)
         # re-prompt to get a human answer
-        print(f"about to re-prompt with {context}, {context.messages}")
         await self._process_context(context)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

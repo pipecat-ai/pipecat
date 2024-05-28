@@ -52,55 +52,6 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-class FunctionCaller(FrameProcessor):
-    def __init__(self, context):
-        self._context = context
-        super().__init__()
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        # When we receive function call frames, we need to ask the LLM to run a completion
-        # again so it actually talks to the user
-        if isinstance(frame, LLMFunctionCallFrame):
-            tool_call = ChatCompletionFunctionMessageParam({
-                "role": "assistant",
-                "tool_calls": [
-                    {
-                        "id": frame.tool_call_id,
-                        "function": {
-                            "arguments": frame.arguments,
-                            "name": frame.function_name
-                        },
-                        "type": "function"
-                    }
-                ]
-
-            })
-            self._context.add_message(tool_call)
-
-            # This is where you'd actually call the function
-            weather_result = {
-                "city": "San Francisco, CA",
-                "conditions": "Sunny and beautiful",
-                "temperature": "75 degrees Fahrenheit"
-            }
-            print(f"weather_result: {weather_result}")
-            result = ChatCompletionToolParam({
-                "tool_call_id": frame.tool_call_id,
-                "role": "tool",
-                "content": json.dumps(weather_result)
-            })
-            print(f"result: {result}")
-            try:
-                self._context.add_message(result)
-            except Exception as e:
-                print(f"got exception: {e}")
-            print(f"context now includes: {self._context.messages}")
-            await self.push_frame(OpenAILLMContextFrame(self._context), FrameDirection.UPSTREAM)
-        else:
-            print(f"!!! Got a frame I'm forwarding: {frame}")
-            await self.push_frame(frame)
-
-
 async def start_fetch_weather(llm):
     await llm.push_frame(TextFrame("Let me think."))
 
