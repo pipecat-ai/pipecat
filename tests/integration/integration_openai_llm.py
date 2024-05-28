@@ -53,8 +53,7 @@ if __name__ == "__main__":
                     },
                 })]
 
-        async def get_weather_from_api(args):
-            print(f"get_weather_from_api called with {args}")
+        async def get_weather_from_api(llm, args):
             return json.dumps({"conditions": "nice", "temperature": "75"})
 
         api_key = os.getenv("OPENAI_API_KEY")

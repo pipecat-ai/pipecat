@@ -69,16 +69,21 @@ class BaseOpenAILLMService(LLMService):
         self._model: str = model
         self._client = self.create_client(api_key=api_key, base_url=base_url)
         self._callbacks = {}
+        self._start_callbacks = {}
 
     def create_client(self, api_key=None, base_url=None):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     # TODO-CB: callback function type
-    def register_function(self, function_name, callback):
+    def register_function(self, function_name, callback, *, start_callback=None):
         self._callbacks[function_name] = callback
+        if start_callback:
+            self._start_callbacks[function_name] = start_callback
 
     def unregister_function(self, function_name):
         del self._callbacks[function_name]
+        if self._start_callbacks[function_name]:
+            del self._start_callbacks[function_name]
 
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
@@ -153,7 +158,10 @@ class BaseOpenAILLMService(LLMService):
                     function_name += tool_call.function.name
                     tool_call_id = tool_call.id
                     # only send a function start frame if we're not handling the function call
-                    if function_name not in self._callbacks.keys():
+                    if function_name in self._callbacks.keys():
+                        if function_name in self._start_callbacks.keys():
+                            await self._start_callbacks[function_name](self)
+                    else:
                         await self.push_frame(LLMFunctionStartFrame(function_name=tool_call.function.name, tool_call_id=tool_call_id))
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments and
@@ -180,7 +188,7 @@ class BaseOpenAILLMService(LLMService):
 
     async def _handle_function_call(self, context, tool_call_id, function_name, arguments):
         print("using a callback to handle this one")
-        result = await self._callbacks[function_name](arguments)
+        result = await self._callbacks[function_name](self, arguments)
         print(f"result is {result}")
 
         tool_call = ChatCompletionFunctionMessageParam({
@@ -198,7 +206,7 @@ class BaseOpenAILLMService(LLMService):
 
         })
         context.add_message(tool_call)
-        if isinstance(result, List):
+        if not isinstance(result, str):
             result = json.dumps(result)
         tool_result = ChatCompletionToolParam({
             "tool_call_id": tool_call_id,

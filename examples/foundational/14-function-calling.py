@@ -101,6 +101,14 @@ class FunctionCaller(FrameProcessor):
             await self.push_frame(frame)
 
 
+async def start_fetch_weather(llm):
+    await llm.push_frame(TextFrame("Let me think."))
+
+
+async def fetch_weather_from_api(llm, args):
+    return ({"conditions": "nice", "temperature": "75"})
+
+
 async def main(room_url: str, token):
     async with aiohttp.ClientSession() as session:
         transport = DailyTransport(
@@ -124,6 +132,10 @@ async def main(room_url: str, token):
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4-turbo-preview")
+        llm.register_function(
+            "get_current_weather",
+            fetch_weather_from_api,
+            start_callback=start_fetch_weather)
 
         fl_in = FrameLogger("Inner")
         fl_out = FrameLogger("Outer")
@@ -164,13 +176,11 @@ async def main(room_url: str, token):
         context = OpenAILLMContext(messages, tools)
         tma_in = LLMUserContextAggregator(context)
         tma_out = LLMAssistantContextAggregator(context)
-        caller = FunctionCaller(context)
         pipeline = Pipeline([
             fl_in,
             transport.input(),
             tma_in,
             llm,
-            caller,
             fl_out,
             tts,
             transport.output(),
