@@ -26,7 +26,7 @@ class FrameProcessor:
         self.name = f"{self.__class__.__name__}#{obj_count(self)}"
         self._prev: "FrameProcessor" | None = None
         self._next: "FrameProcessor" | None = None
-        self._loop: AbstractEventLoop = asyncio.get_running_loop()
+        self._loop: AbstractEventLoop = asyncio.get_event_loop()
 
     async def cleanup(self):
         pass

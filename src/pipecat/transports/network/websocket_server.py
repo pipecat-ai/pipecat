@@ -33,7 +33,7 @@ class WebsocketServerParams(TransportParams):
 
 
 class WebsocketServerCallbacks(BaseModel):
-    on_connection: Callable[[websockets.WebSocketServerProtocol], Awaitable[None]]
+    on_connection: Callable[[websockets.WebSocketServerProtocol], None]
 
 
 class WebsocketServerInputTransport(FrameProcessor):
@@ -87,7 +87,7 @@ class WebsocketServerInputTransport(FrameProcessor):
         self._websocket = websocket
 
         # Notify
-        await self._callbacks.on_connection(websocket)
+        self._callbacks.on_connection(websocket)
 
         # Handle incoming messages
         async for message in websocket:
@@ -148,9 +148,11 @@ class WebsocketServerOutputTransport(FrameProcessor):
         self._audio_buffer = bytes()
         self._in_tts_audio = False
 
-    async def set_client_connection(self, websocket: websockets.WebSocketServerProtocol):
+    def set_client_connection(self, websocket: websockets.WebSocketServerProtocol):
         if self._websocket:
-            await self._websocket.close()
+            loop = self.get_event_loop()
+            future = asyncio.run_coroutine_threadsafe(self._websocket.close(), loop)
+            future.result()
             logger.warning("Only one client allowed, using new connection")
         self._websocket = websocket
 
@@ -196,9 +198,13 @@ class WebsocketServerOutputTransport(FrameProcessor):
 
 class WebsocketServerTransport(BaseTransport):
 
-    def __init__(self, host: str = "localhost", port: int = 8765,
-                 params: WebsocketServerParams = WebsocketServerParams()):
-        super().__init__()
+    def __init__(
+            self,
+            host: str = "localhost",
+            port: int = 8765,
+            params: WebsocketServerParams = WebsocketServerParams(),
+            loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()):
+        super().__init__(loop)
         self._host = host
         self._port = port
         self._params = params
@@ -209,6 +215,10 @@ class WebsocketServerTransport(BaseTransport):
         self._input: WebsocketServerInputTransport | None = None
         self._output: WebsocketServerOutputTransport | None = None
         self._websocket: websockets.WebSocketServerProtocol | None = None
+
+        # Register supported handlers. The user will only be able to register
+        # these handlers.
+        self._register_event_handler("on_client_connected")
 
     def input(self) -> FrameProcessor:
         if not self._input:
@@ -221,8 +231,19 @@ class WebsocketServerTransport(BaseTransport):
             self._output = WebsocketServerOutputTransport(self._params)
         return self._output
 
-    async def _on_connection(self, websocket):
+    def _on_connection(self, websocket):
         if self._output:
-            await self._output.set_client_connection(websocket)
+            print("000 AAAAAAAAAAAAAAAAAAA")
+            self._output.set_client_connection(websocket)
+            print("111 AAAAAAAAAAAAAAAAAAA")
+            self.on_client_connected(websocket)
+            print("222 AAAAAAAAAAAAAAAAAAA")
         else:
             logger.error("A WebsocketServerTransport output is missing in the pipeline")
+
+    #
+    # Decorators (event handlers)
+    #
+
+    def on_client_connected(self, client):
+        pass
