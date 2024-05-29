@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0c\x66rames.proto\x12\x07pipecat\"\x19\n\tTextFrame\x12\x0c\n\x04text\x18\x01 \x01(\t\"\x1e\n\rAudioRawFrame\x12\r\n\x05\x61udio\x18\x01 \x01(\x0c\"F\n\x12TranscriptionFrame\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x11\n\ttimestamp\x18\x03 \x01(\t\"\x93\x01\n\x05\x46rame\x12\"\n\x04text\x18\x01 \x01(\x0b\x32\x12.pipecat.TextFrameH\x00\x12\'\n\x05\x61udio\x18\x02 \x01(\x0b\x32\x16.pipecat.AudioRawFrameH\x00\x12\x34\n\rtranscription\x18\x03 \x01(\x0b\x32\x1b.pipecat.TranscriptionFrameH\x00\x42\x07\n\x05\x66rameb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0c\x66rames.proto\x12\x07pipecat\"\x19\n\tTextFrame\x12\x0c\n\x04text\x18\x01 \x01(\t\"I\n\rAudioRawFrame\x12\r\n\x05\x61udio\x18\x01 \x01(\x0c\x12\x13\n\x0bsample_rate\x18\x02 \x01(\r\x12\x14\n\x0cnum_channels\x18\x03 \x01(\r\"F\n\x12TranscriptionFrame\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x0f\n\x07user_id\x18\x02 \x01(\t\x12\x11\n\ttimestamp\x18\x03 \x01(\t\"\x93\x01\n\x05\x46rame\x12\"\n\x04text\x18\x01 \x01(\x0b\x32\x12.pipecat.TextFrameH\x00\x12\'\n\x05\x61udio\x18\x02 \x01(\x0b\x32\x16.pipecat.AudioRawFrameH\x00\x12\x34\n\rtranscription\x18\x03 \x01(\x0b\x32\x1b.pipecat.TranscriptionFrameH\x00\x42\x07\n\x05\x66rameb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -24,9 +24,9 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_TEXTFRAME']._serialized_start=25
   _globals['_TEXTFRAME']._serialized_end=50
   _globals['_AUDIORAWFRAME']._serialized_start=52
-  _globals['_AUDIORAWFRAME']._serialized_end=82
-  _globals['_TRANSCRIPTIONFRAME']._serialized_start=84
-  _globals['_TRANSCRIPTIONFRAME']._serialized_end=154
-  _globals['_FRAME']._serialized_start=157
-  _globals['_FRAME']._serialized_end=304
+  _globals['_AUDIORAWFRAME']._serialized_end=125
+  _globals['_TRANSCRIPTIONFRAME']._serialized_start=127
+  _globals['_TRANSCRIPTIONFRAME']._serialized_end=197
+  _globals['_FRAME']._serialized_start=200
+  _globals['_FRAME']._serialized_end=347
 # @@protoc_insertion_point(module_scope)

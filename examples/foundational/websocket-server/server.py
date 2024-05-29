@@ -54,7 +54,6 @@ async def main():
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
-            print("AAAAAAAA")
             await task.queue_frame(TextFrame("Hello there!"))
 
         runner = PipelineRunner()
