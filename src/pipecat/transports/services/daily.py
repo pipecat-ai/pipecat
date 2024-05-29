@@ -6,15 +6,12 @@
 
 import aiohttp
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
-import inspect
 import queue
 import time
-import types
 
 from dataclasses import dataclass
-from functools import partial
 from typing import Any, Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 
 from daily import (
     CallClient,
@@ -139,7 +136,8 @@ class DailyTransportClient(EventHandler):
             token: str | None,
             bot_name: str,
             params: DailyParams,
-            callbacks: DailyCallbacks):
+            callbacks: DailyCallbacks,
+            loop: asyncio.AbstractEventLoop):
         super().__init__()
 
         if not self._daily_initialized:
@@ -151,6 +149,7 @@ class DailyTransportClient(EventHandler):
         self._bot_name: str = bot_name
         self._params: DailyParams = params
         self._callbacks = callbacks
+        self._loop = loop
 
         self._participant_id: str = ""
         self._video_renderers = {}
@@ -212,8 +211,7 @@ class DailyTransportClient(EventHandler):
 
         self._joining = True
 
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(self._executor, self._join)
+        await self._loop.run_in_executor(self._executor, self._join)
 
     def _join(self):
         logger.info(f"Joining {self._room_url}")
@@ -304,8 +302,7 @@ class DailyTransportClient(EventHandler):
         self._joined = False
         self._leaving = True
 
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(self._executor, self._leave)
+        await self._loop.run_in_executor(self._executor, self._leave)
 
     def _leave(self):
         logger.info(f"Leaving {self._room_url}")
@@ -335,8 +332,7 @@ class DailyTransportClient(EventHandler):
             self._callbacks.on_error(error_msg)
 
     async def cleanup(self):
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(self._executor, self._cleanup)
+        await self._loop.run_in_executor(self._executor, self._cleanup)
 
     def _cleanup(self):
         if self._client:
@@ -485,8 +481,7 @@ class DailyInputTransport(BaseInputTransport):
         # This will set _running=True
         await super().start(frame)
         # Create camera in thread (runs if _running is true).
-        loop = asyncio.get_running_loop()
-        self._camera_in_thread = loop.run_in_executor(
+        self._camera_in_thread = self._loop.run_in_executor(
             self._in_executor, self._camera_in_thread_handler)
 
     async def stop(self):
@@ -642,7 +637,15 @@ class DailyOutputTransport(BaseOutputTransport):
 
 class DailyTransport(BaseTransport):
 
-    def __init__(self, room_url: str, token: str | None, bot_name: str, params: DailyParams):
+    def __init__(
+            self,
+            room_url: str,
+            token: str | None,
+            bot_name: str,
+            params: DailyParams,
+            loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()):
+        super().__init__(loop)
+
         callbacks = DailyCallbacks(
             on_joined=self._on_joined,
             on_left=self._on_left,
@@ -660,12 +663,9 @@ class DailyTransport(BaseTransport):
         )
         self._params = params
 
-        self._client = DailyTransportClient(room_url, token, bot_name, params, callbacks)
+        self._client = DailyTransportClient(room_url, token, bot_name, params, callbacks, loop)
         self._input: DailyInputTransport | None = None
         self._output: DailyOutputTransport | None = None
-        self._loop = asyncio.get_running_loop()
-
-        self._event_handlers: dict = {}
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
@@ -868,45 +868,3 @@ class DailyTransport(BaseTransport):
 
     def on_participant_left(self, participant, reason):
         pass
-
-    def event_handler(self, event_name: str):
-        def decorator(handler):
-            self._add_event_handler(event_name, handler)
-            return handler
-        return decorator
-
-    def _register_event_handler(self, event_name: str):
-        methods = inspect.getmembers(self, predicate=inspect.ismethod)
-        if event_name not in [method[0] for method in methods]:
-            raise Exception(f"Event handler {event_name} not found")
-
-        self._event_handlers[event_name] = [getattr(self, event_name)]
-
-        patch_method = types.MethodType(partial(self._patch_method, event_name), self)
-        setattr(self, event_name, patch_method)
-
-    def _add_event_handler(self, event_name: str, handler):
-        if event_name not in self._event_handlers:
-            raise Exception(f"Event handler {event_name} not registered")
-        self._event_handlers[event_name].append(types.MethodType(handler, self))
-
-    def _patch_method(self, event_name, *args, **kwargs):
-        try:
-            for handler in self._event_handlers[event_name]:
-                if inspect.iscoroutinefunction(handler):
-                    # Beware, if handler() calls another event handler it
-                    # will deadlock. You shouldn't do that anyways.
-                    future = asyncio.run_coroutine_threadsafe(
-                        handler(*args[1:], **kwargs), self._loop)
-
-                    # wait for the coroutine to finish. This will also
-                    # raise any exceptions raised by the coroutine.
-                    future.result()
-                else:
-                    handler(*args[1:], **kwargs)
-        except Exception as e:
-            logger.error(f"Exception in event handler {event_name}: {e}")
-            raise e
-
-    #     def start_recording(self):
-    #         self.client.start_recording()
