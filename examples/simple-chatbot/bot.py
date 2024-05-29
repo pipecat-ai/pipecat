@@ -7,7 +7,7 @@ from PIL import Image
 
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -149,7 +149,7 @@ async def main(room_url: str, token):
             assistant_response,
         ])
 
-        task = PipelineTask(pipeline, allow_interruptions=True)
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
         await task.queue_frame(quiet_frame)
 
         @transport.event_handler("on_first_participant_joined")
