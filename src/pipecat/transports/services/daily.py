@@ -671,6 +671,7 @@ class DailyTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
+        self._register_event_handler("on_app_message")
         self._register_event_handler("on_call_state_updated")
         self._register_event_handler("on_dialout_connected")
         self._register_event_handler("on_dialout_stopped")
@@ -752,6 +753,7 @@ class DailyTransport(BaseTransport):
     def _on_app_message(self, message: Any, sender: str):
         if self._input:
             self._input.push_app_message(message, sender)
+        self.on_app_message(message, sender)
 
     def _on_call_state_updated(self, state: str):
         self.on_call_state_updated(state)
@@ -826,6 +828,9 @@ class DailyTransport(BaseTransport):
         pass
 
     def on_left(self):
+        pass
+
+    def on_app_message(self, message, sender):
         pass
 
     def on_call_state_updated(self, state):
