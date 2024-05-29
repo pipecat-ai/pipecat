@@ -114,6 +114,7 @@ class DailyCallbacks(BaseModel):
     on_left: Callable[[], None]
     on_error: Callable[[str], None]
     on_app_message: Callable[[Any, str], None]
+    on_call_state_updated: Callable[[str], None]
     on_dialin_ready: Callable[[str], None]
     on_dialout_connected: Callable[[Any], None]
     on_dialout_stopped: Callable[[Any], None]
@@ -345,6 +346,15 @@ class DailyTransportClient(EventHandler):
     def start_dialout(self, settings):
         self._client.start_dialout(settings)
 
+    def stop_dialout(self, participant_id):
+        self._client.stop_dialout(participant_id)
+
+    def start_recording(self, streaming_settings, stream_id, force_new):
+        self._client.start_recording(streaming_settings, stream_id, force_new)
+
+    def stop_recording(self, stream_id):
+        self._client.stop_recording(stream_id)
+
     def capture_participant_transcription(self, participant_id: str, callback: Callable):
         if not self._params.transcription_enabled:
             return
@@ -380,6 +390,9 @@ class DailyTransportClient(EventHandler):
 
     def on_app_message(self, message: Any, sender: str):
         self._callbacks.on_app_message(message, sender)
+
+    def on_call_state_updated(self, state: str):
+        self._callbacks.on_call_state_updated(state)
 
     def on_dialin_ready(self, sip_endpoint: str):
         self._callbacks.on_dialin_ready(sip_endpoint)
@@ -635,6 +648,7 @@ class DailyTransport(BaseTransport):
             on_left=self._on_left,
             on_error=self._on_error,
             on_app_message=self._on_app_message,
+            on_call_state_updated=self._on_call_state_updated,
             on_dialin_ready=self._on_dialin_ready,
             on_dialout_connected=self._on_dialout_connected,
             on_dialout_stopped=self._on_dialout_stopped,
@@ -657,6 +671,8 @@ class DailyTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
+        self._register_event_handler("on_app_message")
+        self._register_event_handler("on_call_state_updated")
         self._register_event_handler("on_dialout_connected")
         self._register_event_handler("on_dialout_stopped")
         self._register_event_handler("on_dialout_error")
@@ -695,8 +711,17 @@ class DailyTransport(BaseTransport):
         if self._output:
             await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
 
-    def start_dialout(self, settings):
+    def start_dialout(self, settings=None):
         self._client.start_dialout(settings)
+
+    def stop_dialout(self, participant_id):
+        self._client.stop_dialout(participant_id)
+
+    def start_recording(self, streaming_settings=None, stream_id=None, force_new=None):
+        self._client.start_recording(streaming_settings, stream_id, force_new)
+
+    def stop_recording(self, stream_id=None):
+        self._client.stop_recording(stream_id)
 
     def capture_participant_transcription(self, participant_id: str):
         self._client.capture_participant_transcription(
@@ -728,6 +753,10 @@ class DailyTransport(BaseTransport):
     def _on_app_message(self, message: Any, sender: str):
         if self._input:
             self._input.push_app_message(message, sender)
+        self.on_app_message(message, sender)
+
+    def _on_call_state_updated(self, state: str):
+        self.on_call_state_updated(state)
 
     async def _handle_dialin_ready(self, sip_endpoint: str):
         async with aiohttp.ClientSession() as session:
@@ -799,6 +828,12 @@ class DailyTransport(BaseTransport):
         pass
 
     def on_left(self):
+        pass
+
+    def on_app_message(self, message, sender):
+        pass
+
+    def on_call_state_updated(self, state):
         pass
 
     def on_dialout_connected(self, data):
