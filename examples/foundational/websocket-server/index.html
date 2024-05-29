@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="//cdn.jsdelivr.net/npm/protobufjs@7.X.X/dist/protobuf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/protobufjs@7.X.X/dist/protobuf.min.js"></script>
     <title>WebSocket Audio Stream</title>
 </head>
 
@@ -28,7 +28,7 @@
 
         const proto = protobuf.load("frames.proto", (err, root) => {
             if (err) throw err;
-            frame = root.lookupType("pipecat_proto.Frame");
+            frame = root.lookupType("pipecat.Frame");
         });
 
         function initWebSocket() {

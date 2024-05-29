@@ -1,25 +1,35 @@
+//
+// Copyright (c) 2024, Daily
+//
+// SPDX-License-Identifier: BSD 2-Clause License
+//
+
+// Generate frames_pb2.py with:
+//
+//   python -m grpc_tools.protoc --proto_path=./ --python_out=./protobufs frames.proto
+
 syntax = "proto3";
 
-package pipecat_proto;
+package pipecat;
 
 message TextFrame {
     string text = 1;
 }
 
-message AudioFrame {
+message AudioRawFrame {
     bytes audio = 1;
 }
 
 message TranscriptionFrame {
     string text = 1;
-    string participant_id = 2;
+    string user_id = 2;
     string timestamp = 3;
 }
 
 message Frame {
     oneof frame {
         TextFrame text = 1;
-        AudioFrame audio = 2;
+        AudioRawFrame audio = 2;
         TranscriptionFrame transcription = 3;
     }
 }
