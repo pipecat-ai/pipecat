@@ -741,10 +741,10 @@ class DailyTransport(BaseTransport):
                 participant_id, framerate, video_source, color_format)
 
     def _on_joined(self, participant):
-        self.on_joined(participant)
+        self._call_async_event_handler("on_joined", participant)
 
     def _on_left(self):
-        self.on_left()
+        self._call_async_event_handler("on_left")
 
     def _on_error(self, error):
         # TODO(aleix): Report error to input/output transports. The one managing
@@ -754,10 +754,10 @@ class DailyTransport(BaseTransport):
     def _on_app_message(self, message: Any, sender: str):
         if self._input:
             self._input.push_app_message(message, sender)
-        self.on_app_message(message, sender)
+        self._call_async_event_handler("on_app_message", message, sender)
 
     def _on_call_state_updated(self, state: str):
-        self.on_call_state_updated(state)
+        self._call_async_event_handler("on_call_state_updated", state)
 
     async def _handle_dialin_ready(self, sip_endpoint: str):
         if not self._params.dialin_settings:
@@ -793,28 +793,28 @@ class DailyTransport(BaseTransport):
     def _on_dialin_ready(self, sip_endpoint):
         if self._params.dialin_settings:
             asyncio.run_coroutine_threadsafe(self._handle_dialin_ready(sip_endpoint), self._loop)
-        self.on_dialin_ready(sip_endpoint)
+        self._call_async_event_handler("on_dialin_ready", sip_endpoint)
 
     def _on_dialout_connected(self, data):
-        self.on_dialout_connected(data)
+        self._call_async_event_handler("on_dialout_connected", data)
 
     def _on_dialout_stopped(self, data):
-        self.on_dialout_stopped(data)
+        self._call_async_event_handler("on_dialout_stopped", data)
 
     def _on_dialout_error(self, data):
-        self.on_dialout_error(data)
+        self._call_async_event_handler("on_dialout_error", data)
 
     def _on_dialout_warning(self, data):
-        self.on_dialout_warning(data)
+        self._call_async_event_handler("on_dialout_warning", data)
 
     def _on_participant_joined(self, participant):
-        self.on_participant_joined(participant)
+        self._call_async_event_handler("on_participant_joined", participant)
 
     def _on_participant_left(self, participant, reason):
-        self.on_participant_left(participant, reason)
+        self._call_async_event_handler("on_participant_left", participant, reason)
 
     def _on_first_participant_joined(self, participant):
-        self.on_first_participant_joined(participant)
+        self._call_async_event_handler("on_first_participant_joined", participant)
 
     def _on_transcription_message(self, participant_id, message):
         text = message["text"]
@@ -829,42 +829,8 @@ class DailyTransport(BaseTransport):
         if self._input:
             self._input.push_transcription_frame(frame)
 
-    #
-    # Decorators (event handlers)
-    #
-
-    def on_joined(self, participant):
-        pass
-
-    def on_left(self):
-        pass
-
-    def on_app_message(self, message, sender):
-        pass
-
-    def on_call_state_updated(self, state):
-        pass
-
-    def on_dialin_ready(self, sip_endpoint):
-        pass
-
-    def on_dialout_connected(self, data):
-        pass
-
-    def on_dialout_stopped(self, data):
-        pass
-
-    def on_dialout_error(self, data):
-        pass
-
-    def on_dialout_warning(self, data):
-        pass
-
-    def on_first_participant_joined(self, participant):
-        pass
-
-    def on_participant_joined(self, participant):
-        pass
-
-    def on_participant_left(self, participant, reason):
-        pass
+    def _call_async_event_handler(self, event_name: str, *args, **kwargs):
+        future = asyncio.run_coroutine_threadsafe(
+            self._call_event_handler(
+                event_name, args, kwargs), self._loop)
+        future.result()
