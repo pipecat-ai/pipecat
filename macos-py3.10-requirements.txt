@@ -12,7 +12,7 @@ annotated-types==0.7.0
     # via pydantic
 anthropic==0.25.9
     # via pipecat-ai (pyproject.toml)
-anyio==4.3.0
+anyio==4.4.0
     # via
     #   anthropic
     #   httpx
@@ -40,9 +40,9 @@ click==8.1.7
     # via flask
 coloredlogs==15.0.1
     # via onnxruntime
-ctranslate2==4.3.0
+ctranslate2==4.2.1
     # via faster-whisper
-daily-python==0.8.0
+daily-python==0.9.0
     # via pipecat-ai (pyproject.toml)
 distro==1.9.0
     # via
@@ -87,7 +87,7 @@ google-api-core[grpc]==2.19.0
     #   google-ai-generativelanguage
     #   google-api-python-client
     #   google-generativeai
-google-api-python-client==2.130.0
+google-api-python-client==2.131.0
     # via google-generativeai
 google-auth==2.29.0
     # via
@@ -126,7 +126,7 @@ httpx==0.27.0
     #   openai
 httpx-sse==0.4.0
     # via fal-client
-huggingface-hub==0.23.1
+huggingface-hub==0.23.2
     # via
     #   faster-whisper
     #   timm
@@ -204,12 +204,12 @@ pyasn1-modules==0.4.0
     # via google-auth
 pyaudio==0.2.14
     # via pipecat-ai (pyproject.toml)
-pydantic==2.7.1
+pydantic==2.7.2
     # via
     #   anthropic
     #   google-generativeai
     #   openai
-pydantic-core==2.18.2
+pydantic-core==2.18.3
     # via pydantic
 pyht==0.0.28
     # via pipecat-ai (pyproject.toml)

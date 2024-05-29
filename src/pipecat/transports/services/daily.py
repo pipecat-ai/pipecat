@@ -104,7 +104,7 @@ class DailyTranscriptionSettings(BaseModel):
 class DailyParams(TransportParams):
     api_url: str = "https://api.daily.co"
     api_key: str = ""
-    dialin_settings: DailyDialinSettings = DailyDialinSettings()
+    dialin_settings: DailyDialinSettings | None = None
     transcription_enabled: bool = False
     transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
 
@@ -673,6 +673,7 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_left")
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_call_state_updated")
+        self._register_event_handler("on_dialin_ready")
         self._register_event_handler("on_dialout_connected")
         self._register_event_handler("on_dialout_stopped")
         self._register_event_handler("on_dialout_error")
@@ -759,6 +760,9 @@ class DailyTransport(BaseTransport):
         self.on_call_state_updated(state)
 
     async def _handle_dialin_ready(self, sip_endpoint: str):
+        if not self._params.dialin_settings:
+            return
+
         async with aiohttp.ClientSession() as session:
             headers = {
                 "Authorization": f"Bearer {self._params.api_key}",
@@ -772,19 +776,24 @@ class DailyTransport(BaseTransport):
 
             url = f"{self._params.api_url}/dialin/pinlessCallUpdate"
 
-            async with session.post(url, headers=headers, data=data) as r:
-                if r.status != 200:
-                    text = await r.text()
-                    logger.error(
-                        f"Unable to handle dialin-ready event (status: {r.status}, error: {text})")
-                    return
+            try:
+                async with session.post(url, headers=headers, data=data, timeout=10) as r:
+                    if r.status != 200:
+                        text = await r.text()
+                        logger.error(
+                            f"Unable to handle dialin-ready event (status: {r.status}, error: {text})")
+                        return
 
-                logger.debug("dialin-ready event handled successfully")
+                    logger.debug("Event dialin-ready was handled successfully")
+            except asyncio.TimeoutError:
+                logger.error(f"Timeout handling dialin-ready event ({url})")
+            except BaseException as e:
+                logger.error(f"Error handling dialin-ready event ({url}): {e}")
 
     def _on_dialin_ready(self, sip_endpoint):
-        future = asyncio.run_coroutine_threadsafe(
-            self._handle_dialin_ready(sip_endpoint), self._loop)
-        future.result()
+        if self._params.dialin_settings:
+            asyncio.run_coroutine_threadsafe(self._handle_dialin_ready(sip_endpoint), self._loop)
+        self.on_dialin_ready(sip_endpoint)
 
     def _on_dialout_connected(self, data):
         self.on_dialout_connected(data)
@@ -834,6 +843,9 @@ class DailyTransport(BaseTransport):
         pass
 
     def on_call_state_updated(self, state):
+        pass
+
+    def on_dialin_ready(self, sip_endpoint):
         pass
 
     def on_dialout_connected(self, data):
