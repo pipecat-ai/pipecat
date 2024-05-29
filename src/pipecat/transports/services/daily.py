@@ -114,6 +114,7 @@ class DailyCallbacks(BaseModel):
     on_left: Callable[[], None]
     on_error: Callable[[str], None]
     on_app_message: Callable[[Any, str], None]
+    on_call_state_updated: Callable[[str], None]
     on_dialin_ready: Callable[[str], None]
     on_dialout_connected: Callable[[Any], None]
     on_dialout_stopped: Callable[[Any], None]
@@ -390,6 +391,9 @@ class DailyTransportClient(EventHandler):
     def on_app_message(self, message: Any, sender: str):
         self._callbacks.on_app_message(message, sender)
 
+    def on_call_state_updated(self, state: str):
+        self._callbacks.on_call_state_updated(state)
+
     def on_dialin_ready(self, sip_endpoint: str):
         self._callbacks.on_dialin_ready(sip_endpoint)
 
@@ -644,6 +648,7 @@ class DailyTransport(BaseTransport):
             on_left=self._on_left,
             on_error=self._on_error,
             on_app_message=self._on_app_message,
+            on_call_state_updated=self._on_call_state_updated,
             on_dialin_ready=self._on_dialin_ready,
             on_dialout_connected=self._on_dialout_connected,
             on_dialout_stopped=self._on_dialout_stopped,
@@ -666,6 +671,7 @@ class DailyTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
+        self._register_event_handler("on_call_state_updated")
         self._register_event_handler("on_dialout_connected")
         self._register_event_handler("on_dialout_stopped")
         self._register_event_handler("on_dialout_error")
@@ -747,6 +753,9 @@ class DailyTransport(BaseTransport):
         if self._input:
             self._input.push_app_message(message, sender)
 
+    def _on_call_state_updated(self, state: str):
+        self.on_call_state_updated(state)
+
     async def _handle_dialin_ready(self, sip_endpoint: str):
         async with aiohttp.ClientSession() as session:
             headers = {
@@ -817,6 +826,9 @@ class DailyTransport(BaseTransport):
         pass
 
     def on_left(self):
+        pass
+
+    def on_call_state_updated(self, state):
         pass
 
     def on_dialout_connected(self, data):
