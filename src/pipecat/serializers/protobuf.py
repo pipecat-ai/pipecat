@@ -7,6 +7,7 @@
 import dataclasses
 
 import pipecat.frames.protobufs.frames_pb2 as frame_protos
+
 from pipecat.frames.frames import AudioRawFrame, Frame, TextFrame, TranscriptionFrame
 from pipecat.serializers.base_serializer import FrameSerializer
 
