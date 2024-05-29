@@ -303,7 +303,7 @@ async def main(room_url: str, token):
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4-turbo")
+            model="gpt-4o")
 
         messages = []
         context = OpenAILLMContext(
@@ -330,20 +330,23 @@ async def main(room_url: str, token):
             "list_visit_reasons",
             intake.save_data,
             start_callback=intake.start_visit_reasons)
-        fl = FrameLogger("after transport output")
-        fltts = FrameLogger("### out of tts")
+        fl = FrameLogger("!!! after LLM")
+        fltts = FrameLogger("@@@ out of tts")
+        flend = FrameLogger("### out of the end")
         pipeline = Pipeline([
             transport.input(),
             user_context,
             llm,
+            fl,
             tts,
-            # fltts,
+            fltts,
             transport.output(),
             assistant_context,
+            flend
             # fl
         ])
 
-        task = PipelineTask(pipeline, allow_interruptions=True)
+        task = PipelineTask(pipeline, allow_interruptions=False)
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
