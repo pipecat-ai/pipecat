@@ -12,7 +12,7 @@ import sys
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
 from pipecat.services.elevenlabs import ElevenLabsTTSService
@@ -77,7 +77,7 @@ async def main(room_url: str, token):
             tma_out              # Assistant spoken responses
         ])
 
-        task = PipelineTask(pipeline, allow_interruptions=True)
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
