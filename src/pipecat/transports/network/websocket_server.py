@@ -33,7 +33,7 @@ class WebsocketServerParams(TransportParams):
 
 
 class WebsocketServerCallbacks(BaseModel):
-    on_connection: Callable[[websockets.WebSocketServerProtocol], None]
+    on_connection: Callable[[websockets.WebSocketServerProtocol], Awaitable[None]]
 
 
 class WebsocketServerInputTransport(FrameProcessor):
@@ -87,7 +87,7 @@ class WebsocketServerInputTransport(FrameProcessor):
         self._websocket = websocket
 
         # Notify
-        self._callbacks.on_connection(websocket)
+        await self._callbacks.on_connection(websocket)
 
         # Handle incoming messages
         async for message in websocket:
@@ -148,11 +148,9 @@ class WebsocketServerOutputTransport(FrameProcessor):
         self._audio_buffer = bytes()
         self._in_tts_audio = False
 
-    def set_client_connection(self, websocket: websockets.WebSocketServerProtocol):
+    async def set_client_connection(self, websocket: websockets.WebSocketServerProtocol):
         if self._websocket:
-            loop = self.get_event_loop()
-            future = asyncio.run_coroutine_threadsafe(self._websocket.close(), loop)
-            future.result()
+            await self._websocket.close()
             logger.warning("Only one client allowed, using new connection")
         self._websocket = websocket
 
@@ -231,19 +229,9 @@ class WebsocketServerTransport(BaseTransport):
             self._output = WebsocketServerOutputTransport(self._params)
         return self._output
 
-    def _on_connection(self, websocket):
+    async def _on_connection(self, websocket):
         if self._output:
-            print("000 AAAAAAAAAAAAAAAAAAA")
-            self._output.set_client_connection(websocket)
-            print("111 AAAAAAAAAAAAAAAAAAA")
-            self.on_client_connected(websocket)
-            print("222 AAAAAAAAAAAAAAAAAAA")
+            await self._output.set_client_connection(websocket)
+            await self._call_event_handler("on_client_connected", websocket)
         else:
             logger.error("A WebsocketServerTransport output is missing in the pipeline")
-
-    #
-    # Decorators (event handlers)
-    #
-
-    def on_client_connected(self, client):
-        pass

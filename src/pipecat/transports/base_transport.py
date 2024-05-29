@@ -6,10 +6,8 @@
 
 import asyncio
 import inspect
-import types
 
 from abc import ABC, abstractmethod
-from functools import partial
 
 from pydantic import ConfigDict
 from pydantic.main import BaseModel
@@ -62,34 +60,22 @@ class BaseTransport(ABC):
         return decorator
 
     def _register_event_handler(self, event_name: str):
-        methods = inspect.getmembers(self, predicate=inspect.ismethod)
-        if event_name not in [method[0] for method in methods]:
-            raise Exception(f"Event handler {event_name} not found")
-
-        self._event_handlers[event_name] = [getattr(self, event_name)]
-
-        patch_method = types.MethodType(partial(self._patch_method, event_name), self)
-        setattr(self, event_name, patch_method)
+        if event_name in self._event_handlers:
+            raise Exception(f"Event handler {event_name} already registered")
+        self._event_handlers[event_name] = []
 
     def _add_event_handler(self, event_name: str, handler):
         if event_name not in self._event_handlers:
             raise Exception(f"Event handler {event_name} not registered")
-        self._event_handlers[event_name].append(types.MethodType(handler, self))
+        self._event_handlers[event_name].append(handler)
 
-    def _patch_method(self, event_name, *args, **kwargs):
+    async def _call_event_handler(self, event_name: str, *args, **kwargs):
         try:
             for handler in self._event_handlers[event_name]:
                 if inspect.iscoroutinefunction(handler):
-                    # Beware, if handler() calls another event handler it
-                    # will deadlock. You shouldn't do that anyways.
-                    future = asyncio.run_coroutine_threadsafe(
-                        handler(*args[1:], **kwargs), self._loop)
-
-                    # wait for the coroutine to finish. This will also
-                    # raise any exceptions raised by the coroutine.
-                    future.result()
+                    await handler(self, *args, **kwargs)
                 else:
-                    handler(*args[1:], **kwargs)
+                    handler(self, *args, **kwargs)
         except Exception as e:
             logger.error(f"Exception in event handler {event_name}: {e}")
             raise e
