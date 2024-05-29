@@ -191,6 +191,7 @@ class BaseOpenAILLMService(LLMService):
             function_name,
             arguments
     ):
+        arguments = json.loads(arguments)
         result = await self._callbacks[function_name](self, arguments)
 
         if isinstance(result, (str, dict)):
@@ -225,12 +226,13 @@ class BaseOpenAILLMService(LLMService):
             for msg in result:
                 context.add_message(msg)
             await self._process_context(context)
-        elif isinstance(result, None):
+        elif isinstance(result, type(None)):
             pass
         else:
             raise BaseException(f"Unknown return type from function callback: {type(result)}")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        print(f"@@@ in process frame with: {frame}")
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context: OpenAILLMContext = frame.context
