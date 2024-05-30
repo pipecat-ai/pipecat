@@ -10,8 +10,6 @@ import os
 import json
 import sys
 
-from pipecat.frames.frames import LLMMessagesFrame, Frame
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -19,23 +17,16 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantContextAggregator,
     LLMUserContextAggregator,
 )
-from pipecat.services.openai import OpenAILLMContextFrame, OpenAILLMContext
+from pipecat.services.openai import OpenAILLMContext
 from pipecat.processors.logger import FrameLogger
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 from openai.types.chat import (
-    ChatCompletionSystemMessageParam,
-    ChatCompletionFunctionMessageParam,
     ChatCompletionToolParam,
-    ChatCompletionUserMessageParam,
 )
 from pipecat.frames.frames import (
-    LLMFullResponseStartFrame,
-    LLMFullResponseEndFrame,
-    LLMResponseEndFrame,
-    LLMResponseStartFrame,
     TextFrame
 )
 
