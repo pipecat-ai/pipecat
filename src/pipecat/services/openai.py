@@ -229,7 +229,7 @@ class BaseOpenAILLMService(LLMService):
 
 class OpenAILLMService(BaseOpenAILLMService):
 
-    def __init__(self, model="gpt-4", **kwargs):
+    def __init__(self, model="gpt-4o", **kwargs):
         super().__init__(model, **kwargs)
 
 
