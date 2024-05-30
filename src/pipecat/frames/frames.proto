@@ -13,25 +13,31 @@ syntax = "proto3";
 package pipecat;
 
 message TextFrame {
-    string text = 1;
+  uint64 id = 1;
+  string name = 2;
+  string text = 3;
 }
 
 message AudioRawFrame {
-    bytes audio = 1;
-    uint32 sample_rate = 2;
-    uint32 num_channels = 3;
+  uint64 id = 1;
+  string name = 2;
+  bytes audio = 3;
+  uint32 sample_rate = 4;
+  uint32 num_channels = 5;
 }
 
 message TranscriptionFrame {
-    string text = 1;
-    string user_id = 2;
-    string timestamp = 3;
+  uint64 id = 1;
+  string name = 2;
+  string text = 3;
+  string user_id = 4;
+  string timestamp = 5;
 }
 
 message Frame {
-    oneof frame {
-        TextFrame text = 1;
-        AudioRawFrame audio = 2;
-        TranscriptionFrame transcription = 3;
-    }
+  oneof frame {
+    TextFrame text = 1;
+    AudioRawFrame audio = 2;
+    TranscriptionFrame transcription = 3;
+  }
 }
