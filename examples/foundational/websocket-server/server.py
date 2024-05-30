@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 logger.remove(0)
-logger.add(sys.stderr, level="TRACE")
+logger.add(sys.stderr, level="DEBUG")
 
 
 async def main():
@@ -37,7 +37,7 @@ async def main():
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4-turbo-preview")
+            model="gpt-4o")
 
         stt = WhisperSTTService()
 

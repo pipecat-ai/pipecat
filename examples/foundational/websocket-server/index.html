@@ -92,8 +92,8 @@
           const audioArray = new Uint8Array(audioVector);
 
           audioContext.decodeAudioData(audioArray.buffer, function(buffer) {
-             const source = new AudioBufferSourceNode(audioContext);
-             source.buffer = buffer;
+              const source = new AudioBufferSourceNode(audioContext);
+              source.buffer = buffer;
               source.start(playTime);
               source.connect(audioContext.destination);
               playTime = playTime + buffer.duration;
