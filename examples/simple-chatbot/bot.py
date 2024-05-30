@@ -117,7 +117,7 @@ async def main(room_url: str, token):
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4-turbo-preview")
+            model="gpt-4o")
 
         messages = [
             {

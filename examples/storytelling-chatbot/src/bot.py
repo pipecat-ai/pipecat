@@ -56,7 +56,7 @@ async def main(room_url, token=None):
 
         llm_service = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4-turbo"
+            model="gpt-4o"
         )
 
         tts_service = ElevenLabsTTSService(
