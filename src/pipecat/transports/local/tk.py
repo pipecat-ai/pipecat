@@ -6,6 +6,8 @@
 
 import asyncio
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 import tkinter as tk
 
@@ -38,6 +40,8 @@ class TkInputTransport(BaseInputTransport):
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
 
+        self._executor = ThreadPoolExecutor(max_workers=5)
+
         self._in_stream = py_audio.open(
             format=py_audio.get_format_from_width(2),
             channels=params.audio_in_channels,
@@ -45,8 +49,11 @@ class TkInputTransport(BaseInputTransport):
             frames_per_buffer=params.audio_in_sample_rate,
             input=True)
 
-    def read_raw_audio_frames(self, frame_count: int) -> bytes:
-        return self._in_stream.read(frame_count, exception_on_overflow=False)
+    async def read_raw_audio_frames(self, frame_count: int) -> bytes:
+        def read_audio(frame_count: int) -> bytes:
+            return self._in_stream.read(frame_count, exception_on_overflow=False)
+
+        return await self.get_event_loop().run_in_executor(self._executor, read_audio, frame_count)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -70,6 +77,8 @@ class TkOutputTransport(BaseOutputTransport):
     def __init__(self, tk_root: tk.Tk, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
 
+        self._executor = ThreadPoolExecutor(max_workers=5)
+
         self._out_stream = py_audio.open(
             format=py_audio.get_format_from_width(2),
             channels=params.audio_out_channels,
@@ -83,10 +92,13 @@ class TkOutputTransport(BaseOutputTransport):
         self._image_label = tk.Label(tk_root, image=photo)
         self._image_label.pack()
 
-    def write_raw_audio_frames(self, frames: bytes):
-        self._out_stream.write(frames)
+    async def write_raw_audio_frames(self, frames: bytes):
+        def write_audio(frames: bytes):
+            self._out_stream.write(frames)
 
-    def write_frame_to_camera(self, frame: ImageRawFrame):
+        await self.get_event_loop().run_in_executor(self._executor, write_audio, frames)
+
+    async def write_frame_to_camera(self, frame: ImageRawFrame):
         self.get_event_loop().call_soon(self._write_frame_to_tk, frame)
 
     async def start(self, frame: StartFrame):

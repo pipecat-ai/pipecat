@@ -58,14 +58,14 @@ class VADAnalyzer:
         pass
 
     @abstractmethod
-    def voice_confidence(self, buffer) -> float:
+    async def voice_confidence(self, buffer) -> float:
         pass
 
     def _get_smoothed_volume(self, audio: bytes) -> float:
         volume = calculate_audio_volume(audio, self._sample_rate)
         return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
 
-    def analyze_audio(self, buffer) -> VADState:
+    async def analyze_audio(self, buffer) -> VADState:
         self._vad_buffer += buffer
 
         num_required_bytes = self._vad_frames_num_bytes
@@ -75,7 +75,7 @@ class VADAnalyzer:
         audio_frames = self._vad_buffer[:num_required_bytes]
         self._vad_buffer = self._vad_buffer[num_required_bytes:]
 
-        confidence = self.voice_confidence(audio_frames)
+        confidence = await self.voice_confidence(audio_frames)
 
         volume = self._get_smoothed_volume(audio_frames)
         self._prev_volume = volume

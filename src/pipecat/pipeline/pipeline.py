@@ -4,8 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
-
 from typing import Callable, Coroutine, List
 
 from pipecat.frames.frames import Frame
@@ -67,7 +65,8 @@ class Pipeline(FrameProcessor):
             await self._sink.process_frame(frame, FrameDirection.UPSTREAM)
 
     async def _cleanup_processors(self):
-        await asyncio.gather(*[p.cleanup() for p in self._processors])
+        for p in self._processors:
+            await p.cleanup()
 
     def _link_processors(self):
         prev = self._processors[0]

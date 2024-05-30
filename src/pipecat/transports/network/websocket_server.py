@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import asyncio
 import io
 import wave
@@ -18,12 +17,11 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
-    StartFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame)
+    StartFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 from loguru import logger
@@ -134,24 +132,15 @@ class WebsocketServerInputTransport(FrameProcessor):
                 break
 
 
-class WebsocketServerOutputTransport(FrameProcessor):
+class WebsocketServerOutputTransport(BaseOutputTransport):
 
     def __init__(self, params: WebsocketServerParams):
-        super().__init__()
+        super().__init__(params)
 
         self._params = params
 
-        self._websocket = None
-        self._audio_buffer = bytes()
-
         self._websocket: websockets.WebSocketServerProtocol | None = None
-
-        loop = self.get_event_loop()
-        self._send_queue_task = loop.create_task(self._send_queue_task_handler())
-        self._send_queue = asyncio.Queue()
-
         self._audio_buffer = bytes()
-        self._in_tts_audio = False
 
     async def set_client_connection(self, websocket: websockets.WebSocketServerProtocol):
         if self._websocket:
@@ -159,61 +148,34 @@ class WebsocketServerOutputTransport(FrameProcessor):
             logger.warning("Only one client allowed, using new connection")
         self._websocket = websocket
 
-    async def _send_queue_task_handler(self):
-        running = True
-        while running:
-            frame = await self._send_queue.get()
-            if self._websocket and frame:
-                # We send WAV data so we can easily decoded in the browser.
-                if self._params.add_wav_header:
-                    content = io.BytesIO()
-                    ww = wave.open(content, "wb")
-                    ww.setsampwidth(2)
-                    ww.setnchannels(frame.num_channels)
-                    ww.setframerate(frame.sample_rate)
-                    ww.writeframes(frame.audio)
-                    ww.close()
-                    content.seek(0)
-                    wav_frame = AudioRawFrame(
-                        content.read(),
-                        sample_rate=frame.sample_rate,
-                        num_channels=frame.num_channels)
-                    frame = wav_frame
-                proto = self._params.serializer.serialize(frame)
-                await self._websocket.send(proto)
+    async def write_raw_audio_frames(self, frames: bytes):
+        self._audio_buffer += frames
+        while len(self._audio_buffer) >= self._params.audio_frame_size:
+            frame = AudioRawFrame(
+                audio=self._audio_buffer[:self._params.audio_frame_size],
+                sample_rate=self._params.audio_out_sample_rate,
+                num_channels=self._params.audio_out_channels
+            )
 
-    async def _stop(self):
-        self._send_queue_task.cancel()
+            if self._params.add_wav_header:
+                content = io.BytesIO()
+                ww = wave.open(content, "wb")
+                ww.setsampwidth(2)
+                ww.setnchannels(frame.num_channels)
+                ww.setframerate(frame.sample_rate)
+                ww.writeframes(frame.audio)
+                ww.close()
+                content.seek(0)
+                wav_frame = AudioRawFrame(
+                    content.read(),
+                    sample_rate=frame.sample_rate,
+                    num_channels=frame.num_channels)
+                frame = wav_frame
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, CancelFrame):
-            await self._stop()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, TTSStartedFrame):
-            self._in_tts_audio = True
-        elif isinstance(frame, AudioRawFrame):
-            if self._in_tts_audio:
-                self._audio_buffer += frame.audio
-                while len(self._audio_buffer) >= self._params.audio_frame_size:
-                    frame = AudioRawFrame(
-                        audio=self._audio_buffer[:self._params.audio_frame_size],
-                        sample_rate=self._params.audio_out_sample_rate,
-                        num_channels=self._params.audio_out_channels
-                    )
-                    await self._send_queue.put(frame)
-                    self._audio_buffer = self._audio_buffer[self._params.audio_frame_size:]
-        elif isinstance(frame, TTSStoppedFrame):
-            self._in_tts_audio = False
-            if self._audio_buffer:
-                frame = AudioRawFrame(
-                    audio=self._audio_buffer,
-                    sample_rate=self._params.audio_out_sample_rate,
-                    num_channels=self._params.audio_out_channels
-                )
-                await self._send_queue.put(frame)
-                self._audio_buffer = bytes()
-        else:
-            await self.push_frame(frame, direction)
+            proto = self._params.serializer.serialize(frame)
+            await self._websocket.send(proto)
+
+            self._audio_buffer = self._audio_buffer[self._params.audio_frame_size:]
 
 
 class WebsocketServerTransport(BaseTransport):
@@ -223,7 +185,7 @@ class WebsocketServerTransport(BaseTransport):
             host: str = "localhost",
             port: int = 8765,
             params: WebsocketServerParams = WebsocketServerParams(),
-            loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()):
+            loop: asyncio.AbstractEventLoop | None = None):
         super().__init__(loop)
         self._host = host
         self._port = port

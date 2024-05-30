@@ -31,7 +31,12 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        transport = WebsocketServerTransport(params=WebsocketServerParams(add_wav_header=True))
+        transport = WebsocketServerTransport(
+            params=WebsocketServerParams(
+                audio_out_enabled=True,
+                add_wav_header=True
+            )
+        )
 
         vad = SileroVAD(audio_passthrough=True)
 

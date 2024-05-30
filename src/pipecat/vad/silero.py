@@ -46,7 +46,7 @@ class SileroVADAnalyzer(VADAnalyzer):
     def num_frames_required(self) -> int:
         return int(self.sample_rate / 100) * 4  # 40ms
 
-    def voice_confidence(self, buffer) -> float:
+    async def voice_confidence(self, buffer) -> float:
         try:
             audio_int16 = np.frombuffer(buffer, np.int16)
             # Divide by 32768 because we have signed 16-bit data.
@@ -88,7 +88,7 @@ class SileroVAD(FrameProcessor):
     async def _analyze_audio(self, frame: AudioRawFrame):
         # Check VAD and push event if necessary. We just care about changes
         # from QUIET to SPEAKING and vice versa.
-        new_vad_state = self._vad_analyzer.analyze_audio(frame.audio)
+        new_vad_state = await self._vad_analyzer.analyze_audio(frame.audio)
         if new_vad_state != self._processor_vad_state and new_vad_state != VADState.STARTING and new_vad_state != VADState.STOPPING:
             new_frame = None
 

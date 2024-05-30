@@ -182,9 +182,6 @@ class DailyTransportClient(EventHandler):
     def participant_id(self) -> str:
         return self._participant_id
 
-    def set_callbacks(self, callbacks: DailyCallbacks):
-        self._callbacks = callbacks
-
     def send_message(self, frame: DailyTransportMessageFrame):
         self._client.send_app_message(frame.message, frame.participant_id)
 
@@ -464,8 +461,10 @@ class DailyInputTransport(BaseInputTransport):
 
         self._client = client
 
+        self._executor = ThreadPoolExecutor(max_workers=5)
+
         self._video_renderers = {}
-        self._camera_in_queue = queue.Queue()
+        self._camera_in_queue = asyncio.Queue()
 
         self._vad_analyzer = params.vad_analyzer
         if params.vad_enabled and not params.vad_analyzer:
@@ -474,38 +473,34 @@ class DailyInputTransport(BaseInputTransport):
                 num_channels=self._params.audio_in_channels)
 
     async def start(self, frame: StartFrame):
-        if self._running:
-            return
         # Join the room.
         await self._client.join()
-        # This will set _running=True
+        # Create camera in task
+        self._camera_in_task = self.get_event_loop().create_task(self._camera_in_task_handler())
         await super().start(frame)
-        # Create camera in thread (runs if _running is true).
-        self._camera_in_thread = self._loop.run_in_executor(
-            self._in_executor, self._camera_in_thread_handler)
 
     async def stop(self):
-        if not self._running:
-            return
         # Leave the room.
         await self._client.leave()
-        # This will set _running=False
+        # The task will stop.
+        self._camera_in_task.cancel()
         await super().stop()
-        # The thread will stop.
-        await self._camera_in_thread
 
     async def cleanup(self):
-        await super().cleanup()
         await self._client.cleanup()
+        await super().cleanup()
 
-    def vad_analyze(self, audio_frames: bytes) -> VADState:
+    async def vad_analyze(self, audio_frames: bytes) -> VADState:
         state = VADState.QUIET
         if self._vad_analyzer:
-            state = self._vad_analyzer.analyze_audio(audio_frames)
+            state = await self._vad_analyzer.analyze_audio(audio_frames)
         return state
 
-    def read_raw_audio_frames(self, frame_count: int) -> bytes:
-        return self._client.read_raw_audio_frames(frame_count)
+    async def read_raw_audio_frames(self, frame_count: int) -> bytes:
+        def read_audio(frame_count: int) -> bytes:
+            return self._client.read_raw_audio_frames(frame_count)
+
+        return await self.get_event_loop().run_in_executor(self._executor, read_audio, frame_count)
 
     #
     # FrameProcessor
@@ -580,20 +575,19 @@ class DailyInputTransport(BaseInputTransport):
                 image=buffer,
                 size=size,
                 format=format)
-            self._camera_in_queue.put(frame)
+            asyncio.run_coroutine_threadsafe(
+                self._camera_in_queue.put(frame), self.get_event_loop())
 
         self._video_renderers[participant_id]["timestamp"] = curr_time
 
-    def _camera_in_thread_handler(self):
-        while self._running:
+    async def _camera_in_task_handler(self):
+        while True:
             try:
-                frame = self._camera_in_queue.get(timeout=1)
-                future = asyncio.run_coroutine_threadsafe(
-                    self._internal_push_frame(frame), self.get_event_loop())
-                future.result()
+                frame = await self._camera_in_queue.get()
+                await self._internal_push_frame(frame)
                 self._camera_in_queue.task_done()
-            except queue.Empty:
-                pass
+            except asyncio.CancelledError:
+                break
             except BaseException as e:
                 logger.error(f"Error capturing video: {e}")
 
@@ -605,34 +599,39 @@ class DailyOutputTransport(BaseOutputTransport):
 
         self._client = client
 
+        self._executor = ThreadPoolExecutor(max_workers=5)
+
     async def start(self, frame: StartFrame):
-        if self._running:
-            return
-        # This will set _running=True
-        await super().start(frame)
         # Join the room.
         await self._client.join()
+        await super().start(frame)
 
     async def stop(self):
-        if not self._running:
-            return
-        # This will set _running=False
-        await super().stop()
         # Leave the room.
         await self._client.leave()
+        await super().stop()
 
     async def cleanup(self):
-        await super().cleanup()
         await self._client.cleanup()
+        await super().cleanup()
 
-    def send_message(self, frame: DailyTransportMessageFrame):
-        self._client.send_message(frame)
+    async def send_message(self, frame: DailyTransportMessageFrame):
+        def send_message(frame: DailyTransportMessageFrame):
+            self._client.send_message(frame)
 
-    def write_raw_audio_frames(self, frames: bytes):
-        self._client.write_raw_audio_frames(frames)
+        await self.get_event_loop().run_in_executor(self._executor, send_message, frame)
 
-    def write_frame_to_camera(self, frame: ImageRawFrame):
-        self._client.write_frame_to_camera(frame)
+    async def write_raw_audio_frames(self, frames: bytes):
+        def write_audio(frames: bytes):
+            self._client.write_raw_audio_frames(frames)
+
+        await self.get_event_loop().run_in_executor(self._executor, write_audio, frames)
+
+    async def write_frame_to_camera(self, frame: ImageRawFrame):
+        def write_image(frame: ImageRawFrame):
+            self._client.write_frame_to_camera(frame)
+
+        await self.get_event_loop().run_in_executor(self._executor, write_image, frame)
 
 
 class DailyTransport(BaseTransport):
@@ -643,7 +642,7 @@ class DailyTransport(BaseTransport):
             token: str | None,
             bot_name: str,
             params: DailyParams,
-            loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()):
+            loop: asyncio.AbstractEventLoop | None = None):
         super().__init__(loop)
 
         callbacks = DailyCallbacks(
@@ -663,7 +662,8 @@ class DailyTransport(BaseTransport):
         )
         self._params = params
 
-        self._client = DailyTransportClient(room_url, token, bot_name, params, callbacks, loop)
+        self._client = DailyTransportClient(
+            room_url, token, bot_name, params, callbacks, self._loop)
         self._input: DailyInputTransport | None = None
         self._output: DailyOutputTransport | None = None
 
@@ -831,6 +831,5 @@ class DailyTransport(BaseTransport):
 
     def _call_async_event_handler(self, event_name: str, *args, **kwargs):
         future = asyncio.run_coroutine_threadsafe(
-            self._call_event_handler(
-                event_name, args, kwargs), self._loop)
+            self._call_event_handler(event_name, *args, **kwargs), self._loop)
         future.result()
