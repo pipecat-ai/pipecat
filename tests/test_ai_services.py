@@ -3,7 +3,7 @@ import unittest
 from typing import AsyncGenerator
 
 from pipecat.services.ai_services import AIService
-from pipecat.pipeline.frames import EndFrame, Frame, TextFrame
+from pipecat.frames.frames import EndFrame, Frame, TextFrame
 
 
 class SimpleAIService(AIService):

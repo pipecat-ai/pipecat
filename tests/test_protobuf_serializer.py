@@ -1,6 +1,6 @@
 import unittest
 
-from pipecat.pipeline.frames import AudioFrame, TextFrame, TranscriptionFrame
+from pipecat.frames.frames import AudioFrame, TextFrame, TranscriptionFrame
 from pipecat.serializers.protobuf_serializer import ProtobufFrameSerializer
 
 

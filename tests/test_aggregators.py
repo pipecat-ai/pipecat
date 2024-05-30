@@ -3,13 +3,12 @@ import doctest
 import functools
 import unittest
 
-from pipecat.pipeline.aggregators import (
-    GatedAggregator,
-    ParallelPipeline,
-    SentenceAggregator,
-    StatelessTextTransformer,
-)
-from pipecat.pipeline.frames import (
+from pipecat.processors.aggregators.sentence import SentenceAggregator
+from pipecat.processors.text_transformer import StatelessTextTransformer
+from pipecat.processors.aggregators.gated import GatedAggregator
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+
+from pipecat.frames.frames import (
     AudioFrame,
     EndFrame,
     ImageFrame,

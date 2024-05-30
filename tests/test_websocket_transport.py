@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch, Mock
 
-from pipecat.pipeline.frames import AudioFrame, EndFrame, TextFrame, TTSEndFrame, TTSStartFrame
+from pipecat.frames.frames import AudioFrame, EndFrame, TextFrame, TTSEndFrame, TTSStartFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.transports.websocket_transport import WebSocketFrameProcessor, WebsocketTransport
 

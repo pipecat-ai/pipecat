@@ -1,6 +1,6 @@
 from abc import abstractmethod
 
-from pipecat.pipeline.frames import Frame
+from pipecat.frames.frames import Frame
 
 
 class FrameSerializer:

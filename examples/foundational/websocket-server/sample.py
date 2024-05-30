@@ -2,8 +2,8 @@ import asyncio
 import aiohttp
 import logging
 import os
-from pipecat.pipeline.frame_processor import FrameProcessor
-from pipecat.pipeline.frames import TextFrame, TranscriptionFrame
+from pipeline.processors.frame_processor import FrameProcessor
+from pipecat.frames.frames import TextFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.services.elevenlabs_ai_services import ElevenLabsTTSService
 from pipecat.transports.websocket_transport import WebsocketTransport

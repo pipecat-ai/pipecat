@@ -2,9 +2,10 @@ import asyncio
 import unittest
 from unittest.mock import Mock
 
-from pipecat.pipeline.aggregators import SentenceAggregator, StatelessTextTransformer
-from pipecat.pipeline.frame_processor import FrameProcessor
-from pipecat.pipeline.frames import EndFrame, TextFrame
+from pipecat.processors.text_transformer import StatelessTextTransformer
+from pipecat.processors.aggregators.sentence import SentenceAggregator
+from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.frames.frames import EndFrame, TextFrame
 
 from pipecat.pipeline.pipeline import Pipeline
 

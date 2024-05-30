@@ -17,7 +17,7 @@ class GatedAggregator(FrameProcessor):
     Yields gate-opening frame before any accumulated frames, then ensuing frames
     until and not including the gate-closed frame.
 
-    >>> from pipecat.pipeline.frames import ImageFrame
+    >>> from pipecat.frames.frames import ImageFrame
 
     >>> async def print_frames(aggregator, frame):
     ...     async for frame in aggregator.process_frame(frame):

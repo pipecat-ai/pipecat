@@ -1,8 +1,8 @@
 import asyncio
 import os
-from pipecat.pipeline.openai_frames import OpenAILLMContextFrame
-from pipecat.services.azure_ai_services import AzureLLMService
-from pipecat.services.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
+from pipecat.services.azure import AzureLLMService
+from pipecat.services.openai import OpenAILLMContext
 
 from openai.types.chat import (
     ChatCompletionSystemMessageParam,

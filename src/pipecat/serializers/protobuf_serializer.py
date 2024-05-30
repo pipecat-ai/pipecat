@@ -1,7 +1,7 @@
 import dataclasses
 from typing import Text
-from pipecat.pipeline.frames import AudioFrame, Frame, TextFrame, TranscriptionFrame
-import pipecat.pipeline.protobufs.frames_pb2 as frame_protos
+from pipecat.frames.frames import AudioFrame, Frame, TextFrame, TranscriptionFrame
+import pipecat.frames.protobufs.frames_pb2 as frame_protos
 from pipecat.serializers.abstract_frame_serializer import FrameSerializer
 
 
