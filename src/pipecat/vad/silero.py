@@ -37,8 +37,6 @@ class SileroVADAnalyzer(VADAnalyzer):
             repo_or_dir="snakers4/silero-vad", model="silero_vad", force_reload=False
         )
 
-        self._processor_vad_state: VADState = VADState.QUIET
-
         logger.debug("Loaded Silero VAD")
 
     #
@@ -72,6 +70,8 @@ class SileroVAD(FrameProcessor):
 
         self._vad_analyzer = SileroVADAnalyzer(sample_rate=sample_rate, params=vad_params)
         self._audio_passthrough = audio_passthrough
+
+        self._processor_vad_state: VADState = VADState.QUIET
 
     #
     # FrameProcessor
