@@ -36,7 +36,7 @@ try:
 
 except ModuleNotFoundError as e:
     logger.exception(
-        "You need to `pip install langchain_openai langchain_community` for this example. Also, be sure to set `OPENAI_API_KEY` in the environment variable."
+        "You need to `pip install langchain langchain-openai langchain-community` for this example. Also, be sure to set `OPENAI_API_KEY` in the environment variable."
     )
     raise Exception(f"Missing module: {e}")
 
