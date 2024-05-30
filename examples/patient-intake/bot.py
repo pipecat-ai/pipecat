@@ -22,8 +22,6 @@ from pipecat.processors.logger import FrameLogger
 from pipecat.frames.frames import (
     Frame,
     LLMMessagesFrame,
-    LLMFunctionCallFrame,
-    LLMFunctionStartFrame,
     AudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor

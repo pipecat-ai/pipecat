@@ -10,8 +10,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
-    LLMFunctionCallFrame,
-    LLMFunctionStartFrame,
     TextFrame
 )
 from pipecat.utils.test_frame_processor import TestFrameProcessor

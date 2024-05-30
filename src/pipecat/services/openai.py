@@ -17,10 +17,8 @@ from typing import AsyncGenerator, List, Literal
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    LLMFunctionCallFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMFunctionStartFrame,
     LLMMessagesFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
@@ -52,6 +50,10 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
+
+
+class OpenAIUnhandledFunctionException(BaseException):
+    pass
 
 
 class BaseOpenAILLMService(LLMService):
@@ -161,12 +163,8 @@ class BaseOpenAILLMService(LLMService):
                     if function_name in self._callbacks.keys():
                         if function_name in self._start_callbacks.keys():
                             await self._start_callbacks[function_name](self)
-                    else:
-                        await self.push_frame(LLMFunctionStartFrame(function_name=tool_call.function.name, tool_call_id=tool_call_id))
                 if tool_call.function and tool_call.function.arguments:
-                    # Keep iterating through the response to collect all the argument fragments and
-                    # yield a complete LLMFunctionCallFrame after run_llm_async
-                    # completes
+                    # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
                 await self.push_frame(LLMResponseStartFrame())
@@ -176,13 +174,14 @@ class BaseOpenAILLMService(LLMService):
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
-        # handler, push an LLMFunctionCallFrame and let the pipeline deal with it.
+        # handler, raise an exception.
         if function_name and arguments:
             if function_name in self._callbacks.keys():
                 await self._handle_function_call(context, tool_call_id, function_name, arguments)
 
             else:
-                await self.push_frame(LLMFunctionCallFrame(function_name=function_name, arguments=arguments, tool_call_id=tool_call_id))
+                raise OpenAIUnhandledFunctionException(
+                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
 
     async def _handle_function_call(
             self,
@@ -193,7 +192,7 @@ class BaseOpenAILLMService(LLMService):
     ):
         arguments = json.loads(arguments)
         result = await self._callbacks[function_name](self, arguments)
-
+        arguments = json.dumps(arguments)
         if isinstance(result, (str, dict)):
             # Handle it in "full magic mode"
             tool_call = ChatCompletionFunctionMessageParam({

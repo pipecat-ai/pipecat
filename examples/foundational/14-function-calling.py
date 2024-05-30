@@ -36,8 +36,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
-    LLMFunctionCallFrame,
-    LLMFunctionStartFrame,
     TextFrame
 )
 
