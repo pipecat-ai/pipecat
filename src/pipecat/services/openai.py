@@ -232,7 +232,6 @@ class BaseOpenAILLMService(LLMService):
             raise BaseException(f"Unknown return type from function callback: {type(result)}")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        print(f"@@@ in process frame with: {frame}")
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context: OpenAILLMContext = frame.context
