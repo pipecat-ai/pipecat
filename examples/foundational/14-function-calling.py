@@ -7,9 +7,9 @@
 import asyncio
 import aiohttp
 import os
-import json
 import sys
 
+from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -17,18 +17,13 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantContextAggregator,
     LLMUserContextAggregator,
 )
-from pipecat.services.openai import OpenAILLMContext
 from pipecat.processors.logger import FrameLogger
 from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.openai import OpenAILLMService
+from pipecat.services.openai import OpenAILLMContext, OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-from openai.types.chat import (
-    ChatCompletionToolParam,
-)
-from pipecat.frames.frames import (
-    TextFrame
-)
+
+from openai.types.chat import ChatCompletionToolParam
 
 from runner import configure
 
