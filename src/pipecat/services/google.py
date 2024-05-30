@@ -86,9 +86,18 @@ class GoogleLLMService(LLMService):
             logger.debug(f"Google LLM TTFB: {time.time() - start_time}")
 
             async for chunk in self._async_generator_wrapper(response):
-                await self.push_frame(LLMResponseStartFrame())
-                await self.push_frame(TextFrame(chunk.text))
-                await self.push_frame(LLMResponseEndFrame())
+                try:
+                    text = chunk.text
+                    await self.push_frame(LLMResponseStartFrame())
+                    await self.push_frame(TextFrame(text))
+                    await self.push_frame(LLMResponseEndFrame())
+                except Exception as e:
+                    # Google LLMs seem to flag safety issues a lot!
+                    if chunk.candidates[0].finish_reason == 3:
+                        logger.debug(
+                            f"LLM refused to generate content for safety reasons - {messages}.")
+                    else:
+                        logger.error(f"Error {e}")
 
         except Exception as e:
             logger.error(f"Exception: {e}")

@@ -35,6 +35,7 @@ Website = "https://pipecat.ai"
 [project.optional-dependencies]
 anthropic = [ "anthropic~=0.25.7" ]
 azure = [ "azure-cognitiveservices-speech~=1.37.0" ]
+cartesia = [ "numpy", "sounddevice", "cartesia" ]
 daily = [ "daily-python~=0.9.0" ]
 examples = [ "python-dotenv~=1.0.0", "flask~=3.0.3", "flask_cors~=4.0.1" ]
 fal = [ "fal-client~=0.4.0" ]
