@@ -210,7 +210,7 @@ class BaseOpenAILLMService(LLMService):
 
             })
             context.add_message(tool_call)
-            if not isinstance(result, str):
+            if isinstance(result, dict):
                 result = json.dumps(result)
             tool_result = ChatCompletionToolParam({
                 "tool_call_id": tool_call_id,
