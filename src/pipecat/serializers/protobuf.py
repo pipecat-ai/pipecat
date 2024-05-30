@@ -36,7 +36,8 @@ class ProtobufFrameSerializer(FrameSerializer):
             setattr(getattr(proto_frame, proto_optional_name), field.name,
                     getattr(frame, field.name))
 
-        return proto_frame.SerializeToString()
+        result = proto_frame.SerializeToString()
+        return result
 
     def deserialize(self, data: bytes) -> Frame:
         """Returns a Frame object from a Frame protobuf. Used to convert frames
@@ -68,4 +69,22 @@ class ProtobufFrameSerializer(FrameSerializer):
         args_dict = {}
         for field in proto.DESCRIPTOR.fields_by_name[which].message_type.fields:
             args_dict[field.name] = getattr(args, field.name)
-        return class_name(**args_dict)
+
+        # Remove special fields if needed
+        id = getattr(args, "id")
+        name = getattr(args, "name")
+        if not id:
+            del args_dict["id"]
+        if not name:
+            del args_dict["name"]
+
+        # Create the instance
+        instance = class_name(**args_dict)
+
+        # Set special fields
+        if id:
+            setattr(instance, "id", getattr(args, "id"))
+        if name:
+            setattr(instance, "name", getattr(args, "name"))
+
+        return instance
