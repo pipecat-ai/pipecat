@@ -110,7 +110,6 @@ class SpriteFrame(Frame):
         return f"{self.name}(size: {len(self.images)})"
 
 
-
 @dataclass
 class TextFrame(DataFrame):
     """A chunk of text. Emitted by LLM services, consumed by TTS services, can
