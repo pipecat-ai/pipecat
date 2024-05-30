@@ -8,7 +8,7 @@ import aiohttp
 
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, TTSStartedFrame, TTSStoppedFrame, TextFrame
+from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
