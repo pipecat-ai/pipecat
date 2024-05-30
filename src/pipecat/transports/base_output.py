@@ -158,7 +158,6 @@ class BaseOutputTransport(FrameProcessor):
         while self._running:
             try:
                 frame = self._sink_queue.get(timeout=1)
-
                 if not self._is_interrupted.is_set():
                     if isinstance(frame, AudioRawFrame):
                         if self._params.audio_out_enabled:
