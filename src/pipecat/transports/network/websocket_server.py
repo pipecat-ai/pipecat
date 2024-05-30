@@ -6,6 +6,8 @@
 
 
 import asyncio
+import io
+import wave
 import websockets
 
 from typing import Awaitable, Callable
@@ -28,7 +30,8 @@ from loguru import logger
 
 
 class WebsocketServerParams(TransportParams):
-    audio_frame_size: int = 16000
+    add_wav_header: bool = False
+    audio_frame_size: int = 6400  # 200ms
     serializer: FrameSerializer = ProtobufFrameSerializer()
 
 
@@ -93,6 +96,8 @@ class WebsocketServerInputTransport(FrameProcessor):
         async for message in websocket:
             frame = self._params.serializer.deserialize(message)
             await self._internal_push_frame(frame)
+
+        logger.info(f"Client {websocket.remote_address} disconnected")
 
     async def _start(self):
         loop = self.get_event_loop()
@@ -159,13 +164,30 @@ class WebsocketServerOutputTransport(FrameProcessor):
         while running:
             frame = await self._send_queue.get()
             if self._websocket and frame:
+                # We send WAV data so we can easily decoded in the browser.
+                if self._params.add_wav_header:
+                    content = io.BytesIO()
+                    ww = wave.open(content, "wb")
+                    ww.setsampwidth(2)
+                    ww.setnchannels(frame.num_channels)
+                    ww.setframerate(frame.sample_rate)
+                    ww.writeframes(frame.audio)
+                    ww.close()
+                    content.seek(0)
+                    wav_frame = AudioRawFrame(
+                        content.read(),
+                        sample_rate=frame.sample_rate,
+                        num_channels=frame.num_channels)
+                    frame = wav_frame
                 proto = self._params.serializer.serialize(frame)
                 await self._websocket.send(proto)
 
+    async def _stop(self):
+        self._send_queue_task.cancel()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, CancelFrame):
-            # await self.stop()
-            # We don't queue a CancelFrame since we want to stop ASAP.
+            await self._stop()
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSStartedFrame):
             self._in_tts_audio = True
