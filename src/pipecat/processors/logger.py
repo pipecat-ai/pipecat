@@ -6,17 +6,22 @@
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from loguru import logger
+from typing import Optional
+logger = logger.opt(ansi=True)
 
 
 class FrameLogger(FrameProcessor):
-    def __init__(self, prefix="Frame"):
+    def __init__(self, prefix="Frame", color: Optional[str] = None):
         super().__init__()
         self._prefix = prefix
+        self._color = color
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        match direction:
-            case FrameDirection.UPSTREAM:
-                print(f"< {self._prefix}: {frame}")
-            case FrameDirection.DOWNSTREAM:
-                print(f"> {self._prefix}: {frame}")
+        dir = "<" if direction is FrameDirection.UPSTREAM else ">"
+        msg = f"{dir} {self._prefix}: {frame}"
+        if self._color:
+            msg = f"<{self._color}>{msg}</>"
+        logger.debug(msg)
+
         await self.push_frame(frame, direction)

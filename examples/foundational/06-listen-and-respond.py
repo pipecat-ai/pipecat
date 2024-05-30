@@ -56,10 +56,11 @@ async def main(room_url: str, token):
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4-turbo-preview")
+            model="gpt-4o")
 
-        fl_in = FrameLogger("Inner")
-        fl_out = FrameLogger("Outer")
+        fl = FrameLogger("!!! after LLM", "red")
+        fltts = FrameLogger("@@@ out of tts", "green")
+        flend = FrameLogger("### out of the end", "magenta")
 
         messages = [
             {
@@ -71,14 +72,15 @@ async def main(room_url: str, token):
         tma_out = LLMAssistantResponseAggregator(messages)
 
         pipeline = Pipeline([
-            fl_in,
             transport.input(),
             tma_in,
             llm,
-            fl_out,
+            fl,
             tts,
+            fltts,
             transport.output(),
-            tma_out
+            tma_out,
+            flend
         ])
 
         task = PipelineTask(pipeline)

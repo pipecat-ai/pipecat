@@ -158,7 +158,6 @@ class BaseOutputTransport(FrameProcessor):
         while self._running:
             try:
                 frame = self._sink_queue.get(timeout=1)
-
                 if not self._is_interrupted.is_set():
                     if isinstance(frame, AudioRawFrame):
                         if self._params.audio_out_enabled:
@@ -251,6 +250,8 @@ class BaseOutputTransport(FrameProcessor):
                 elif self._camera_images:
                     image = next(self._camera_images)
                     self._draw_image(image)
+                    time.sleep(1.0 / self._params.camera_out_framerate)
+                else:
                     time.sleep(1.0 / self._params.camera_out_framerate)
             except queue.Empty:
                 pass

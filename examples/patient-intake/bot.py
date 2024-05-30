@@ -330,20 +330,16 @@ async def main(room_url: str, token):
             "list_visit_reasons",
             intake.save_data,
             start_callback=intake.start_visit_reasons)
-        fl = FrameLogger("!!! after LLM")
-        fltts = FrameLogger("@@@ out of tts")
-        flend = FrameLogger("### out of the end")
+        fl = FrameLogger("LLM Output")
+
         pipeline = Pipeline([
             transport.input(),
             user_context,
             llm,
             fl,
             tts,
-            fltts,
             transport.output(),
             assistant_context,
-            flend
-            # fl
         ])
 
         task = PipelineTask(pipeline, allow_interruptions=False)
