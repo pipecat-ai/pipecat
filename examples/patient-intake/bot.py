@@ -106,7 +106,6 @@ class IntakeProcessor:
         ]
 
     async def verify_birthday(self, llm, args):
-        print(f"!!! checking birthday! Happy birthday! the user said {args}, {type(args)}")
         if args["birthday"] == "1983-01-01":
             self._context.set_tools(
                 [
@@ -137,6 +136,8 @@ class IntakeProcessor:
                             },
                         },
                     }])
+            # It's a bit weird to push this to the LLM, but it gets it into the pipeline
+            await llm.push_frame(sounds["ding2.wav"], FrameDirection.DOWNSTREAM)
             # We don't need the function call in the context, so just return a new
             # system message and let the framework re-prompt
             return [{"role": "system", "content": "Next, thank the user for confirming their identity, then ask the user to list their current prescriptions. Each prescription needs to have a medication name and a dosage. Do not call the list_prescriptions function with any unknown dosages."}]
