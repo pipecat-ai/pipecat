@@ -7,11 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed SileroVAD frame processor.
+
+## [0.0.24] - 2024-05-29
+
+### Added
+
+- Exposed `on_dialin_ready` for Daily transport SIP endpoint handling. This
+  notifies when the Daily room SIP endpoints are ready. This allows integrating
+  with third-party services like Twilio.
+
+- Exposed Daily transport `on_app_message` event.
+
+- Added Daily transport `on_call_state_updated` event.
+
+- Added Daily transport `start_recording()`, `stop_recording` and
+  `stop_dialout`.
+
 ### Changed
+
+- Added `PipelineParams`. This replaces the `allow_interruptions` argument in
+  `PipelineTask` and will allow future parameters in the future.
+
+- Fixed Deepgram Aura TTS base_url and added ErrorFrame reporting.
 
 - GoogleLLMService `api_key` argument is now mandatory.
 
 ### Fixed
+
+- Daily tranport `dialin-ready` doesn't not block anymore and it now handles
+  timeouts.
 
 - Fixed AzureLLMService.
 

@@ -15,8 +15,8 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.anthropic import AnthropicLLMService
+from pipecat.services.deepgram import DeepgramTTSService
+from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -45,23 +45,20 @@ async def main(room_url: str, token):
             )
         )
 
-        tts = ElevenLabsTTSService(
+        tts = DeepgramTTSService(
             aiohttp_session=session,
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+            api_key=os.getenv("DEEPGRAM_API_KEY"),
+            voice="aura-helios-en"
         )
 
-        llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            model="claude-3-opus-20240229")
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="gpt-4-turbo-preview")
 
-        # todo: think more about how to handle system prompts in a more general way. OpenAI,
-        # Google, and Anthropic all have slightly different approaches to providing a system
-        # prompt.
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative, helpful, and brief way. Say hello.",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
             },
         ]
 
@@ -83,6 +80,8 @@ async def main(room_url: str, token):
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
+            messages.append(
+                {"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()

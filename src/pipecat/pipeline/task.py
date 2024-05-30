@@ -8,11 +8,17 @@ import asyncio
 
 from typing import AsyncIterable, Iterable
 
+from pydantic import BaseModel
+
 from pipecat.frames.frames import CancelFrame, EndFrame, ErrorFrame, Frame, StartFrame, StopTaskFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
+
+
+class PipelineParams(BaseModel):
+    allow_interruptions: bool = False
 
 
 class Source(FrameProcessor):
@@ -31,12 +37,12 @@ class Source(FrameProcessor):
 
 class PipelineTask:
 
-    def __init__(self, pipeline: FrameProcessor, allow_interruptions=False):
+    def __init__(self, pipeline: FrameProcessor, params: PipelineParams = PipelineParams()):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
 
         self._pipeline = pipeline
-        self._allow_interruptions = allow_interruptions
+        self._params = params
 
         self._down_queue = asyncio.Queue()
         self._up_queue = asyncio.Queue()
@@ -77,7 +83,7 @@ class PipelineTask:
 
     async def _process_down_queue(self):
         await self._source.process_frame(
-            StartFrame(allow_interruptions=self._allow_interruptions), FrameDirection.DOWNSTREAM)
+            StartFrame(allow_interruptions=self._params.allow_interruptions), FrameDirection.DOWNSTREAM)
         running = True
         should_cleanup = True
         while running:
