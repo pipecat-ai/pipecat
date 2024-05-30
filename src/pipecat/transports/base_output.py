@@ -252,6 +252,8 @@ class BaseOutputTransport(FrameProcessor):
                     image = next(self._camera_images)
                     self._draw_image(image)
                     time.sleep(1.0 / self._params.camera_out_framerate)
+                else:
+                    time.sleep(1.0 / self._params.camera_out_framerate)
             except queue.Empty:
                 pass
             except Exception as e:
