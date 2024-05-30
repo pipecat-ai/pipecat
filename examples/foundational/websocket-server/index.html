@@ -16,6 +16,7 @@
     <script>
       const SAMPLE_RATE = 16000;
       const NUM_CHANNELS = 1;
+      const PLAY_TIME_RESET_THRESHOLD_MS = 1.0;
 
       // The protobuf type. We will load it later.
       let Frame = null;
@@ -38,6 +39,9 @@
 
       // AudioContext play time.
       let playTime = 0;
+
+      // Last time we received a websocket message.
+      let lastMessageTime = 0;
 
       // Whether we should be playing audio.
       let isPlaying = false;
@@ -82,9 +86,12 @@
               return false;
           }
 
-          if (playTime == 0) {
+          // Reset play time if it's been a while we haven't played anything.
+          const diffTime = audioContext.currentTime - lastMessageTime;
+          if ((playTime == 0) || (diffTime > PLAY_TIME_RESET_THRESHOLD_MS)) {
               playTime = audioContext.currentTime;
           }
+          lastMessageTime = audioContext.currentTime;
 
           // We should be able to use parsedFrame.audio.audio.buffer but for
           // some reason that contains all the bytes from the protobuf message.
