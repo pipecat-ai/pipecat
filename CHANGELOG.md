@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added function calling (LLMService.register_function()). This will allow the
+  LLM to call functions you have registered when needed. For example, if you
+  register a function to get the weather in Los Angeles and ask the LLM about
+  the weather in Los Angeles, the LLM will call your function.
+  See https://platform.openai.com/docs/guides/function-calling
+
 - Added Cartesia TTS support (https://cartesia.ai/)
 
 ### Fixed
