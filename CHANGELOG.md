@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added WebsocketServerTransport. This will create a websocket server and will
+  read messages coming from a client. The messages are serialized/deserialized
+  with protobufs. See `examples/websocket-server` for a detailed example.
+
 ### Fixed
 
 - Fixed SileroVAD frame processor.
