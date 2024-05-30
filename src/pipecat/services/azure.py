@@ -46,7 +46,7 @@ class AzureTTSService(TTSService):
         self._voice = voice
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Transcribing text: {text}")
+        logger.debug(f"Generating TTS: {text}")
 
         ssml = (
             "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' "
