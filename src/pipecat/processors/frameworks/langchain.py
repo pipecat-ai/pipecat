@@ -1,13 +1,22 @@
-import sys
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 from typing import Union
 
-from loguru import logger
-
-from pipecat.frames.frames import (Frame, LLMFullResponseEndFrame,
-                                   LLMFullResponseStartFrame, LLMMessagesFrame,
-                                   LLMResponseEndFrame, LLMResponseStartFrame,
-                                   TextFrame)
+from pipecat.frames.frames import (
+    Frame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMessagesFrame,
+    LLMResponseEndFrame,
+    LLMResponseStartFrame,
+    TextFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+from loguru import logger
 
 try:
     from langchain_core.messages import AIMessageChunk
@@ -38,26 +47,17 @@ class LangchainProcessor(FrameProcessor):
 
             await self._ainvoke(text.strip())
         else:
-            await self.push_frame(frame)
-
-    async def _invoke(self, text: str):
-        response = await self._chain.ainvoke(
-            {self._transcript_key: text},
-            config={"configurable": {"session_id": self._participant_id}},
-        )
-        await self.push_frame(LLMFullResponseStartFrame())
-        await self.push_frame(TextFrame(response))
-        await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_frame(frame, direction)
 
     @staticmethod
-    def __get_token_value(text: Union[str, AIMessageChunk]) -> str | None:
+    def __get_token_value(text: Union[str, AIMessageChunk]) -> str:
         match text:
             case str():
                 return text
             case AIMessageChunk():
                 return text.content
             case _:
-                return None
+                return ""
 
     async def _ainvoke(self, text: str):
         logger.debug(f"Invoking chain with {text}")
@@ -72,8 +72,6 @@ class LangchainProcessor(FrameProcessor):
                 await self.push_frame(LLMResponseEndFrame())
         except GeneratorExit:
             logger.warning("Generator was closed prematurely")
-            raise  # Re-raise to ensure proper generator closure
         except Exception as e:
             logger.error(f"An unknown error occurred: {e}")
-            raise
         await self.push_frame(LLMFullResponseEndFrame())
