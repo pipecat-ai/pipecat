@@ -1,11 +1,15 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
 import aiohttp
-import copy
-import json
 import os
-import re
 import sys
 import wave
+
 from typing import List
 
 from openai._types import NotGiven, NOT_GIVEN
@@ -14,23 +18,18 @@ from openai.types.chat import (
     ChatCompletionToolParam,
 )
 
+from pipecat.frames.frames import AudioRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 from pipecat.processors.logger import FrameLogger
-from pipecat.frames.frames import (
-    Frame,
-    LLMMessagesFrame,
-    AudioRawFrame,
-)
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.openai import OpenAILLMService
+from pipecat.services.openai import OpenAILLMContext, OpenAILLMContextFrame, OpenAILLMService
 from pipecat.services.ai_services import AIService
-from pipecat.transports.services.daily import DailyParams, DailyTranscriptionSettings, DailyTransport
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-from pipecat.services.openai import OpenAILLMContext, OpenAILLMContextFrame
 
 from runner import configure
 
@@ -242,7 +241,6 @@ class IntakeProcessor:
         self._context.add_message(
             {"role": "system", "content": "Finally, ask the user the reason for their doctor visit today. Once they answer, call the list_visit_reasons function."})
         await llm.process_frame(OpenAILLMContextFrame(self._context), FrameDirection.DOWNSTREAM)
-        pass
 
     async def start_visit_reasons(self, llm):
         print("!!! doing start visit reasons")
@@ -251,7 +249,6 @@ class IntakeProcessor:
         self._context.add_message({"role": "system",
                                    "content": "Now, thank the user and end the conversation."})
         await llm.process_frame(OpenAILLMContextFrame(self._context), FrameDirection.DOWNSTREAM)
-        pass
 
     async def save_data(self, llm, args):
         logger.info(f"!!! Saving data: {args}")
@@ -305,12 +302,10 @@ async def main(room_url: str, token):
             model="gpt-4o")
 
         messages = []
-        context = OpenAILLMContext(
-            messages=messages,
-        )
+        context = OpenAILLMContext(messages=messages)
         user_context = LLMUserContextAggregator(context)
         assistant_context = LLMAssistantContextAggregator(context)
-        # checklist = ChecklistProcessor(context, llm)
+
         intake = IntakeProcessor(context, llm)
         llm.register_function("verify_birthday", intake.verify_birthday)
         llm.register_function(
@@ -329,19 +324,20 @@ async def main(room_url: str, token):
             "list_visit_reasons",
             intake.save_data,
             start_callback=intake.start_visit_reasons)
+
         fl = FrameLogger("LLM Output")
 
         pipeline = Pipeline([
-            transport.input(),
-            user_context,
-            llm,
-            fl,
-            tts,
-            transport.output(),
-            assistant_context,
+            transport.input(),   # Transport input
+            user_context,        # User responses
+            llm,                 # LLM
+            fl,                  # Frame logger
+            tts,                 # TTS
+            transport.output(),  # Transport output
+            assistant_context,   # Assistant responses
         ])
 
-        task = PipelineTask(pipeline, allow_interruptions=False)
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=False))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
