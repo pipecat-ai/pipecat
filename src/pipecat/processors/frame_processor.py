@@ -5,7 +5,7 @@
 #
 
 import asyncio
-from asyncio import AbstractEventLoop
+
 from enum import Enum
 
 from pipecat.frames.frames import ErrorFrame, Frame
@@ -21,12 +21,12 @@ class FrameDirection(Enum):
 
 class FrameProcessor:
 
-    def __init__(self):
+    def __init__(self, loop: asyncio.AbstractEventLoop | None = None):
         self.id: int = obj_id()
         self.name = f"{self.__class__.__name__}#{obj_count(self)}"
         self._prev: "FrameProcessor" | None = None
         self._next: "FrameProcessor" | None = None
-        self._loop: AbstractEventLoop = asyncio.get_running_loop()
+        self._loop: asyncio.AbstractEventLoop = loop or asyncio.get_running_loop()
 
     async def cleanup(self):
         pass
@@ -36,7 +36,7 @@ class FrameProcessor:
         processor._prev = self
         logger.debug(f"Linking {self} -> {self._next}")
 
-    def get_event_loop(self) -> AbstractEventLoop:
+    def get_event_loop(self) -> asyncio.AbstractEventLoop:
         return self._loop
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

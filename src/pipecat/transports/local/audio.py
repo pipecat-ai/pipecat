@@ -6,7 +6,7 @@
 
 import asyncio
 
-from pipecat.frames.frames import StartFrame
+from pipecat.frames.frames import AudioRawFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -35,8 +35,14 @@ class LocalAudioInputTransport(BaseInputTransport):
             frames_per_buffer=params.audio_in_sample_rate,
             input=True)
 
-    def read_raw_audio_frames(self, frame_count: int) -> bytes:
-        return self._in_stream.read(frame_count, exception_on_overflow=False)
+    def read_next_audio_frame(self) -> AudioRawFrame | None:
+        sample_rate = self._params.audio_in_sample_rate
+        num_channels = self._params.audio_in_channels
+        num_frames = int(sample_rate / 100)  # 10ms of audio
+
+        audio = self._in_stream.read(num_frames, exception_on_overflow=False)
+
+        return AudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=num_channels)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)

@@ -196,7 +196,7 @@ class ImageGenService(AIService):
         super().__init__()
 
     # Renders the image. Returns an Image object.
-    @ abstractmethod
+    @abstractmethod
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         pass
 
@@ -215,7 +215,7 @@ class VisionService(AIService):
         super().__init__()
         self._describe_text = None
 
-    @ abstractmethod
+    @abstractmethod
     async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
         pass
 
