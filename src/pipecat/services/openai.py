@@ -29,12 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService, ImageGenService
-from openai.types.chat import (
-    ChatCompletionSystemMessageParam,
-    ChatCompletionFunctionMessageParam,
-    ChatCompletionToolParam,
-    ChatCompletionUserMessageParam,
-)
+
 from loguru import logger
 
 try:
@@ -43,7 +38,9 @@ try:
     from openai.types.chat import (
         ChatCompletion,
         ChatCompletionChunk,
+        ChatCompletionFunctionMessageParam,
         ChatCompletionMessageParam,
+        ChatCompletionToolParam
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -70,22 +67,9 @@ class BaseOpenAILLMService(LLMService):
         super().__init__()
         self._model: str = model
         self._client = self.create_client(api_key=api_key, base_url=base_url)
-        self._callbacks = {}
-        self._start_callbacks = {}
 
     def create_client(self, api_key=None, base_url=None):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
-
-    # TODO-CB: callback function type
-    def register_function(self, function_name, callback, start_callback=None):
-        self._callbacks[function_name] = callback
-        if start_callback:
-            self._start_callbacks[function_name] = start_callback
-
-    def unregister_function(self, function_name):
-        del self._callbacks[function_name]
-        if self._start_callbacks[function_name]:
-            del self._start_callbacks[function_name]
 
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
@@ -159,10 +143,7 @@ class BaseOpenAILLMService(LLMService):
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
                     tool_call_id = tool_call.id
-                    # only send a function start frame if we're not handling the function call
-                    if function_name in self._callbacks.keys():
-                        if function_name in self._start_callbacks.keys():
-                            await self._start_callbacks[function_name](self)
+                    await self.call_start_function(function_name)
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
@@ -176,9 +157,8 @@ class BaseOpenAILLMService(LLMService):
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
         if function_name and arguments:
-            if function_name in self._callbacks.keys():
+            if self.has_function(function_name):
                 await self._handle_function_call(context, tool_call_id, function_name, arguments)
-
             else:
                 raise OpenAIUnhandledFunctionException(
                     f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
@@ -191,7 +171,7 @@ class BaseOpenAILLMService(LLMService):
             arguments
     ):
         arguments = json.loads(arguments)
-        result = await self._callbacks[function_name](self, arguments)
+        result = await self.call_function(function_name, arguments)
         arguments = json.dumps(arguments)
         if isinstance(result, (str, dict)):
             # Handle it in "full magic mode"
