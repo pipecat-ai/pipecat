@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue where `camera_out_enabled` would cause the highg CPU usage if
   no image was provided.
 
+### Performance
+
+- Removed unnecessary audio input tasks.
+
 ## [0.0.24] - 2024-05-29
 
 ### Added
