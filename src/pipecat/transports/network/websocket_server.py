@@ -7,23 +7,18 @@
 
 import asyncio
 import io
+import queue
 import wave
 import websockets
 
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.frames.frames import (
-    AudioRawFrame,
-    CancelFrame,
-    EndFrame,
-    Frame,
-    StartFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame)
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.frames.frames import AudioRawFrame, StartFrame
+from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
+from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
@@ -40,7 +35,7 @@ class WebsocketServerCallbacks(BaseModel):
     on_connection: Callable[[websockets.WebSocketServerProtocol], Awaitable[None]]
 
 
-class WebsocketServerInputTransport(FrameProcessor):
+class WebsocketServerInputTransport(BaseInputTransport):
 
     def __init__(
             self,
@@ -48,7 +43,7 @@ class WebsocketServerInputTransport(FrameProcessor):
             port: int,
             params: WebsocketServerParams,
             callbacks: WebsocketServerCallbacks):
-        super().__init__()
+        super().__init__(params)
 
         self._host = host
         self._port = port
@@ -57,25 +52,23 @@ class WebsocketServerInputTransport(FrameProcessor):
 
         self._websocket: websockets.WebSocketServerProtocol | None = None
 
+        self._client_audio_queue = queue.Queue()
         self._stop_server_event = asyncio.Event()
 
-        # Create push frame task. This is the task that will push frames in
-        # order. We also guarantee that all frames are pushed in the same task.
-        self._create_push_task()
+    async def start(self, frame: StartFrame):
+        self._server_task = self.get_event_loop().create_task(self._server_task_handler())
+        await super().start(frame)
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, CancelFrame):
-            await self._stop()
-            # We don't queue a CancelFrame since we want to stop ASAP.
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, StartFrame):
-            await self._start()
-            await self._internal_push_frame(frame, direction)
-        elif isinstance(frame, EndFrame):
-            await self._stop()
-            await self._internal_push_frame(frame, direction)
-        else:
-            await self._internal_push_frame(frame, direction)
+    async def stop(self):
+        self._stop_server_event.set()
+        await self._server_task
+        await super().stop()
+
+    def read_next_audio_frame(self) -> AudioRawFrame | None:
+        try:
+            return self._client_audio_queue.get(timeout=1)
+        except queue.Empty:
+            return None
 
     async def _server_task_handler(self):
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
@@ -96,43 +89,15 @@ class WebsocketServerInputTransport(FrameProcessor):
         # Handle incoming messages
         async for message in websocket:
             frame = self._params.serializer.deserialize(message)
-            await self._internal_push_frame(frame)
+            if isinstance(frame, AudioRawFrame) and self._params.audio_in_enabled:
+                self._client_audio_queue.put_nowait(frame)
+            else:
+                await self._internal_push_frame(frame)
+
+        await self._websocket.close()
+        self._websocket = None
 
         logger.info(f"Client {websocket.remote_address} disconnected")
-
-    async def _start(self):
-        loop = self.get_event_loop()
-        self._server_task = loop.create_task(self._server_task_handler())
-
-    async def _stop(self):
-        self._stop_server_event.set()
-        self._push_frame_task.cancel()
-        await self._server_task
-
-    #
-    # Push frames task
-    #
-
-    def _create_push_task(self):
-        loop = self.get_event_loop()
-        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
-        self._push_queue = asyncio.Queue()
-
-    async def _internal_push_frame(
-            self,
-            frame: Frame | None,
-            direction: FrameDirection | None = FrameDirection.DOWNSTREAM):
-        await self._push_queue.put((frame, direction))
-
-    async def _push_frame_task_handler(self):
-        running = True
-        while running:
-            try:
-                (frame, direction) = await self._push_queue.get()
-                await self.push_frame(frame, direction)
-                running = not isinstance(frame, EndFrame)
-            except asyncio.CancelledError:
-                break
 
 
 class WebsocketServerOutputTransport(BaseOutputTransport):
@@ -177,7 +142,10 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
                 frame = wav_frame
 
             proto = self._params.serializer.serialize(frame)
-            asyncio.run_coroutine_threadsafe(self._websocket.send(proto), self.get_event_loop())
+
+            future = asyncio.run_coroutine_threadsafe(
+                self._websocket.send(proto), self.get_event_loop())
+            future.result()
 
             self._audio_buffer = self._audio_buffer[self._params.audio_frame_size:]
 
