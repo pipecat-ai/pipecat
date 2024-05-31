@@ -643,7 +643,7 @@ class DailyTransport(BaseTransport):
             token: str | None,
             bot_name: str,
             params: DailyParams,
-            loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()):
+            loop: asyncio.AbstractEventLoop | None = None):
         super().__init__(loop)
 
         callbacks = DailyCallbacks(
@@ -663,7 +663,8 @@ class DailyTransport(BaseTransport):
         )
         self._params = params
 
-        self._client = DailyTransportClient(room_url, token, bot_name, params, callbacks, loop)
+        self._client = DailyTransportClient(
+            room_url, token, bot_name, params, callbacks, self._loop)
         self._input: DailyInputTransport | None = None
         self._output: DailyOutputTransport | None = None
 
