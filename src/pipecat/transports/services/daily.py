@@ -831,6 +831,5 @@ class DailyTransport(BaseTransport):
 
     def _call_async_event_handler(self, event_name: str, *args, **kwargs):
         future = asyncio.run_coroutine_threadsafe(
-            self._call_event_handler(
-                event_name, args, kwargs), self._loop)
+            self._call_event_handler(event_name, *args, **kwargs), self._loop)
         future.result()
