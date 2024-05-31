@@ -188,15 +188,22 @@ class DailyTransportClient(EventHandler):
     def send_message(self, frame: DailyTransportMessageFrame):
         self._client.send_app_message(frame.message, frame.participant_id)
 
-    def read_raw_audio_frames(self, frame_count: int) -> bytes:
+    def read_next_audio_frame(self) -> AudioRawFrame | None:
+        sample_rate = self._params.audio_in_sample_rate
+        num_channels = self._params.audio_in_channels
+
         if self._other_participant_has_joined:
-            return self._speaker.read_frames(frame_count)
+            num_frames = int(sample_rate / 100)  # 10ms of audio
+
+            audio = self._speaker.read_frames(num_frames)
+
+            return AudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=num_channels)
         else:
             # If no one has ever joined the meeting `read_frames()` would block,
             # instead we just wait a bit. daily-python should probably return
             # silence instead.
             time.sleep(0.01)
-            return b''
+            return None
 
     def write_raw_audio_frames(self, frames: bytes):
         self._mic.write_frames(frames)
@@ -467,7 +474,7 @@ class DailyInputTransport(BaseInputTransport):
         self._video_renderers = {}
         self._camera_in_queue = queue.Queue()
 
-        self._vad_analyzer = params.vad_analyzer
+        self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
         if params.vad_enabled and not params.vad_analyzer:
             self._vad_analyzer = WebRTCVADAnalyzer(
                 sample_rate=self._params.audio_in_sample_rate,
@@ -498,14 +505,11 @@ class DailyInputTransport(BaseInputTransport):
         await super().cleanup()
         await self._client.cleanup()
 
-    def vad_analyze(self, audio_frames: bytes) -> VADState:
-        state = VADState.QUIET
-        if self._vad_analyzer:
-            state = self._vad_analyzer.analyze_audio(audio_frames)
-        return state
+    def vad_analyzer(self) -> VADAnalyzer | None:
+        return self._vad_analyzer
 
-    def read_raw_audio_frames(self, frame_count: int) -> bytes:
-        return self._client.read_raw_audio_frames(frame_count)
+    def read_next_audio_frame(self) -> AudioRawFrame | None:
+        return self._client.read_next_audio_frame()
 
     #
     # FrameProcessor

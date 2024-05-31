@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame)
 from pipecat.transports.base_transport import TransportParams
-from pipecat.vad.vad_analyzer import VADState
+from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
 
 from loguru import logger
 
@@ -74,10 +74,10 @@ class BaseInputTransport(FrameProcessor):
 
         self._push_frame_task.cancel()
 
-    def vad_analyze(self, audio_frames: bytes) -> VADState:
-        pass
+    def vad_analyzer(self) -> VADAnalyzer | None:
+        return self._params.vad_analyzer
 
-    def read_raw_audio_frames(self, frame_count: int) -> bytes:
+    def read_next_audio_frame(self) -> AudioRawFrame | None:
         pass
 
     #
@@ -146,8 +146,15 @@ class BaseInputTransport(FrameProcessor):
     # Audio input
     #
 
+    def _vad_analyze(self, audio_frames: bytes) -> VADState:
+        state = VADState.QUIET
+        vad_analyzer = self.vad_analyzer()
+        if vad_analyzer:
+            state = vad_analyzer.analyze_audio(audio_frames)
+        return state
+
     def _handle_vad(self, audio_frames: bytes, vad_state: VADState):
-        new_vad_state = self.vad_analyze(audio_frames)
+        new_vad_state = self._vad_analyze(audio_frames)
         if new_vad_state != vad_state and new_vad_state != VADState.STARTING and new_vad_state != VADState.STOPPING:
             frame = None
             if new_vad_state == VADState.SPEAKING:
@@ -165,19 +172,11 @@ class BaseInputTransport(FrameProcessor):
 
     def _audio_thread_handler(self):
         vad_state: VADState = VADState.QUIET
-
-        sample_rate = self._params.audio_in_sample_rate
-        num_channels = self._params.audio_in_channels
-        num_frames = int(sample_rate / 100)  # 10ms of audio
         while self._running:
             try:
-                audio_frames = self.read_raw_audio_frames(num_frames)
-                if len(audio_frames) > 0:
-                    frame = AudioRawFrame(
-                        audio=audio_frames,
-                        sample_rate=sample_rate,
-                        num_channels=num_channels)
+                frame = self.read_next_audio_frame()
 
+                if frame:
                     audio_passthrough = True
 
                     # Check VAD and push event if necessary. We just care about
