@@ -46,7 +46,7 @@ class PipelineRunner:
         return self._running
 
     def _setup_sigint(self):
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         loop.add_signal_handler(
             signal.SIGINT,
             lambda *args: asyncio.create_task(self._sigint_handler())

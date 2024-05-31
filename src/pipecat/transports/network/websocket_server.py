@@ -223,7 +223,7 @@ class WebsocketServerTransport(BaseTransport):
             host: str = "localhost",
             port: int = 8765,
             params: WebsocketServerParams = WebsocketServerParams(),
-            loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()):
+            loop: asyncio.AbstractEventLoop | None = None):
         super().__init__(loop)
         self._host = host
         self._port = port
