@@ -36,7 +36,7 @@ try:
 
 except ModuleNotFoundError as e:
     logger.exception(
-        "You need to `pip install langchain langchain-openai langchain-community` for this example. Also, be sure to set `OPENAI_API_KEY` in the environment variable."
+        "In order to run this example you need to `pip install pipecat-ai[langchain] langchain-community langchain-openai. Also, be sure to set `OPENAI_API_KEY` in the environment variable."
     )
     raise Exception(f"Missing module: {e}")
 
@@ -94,12 +94,12 @@ async def main(room_url: str, token):
 
         pipeline = Pipeline(
             [
-                transport.input(),  # Transport user input
-                tma_in,  # User responses
-                lc,  # Langchain
-                tts,  # TTS
-                transport.output(),  # Transport bot output
-                tma_out,  # Assistant spoken responses
+                transport.input(),      # Transport user input
+                tma_in,                 # User responses
+                lc,                     # Langchain
+                tts,                    # TTS
+                transport.output(),     # Transport bot output
+                tma_out,                # Assistant spoken responses
             ]
         )
 
