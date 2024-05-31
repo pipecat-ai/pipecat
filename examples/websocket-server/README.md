@@ -10,10 +10,10 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Run the server
+## Run the bot
 
 ```bash
-python server.py
+python bot.py
 ```
 
 ## Run the HTTP server
