@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the weather in Los Angeles, the LLM will call your function.
   See https://platform.openai.com/docs/guides/function-calling
 
+- Added new `LangchainProcessor`.
+
 - Added Cartesia TTS support (https://cartesia.ai/)
 
 ### Fixed

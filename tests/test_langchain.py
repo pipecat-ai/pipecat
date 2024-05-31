@@ -1,7 +1,10 @@
-import unittest
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
 
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.language_models import FakeStreamingListLLM
+import unittest
 
 from pipecat.frames.frames import (LLMFullResponseEndFrame,
                                    LLMFullResponseStartFrame, StopTaskFrame,
@@ -14,7 +17,10 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
 from pipecat.processors.frame_processor import FrameProcessor
-from pipecat.services.langchain import LangchainProcessor
+from pipecat.processors.frameworks.langchain import LangchainProcessor
+
+from langchain.prompts import ChatPromptTemplate
+from langchain_core.language_models import FakeStreamingListLLM
 
 
 class TestLangchain(unittest.IsolatedAsyncioTestCase):
