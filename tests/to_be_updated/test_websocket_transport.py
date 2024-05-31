@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch, Mock
 
-from pipecat.frames.frames import AudioFrame, EndFrame, TextFrame, TTSEndFrame, TTSStartFrame
+from pipecat.frames.frames import AudioRawFrame, EndFrame, TextFrame, TTSStoppedFrame, TTSStartedFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.transports.websocket_transport import WebSocketFrameProcessor, WebsocketTransport
 
@@ -52,10 +52,10 @@ class TestWebSocketTransportService(unittest.IsolatedAsyncioTestCase):
         processor = WebSocketFrameProcessor(audio_frame_size=4)
 
         source_frames = [
-            TTSStartFrame(),
-            AudioFrame(b"1234"),
-            AudioFrame(b"5678"),
-            TTSEndFrame(),
+            TTSStartedFrame(),
+            AudioRawFrame(b"1234", 1, 1),
+            AudioRawFrame(b"5678", 1, 1),
+            TTSStoppedFrame(),
             TextFrame("hello world")
         ]
 
@@ -65,9 +65,9 @@ class TestWebSocketTransportService(unittest.IsolatedAsyncioTestCase):
                 frames.append(output_frame)
 
         self.assertEqual(len(frames), 3)
-        self.assertIsInstance(frames[0], AudioFrame)
+        self.assertIsInstance(frames[0], AudioRawFrame)
         self.assertEqual(frames[0].data, b"1234")
-        self.assertIsInstance(frames[1], AudioFrame)
+        self.assertIsInstance(frames[1], AudioRawFrame)
         self.assertEqual(frames[1].data, b"5678")
         self.assertIsInstance(frames[2], TextFrame)
         self.assertEqual(frames[2].text, "hello world")

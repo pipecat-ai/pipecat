@@ -1,5 +1,5 @@
 from typing import List
-from pipecat.frames.frames import EndFrame, EndPipeFrame
+from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 
 
@@ -16,8 +16,7 @@ class SequentialMergePipeline(Pipeline):
             while True:
                 frame = await pipeline.sink.get()
                 if isinstance(
-                        frame, EndFrame) or isinstance(
-                        frame, EndPipeFrame):
+                        frame, EndFrame):
                     break
                 await self.sink.put(frame)
 

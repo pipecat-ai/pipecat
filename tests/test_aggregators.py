@@ -9,9 +9,9 @@ from pipecat.processors.aggregators.gated import GatedAggregator
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 
 from pipecat.frames.frames import (
-    AudioFrame,
+    AudioRawFrame,
     EndFrame,
-    ImageFrame,
+    ImageRawFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
     Frame,
@@ -45,26 +45,26 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
     async def test_gated_accumulator(self):
         gated_aggregator = GatedAggregator(
             gate_open_fn=lambda frame: isinstance(
-                frame, ImageFrame), gate_close_fn=lambda frame: isinstance(
+                frame, ImageRawFrame), gate_close_fn=lambda frame: isinstance(
                 frame, LLMResponseStartFrame), start_open=False, )
 
         frames = [
             LLMResponseStartFrame(),
             TextFrame("Hello, "),
             TextFrame("world."),
-            AudioFrame(b"hello"),
-            ImageFrame(b"image", (0, 0)),
-            AudioFrame(b"world"),
+            AudioRawFrame(b"hello", 1, 1),
+            ImageRawFrame(b"image", (0, 0)),
+            AudioRawFrame(b"world", 1, 1),
             LLMResponseEndFrame(),
         ]
 
         expected_output_frames = [
-            ImageFrame(b"image", (0, 0)),
+            ImageRawFrame(b"image", (0, 0)),
             LLMResponseStartFrame(),
             TextFrame("Hello, "),
             TextFrame("world."),
-            AudioFrame(b"hello"),
-            AudioFrame(b"world"),
+            AudioRawFrame(b"hello", 1, 1),
+            AudioRawFrame(b"world", 1, 1),
             LLMResponseEndFrame(),
         ]
         for frame in frames:

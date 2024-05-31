@@ -17,8 +17,8 @@ from functools import partial
 from typing import Any, Callable, Mapping
 
 from daily import (
-    CallClient,
     Daily,
+    CallClient,
     EventHandler,
     VirtualCameraDevice,
     VirtualMicrophoneDevice,

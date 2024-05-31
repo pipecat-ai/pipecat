@@ -1,6 +1,6 @@
 import dataclasses
 from typing import Text
-from pipecat.frames.frames import AudioFrame, Frame, TextFrame, TranscriptionFrame
+from pipecat.frames.frames import AudioRawFrame, Frame, TextFrame, TranscriptionFrame
 import pipecat.frames.protobufs.frames_pb2 as frame_protos
 from pipecat.serializers.abstract_frame_serializer import FrameSerializer
 
@@ -8,7 +8,7 @@ from pipecat.serializers.abstract_frame_serializer import FrameSerializer
 class ProtobufFrameSerializer(FrameSerializer):
     SERIALIZABLE_TYPES = {
         TextFrame: "text",
-        AudioFrame: "audio",
+        AudioRawFrame: "audio",
         TranscriptionFrame: "transcription"
     }
 
