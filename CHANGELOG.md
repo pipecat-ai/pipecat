@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added WebsocketServerTransport. This will create a websocket server and will
+  read messages coming from a client. The messages are serialized/deserialized
+  with protobufs. See `examples/websocket-server` for a detailed example.
+
 - Added function calling (LLMService.register_function()). This will allow the
   LLM to call functions you have registered when needed. For example, if you
   register a function to get the weather in Los Angeles and ask the LLM about
@@ -24,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue where `camera_out_enabled` would cause the highg CPU usage if
   no image was provided.
 
+### Performance
+
+- Removed unnecessary audio input tasks.
 
 ## [0.0.24] - 2024-05-29
 

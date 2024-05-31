@@ -4,6 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+import inspect
+
 from abc import ABC, abstractmethod
 
 from pydantic import ConfigDict
@@ -11,6 +14,8 @@ from pydantic.main import BaseModel
 
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.vad.vad_analyzer import VADAnalyzer
+
+from loguru import logger
 
 
 class TransportParams(BaseModel):
@@ -36,6 +41,10 @@ class TransportParams(BaseModel):
 
 class BaseTransport(ABC):
 
+    def __init__(self, loop: asyncio.AbstractEventLoop | None):
+        self._loop = loop or asyncio.get_running_loop()
+        self._event_handlers: dict = {}
+
     @abstractmethod
     def input(self) -> FrameProcessor:
         raise NotImplementedError
@@ -43,3 +52,30 @@ class BaseTransport(ABC):
     @abstractmethod
     def output(self) -> FrameProcessor:
         raise NotImplementedError
+
+    def event_handler(self, event_name: str):
+        def decorator(handler):
+            self._add_event_handler(event_name, handler)
+            return handler
+        return decorator
+
+    def _register_event_handler(self, event_name: str):
+        if event_name in self._event_handlers:
+            raise Exception(f"Event handler {event_name} already registered")
+        self._event_handlers[event_name] = []
+
+    def _add_event_handler(self, event_name: str, handler):
+        if event_name not in self._event_handlers:
+            raise Exception(f"Event handler {event_name} not registered")
+        self._event_handlers[event_name].append(handler)
+
+    async def _call_event_handler(self, event_name: str, *args, **kwargs):
+        try:
+            for handler in self._event_handlers[event_name]:
+                if inspect.iscoroutinefunction(handler):
+                    await handler(self, *args, **kwargs)
+                else:
+                    handler(self, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Exception in event handler {event_name}: {e}")
+            raise e

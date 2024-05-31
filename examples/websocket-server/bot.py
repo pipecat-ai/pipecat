@@ -4,8 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import aiohttp
+import asyncio
 import os
 import sys
 
@@ -14,13 +14,14 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.services.deepgram import DeepgramTTSService
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator
+)
+from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.services.whisper import WhisperSTTService
+from pipecat.transports.network.websocket_server import WebsocketServerParams, WebsocketServerTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-
-from runner import configure
 
 from loguru import logger
 
@@ -31,29 +32,30 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def main(room_url: str, token):
+async def main():
     async with aiohttp.ClientSession() as session:
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Respond bot",
-            DailyParams(
+        transport = WebsocketServerTransport(
+            params=WebsocketServerParams(
+                audio_in_enabled=True,
                 audio_out_enabled=True,
-                transcription_enabled=True,
+                add_wav_header=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
+                vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True
             )
-        )
-
-        tts = DeepgramTTSService(
-            aiohttp_session=session,
-            api_key=os.getenv("DEEPGRAM_API_KEY"),
-            voice="aura-helios-en"
         )
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o")
+
+        stt = WhisperSTTService()
+
+        tts = ElevenLabsTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        )
 
         messages = [
             {
@@ -66,19 +68,19 @@ async def main(room_url: str, token):
         tma_out = LLMAssistantResponseAggregator(messages)
 
         pipeline = Pipeline([
-            transport.input(),   # Transport user input
+            transport.input(),   # Websocket input from client
+            stt,                 # Speech-To-Text
             tma_in,              # User responses
             llm,                 # LLM
-            tts,                 # TTS
-            transport.output(),  # Transport bot output
-            tma_out              # Assistant spoken responses
+            tts,                 # Text-To-Speech
+            transport.output(),  # Websocket output to client
+            tma_out              # LLM responses
         ])
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+        task = PipelineTask(pipeline)
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
             # Kick off the conversation.
             messages.append(
                 {"role": "system", "content": "Please introduce yourself to the user."})
@@ -88,7 +90,5 @@ async def main(room_url: str, token):
 
         await runner.run(task)
 
-
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url, token))
+    asyncio.run(main())
