@@ -1,8 +1,6 @@
 import sys
 from typing import Union
 
-from langchain_core.messages import AIMessageChunk
-from langchain_core.runnables import Runnable
 from loguru import logger
 
 from pipecat.frames.frames import (Frame, LLMFullResponseEndFrame,
@@ -10,6 +8,15 @@ from pipecat.frames.frames import (Frame, LLMFullResponseEndFrame,
                                    LLMResponseEndFrame, LLMResponseStartFrame,
                                    TextFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+try:
+    from langchain_core.messages import AIMessageChunk
+    from langchain_core.runnables import Runnable
+except ModuleNotFoundError as e:
+    logger.exception(
+        "In order to use Langchain, you need to `pip install pipecat-ai[langchain]`. "
+    )
+    raise Exception(f"Missing module: {e}")
 
 
 class LangchainProcessor(FrameProcessor):
