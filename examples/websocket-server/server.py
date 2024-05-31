@@ -12,13 +12,16 @@ import sys
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
+from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator
+)
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.whisper import WhisperSTTService
 from pipecat.transports.network.websocket_server import WebsocketServerParams, WebsocketServerTransport
-from pipecat.vad.silero import SileroVAD
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from loguru import logger
 
@@ -33,12 +36,14 @@ async def main():
     async with aiohttp.ClientSession() as session:
         transport = WebsocketServerTransport(
             params=WebsocketServerParams(
+                audio_in_enabled=True,
                 audio_out_enabled=True,
-                add_wav_header=True
+                add_wav_header=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True
             )
         )
-
-        vad = SileroVAD(audio_passthrough=True)
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
@@ -64,7 +69,6 @@ async def main():
 
         pipeline = Pipeline([
             transport.input(),   # Websocket input from client
-            vad,                 # VAD to detect user speech
             stt,                 # Speech-To-Text
             tma_in,              # User responses
             llm,                 # LLM
