@@ -3,7 +3,7 @@ import aiohttp
 import asyncio
 import logging
 import os
-from pipeline.processors.aggregators import SentenceAggregator
+from pipecat.processors.aggregators import SentenceAggregator
 from pipecat.pipeline.pipeline import Pipeline
 
 from pipecat.transports.daily_transport import DailyTransport
