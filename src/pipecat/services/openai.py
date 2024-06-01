@@ -11,7 +11,6 @@ from typing import AsyncGenerator, List, Literal
 
 import aiohttp
 from loguru import logger
-from openai import OpenAI
 from PIL import Image
 
 from pipecat.frames.frames import (AudioRawFrame, ErrorFrame, Frame,
@@ -27,7 +26,7 @@ from pipecat.services.ai_services import (ImageGenService, LLMService,
                                           TTSService)
 
 try:
-    from openai import AsyncOpenAI, AsyncStream
+    from openai import AsyncOpenAI, AsyncStream, BadRequestError
     from openai.types.chat import (ChatCompletion, ChatCompletionChunk,
                                    ChatCompletionFunctionMessageParam,
                                    ChatCompletionMessageParam,
@@ -264,38 +263,40 @@ class OpenAIImageGenService(ImageGenService):
             yield frame
 
 
-class WhisperTTSService(TTSService):
+class OpenAITTSService(TTSService):
     def __init__(
             self,
             *,
-            api_key: str | None,
+            api_key: str | None = None,
             voice: Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"] = "alloy",
-            response_format: Literal["mp3", "opus", "flac", "pcm"] = "pcm",
             model: Literal["tts-1", "tts-1-hd"] = "tts-1",
             **kwargs):
         super().__init__(**kwargs)
 
         self._voice = voice
         self._model = model
-        self._response_format = response_format
 
         self._client = AsyncOpenAI(api_key=api_key)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
-        async with self._client.audio.speech.with_streaming_response.create(
-                input=text,
-                model=self._model,
-                voice=self._voice,
-                response_format=self._response_format
-        ) as r:
-            if r.status != 200:
-                error = await r.text()
-                logger.error(f"Error getting audio (status: {r.status}, error: {error})")
-                yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {error})")
-                return
-            for chunk in r.iter_bytes(1024):
-                if len(chunk) > 0:
-                    frame = AudioRawFrame(chunk, 16000, 1)
-                    yield frame
+        try:
+            async with self._client.audio.speech.with_streaming_response.create(
+                    input=text,
+                    model=self._model,
+                    voice=self._voice,
+                    response_format="pcm",
+            ) as r:
+                if r.status_code != 200:
+                    error = await r.text()
+                    logger.error(f"Error getting audio (status: {r.status_code}, error: {error})")
+                    yield ErrorFrame(f"Error getting audio (status: {r.status_code}, error: {error})")
+                    return
+                async for chunk in r.iter_bytes(8192):
+                    if len(chunk) > 0:
+                        frame = AudioRawFrame(chunk, 24_000, 1)
+                        yield frame
+        except BadRequestError as e:
+            logger.exception(f"Error generating TTS: {e}")
+            raise
