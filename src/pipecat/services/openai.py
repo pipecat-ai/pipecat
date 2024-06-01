@@ -264,6 +264,16 @@ class OpenAIImageGenService(ImageGenService):
 
 
 class OpenAITTSService(TTSService):
+    """This service uses the OpenAI TTS API to generate audio from text.
+    The returned audio is PCM encoded at 24kHz. When using the DailyTransport, set the sample rate in the DailyParams:
+    ```
+    DailyParams(
+        audio_out_enabled=True,
+        audio_out_sample_rate=24_000,
+    )
+    ```
+    """
+
     def __init__(
             self,
             *,
