@@ -13,7 +13,7 @@ from pipecat.frames.frames import (LLMFullResponseEndFrame,
                                    UserStoppedSpeakingFrame)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
 from pipecat.processors.frame_processor import FrameProcessor
@@ -69,7 +69,7 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=False))
         await task.queue_frames(
             [
                 UserStartedSpeakingFrame(),
