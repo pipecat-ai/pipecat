@@ -17,11 +17,11 @@ from runner import configure
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+from pipecat.processors.frameworks.langchain import LangchainProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.langchain import LangchainProcessor
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -103,7 +103,7 @@ async def main(room_url: str, token):
             ]
         )
 
-        task = PipelineTask(pipeline, allow_interruptions=True)
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
