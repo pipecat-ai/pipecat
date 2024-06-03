@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue with Deepgram TTS that was introduced in the previous release.
 
+### Performance
+
+- Load Cartesia voice on startup.
+
 ## [0.0.25] - 2024-05-31
 
 ### Added
