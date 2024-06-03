@@ -13,24 +13,39 @@ import aiohttp
 from loguru import logger
 from PIL import Image
 
-from pipecat.frames.frames import (AudioRawFrame, ErrorFrame, Frame,
-                                   LLMFullResponseEndFrame,
-                                   LLMFullResponseStartFrame, LLMMessagesFrame,
-                                   LLMResponseEndFrame, LLMResponseStartFrame,
-                                   TextFrame, URLImageRawFrame,
-                                   VisionImageRawFrame)
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    ErrorFrame,
+    Frame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMessagesFrame,
+    LLMResponseEndFrame,
+    LLMResponseStartFrame,
+    TextFrame,
+    URLImageRawFrame,
+    VisionImageRawFrame
+)
 from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext, OpenAILLMContextFrame)
+    OpenAILLMContext,
+    OpenAILLMContextFrame
+)
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import (ImageGenService, LLMService,
-                                          TTSService)
+from pipecat.services.ai_services import (
+    ImageGenService,
+    LLMService,
+    TTSService
+)
 
 try:
     from openai import AsyncOpenAI, AsyncStream, BadRequestError
-    from openai.types.chat import (ChatCompletion, ChatCompletionChunk,
-                                   ChatCompletionFunctionMessageParam,
-                                   ChatCompletionMessageParam,
-                                   ChatCompletionToolParam)
+    from openai.types.chat import (
+        ChatCompletion,
+        ChatCompletionChunk,
+        ChatCompletionFunctionMessageParam,
+        ChatCompletionMessageParam,
+        ChatCompletionToolParam
+    )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -265,7 +280,7 @@ class OpenAIImageGenService(ImageGenService):
 
 class OpenAITTSService(TTSService):
     """This service uses the OpenAI TTS API to generate audio from text.
-    The returned audio is PCM encoded at 24kHz. When using the DailyTransport, set the sample rate in the DailyParams:
+    The returned audio is PCM encoded at 24kHz. When using the DailyTransport, set the sample rate in the DailyParams accordingly:
     ```
     DailyParams(
         audio_out_enabled=True,
@@ -308,5 +323,4 @@ class OpenAITTSService(TTSService):
                         frame = AudioRawFrame(chunk, 24_000, 1)
                         yield frame
         except BadRequestError as e:
-            logger.exception(f"Error generating TTS: {e}")
-            raise
+            logger.error(f"Error generating TTS: {e}")
