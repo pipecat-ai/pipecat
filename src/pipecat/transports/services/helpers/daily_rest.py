@@ -66,7 +66,7 @@ class DailyRESTHelper:
 
     def create_room(self, params: DailyRoomParams) -> DailyRoomObject:
         res = requests.post(
-            f"https://{self.daily_api_url}/rooms",
+            f"{self.daily_api_url}/rooms",
             headers={"Authorization": f"Bearer {self.daily_api_key}"},
             json={**params.model_dump(exclude_none=True)}
         )
@@ -85,7 +85,7 @@ class DailyRESTHelper:
 
     def _get_room_from_name(self, room_name: str) -> DailyRoomObject:
         res: requests.Response = requests.get(
-            f"https://{self.daily_api_url}/rooms/{room_name}",
+            f"{self.daily_api_url}/rooms/{room_name}",
             headers={"Authorization": f"Bearer {self.daily_api_key}"}
         )
 
@@ -115,7 +115,7 @@ class DailyRESTHelper:
         room_name = self._get_name_from_url(room_url)
 
         res: requests.Response = requests.post(
-            f"https://{self.daily_api_url}/meeting-tokens",
+            f"{self.daily_api_url}/meeting-tokens",
             headers={
                 "Authorization": f"Bearer {self.daily_api_key}"},
             json={
