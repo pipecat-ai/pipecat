@@ -38,7 +38,8 @@ Next, follow the steps in the README for each demo.
 | [Storytelling Chatbot](storytelling-chatbot) | Stitches together multiple third-party services to create a collaborative storytime experience.                                            | Deepgram, ElevenLabs, Open AI, Fal, Daily, Custom UI  |
 | [Translation Chatbot](translation-chatbot)   | Listens for user speech, then translates that speech to Spanish and speaks the translation back. Demonstrates multi-participant use-cases. | Deepgram, Azure, OpenAI, Daily, Daily Prebuilt UI     |
 | [Moondream Chatbot](moondream-chatbot)       | Demonstrates how to add vision capabilities to GPT4. **Note: works best with a GPU**                                                       | Deepgram, OpenAI, Moondream, Daily, Daily Prebuilt UI |
-| Function-calling Chatbot (TBC)               | A chatbot that can call functions in response to user input                                                                                | Deepgram, OpenAI, Fireworks, Daily, Daily Prebuilt UI |
+| Function-calling Chatbot (TBC)               | A chatbot that can call functions in response to user input.                                                                                | Deepgram, OpenAI, Fireworks, Daily, Daily Prebuilt UI |
+| [Dialin Chatbot](dialin-chatbot)             | A chatbot that connects to an incoming phone call from Daily or Twilio.                                                                                | Deepgram, OpenAI, ElevenLabs, Daily, Twilio |
 
 > [!IMPORTANT]
 > These example projects use Daily as a WebRTC transport and can be joined using their hosted Prebuilt UI.

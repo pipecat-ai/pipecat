@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue where `BaseOutputTransport` would send longer audio frames
   preventing interruptions.
 
+### Other
+
+- Added new `dialin-chatbot` example. This examples shows how to call the bot
+  using a phone number.
+
 ## [0.0.29] - 2024-06-07
 
 ### Added
