@@ -32,8 +32,7 @@ class DeepgramTTSService(TTSService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.info(f"Running Deepgram TTS for {text}")
         base_url = "https://api.deepgram.com/v1/speak"
-        request_url = f"{base_url}?model = {
-            self._voice} & encoding = linear16 & container = none & sample_rate = 16000"
+        request_url = f"{base_url}?model={self._voice}&encoding=linear16&container=none&sample_rate=16000"
         headers = {"authorization": f"token {self._api_key}"}
         body = {"text": text}
 
