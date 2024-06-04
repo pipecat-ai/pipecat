@@ -3,18 +3,18 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
-
+import base64
 import io
 import json
 import time
-import aiohttp
-import base64
-
-from PIL import Image
-
 from typing import AsyncGenerator, List, Literal
 
+import aiohttp
+from loguru import logger
+from PIL import Image
+
 from pipecat.frames.frames import (
+    AudioRawFrame,
     ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
@@ -26,15 +26,19 @@ from pipecat.frames.frames import (
     URLImageRawFrame,
     VisionImageRawFrame
 )
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame
+)
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService, ImageGenService
-
-from loguru import logger
+from pipecat.services.ai_services import (
+    ImageGenService,
+    LLMService,
+    TTSService
+)
 
 try:
-    from openai import AsyncOpenAI, AsyncStream
-
+    from openai import AsyncOpenAI, AsyncStream, BadRequestError
     from openai.types.chat import (
         ChatCompletion,
         ChatCompletionChunk,
@@ -272,3 +276,51 @@ class OpenAIImageGenService(ImageGenService):
             image = Image.open(image_stream)
             frame = URLImageRawFrame(image_url, image.tobytes(), image.size, image.format)
             yield frame
+
+
+class OpenAITTSService(TTSService):
+    """This service uses the OpenAI TTS API to generate audio from text.
+    The returned audio is PCM encoded at 24kHz. When using the DailyTransport, set the sample rate in the DailyParams accordingly:
+    ```
+    DailyParams(
+        audio_out_enabled=True,
+        audio_out_sample_rate=24_000,
+    )
+    ```
+    """
+
+    def __init__(
+            self,
+            *,
+            api_key: str | None = None,
+            voice: Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"] = "alloy",
+            model: Literal["tts-1", "tts-1-hd"] = "tts-1",
+            **kwargs):
+        super().__init__(**kwargs)
+
+        self._voice = voice
+        self._model = model
+
+        self._client = AsyncOpenAI(api_key=api_key)
+
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        logger.debug(f"Generating TTS: [{text}]")
+
+        try:
+            async with self._client.audio.speech.with_streaming_response.create(
+                    input=text,
+                    model=self._model,
+                    voice=self._voice,
+                    response_format="pcm",
+            ) as r:
+                if r.status_code != 200:
+                    error = await r.text()
+                    logger.error(f"Error getting audio (status: {r.status_code}, error: {error})")
+                    yield ErrorFrame(f"Error getting audio (status: {r.status_code}, error: {error})")
+                    return
+                async for chunk in r.iter_bytes(8192):
+                    if len(chunk) > 0:
+                        frame = AudioRawFrame(chunk, 24_000, 1)
+                        yield frame
+        except BadRequestError as e:
+            logger.error(f"Error generating TTS: {e}")
