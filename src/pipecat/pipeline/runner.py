@@ -43,11 +43,15 @@ class PipelineRunner:
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(
             signal.SIGINT,
-            lambda *args: asyncio.create_task(self._sigint_handler())
+            lambda *args: asyncio.create_task(self._sig_handler())
+        )
+        loop.add_signal_handler(
+            signal.SIGTERM,
+            lambda *args: asyncio.create_task(self._sig_handler())
         )
 
-    async def _sigint_handler(self):
-        logger.warning(f"Ctrl-C detected. Canceling runner {self}")
+    async def _sig_handler(self):
+        logger.warning(f"Interruption detected. Canceling runner {self}")
         await self.cancel()
 
     def __str__(self):
