@@ -20,18 +20,15 @@ class PipelineRunner:
         self.name: str = name or f"{self.__class__.__name__}#{obj_count(self)}"
 
         self._tasks = {}
-        self._running = True
 
         if handle_sigint:
             self._setup_sigint()
 
     async def run(self, task: PipelineTask):
         logger.debug(f"Runner {self} started running {task}")
-        self._running = True
         self._tasks[task.name] = task
         await task.run()
         del self._tasks[task.name]
-        self._running = False
         logger.debug(f"Runner {self} finished running {task}")
 
     async def stop_when_done(self):
@@ -41,9 +38,6 @@ class PipelineRunner:
     async def cancel(self):
         logger.debug(f"Canceling runner {self}")
         await asyncio.gather(*[t.cancel() for t in self._tasks.values()])
-
-    def is_active(self):
-        return self._running
 
     def _setup_sigint(self):
         loop = asyncio.get_running_loop()
