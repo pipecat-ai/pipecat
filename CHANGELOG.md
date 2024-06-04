@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PipelineTask` now has a `has_finished()` method to indicate if the task has
   completed. If a task is never ran `has_finished()` will return False.
 
+- `PipelineRunner` now supports SIGTERM. If received, the runner will be
+  canceled.
+
 ### Fixed
 
 - Fixed an error closing local audio transports.
