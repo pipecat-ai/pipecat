@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where `BaseInputTransport` and `BaseOutputTransport` where
+  stopping push tasks before pushing `EndFrame` frames.
+
 - Fixed an error closing local audio transports.
 
 - Fixed an issue with Deepgram TTS that was introduced in the previous release.
