@@ -87,16 +87,16 @@ class BaseInputTransport(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, CancelFrame):
-            await self.stop()
             # We don't queue a CancelFrame since we want to stop ASAP.
             await self.push_frame(frame, direction)
+            await self.stop()
         elif isinstance(frame, StartFrame):
             self._allow_interruption = frame.allow_interruptions
             await self.start(frame)
             await self._internal_push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
-            await self.stop()
             await self._internal_push_frame(frame, direction)
+            await self.stop()
         else:
             await self._internal_push_frame(frame, direction)
 

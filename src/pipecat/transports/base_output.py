@@ -121,11 +121,11 @@ class BaseOutputTransport(FrameProcessor):
             self._sink_queue.put_nowait(frame)
         # EndFrame is managed in the queue handler.
         elif isinstance(frame, CancelFrame):
+            await self.push_frame(frame, direction)
             await self.stop()
-            await self.push_frame(frame, direction)
         elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
-            await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
+            await self._handle_interruptions(frame)
         else:
             self._sink_queue.put_nowait(frame)
 
