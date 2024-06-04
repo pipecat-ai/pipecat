@@ -31,12 +31,15 @@ class DailyRoomProperties(BaseModel):
     enable_emoji_reactions: bool = False
     eject_at_room_exp: bool = True
     enable_dialout: Optional[bool] = None
-    sip: DailyRoomSipParams = DailyRoomSipParams()
-    sip_uri: dict = {}
+    sip: Optional[DailyRoomSipParams] = None
+    sip_uri: Optional[dict] = None
 
     @property
     def sip_endpoint(self) -> str:
-        return "sip:%s" % self.sip_uri['endpoint']
+        if not self.sip_uri:
+            return ""
+        else:
+            return "sip:%s" % self.sip_uri['endpoint']
 
 
 class DailyRoomParams(BaseModel):
