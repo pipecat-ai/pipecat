@@ -99,7 +99,7 @@ class DailyTranscriptionSettings(BaseModel):
 
 
 class DailyParams(TransportParams):
-    api_url: str = "https://api.daily.co"
+    api_url: str = "https://api.daily.co/v1"
     api_key: str = ""
     dialin_settings: DailyDialinSettings | None = None
     transcription_enabled: bool = False
@@ -531,7 +531,8 @@ class DailyInputTransport(BaseInputTransport):
         future.result()
 
     def push_app_message(self, message: Any, sender: str):
-        frame = DailyTransportMessageFrame(message=message, participant_id=sender)
+        frame = DailyTransportMessageFrame(
+            message=message, participant_id=sender)
         future = asyncio.run_coroutine_threadsafe(
             self._internal_push_frame(frame), self.get_event_loop())
         future.result()
@@ -797,7 +798,8 @@ class DailyTransport(BaseTransport):
 
     def _on_dialin_ready(self, sip_endpoint):
         if self._params.dialin_settings:
-            asyncio.run_coroutine_threadsafe(self._handle_dialin_ready(sip_endpoint), self._loop)
+            asyncio.run_coroutine_threadsafe(
+                self._handle_dialin_ready(sip_endpoint), self._loop)
         self._call_async_event_handler("on_dialin_ready", sip_endpoint)
 
     def _on_dialout_connected(self, data):
@@ -816,10 +818,12 @@ class DailyTransport(BaseTransport):
         self._call_async_event_handler("on_participant_joined", participant)
 
     def _on_participant_left(self, participant, reason):
-        self._call_async_event_handler("on_participant_left", participant, reason)
+        self._call_async_event_handler(
+            "on_participant_left", participant, reason)
 
     def _on_first_participant_joined(self, participant):
-        self._call_async_event_handler("on_first_participant_joined", participant)
+        self._call_async_event_handler(
+            "on_first_participant_joined", participant)
 
     def _on_transcription_message(self, participant_id, message):
         text = message["text"]
