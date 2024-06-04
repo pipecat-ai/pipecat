@@ -29,7 +29,7 @@ class LocalAudioInputTransport(BaseInputTransport):
         super().__init__(params)
 
         sample_rate = self._params.audio_in_sample_rate
-        num_frames = int(sample_rate / 100)  # 10ms of audio
+        num_frames = int(sample_rate / 100) * 2  # 20ms of audio
 
         self._in_stream = py_audio.open(
             format=py_audio.get_format_from_width(2),
@@ -81,21 +81,9 @@ class LocalAudioOutputTransport(BaseOutputTransport):
     def write_raw_audio_frames(self, frames: bytes):
         self._out_stream.write(frames)
 
-    async def start(self, frame: StartFrame):
-        await super().start(frame)
-        self._out_stream.start_stream()
-
-    async def stop(self):
-        await super().stop()
-        self._out_stream.stop_stream()
-
     async def cleanup(self):
-        # This is not very pretty (taken from PyAudio docs).
-        while self._out_stream.is_active():
-            await asyncio.sleep(0.1)
-        self._out_stream.close()
-
         await super().cleanup()
+        self._out_stream.close()
 
 
 class LocalAudioTransport(BaseTransport):
