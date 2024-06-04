@@ -156,7 +156,7 @@ async def main():
             await runner.stop_when_done()
 
         async def run_tk():
-            while True:
+            while not task.has_finished():
                 tk_root.update()
                 tk_root.update_idletasks()
                 await asyncio.sleep(0.1)
