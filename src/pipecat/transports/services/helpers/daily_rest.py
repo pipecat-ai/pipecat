@@ -10,8 +10,7 @@ Daily REST Helpers
 Methods that wrap the Daily API to create rooms, check room URLs, and get meeting tokens.
 
 """
-import urllib.parse
-import urllib
+from urllib.parse import urlparse
 import requests
 from typing import Literal, Optional
 from time import time
@@ -32,8 +31,8 @@ class DailyRoomProperties(BaseModel):
     enable_emoji_reactions: bool = False
     eject_at_room_exp: bool = True
     enable_dialout: Optional[bool] = None
-    sip: DailyRoomSipParams = None
-    sip_uri: dict = None
+    sip: DailyRoomSipParams = DailyRoomSipParams()
+    sip_uri: dict = {}
 
     @property
     def sip_endpoint(self) -> str:
@@ -57,12 +56,12 @@ class DailyRoomObject(BaseModel):
 
 
 class DailyRESTHelper:
-    def __init__(self, daily_api_key: str, daily_api_url: str = "api.daily.co/v1"):
+    def __init__(self, daily_api_key: str, daily_api_url: str = "https://api.daily.co/v1"):
         self.daily_api_key = daily_api_key
         self.daily_api_url = daily_api_url
 
     def _get_name_from_url(self, room_url: str) -> str:
-        return urllib.parse.urlparse(room_url).path[1:]
+        return urlparse(room_url).path[1:]
 
     def create_room(self, params: DailyRoomParams) -> DailyRoomObject:
         res = requests.post(
