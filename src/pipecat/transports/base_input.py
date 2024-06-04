@@ -36,11 +36,7 @@ class BaseInputTransport(FrameProcessor):
         self._running = False
         self._allow_interruptions = False
 
-        self._in_executor = ThreadPoolExecutor(max_workers=5)
-
-        # Create audio input queue if needed.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_queue = queue.Queue()
+        self._executor = ThreadPoolExecutor(max_workers=5)
 
         # Create push frame task. This is the task that will push frames in
         # order. We also guarantee that all frames are pushed in the same task.
@@ -57,9 +53,11 @@ class BaseInputTransport(FrameProcessor):
 
         self._running = True
 
+        # Create audio input queue and thread if needed.
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            loop = self.get_event_loop()
-            self._audio_thread = loop.run_in_executor(self._in_executor, self._audio_thread_handler)
+            self._audio_in_queue = queue.Queue()
+            self._audio_thread = self._loop.run_in_executor(
+                self._executor, self._audio_thread_handler)
 
     async def stop(self):
         if not self._running:
@@ -77,8 +75,8 @@ class BaseInputTransport(FrameProcessor):
     def vad_analyzer(self) -> VADAnalyzer | None:
         return self._params.vad_analyzer
 
-    def read_next_audio_frame(self) -> AudioRawFrame | None:
-        pass
+    def push_audio_frame(self, frame: AudioRawFrame):
+        self._audio_in_queue.put_nowait(frame)
 
     #
     # Frame processor
@@ -174,21 +172,22 @@ class BaseInputTransport(FrameProcessor):
         vad_state: VADState = VADState.QUIET
         while self._running:
             try:
-                frame = self.read_next_audio_frame()
+                frame: AudioRawFrame = self._audio_in_queue.get(timeout=1)
 
-                if frame:
-                    audio_passthrough = True
+                audio_passthrough = True
 
-                    # Check VAD and push event if necessary. We just care about
-                    # changes from QUIET to SPEAKING and vice versa.
-                    if self._params.vad_enabled:
-                        vad_state = self._handle_vad(frame.audio, vad_state)
-                        audio_passthrough = self._params.vad_audio_passthrough
+                # Check VAD and push event if necessary. We just care about
+                # changes from QUIET to SPEAKING and vice versa.
+                if self._params.vad_enabled:
+                    vad_state = self._handle_vad(frame.audio, vad_state)
+                    audio_passthrough = self._params.vad_audio_passthrough
 
                     # Push audio downstream if passthrough.
-                    if audio_passthrough:
-                        future = asyncio.run_coroutine_threadsafe(
-                            self._internal_push_frame(frame), self.get_event_loop())
-                        future.result()
+                if audio_passthrough:
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._internal_push_frame(frame), self._loop)
+                    future.result()
+            except queue.Empty:
+                pass
             except BaseException as e:
                 logger.error(f"Error reading audio frames: {e}")

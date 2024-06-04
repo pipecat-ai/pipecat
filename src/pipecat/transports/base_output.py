@@ -43,7 +43,7 @@ class BaseOutputTransport(FrameProcessor):
         self._running = False
         self._allow_interruptions = False
 
-        self._out_executor = ThreadPoolExecutor(max_workers=5)
+        self._executor = ThreadPoolExecutor(max_workers=5)
 
         # These are the images that we should send to the camera at our desired
         # framerate.
@@ -56,6 +56,10 @@ class BaseOutputTransport(FrameProcessor):
 
         self._stopped_event = asyncio.Event()
         self._is_interrupted = threading.Event()
+
+        # Create push frame task. This is the task that will push frames in
+        # order. We also guarantee that all frames are pushed in the same task.
+        self._create_push_task()
 
     async def start(self, frame: StartFrame):
         # Make sure we have the latest params. Note that this transport might
@@ -70,15 +74,12 @@ class BaseOutputTransport(FrameProcessor):
 
         loop = self.get_event_loop()
 
+        # Create queues and threads.
         if self._params.camera_out_enabled:
             self._camera_out_thread = loop.run_in_executor(
-                self._out_executor, self._camera_out_thread_handler)
+                self._executor, self._camera_out_thread_handler)
 
-        self._sink_thread = loop.run_in_executor(self._out_executor, self._sink_thread_handler)
-
-        # Create push frame task. This is the task that will push frames in
-        # order. We also guarantee that all frames are pushed in the same task.
-        self._create_push_task()
+        self._sink_thread = loop.run_in_executor(self._executor, self._sink_thread_handler)
 
     async def stop(self):
         if not self._running:
@@ -117,7 +118,7 @@ class BaseOutputTransport(FrameProcessor):
         #
         if isinstance(frame, StartFrame):
             await self.start(frame)
-            self._sink_queue.put(frame)
+            self._sink_queue.put_nowait(frame)
         # EndFrame is managed in the queue handler.
         elif isinstance(frame, CancelFrame):
             await self.stop()
@@ -126,7 +127,7 @@ class BaseOutputTransport(FrameProcessor):
             await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
         else:
-            self._sink_queue.put(frame)
+            self._sink_queue.put_nowait(frame)
 
         # If we are finishing, wait here until we have stopped, otherwise we might
         # close things too early upstream. We need this event because we don't
@@ -233,7 +234,7 @@ class BaseOutputTransport(FrameProcessor):
 
     def _set_camera_image(self, image: ImageRawFrame):
         if self._params.camera_out_is_live:
-            self._camera_out_queue.put(image)
+            self._camera_out_queue.put_nowait(image)
         else:
             self._camera_images = itertools.cycle([image])
 

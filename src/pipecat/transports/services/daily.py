@@ -37,7 +37,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
+from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams
 
 from loguru import logger
 
@@ -193,7 +193,7 @@ class DailyTransportClient(EventHandler):
         num_channels = self._params.audio_in_channels
 
         if self._other_participant_has_joined:
-            num_frames = int(sample_rate / 100)  # 10ms of audio
+            num_frames = int(sample_rate / 100) * 2  # 20ms of audio
 
             audio = self._speaker.read_frames(num_frames)
 
@@ -472,7 +472,6 @@ class DailyInputTransport(BaseInputTransport):
         self._client = client
 
         self._video_renderers = {}
-        self._camera_in_queue = queue.Queue()
 
         self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
         if params.vad_enabled and not params.vad_analyzer:
@@ -483,23 +482,26 @@ class DailyInputTransport(BaseInputTransport):
     async def start(self, frame: StartFrame):
         if self._running:
             return
+        # Parent start.
+        await super().start(frame)
         # Join the room.
         await self._client.join()
-        # This will set _running=True
-        await super().start(frame)
-        # Create camera in thread (runs if _running is true).
-        self._camera_in_thread = self._loop.run_in_executor(
-            self._in_executor, self._camera_in_thread_handler)
+        # Create audio task. It reads audio frames from Daily and push them
+        # internally for VAD processing.
+        if self._params.audio_in_enabled or self._params.vad_enabled:
+            self._audio_in_thread = self._loop.run_in_executor(
+                self._executor, self._audio_in_thread_handler)
 
     async def stop(self):
         if not self._running:
             return
+        # Parent stop. This will set _running to False.
+        await super().stop()
         # Leave the room.
         await self._client.leave()
-        # This will set _running=False
-        await super().stop()
-        # The thread will stop.
-        await self._camera_in_thread
+        # Stop audio thread.
+        if self._params.audio_in_enabled or self._params.vad_enabled:
+            await self._audio_in_thread
 
     async def cleanup(self):
         await super().cleanup()
@@ -507,9 +509,6 @@ class DailyInputTransport(BaseInputTransport):
 
     def vad_analyzer(self) -> VADAnalyzer | None:
         return self._vad_analyzer
-
-    def read_next_audio_frame(self) -> AudioRawFrame | None:
-        return self._client.read_next_audio_frame()
 
     #
     # FrameProcessor
@@ -535,6 +534,16 @@ class DailyInputTransport(BaseInputTransport):
         future = asyncio.run_coroutine_threadsafe(
             self._internal_push_frame(frame), self.get_event_loop())
         future.result()
+
+    #
+    # Audio in
+    #
+
+    def _audio_in_thread_handler(self):
+        while self._running:
+            frame = self._client.read_next_audio_frame()
+            if frame:
+                self.push_audio_frame(frame)
 
     #
     # Camera in
@@ -584,22 +593,11 @@ class DailyInputTransport(BaseInputTransport):
                 image=buffer,
                 size=size,
                 format=format)
-            self._camera_in_queue.put(frame)
+            future = asyncio.run_coroutine_threadsafe(
+                self._internal_push_frame(frame), self.get_event_loop())
+            future.result()
 
         self._video_renderers[participant_id]["timestamp"] = curr_time
-
-    def _camera_in_thread_handler(self):
-        while self._running:
-            try:
-                frame = self._camera_in_queue.get(timeout=1)
-                future = asyncio.run_coroutine_threadsafe(
-                    self._internal_push_frame(frame), self.get_event_loop())
-                future.result()
-                self._camera_in_queue.task_done()
-            except queue.Empty:
-                pass
-            except BaseException as e:
-                logger.error(f"Error capturing video: {e}")
 
 
 class DailyOutputTransport(BaseOutputTransport):
@@ -612,7 +610,7 @@ class DailyOutputTransport(BaseOutputTransport):
     async def start(self, frame: StartFrame):
         if self._running:
             return
-        # This will set _running=True
+        # Parent start.
         await super().start(frame)
         # Join the room.
         await self._client.join()
@@ -620,7 +618,7 @@ class DailyOutputTransport(BaseOutputTransport):
     async def stop(self):
         if not self._running:
             return
-        # This will set _running=False
+        # Parent stop. This will set _running to False.
         await super().stop()
         # Leave the room.
         await self._client.leave()
