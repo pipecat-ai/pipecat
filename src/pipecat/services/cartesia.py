@@ -36,7 +36,7 @@ class CartesiaTTSService(TTSService):
             logger.error(f"Cartesia initialization error: {e}")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Transcribing text: [{text}]")
+        logger.debug(f"Generating TTS: [{text}]")
 
         try:
             chunk_generator = await self._client.generate(
@@ -50,4 +50,4 @@ class CartesiaTTSService(TTSService):
             async for chunk in chunk_generator:
                 yield AudioRawFrame(chunk['audio'], 16000, 1)
         except Exception as e:
-            logger.error(f"Cartesia error: {e}")
+            logger.error(f"Cartesia exception: {e}")
