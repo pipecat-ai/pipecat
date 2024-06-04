@@ -4,15 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import asyncio
 import os
 import sys
 
 import aiohttp
-from dotenv import load_dotenv
-from loguru import logger
-from runner import configure
 
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -25,20 +21,19 @@ from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_openai import ChatOpenAI
+
+from loguru import logger
+
+from runner import configure
+
+from dotenv import load_dotenv
 load_dotenv(override=True)
 
-try:
-    from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-    from langchain_community.chat_message_histories import ChatMessageHistory
-    from langchain_core.chat_history import BaseChatMessageHistory
-    from langchain_core.runnables.history import RunnableWithMessageHistory
-    from langchain_openai import ChatOpenAI
-
-except ModuleNotFoundError as e:
-    logger.exception(
-        "In order to run this example you need to `pip install pipecat-ai[langchain] langchain-community langchain-openai. Also, be sure to set `OPENAI_API_KEY` in the environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
