@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `DailyRESTHelper` which helps you create Daily rooms and tokens in an
+  easy way.
+
 - `PipelineTask` now has a `has_finished()` method to indicate if the task has
   completed. If a task is never ran `has_finished()` will return False.
 
