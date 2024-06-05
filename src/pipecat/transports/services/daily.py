@@ -99,7 +99,7 @@ class DailyTranscriptionSettings(BaseModel):
 
 
 class DailyParams(TransportParams):
-    api_url: str = "https://api.daily.co"
+    api_url: str = "https://api.daily.co/v1"
     api_key: str = ""
     dialin_settings: DailyDialinSettings | None = None
     transcription_enabled: bool = False
@@ -769,7 +769,7 @@ class DailyTransport(BaseTransport):
         async with aiohttp.ClientSession() as session:
             headers = {
                 "Authorization": f"Bearer {self._params.api_key}",
-                "Content-Type": "application/x-www-form-urlencoded"
+                "Content-Type": "application/json"
             }
             data = {
                 "callId": self._params.dialin_settings.call_id,
@@ -780,7 +780,7 @@ class DailyTransport(BaseTransport):
             url = f"{self._params.api_url}/dialin/pinlessCallUpdate"
 
             try:
-                async with session.post(url, headers=headers, data=data, timeout=10) as r:
+                async with session.post(url, headers=headers, json=data, timeout=10) as r:
                     if r.status != 200:
                         text = await r.text()
                         logger.error(
