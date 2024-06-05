@@ -5,7 +5,7 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.26] - 2024-06-05
 
 ### Added
 
@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed an issue where `BaseInputTransport` and `BaseOutputTransport` where
-  stopping push tasks before pushing `EndFrame` frames.
+  stopping push tasks before pushing `EndFrame` frames could cause the bots to
+  get stuck.
 
 - Fixed an error closing local audio transports.
 
