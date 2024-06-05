@@ -16,8 +16,6 @@ from pipecat.services.whisper import WhisperSTTService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.local.audio import LocalAudioTransport
 
-from runner import configure
-
 from loguru import logger
 
 from dotenv import load_dotenv
@@ -34,7 +32,7 @@ class TranscriptionLogger(FrameProcessor):
             print(f"Transcription: {frame.text}")
 
 
-async def main(room_url: str):
+async def main():
     transport = LocalAudioTransport(TransportParams(audio_in_enabled=True))
 
     stt = WhisperSTTService()
@@ -51,5 +49,4 @@ async def main(room_url: str):
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url))
+    asyncio.run(main())

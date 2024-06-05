@@ -38,6 +38,7 @@ async def main(room_url, token):
         TransportParams(
             audio_out_enabled=True,
             camera_out_enabled=True,
+            camera_out_is_live=True,
             camera_out_width=1280,
             camera_out_height=720))
 
@@ -47,15 +48,15 @@ async def main(room_url, token):
 
     pipeline = Pipeline([daily_transport.input(), tk_transport.output()])
 
-    runner = PipelineRunner()
+    task = PipelineTask(pipeline)
 
     async def run_tk():
-        while runner.is_active():
+        while not task.has_finished():
             tk_root.update()
             tk_root.update_idletasks()
             await asyncio.sleep(0.1)
 
-    task = PipelineTask(pipeline)
+    runner = PipelineRunner()
 
     await asyncio.gather(runner.run(task), run_tk())
 

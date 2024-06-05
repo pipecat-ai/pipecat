@@ -7,11 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Allow passing `output_format` and `model_id` to `CartesiaTTSService` to change
+  audio sample format and the model to use.
+
+- Added `DailyRESTHelper` which helps you create Daily rooms and tokens in an
+  easy way.
+
+- `PipelineTask` now has a `has_finished()` method to indicate if the task has
+  completed. If a task is never ran `has_finished()` will return False.
+
+- `PipelineRunner` now supports SIGTERM. If received, the runner will be
+  canceled.
+
 ### Fixed
+
+- Fixed an issue where `BaseInputTransport` and `BaseOutputTransport` where
+  stopping push tasks before pushing `EndFrame` frames.
+
+- Fixed an error closing local audio transports.
 
 - Fixed an issue with Deepgram TTS that was introduced in the previous release.
 
+- Fixed `AnthropicLLMService` interruptions. If an interruption occurred, a
+  `user` message could be appended after the previous `user` message. Anthropic
+  does not allow that because it requires alternate `user` and `assistant`
+  messages.
+
 ### Performance
+
+- The `BaseInputTransport` does not pull audio frames from sub-classes any
+  more. Instead, sub-classes now push audio frames into a queue in the base
+  class. Also, `DailyInputTransport` now pushes audio frames every 20ms instead
+  of 10ms.
+
+- Remove redundant camera input thread from `DailyInputTransport`. This should
+  improve performance a little bit when processing participant videos.
 
 - Load Cartesia voice on startup.
 
