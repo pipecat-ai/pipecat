@@ -30,6 +30,7 @@ async def main(room_url, token):
             audio_in_enabled=True,
             audio_out_enabled=True,
             camera_out_enabled=True,
+            camera_out_is_live=True,
             camera_out_width=1280,
             camera_out_height=720
         )

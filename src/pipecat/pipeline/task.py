@@ -43,12 +43,16 @@ class PipelineTask:
 
         self._pipeline = pipeline
         self._params = params
+        self._finished = False
 
         self._down_queue = asyncio.Queue()
         self._up_queue = asyncio.Queue()
 
         self._source = Source(self._up_queue)
         self._source.link(pipeline)
+
+    def has_finished(self):
+        return self._finished
 
     async def stop_when_done(self):
         logger.debug(f"Task {self} scheduled to stop when done")
@@ -67,6 +71,7 @@ class PipelineTask:
         self._process_up_task = asyncio.create_task(self._process_up_queue())
         self._process_down_task = asyncio.create_task(self._process_down_queue())
         await asyncio.gather(self._process_up_task, self._process_down_task)
+        self._finished = True
 
     async def queue_frame(self, frame: Frame):
         await self._down_queue.put(frame)

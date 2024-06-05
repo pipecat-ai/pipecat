@@ -30,7 +30,8 @@ class DeepgramTTSService(TTSService):
         self._aiohttp_session = aiohttp_session
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.info(f"Running Deepgram TTS for {text}")
+        logger.debug(f"Generating TTS: [{text}]")
+
         base_url = "https://api.deepgram.com/v1/speak"
         request_url = f"{base_url}?model={self._voice}&encoding=linear16&container=none&sample_rate=16000"
         headers = {"authorization": f"token {self._api_key}"}
@@ -48,4 +49,4 @@ class DeepgramTTSService(TTSService):
                     frame = AudioRawFrame(audio=data, sample_rate=16000, num_channels=1)
                     yield frame
         except Exception as e:
-            logger.error(f"Exception {e}")
+            logger.error(f"Deepgram exception: {e}")
