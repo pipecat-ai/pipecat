@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Allow passing `output_format` and `model_id` to `CartesiaTTSService` to change
+  audio sample format and the model to use.
+
 - Added `DailyRESTHelper` which helps you create Daily rooms and tokens in an
   easy way.
 
