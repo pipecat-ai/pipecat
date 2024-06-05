@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `OpenAITTSService`.
+
 - Allow passing `output_format` and `model_id` to `CartesiaTTSService` to change
   audio sample format and the model to use.
 
