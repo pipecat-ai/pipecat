@@ -346,6 +346,12 @@ class DailyTransportClient(EventHandler):
             self._client.release()
             self._client = None
 
+    def participants(self):
+        return self._client.participants()
+
+    def participant_counts(self):
+        return self._client.participant_counts()
+
     def start_dialout(self, settings):
         self._client.start_dialout(settings)
 
@@ -714,6 +720,12 @@ class DailyTransport(BaseTransport):
     async def send_audio(self, frame: AudioRawFrame):
         if self._output:
             await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+    def participants(self):
+        return self._client.participants()
+
+    def participant_counts(self):
+        return self._client.participant_counts()
 
     def start_dialout(self, settings=None):
         self._client.start_dialout(settings)
