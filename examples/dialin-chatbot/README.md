@@ -62,6 +62,8 @@ A Dockerfile is included in this demo for convenience. Here is an example of how
 
 ### Launch the fly project
 
+`mv fly.example.toml fly.toml`
+
 `fly launch` (using the included fly.toml)
 
 ### Setup your secrets on Fly
