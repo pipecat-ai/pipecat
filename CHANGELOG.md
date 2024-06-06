@@ -12,12 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a new `FunctionFilter`. This filter will let you filter frames based on
   a given function, except system messages which should never be filtered.
 
+- Added `BasePipeline`. All pipeline classes should be based on this class. All
+  subclasses should implement a `services()` method that returns a list of
+  all `AIServices` in the pipeline.
+
 - Added `enable_metrics` to `PipelineParams`.
 
 - Added `MetricsFrame`. The `MetricsFrame` will report different metrics in the
   system. Right now, it can report TTFB (Time To First Byte) values for
   different services, that is the time spent between the arrival of a `Frame` to
-  the processor/service until the first `DataFrame` is pushed downstream.
+  the processor/service until the first `DataFrame` is pushed downstream. If
+  metrics are enabled an intial `MetricsFrame` with all the services in the
+  pipeline will be sent.
 
 - Added TTFB metrics and debug logging for TTS services.
 
