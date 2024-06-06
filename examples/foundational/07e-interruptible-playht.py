@@ -72,9 +72,7 @@ async def main(room_url: str, token):
             tma_in,              # User responses
             llm,                 # LLM
             tts,                 # TTS
-            FrameLogger("tts out"),
             transport.output(),  # Transport bot output
-            FrameLogger("transport out"),
             tma_out              # Assistant spoken responses
         ])
 
