@@ -107,15 +107,6 @@ class BaseOpenAILLMService(LLMService):
 
         return chunks
 
-    async def _chat_completions(self, messages) -> str | None:
-        response: ChatCompletion = await self._client.chat.completions.create(
-            model=self._model, stream=False, messages=messages
-        )
-        if response and len(response.choices) > 0:
-            return response.choices[0].message.content
-        else:
-            return None
-
     async def _process_context(self, context: OpenAILLMContext):
         function_name = ""
         arguments = ""
