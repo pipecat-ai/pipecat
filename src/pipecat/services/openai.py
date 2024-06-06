@@ -304,6 +304,8 @@ class OpenAITTSService(TTSService):
         self._client = AsyncOpenAI(api_key=api_key)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        start_time = time.time()
+        ttfb = None
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
@@ -320,6 +322,9 @@ class OpenAITTSService(TTSService):
                     return
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
+                        if ttfb is None:
+                            ttfb = time.time() - start_time
+                            logger.debug(f"TTS ttfb: {ttfb}")
                         frame = AudioRawFrame(chunk, 24_000, 1)
                         yield frame
         except BadRequestError as e:
