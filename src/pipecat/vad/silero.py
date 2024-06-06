@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import time
+
 import numpy as np
 
 from pipecat.frames.frames import AudioRawFrame, Frame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame
@@ -25,6 +27,9 @@ except ModuleNotFoundError as e:
     logger.error("In order to use Silero VAD, you need to `pip install pipecat-ai[silero]`.")
     raise Exception(f"Missing module(s): {e}")
 
+# How often should we reset internal model state
+_MODEL_RESET_STATES_TIME = 5.0
+
 
 class SileroVADAnalyzer(VADAnalyzer):
 
@@ -33,9 +38,11 @@ class SileroVADAnalyzer(VADAnalyzer):
 
         logger.debug("Loading Silero VAD model...")
 
-        (self._model, self._utils) = torch.hub.load(
+        (self._model, utils) = torch.hub.load(
             repo_or_dir="snakers4/silero-vad", model="silero_vad", force_reload=False
         )
+
+        self._last_reset_time = 0
 
         logger.debug("Loaded Silero VAD")
 
@@ -52,6 +59,15 @@ class SileroVADAnalyzer(VADAnalyzer):
             # Divide by 32768 because we have signed 16-bit data.
             audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
             new_confidence = self._model(torch.from_numpy(audio_float32), self.sample_rate).item()
+
+            # We need to reset the model from time to time because it doesn't
+            # really need all the data and memory will keep growing otherwise.
+            curr_time = time.time()
+            diff_time = curr_time - self._last_reset_time
+            if diff_time >= _MODEL_RESET_STATES_TIME:
+                self._model.reset_states()
+                self._last_reset_time = curr_time
+
             return new_confidence
         except BaseException as e:
             # This comes from an empty audio array
