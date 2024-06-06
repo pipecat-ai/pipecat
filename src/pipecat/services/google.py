@@ -1,8 +1,10 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
 
-import json
-import os
 import asyncio
-import time
 
 from typing import List
 
@@ -81,9 +83,11 @@ class GoogleLLMService(LLMService):
 
             messages = self._get_messages_from_openai_context(context)
 
-            start_time = time.time()
+            await self.start_ttfb_metrics()
+
             response = self._client.generate_content(messages, stream=True)
-            logger.debug(f"Google LLM TTFB: {time.time() - start_time}")
+
+            await self.stop_ttfb_metrics()
 
             async for chunk in self._async_generator_wrapper(response):
                 try:

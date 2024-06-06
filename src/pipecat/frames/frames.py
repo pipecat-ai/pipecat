@@ -239,6 +239,13 @@ class StopInterruptionFrame(SystemFrame):
     pass
 
 
+@dataclass
+class MetricsFrame(SystemFrame):
+    """Emitted by processor who can compute metrics like latencies.
+    """
+    ttfb: Mapping[str, float]
+
+
 #
 # Control frames
 #

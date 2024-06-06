@@ -5,7 +5,6 @@
 #
 
 import aiohttp
-import time
 
 from typing import AsyncGenerator
 
@@ -33,8 +32,6 @@ class ElevenLabsTTSService(TTSService):
         self._model = model
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        start_time = time.time()
-        ttfb = None
         logger.debug(f"Generating TTS: [{text}]")
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}/stream"
@@ -50,6 +47,8 @@ class ElevenLabsTTSService(TTSService):
             "Content-Type": "application/json",
         }
 
+        await self.start_ttfb_metrics()
+
         async with self._aiohttp_session.post(url, json=payload, headers=headers, params=querystring) as r:
             if r.status != 200:
                 text = await r.text()
@@ -59,8 +58,6 @@ class ElevenLabsTTSService(TTSService):
 
             async for chunk in r.content:
                 if len(chunk) > 0:
-                    if ttfb is None:
-                        ttfb = time.time() - start_time
-                        logger.debug(f"TTS ttfb: {ttfb}")
+                    await self.stop_ttfb_metrics()
                     frame = AudioRawFrame(chunk, 16000, 1)
                     yield frame

@@ -73,6 +73,8 @@ class WhisperSTTService(STTService):
             logger.error("Whisper model not available")
             return
 
+        await self.start_ttfb_metrics()
+
         # Divide by 32768 because we have signed 16-bit data.
         audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -83,4 +85,5 @@ class WhisperSTTService(STTService):
                 text += f"{segment.text} "
 
         if text:
+            await self.stop_ttfb_metrics()
             yield TranscriptionFrame(text, "", int(time.time_ns() / 1000000))

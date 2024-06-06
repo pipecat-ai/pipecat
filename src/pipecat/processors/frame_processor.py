@@ -5,10 +5,11 @@
 #
 
 import asyncio
+import time
 
 from enum import Enum
 
-from pipecat.frames.frames import ErrorFrame, Frame, StartFrame
+from pipecat.frames.frames import ErrorFrame, Frame, MetricsFrame, StartFrame
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
@@ -32,13 +33,27 @@ class FrameProcessor:
         self._allow_interruptions = False
         self._enable_metrics = False
 
+        # Metrics
+        self._start_ttfb_time = 0
+
     @property
-    def allow_interruptions(self):
+    def interruptions_allowed(self):
         return self._allow_interruptions
 
     @property
-    def enable_metrics(self):
+    def metrics_enabled(self):
         return self._enable_metrics
+
+    async def start_ttfb_metrics(self):
+        if self.metrics_enabled:
+            self._start_ttfb_time = time.time()
+
+    async def stop_ttfb_metrics(self):
+        if self.metrics_enabled and self._start_ttfb_time > 0:
+            ttfb = time.time() - self._start_ttfb_time
+            logger.debug(f"{self.name} TTFB: {ttfb}")
+            await self.push_frame(MetricsFrame(ttfb={self.name: ttfb}))
+            self._start_ttfb_time = 0
 
     async def cleanup(self):
         pass

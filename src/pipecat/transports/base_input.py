@@ -123,7 +123,7 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def _handle_interruptions(self, frame: Frame):
-        if self.allow_interruptions:
+        if self.interruptions_allowed:
             # Make sure we notify about interruptions quickly out-of-band
             if isinstance(frame, UserStartedSpeakingFrame):
                 logger.debug("User started speaking")

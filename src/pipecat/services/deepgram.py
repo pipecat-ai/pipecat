@@ -5,7 +5,6 @@
 #
 
 import aiohttp
-import time
 
 from typing import AsyncGenerator
 
@@ -31,8 +30,6 @@ class DeepgramTTSService(TTSService):
         self._aiohttp_session = aiohttp_session
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        start_time = time.time()
-        ttfb = None
         logger.debug(f"Generating TTS: [{text}]")
 
         base_url = "https://api.deepgram.com/v1/speak"
@@ -41,6 +38,7 @@ class DeepgramTTSService(TTSService):
         body = {"text": text}
 
         try:
+            await self.start_ttfb_metrics()
             async with self._aiohttp_session.post(request_url, headers=headers, json=body) as r:
                 if r.status != 200:
                     text = await r.text()
@@ -49,9 +47,7 @@ class DeepgramTTSService(TTSService):
                     return
 
                 async for data in r.content:
-                    if ttfb is None:
-                        ttfb = time.time() - start_time
-                        logger.debug(f"TTS ttfb: {ttfb}")
+                    await self.stop_ttfb_metrics()
                     frame = AudioRawFrame(audio=data, sample_rate=16000, num_channels=1)
                     yield frame
         except Exception as e:
