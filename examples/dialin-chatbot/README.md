@@ -7,7 +7,7 @@
 Example project that demonstrates how to add phone number dialin to your Pipecat bots. We include examples for both Daily (`bot_daily.py`) and Twilio (`bot_twilio.py`), depending on who you want to use as a phone vendor.
 
 - 🔁 Transport: Daily WebRTC
-- 💬 Speech-to-Text (transcription): Daily
+- 💬 Speech-to-Text: Deepgram via Daily transport
 - 🤖 LLM: GPT4-o / OpenAI
 - 🔉 Text-to-Speech: ElevenLabs
 
