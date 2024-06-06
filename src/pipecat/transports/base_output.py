@@ -20,6 +20,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
+    MetricsFrame,
     SpriteFrame,
     StartFrame,
     EndFrame,
@@ -41,7 +42,6 @@ class BaseOutputTransport(FrameProcessor):
         self._params = params
 
         self._running = False
-        self._allow_interruptions = False
 
         self._executor = ThreadPoolExecutor(max_workers=5)
 
@@ -62,11 +62,6 @@ class BaseOutputTransport(FrameProcessor):
         self._create_push_task()
 
     async def start(self, frame: StartFrame):
-        # Make sure we have the latest params. Note that this transport might
-        # have been started on another task that might not need interruptions,
-        # for example.
-        self._allow_interruptions = frame.allow_interruptions
-
         if self._running:
             return
 
@@ -93,6 +88,9 @@ class BaseOutputTransport(FrameProcessor):
     def send_message(self, frame: TransportMessageFrame):
         pass
 
+    def send_metrics(self, frame: MetricsFrame):
+        pass
+
     def write_frame_to_camera(self, frame: ImageRawFrame):
         pass
 
@@ -111,6 +109,8 @@ class BaseOutputTransport(FrameProcessor):
         await self._sink_thread
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         #
         # Out-of-band frames like (CancelFrame or StartInterruptionFrame) are
         # pushed immediately. Other frames require order so they are put in the
@@ -136,7 +136,7 @@ class BaseOutputTransport(FrameProcessor):
             await self._stopped_event.wait()
 
     async def _handle_interruptions(self, frame: Frame):
-        if not self._allow_interruptions:
+        if not self.interruptions_allowed:
             return
 
         if isinstance(frame, StartInterruptionFrame):
@@ -170,6 +170,8 @@ class BaseOutputTransport(FrameProcessor):
                         self._set_camera_images(frame.images)
                     elif isinstance(frame, TransportMessageFrame):
                         self.send_message(frame)
+                    elif isinstance(frame, MetricsFrame):
+                        self.send_metrics(frame)
                     else:
                         future = asyncio.run_coroutine_threadsafe(
                             self._internal_push_frame(frame), self.get_event_loop())

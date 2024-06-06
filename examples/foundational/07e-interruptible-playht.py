@@ -15,11 +15,11 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.playht import PlayHTTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-
+from pipecat.processors.logger import FrameLogger
 
 from runner import configure
 
@@ -40,17 +40,17 @@ async def main(room_url: str, token):
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
-                audio_out_sample_rate=44100,
+                audio_out_sample_rate=16000,
                 transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer()
             )
         )
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_name="British Lady",
-            output_format="pcm_44100"
+        tts = PlayHTTTSService(
+            user_id=os.getenv("PLAYHT_USER_ID"),
+            api_key=os.getenv("PLAYHT_API_KEY"),
+            voice_url="s3://voice-cloning-zero-shot/801a663f-efd0-4254-98d0-5c175514c3e8/jennifer/manifest.json",
         )
 
         llm = OpenAILLMService(

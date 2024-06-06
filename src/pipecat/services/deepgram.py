@@ -38,6 +38,7 @@ class DeepgramTTSService(TTSService):
         body = {"text": text}
 
         try:
+            await self.start_ttfb_metrics()
             async with self._aiohttp_session.post(request_url, headers=headers, json=body) as r:
                 if r.status != 200:
                     text = await r.text()
@@ -46,6 +47,7 @@ class DeepgramTTSService(TTSService):
                     return
 
                 async for data in r.content:
+                    await self.stop_ttfb_metrics()
                     frame = AudioRawFrame(audio=data, sample_rate=16000, num_channels=1)
                     yield frame
         except Exception as e:

@@ -36,6 +36,8 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
             return self.name
 
         async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+
             if isinstance(frame, LLMFullResponseStartFrame):
                 self.start_collecting = True
             elif isinstance(frame, TextFrame) and self.start_collecting:

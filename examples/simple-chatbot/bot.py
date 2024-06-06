@@ -64,6 +64,8 @@ class TalkingAnimation(FrameProcessor):
         self._is_talking = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, AudioRawFrame):
             if not self._is_talking:
                 await self.push_frame(talking_frame)

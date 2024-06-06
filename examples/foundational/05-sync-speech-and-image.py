@@ -59,6 +59,8 @@ class MonthPrepender(FrameProcessor):
         self.prepend_to_next_text_frame = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, MonthFrame):
             self.most_recent_month = frame.month
         elif self.prepend_to_next_text_frame and isinstance(frame, TextFrame):

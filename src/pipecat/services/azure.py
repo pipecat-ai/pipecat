@@ -11,7 +11,6 @@ import io
 from PIL import Image
 from typing import AsyncGenerator
 
-from numpy import str_
 from openai import AsyncAzureOpenAI
 
 from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, URLImageRawFrame
@@ -48,6 +47,8 @@ class AzureTTSService(TTSService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: {text}")
 
+        await self.start_ttfb_metrics()
+
         ssml = (
             "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
@@ -61,6 +62,7 @@ class AzureTTSService(TTSService):
         result = await asyncio.to_thread(self.speech_synthesizer.speak_ssml, (ssml))
 
         if result.reason == ResultReason.SynthesizingAudioCompleted:
+            await self.stop_ttfb_metrics()
             # Azure always sends a 44-byte header. Strip it off.
             yield AudioRawFrame(audio=result.audio_data[44:], sample_rate=16000, num_channels=1)
         elif result.reason == ResultReason.Canceled:
