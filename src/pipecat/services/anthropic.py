@@ -101,7 +101,7 @@ class AnthropicLLMService(LLMService):
 
             messages = self._get_messages_from_openai_context(context)
 
-            await self.start_ttfb_metric()
+            await self.start_ttfb_metrics()
 
             response = await self._client.messages.create(
                 messages=messages,
@@ -109,7 +109,7 @@ class AnthropicLLMService(LLMService):
                 max_tokens=self._max_tokens,
                 stream=True)
 
-            await self.stop_ttfb_metric()
+            await self.stop_ttfb_metrics()
 
             async for event in response:
                 # logger.debug(f"Anthropic LLM event: {event}")
@@ -119,7 +119,7 @@ class AnthropicLLMService(LLMService):
                     await self.push_frame(LLMResponseEndFrame())
 
         except Exception as e:
-            logger.error(f"Anthrophic exception: {e}")
+            logger.error(f"Anthropic exception: {e}")
         finally:
             await self.push_frame(LLMFullResponseEndFrame())
 
