@@ -32,7 +32,7 @@ twilio_account_sid = os.getenv('TWILIO_ACCOUNT_SID')
 twilio_auth_token = os.getenv('TWILIO_AUTH_TOKEN')
 twilioclient = Client(twilio_account_sid, twilio_auth_token)
 
-daily_api_key = os.getenv("DAILY_API_KEY")
+daily_api_key = os.getenv("DAILY_API_KEY", "")
 
 
 async def main(room_url: str, token: str, callId: str, sipUri: str):
@@ -58,8 +58,8 @@ async def main(room_url: str, token: str, callId: str, sipUri: str):
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+            api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
         )
 
         llm = OpenAILLMService(
@@ -108,7 +108,7 @@ async def main(room_url: str, token: str, callId: str, sipUri: str):
                     twiml=f'<Response><Dial><Sip>{sipUri}</Sip></Dial></Response>'
                 )
             except Exception as e:
-                raise Exception(detail=f"Failed to forward call: {str(e)}")
+                raise Exception(f"Failed to forward call: {str(e)}")
 
         runner = PipelineRunner()
         await runner.run(task)
