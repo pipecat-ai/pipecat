@@ -7,6 +7,7 @@
 import io
 import struct
 import time
+import asyncio
 
 from typing import AsyncGenerator
 
@@ -52,6 +53,11 @@ class PlayHTTTSService(TTSService):
         ttfb = None
         logger.debug(f"Generating TTS: [{text}]")
 
+        async def async_generator(sync_gen):
+            for item in sync_gen:
+                await asyncio.sleep(0)  # Yield control back to the event loop
+                yield item
+
         try:
             b = bytearray()
             in_header = True
@@ -62,7 +68,9 @@ class PlayHTTTSService(TTSService):
 
             # need to ask Aleix about this. frames are getting pushed.
             # but playback is blocked
-            for chunk in sync_gen:
+
+            # for chunk in sync_gen:
+            async for chunk in async_generator(sync_gen):
                 # skip the RIFF header.
                 if in_header:
                     b.extend(chunk)
