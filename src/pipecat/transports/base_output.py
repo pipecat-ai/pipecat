@@ -132,7 +132,7 @@ class BaseOutputTransport(FrameProcessor):
             await self._stopped_event.wait()
 
     async def _handle_interruptions(self, frame: Frame):
-        if not self.allow_interruptions:
+        if not self.interruptions_allowed:
             return
 
         if isinstance(frame, StartInterruptionFrame):

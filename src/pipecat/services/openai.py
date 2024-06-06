@@ -3,13 +3,14 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
+import aiohttp
 import base64
 import io
 import json
-import time
+
 from typing import AsyncGenerator, List, Literal
 
-import aiohttp
 from loguru import logger
 from PIL import Image
 
@@ -94,7 +95,6 @@ class BaseOpenAILLMService(LLMService):
                 del message["data"]
                 del message["mime_type"]
 
-        start_time = time.time()
         chunks: AsyncStream[ChatCompletionChunk] = (
             await self._client.chat.completions.create(
                 model=self._model,
@@ -104,8 +104,6 @@ class BaseOpenAILLMService(LLMService):
                 tool_choice=context.tool_choice,
             )
         )
-
-        logger.debug(f"OpenAI LLM TTFB: {time.time() - start_time}")
 
         return chunks
 
@@ -123,6 +121,8 @@ class BaseOpenAILLMService(LLMService):
         arguments = ""
         tool_call_id = ""
 
+        await self.start_ttfb_metrics()
+
         chunk_stream: AsyncStream[ChatCompletionChunk] = (
             await self._stream_chat_completions(context)
         )
@@ -130,6 +130,8 @@ class BaseOpenAILLMService(LLMService):
         async for chunk in chunk_stream:
             if len(chunk.choices) == 0:
                 continue
+
+            await self.stop_ttfb_metrics()
 
             if chunk.choices[0].delta.tool_calls:
                 # We're streaming the LLM response to enable the fastest response times.
@@ -306,11 +308,11 @@ class OpenAITTSService(TTSService):
         self._client = AsyncOpenAI(api_key=api_key)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        start_time = time.time()
-        ttfb = None
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
+            await self.start_ttfb_metrics()
+
             async with self._client.audio.speech.with_streaming_response.create(
                     input=text,
                     model=self._model,
@@ -324,9 +326,7 @@ class OpenAITTSService(TTSService):
                     return
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
-                        if ttfb is None:
-                            ttfb = time.time() - start_time
-                            logger.debug(f"TTS ttfb: {ttfb}")
+                        await self.stop_ttfb_metrics()
                         frame = AudioRawFrame(chunk, 24_000, 1)
                         yield frame
         except BadRequestError as e:

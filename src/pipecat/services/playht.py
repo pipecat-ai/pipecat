@@ -6,8 +6,6 @@
 
 import io
 import struct
-import time
-import asyncio
 
 from typing import AsyncGenerator
 
@@ -49,20 +47,18 @@ class PlayHTTTSService(TTSService):
         self._client.close()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        start_time = time.time()
-        ttfb = None
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
             b = bytearray()
             in_header = True
+
+            await self.start_ttfb_metrics()
+
             playht_gen = self._client.tts(
                 text,
                 voice_engine="PlayHT2.0-turbo",
                 options=self._options)
-
-            # need to ask Aleix about this. frames are getting pushed.
-            # but playback is blocked
 
             async for chunk in playht_gen:
                 # skip the RIFF header.
@@ -80,9 +76,7 @@ class PlayHTTTSService(TTSService):
                         in_header = False
                 else:
                     if len(chunk):
-                        if ttfb is None:
-                            ttfb = time.time() - start_time
-                            logger.debug(f"TTS ttfb: {ttfb}")
+                        await self.stop_ttfb_metrics()
                         frame = AudioRawFrame(chunk, 16000, 1)
                         yield frame
         except Exception as e:

@@ -3,7 +3,6 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
-import time
 
 from cartesia.tts import AsyncCartesiaTTS
 
@@ -41,11 +40,11 @@ class CartesiaTTSService(TTSService):
             logger.error(f"Cartesia initialization error: {e}")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        start_time = time.time()
-        ttfb = None
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
+            await self.start_ttfb_metrics()
+
             chunk_generator = await self._client.generate(
                 stream=True,
                 transcript=text,
@@ -55,9 +54,7 @@ class CartesiaTTSService(TTSService):
             )
 
             async for chunk in chunk_generator:
-                if ttfb is None:
-                    ttfb = time.time() - start_time
-                    logger.debug(f"TTS ttfb: {ttfb}")
+                await self.stop_ttfb_metrics()
                 yield AudioRawFrame(chunk["audio"], chunk["sampling_rate"], 1)
         except Exception as e:
             logger.error(f"Cartesia exception: {e}")
