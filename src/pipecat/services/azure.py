@@ -7,6 +7,7 @@
 import aiohttp
 import asyncio
 import io
+import time
 
 from PIL import Image
 from typing import AsyncGenerator
@@ -46,6 +47,8 @@ class AzureTTSService(TTSService):
         self._voice = voice
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        start_time = time.time()
+        ttfb = None
         logger.debug(f"Generating TTS: {text}")
 
         ssml = (
@@ -61,6 +64,9 @@ class AzureTTSService(TTSService):
         result = await asyncio.to_thread(self.speech_synthesizer.speak_ssml, (ssml))
 
         if result.reason == ResultReason.SynthesizingAudioCompleted:
+            if ttfb is None:
+                ttfb = time.time() - start_time
+                logger.debug(f"TTS ttfb: {ttfb}")
             # Azure always sends a 44-byte header. Strip it off.
             yield AudioRawFrame(audio=result.audio_data[44:], sample_rate=16000, num_channels=1)
         elif result.reason == ResultReason.Canceled:
