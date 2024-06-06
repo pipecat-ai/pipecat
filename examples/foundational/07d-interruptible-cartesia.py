@@ -19,7 +19,6 @@ from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-from pipecat.processors.logger import FrameLogger
 
 
 from runner import configure
@@ -73,9 +72,7 @@ async def main(room_url: str, token):
             tma_in,              # User responses
             llm,                 # LLM
             tts,                 # TTS
-            FrameLogger("tts out"),
             transport.output(),  # Transport bot output
-            FrameLogger("transport out"),
             tma_out              # Assistant spoken responses
         ])
 

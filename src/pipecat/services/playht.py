@@ -17,8 +17,8 @@ from pipecat.services.ai_services import TTSService
 from loguru import logger
 
 try:
-    from pyht import Client
     from pyht.client import TTSOptions
+    from pyht.async_client import AsyncClient
     from pyht.protos.api_pb2 import Format
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -35,7 +35,7 @@ class PlayHTTTSService(TTSService):
         self._user_id = user_id
         self._speech_key = api_key
 
-        self._client = Client(
+        self._client = AsyncClient(
             user_id=self._user_id,
             api_key=self._speech_key,
         )
@@ -53,15 +53,10 @@ class PlayHTTTSService(TTSService):
         ttfb = None
         logger.debug(f"Generating TTS: [{text}]")
 
-        async def async_generator(sync_gen):
-            for item in sync_gen:
-                await asyncio.sleep(0)  # Yield control back to the event loop
-                yield item
-
         try:
             b = bytearray()
             in_header = True
-            sync_gen = self._client.tts(
+            playht_gen = self._client.tts(
                 text,
                 voice_engine="PlayHT2.0-turbo",
                 options=self._options)
@@ -69,8 +64,7 @@ class PlayHTTTSService(TTSService):
             # need to ask Aleix about this. frames are getting pushed.
             # but playback is blocked
 
-            # for chunk in sync_gen:
-            async for chunk in async_generator(sync_gen):
+            async for chunk in playht_gen:
                 # skip the RIFF header.
                 if in_header:
                     b.extend(chunk)
