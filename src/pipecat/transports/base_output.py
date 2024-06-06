@@ -41,7 +41,6 @@ class BaseOutputTransport(FrameProcessor):
         self._params = params
 
         self._running = False
-        self._allow_interruptions = False
 
         self._executor = ThreadPoolExecutor(max_workers=5)
 
@@ -62,11 +61,6 @@ class BaseOutputTransport(FrameProcessor):
         self._create_push_task()
 
     async def start(self, frame: StartFrame):
-        # Make sure we have the latest params. Note that this transport might
-        # have been started on another task that might not need interruptions,
-        # for example.
-        self._allow_interruptions = frame.allow_interruptions
-
         if self._running:
             return
 
@@ -111,6 +105,8 @@ class BaseOutputTransport(FrameProcessor):
         await self._sink_thread
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         #
         # Out-of-band frames like (CancelFrame or StartInterruptionFrame) are
         # pushed immediately. Other frames require order so they are put in the
@@ -136,7 +132,7 @@ class BaseOutputTransport(FrameProcessor):
             await self._stopped_event.wait()
 
     async def _handle_interruptions(self, frame: Frame):
-        if not self._allow_interruptions:
+        if not self.allow_interruptions:
             return
 
         if isinstance(frame, StartInterruptionFrame):

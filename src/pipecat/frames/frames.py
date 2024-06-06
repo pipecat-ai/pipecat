@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Any, List, Tuple
+from typing import Any, List, Mapping, Tuple
 
 from dataclasses import dataclass, field
 
@@ -188,6 +188,7 @@ class SystemFrame(Frame):
 class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
     allow_interruptions: bool = False
+    enable_metrics: bool = False
 
 
 @dataclass

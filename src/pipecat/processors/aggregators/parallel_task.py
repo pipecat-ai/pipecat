@@ -22,6 +22,8 @@ class Source(FrameProcessor):
         self._up_queue = upstream_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         match direction:
             case FrameDirection.UPSTREAM:
                 await self._up_queue.put(frame)
@@ -36,6 +38,8 @@ class Sink(FrameProcessor):
         self._down_queue = downstream_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         match direction:
             case FrameDirection.UPSTREAM:
                 await self.push_frame(frame, direction)
@@ -80,6 +84,8 @@ class ParallelTask(FrameProcessor):
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if direction == FrameDirection.UPSTREAM:
             # If we get an upstream frame we process it in each sink.
             await asyncio.gather(*[s.process_frame(frame, direction) for s in self._sinks])

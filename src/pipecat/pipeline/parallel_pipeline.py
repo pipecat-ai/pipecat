@@ -20,6 +20,8 @@ class Source(FrameProcessor):
         self._up_queue = upstream_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         match direction:
             case FrameDirection.UPSTREAM:
                 await self._up_queue.put(frame)
@@ -34,6 +36,8 @@ class Sink(FrameProcessor):
         self._down_queue = downstream_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         match direction:
             case FrameDirection.UPSTREAM:
                 await self.push_frame(frame, direction)
@@ -90,6 +94,8 @@ class ParallelPipeline(FrameProcessor):
         self._down_task = loop.create_task(self._process_down_queue())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, StartFrame):
             await self._start_tasks()
 

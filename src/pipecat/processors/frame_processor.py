@@ -8,7 +8,7 @@ import asyncio
 
 from enum import Enum
 
-from pipecat.frames.frames import ErrorFrame, Frame
+from pipecat.frames.frames import ErrorFrame, Frame, StartFrame
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
@@ -28,6 +28,18 @@ class FrameProcessor:
         self._next: "FrameProcessor" | None = None
         self._loop: asyncio.AbstractEventLoop = loop or asyncio.get_running_loop()
 
+        # Properties
+        self._allow_interruptions = False
+        self._enable_metrics = False
+
+    @property
+    def allow_interruptions(self):
+        return self._allow_interruptions
+
+    @property
+    def enable_metrics(self):
+        return self._enable_metrics
+
     async def cleanup(self):
         pass
 
@@ -40,7 +52,9 @@ class FrameProcessor:
         return self._loop
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        pass
+        if isinstance(frame, StartFrame):
+            self._allow_interruptions = frame.allow_interruptions
+            self._enable_metrics = frame.enable_metrics
 
     async def push_error(self, error: ErrorFrame):
         await self.push_frame(error, FrameDirection.UPSTREAM)
