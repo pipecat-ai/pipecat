@@ -1,7 +1,3 @@
 **/.DS_Store
-web-ui/node_modules
-web-ui/dist
-web-ui/dist-ssr
-web-ui/*.lock
-web-ui/*.local
-web-ui/*.*.local
+.env
+.env.*
