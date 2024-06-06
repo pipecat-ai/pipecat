@@ -23,11 +23,11 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.parallel_task import ParallelTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.aggregators.gated import GatedAggregator
 from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
 from pipecat.processors.aggregators.sentence import SentenceAggregator
-from pipecat.processors.aggregators.parallel_task import ParallelTask
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService

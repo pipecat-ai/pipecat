@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added TTFB metrics and debug logging for TTS services.
 
+### Changed
+
+- Moved `ParallelTask` to `pipecat.pipeline.parallel_task`.
+
 ### Fixed
 
 - Fixed PlayHT TTS service to work properly async.
