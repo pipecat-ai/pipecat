@@ -2,14 +2,14 @@
 bot_runner.py
 
 HTTP service that listens for incoming calls from either Daily or Twilio,
-provisioning a room and starting a Pipecat bot in response. 
+provisioning a room and starting a Pipecat bot in response.
 
 Refer to README for more information.
 """
 import os
 import argparse
 import subprocess
-from daily_helpers import DailyRESTHelper, DailyRoomObject, DailyRoomProperties, DailyRoomSipParams, DailyRoomParams
+from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomObject, DailyRoomProperties, DailyRoomSipParams, DailyRoomParams
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -26,8 +26,8 @@ REQUIRED_ENV_VARS = ['OPENAI_API_KEY', 'DAILY_API_KEY',
                      'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']
 
 daily_rest_helper = DailyRESTHelper(
-    os.getenv("DAILY_API_KEY", None),
-    os.getenv("DAILY_API_URL", 'api.daily.co/v1'))
+    os.getenv("DAILY_API_KEY", ""),
+    os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'))
 
 
 # ----------------- API ----------------- #
@@ -48,7 +48,7 @@ When the vendor is Daily, the bot handles the call forwarding automatically,
 i.e, forwards the call from the "hold music state" to the Daily Room's SIP URI.
 
 Alternatively, when the vendor is Twilio (not Daily), the bot is responsible for
-updating the state on Twilio. So when `dialin-ready` fires, it takes appropriate 
+updating the state on Twilio. So when `dialin-ready` fires, it takes appropriate
 action using the Twilio Client library.
 """
 
@@ -92,9 +92,11 @@ def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
     if vendor == "daily":
-        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain} -s {room.config.sip_endpoint}"
+        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {
+            callId} -d {callDomain} -s {room.config.sip_endpoint}"
     else:
-        bot_proc = f"python3 -m bot_twilio -u {room.url} -t {token} -i {callId} -s {room.config.sip_endpoint}"
+        bot_proc = f"python3 -m bot_twilio -u {room.url} -t {
+            token} -i {callId} -s {room.config.sip_endpoint}"
 
     try:
         subprocess.Popen(
@@ -119,7 +121,7 @@ async def twilio_start_bot(request: Request):
     # Click Configure and under Voice Configuration,
     # "a call comes in" choose webhook and point the URL to
     # where this code is hosted.
-    data = None
+    data = {}
     try:
         # shouldnt have received json, twilio sends form data
         form_data = await request.form()

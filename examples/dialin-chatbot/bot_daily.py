@@ -24,8 +24,8 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-daily_api_url = os.getenv("DAILY_API_URL", "api.daily.co/v1")
-daily_api_key = os.getenv("DAILY_API_KEY")
+daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
+daily_api_key = os.getenv("DAILY_API_KEY", "")
 
 
 async def main(room_url: str, token: str, callId: str, callDomain: str, sipUri: str):
@@ -44,7 +44,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str, sipUri: 
             token,
             "Chatbot",
             DailyParams(
-                api_url=f"https://{daily_api_url}",
+                api_url=f"{daily_api_url}",
                 api_key=daily_api_key,
                 dialin_settings=diallin_settings,
                 audio_in_enabled=True,
