@@ -20,6 +20,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
+    MetricsFrame,
     SpriteFrame,
     StartFrame,
     EndFrame,
@@ -85,6 +86,9 @@ class BaseOutputTransport(FrameProcessor):
         self._stopped_event.set()
 
     def send_message(self, frame: TransportMessageFrame):
+        pass
+
+    def send_metrics(self, frame: MetricsFrame):
         pass
 
     def write_frame_to_camera(self, frame: ImageRawFrame):
@@ -166,6 +170,8 @@ class BaseOutputTransport(FrameProcessor):
                         self._set_camera_images(frame.images)
                     elif isinstance(frame, TransportMessageFrame):
                         self.send_message(frame)
+                    elif isinstance(frame, MetricsFrame):
+                        self.send_metrics(frame)
                     else:
                         future = asyncio.run_coroutine_threadsafe(
                             self._internal_push_frame(frame), self.get_event_loop())
