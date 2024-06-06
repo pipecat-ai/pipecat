@@ -43,6 +43,8 @@ class WakeCheckFilter(FrameProcessor):
             self._wake_patterns.append(pattern)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         try:
             if isinstance(frame, TranscriptionFrame):
                 p = self._participant_states.get(frame.user_id)

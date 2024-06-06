@@ -52,6 +52,8 @@ class StoryImageProcessor(FrameProcessor):
         self._fal_service = fal_service
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, StoryImageFrame):
             try:
                 async with timeout(7):
@@ -86,6 +88,8 @@ class StoryProcessor(FrameProcessor):
         self._story = story
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, UserStoppedSpeakingFrame):
             # Send an app message to the UI
             await self.push_frame(DailyTransportMessageFrame(CUE_ASSISTANT_TURN))

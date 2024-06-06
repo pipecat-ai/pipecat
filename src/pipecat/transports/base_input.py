@@ -34,7 +34,6 @@ class BaseInputTransport(FrameProcessor):
         self._params = params
 
         self._running = False
-        self._allow_interruptions = False
 
         self._executor = ThreadPoolExecutor(max_workers=5)
 
@@ -43,11 +42,6 @@ class BaseInputTransport(FrameProcessor):
         self._create_push_task()
 
     async def start(self, frame: StartFrame):
-        # Make sure we have the latest params. Note that this transport might
-        # have been started on another task that might not need interruptions,
-        # for example.
-        self._allow_interruptions = frame.allow_interruptions
-
         if self._running:
             return
 
@@ -86,12 +80,13 @@ class BaseInputTransport(FrameProcessor):
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, CancelFrame):
             # We don't queue a CancelFrame since we want to stop ASAP.
             await self.push_frame(frame, direction)
             await self.stop()
         elif isinstance(frame, StartFrame):
-            self._allow_interruption = frame.allow_interruptions
             await self.start(frame)
             await self._internal_push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
@@ -128,7 +123,7 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def _handle_interruptions(self, frame: Frame):
-        if self._allow_interruptions:
+        if self.allow_interruptions:
             # Make sure we notify about interruptions quickly out-of-band
             if isinstance(frame, UserStartedSpeakingFrame):
                 logger.debug("User started speaking")

@@ -105,6 +105,8 @@ class GoogleLLMService(LLMService):
             await self.push_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         context = None
 
         if isinstance(frame, OpenAILLMContextFrame):

@@ -13,6 +13,8 @@ class TestFrameProcessor(FrameProcessor):
         super().__init__()
 
     async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+
         if not self.test_frames[0]:  # then we've run out of required frames but the generator is still going?
             raise TestException(f"Oops, got an extra frame, {frame}")
         if isinstance(self.test_frames[0], List):
