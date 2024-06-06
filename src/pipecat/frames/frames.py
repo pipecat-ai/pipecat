@@ -241,7 +241,7 @@ class StopInterruptionFrame(SystemFrame):
 
 @dataclass
 class MetricsFrame(SystemFrame):
-    """Emitted by processor who can compute metrics like latencies.
+    """Emitted by processor that can compute metrics like latencies.
     """
     ttfb: Mapping[str, float]
 
