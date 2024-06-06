@@ -15,11 +15,10 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.openai import OpenAITTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-
 
 from runner import configure
 
@@ -40,17 +39,16 @@ async def main(room_url: str, token):
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
-                audio_out_sample_rate=44100,
+                audio_out_sample_rate=24000,
                 transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer()
             )
         )
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_name="British Lady",
-            output_format="pcm_44100"
+        tts = OpenAITTSService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            voice="alloy"
         )
 
         llm = OpenAILLMService(

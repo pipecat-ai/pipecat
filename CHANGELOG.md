@@ -5,6 +5,24 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## Unreleased
+
+### Added
+
+- Added `enable_metrics` to `PipelineParams`.
+
+- Added `MetricsFrame`. The `MetricsFrame` will report different metrics in the
+  system. Right now, it can report TTFB (Time To First Byte) values for
+  different services, that is the time spent between the arrival of a `Frame` to
+  the processor/service until the first `DataFrame` is pushed downstream.
+
+- Added TTFB metrics and debug logging for TTS services.
+
+### Fixed
+
+- Fixed PlayHT TTS service to work properly async.
+
 ## [0.0.28] - 2024-06-05
 
 ### Fixed

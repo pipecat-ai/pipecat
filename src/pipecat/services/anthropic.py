@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import time
 import base64
 
 from pipecat.frames.frames import (
@@ -102,13 +101,16 @@ class AnthropicLLMService(LLMService):
 
             messages = self._get_messages_from_openai_context(context)
 
-            start_time = time.time()
+            await self.start_ttfb_metric()
+
             response = await self._client.messages.create(
                 messages=messages,
                 model=self._model,
                 max_tokens=self._max_tokens,
                 stream=True)
-            logger.debug(f"Anthropic LLM TTFB: {time.time() - start_time}")
+
+            await self.stop_ttfb_metric()
+
             async for event in response:
                 # logger.debug(f"Anthropic LLM event: {event}")
                 if (event.type == "content_block_delta"):
@@ -122,6 +124,8 @@ class AnthropicLLMService(LLMService):
             await self.push_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         context = None
 
         if isinstance(frame, OpenAILLMContextFrame):

@@ -106,6 +106,8 @@ class TTSService(AIService):
         await self.push_frame(TextFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)
         elif isinstance(frame, EndFrame):
@@ -179,6 +181,8 @@ class STTService(AIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes a frame of audio data, either buffering or transcribing it."""
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
             self._wave.close()
             await self.push_frame(frame, direction)
@@ -201,6 +205,8 @@ class ImageGenService(AIService):
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, TextFrame):
             await self.push_frame(frame, direction)
             await self.process_generator(self.run_image_gen(frame.text))
@@ -220,6 +226,8 @@ class VisionService(AIService):
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, VisionImageRawFrame):
             await self.process_generator(self.run_vision(frame))
         else:
