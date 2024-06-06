@@ -93,7 +93,7 @@ def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
     if vendor == "daily":
         bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {
-            callId} -d {callDomain} -s {room.config.sip_endpoint}"
+            callId} -d {callDomain}"
     else:
         bot_proc = f"python3 -m bot_twilio -u {room.url} -t {
             token} -i {callId} -s {room.config.sip_endpoint}"

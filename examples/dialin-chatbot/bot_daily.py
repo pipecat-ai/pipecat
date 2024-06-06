@@ -24,19 +24,18 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 daily_api_key = os.getenv("DAILY_API_KEY", "")
+daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
-async def main(room_url: str, token: str, callId: str, callDomain: str, sipUri: str):
+async def main(room_url: str, token: str, callId: str, callDomain: str):
     async with aiohttp.ClientSession() as session:
         # diallin_settings are only needed if Daily's SIP URI is used
         # If you are handling this via Twilio, Telnyx, set this to None
         # and handle call-forwarding when on_dialin_ready fires.
         diallin_settings = DailyDialinSettings(
             call_id=callId,
-            call_domain=callDomain,
-            sip_uri=sipUri
+            call_domain=callDomain
         )
 
         transport = DailyTransport(
@@ -44,7 +43,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str, sipUri: 
             token,
             "Chatbot",
             DailyParams(
-                api_url=f"{daily_api_url}",
+                api_url=f"https://{daily_api_url}",
                 api_key=daily_api_key,
                 dialin_settings=diallin_settings,
                 audio_in_enabled=True,
@@ -58,8 +57,8 @@ async def main(room_url: str, token: str, callId: str, callDomain: str, sipUri: 
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+            api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
         )
 
         llm = OpenAILLMService(
@@ -107,7 +106,6 @@ if __name__ == "__main__":
     parser.add_argument("-t", type=str, help="Token")
     parser.add_argument("-i", type=str, help="Call ID")
     parser.add_argument("-d", type=str, help="Call Domain")
-    parser.add_argument("-s", type=str, help="SIP URI")
     config = parser.parse_args()
 
-    asyncio.run(main(config.u, config.t, config.i, config.d, config.s))
+    asyncio.run(main(config.u, config.t, config.i, config.d))
