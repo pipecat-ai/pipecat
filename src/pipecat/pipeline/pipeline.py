@@ -4,12 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
-
 from typing import Callable, Coroutine, List
 
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import Frame, MetricsFrame, StartFrame
+from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.ai_services import AIService
 
 
 class PipelineSource(FrameProcessor):
@@ -44,7 +44,7 @@ class PipelineSink(FrameProcessor):
                 await self._downstream_push_frame(frame, direction)
 
 
-class Pipeline(FrameProcessor):
+class Pipeline(BasePipeline):
 
     def __init__(self, processors: List[FrameProcessor]):
         super().__init__()
@@ -58,6 +58,19 @@ class Pipeline(FrameProcessor):
         self._link_processors()
 
     #
+    # BasePipeline
+    #
+
+    def services(self):
+        services = []
+        for p in self._processors:
+            if isinstance(p, AIService):
+                services.append(p)
+            elif isinstance(p, Pipeline):
+                services += p.services()
+        return services
+
+    #
     # Frame processor
     #
 
@@ -66,6 +79,9 @@ class Pipeline(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame) and self.metrics_enabled:
+            await self._send_initial_metrics()
 
         if direction == FrameDirection.DOWNSTREAM:
             await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
@@ -81,3 +97,9 @@ class Pipeline(FrameProcessor):
         for curr in self._processors[1:]:
             prev.link(curr)
             prev = curr
+
+    async def _send_initial_metrics(self):
+        services = self.services()
+        ttfb = dict(zip([s.name for s in services], [0] * len(services)))
+        frame = MetricsFrame(ttfb=ttfb)
+        await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
