@@ -45,7 +45,7 @@ class WhisperSTTService(STTService):
                  model: Model = Model.DISTIL_MEDIUM_EN,
                  device: str = "auto",
                  compute_type: str = "default",
-                 no_speech_prob: float = 0.1,
+                 no_speech_prob: float = 0.4,
                  **kwargs):
 
         super().__init__(**kwargs)
@@ -86,4 +86,5 @@ class WhisperSTTService(STTService):
 
         if text:
             await self.stop_ttfb_metrics()
+            logger.debug(f"Transcription: [{text}]")
             yield TranscriptionFrame(text, "", int(time.time_ns() / 1000000))

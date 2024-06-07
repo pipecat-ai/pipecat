@@ -41,7 +41,7 @@ async def start_fetch_weather(llm):
 
 
 async def fetch_weather_from_api(llm, args):
-    return ({"conditions": "nice", "temperature": "75"})
+    return {"conditions": "nice", "temperature": "75"}
 
 
 async def main(room_url: str, token):
