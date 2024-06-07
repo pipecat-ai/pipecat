@@ -39,6 +39,9 @@ class CartesiaTTSService(TTSService):
         except Exception as e:
             logger.error(f"Cartesia initialization error: {e}")
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 

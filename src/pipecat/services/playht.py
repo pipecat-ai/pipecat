@@ -43,8 +43,8 @@ class PlayHTTTSService(TTSService):
             quality="higher",
             format=Format.FORMAT_WAV)
 
-    def __del__(self):
-        self._client.close()
+    def can_generate_metrics(self) -> bool:
+        return True
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")

@@ -76,6 +76,9 @@ class BaseOpenAILLMService(LLMService):
     def create_client(self, api_key=None, base_url=None):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
@@ -106,15 +109,6 @@ class BaseOpenAILLMService(LLMService):
         )
 
         return chunks
-
-    async def _chat_completions(self, messages) -> str | None:
-        response: ChatCompletion = await self._client.chat.completions.create(
-            model=self._model, stream=False, messages=messages
-        )
-        if response and len(response.choices) > 0:
-            return response.choices[0].message.content
-        else:
-            return None
 
     async def _process_context(self, context: OpenAILLMContext):
         function_name = ""
@@ -306,6 +300,9 @@ class OpenAITTSService(TTSService):
         self._model = model
 
         self._client = AsyncOpenAI(api_key=api_key)
+
+    def can_generate_metrics(self) -> bool:
+        return True
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")

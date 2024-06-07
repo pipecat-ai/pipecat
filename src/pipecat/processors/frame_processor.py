@@ -44,6 +44,9 @@ class FrameProcessor:
     def metrics_enabled(self):
         return self._enable_metrics
 
+    def can_generate_metrics(self) -> bool:
+        return False
+
     async def start_ttfb_metrics(self):
         if self.metrics_enabled:
             self._start_ttfb_time = time.time()

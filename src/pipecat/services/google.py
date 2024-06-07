@@ -47,6 +47,9 @@ class GoogleLLMService(LLMService):
         gai.configure(api_key=api_key)
         self._client = gai.GenerativeModel(model)
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     def _get_messages_from_openai_context(
             self, context: OpenAILLMContext) -> List[glm.Content]:
         openai_messages = context.get_messages()
