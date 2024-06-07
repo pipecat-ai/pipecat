@@ -86,4 +86,5 @@ class WhisperSTTService(STTService):
 
         if text:
             await self.stop_ttfb_metrics()
+            logger.debug(f"Transcription: [{text}]")
             yield TranscriptionFrame(text, "", int(time.time_ns() / 1000000))
