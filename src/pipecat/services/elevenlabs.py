@@ -31,6 +31,9 @@ class ElevenLabsTTSService(TTSService):
         self._aiohttp_session = aiohttp_session
         self._model = model
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 

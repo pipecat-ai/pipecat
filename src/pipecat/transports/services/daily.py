@@ -527,8 +527,6 @@ class DailyInputTransport(BaseInputTransport):
         if isinstance(frame, UserImageRequestFrame):
             self.request_participant_image(frame.user_id)
 
-        await super().process_frame(frame, direction)
-
     #
     # Frames
     #

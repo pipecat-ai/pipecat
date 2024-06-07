@@ -12,14 +12,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a new `FunctionFilter`. This filter will let you filter frames based on
   a given function, except system messages which should never be filtered.
 
+- Added `FrameProcessor.can_generate_metrics()` method to indicate if a
+  processor can generate metrics. In the future this might get an extra argument
+  to ask for a specific type of metric.
+
+- Added `BasePipeline`. All pipeline classes should be based on this class. All
+  subclasses should implement a `processors_with_metrics()` method that returns
+  a list of all `FrameProcessor`s in the pipeline that can generate metrics.
+
 - Added `enable_metrics` to `PipelineParams`.
 
 - Added `MetricsFrame`. The `MetricsFrame` will report different metrics in the
   system. Right now, it can report TTFB (Time To First Byte) values for
   different services, that is the time spent between the arrival of a `Frame` to
-  the processor/service until the first `DataFrame` is pushed downstream.
+  the processor/service until the first `DataFrame` is pushed downstream. If
+  metrics are enabled an intial `MetricsFrame` with all the services in the
+  pipeline will be sent.
 
 - Added TTFB metrics and debug logging for TTS services.
+
+### Changed
+
+- Moved `ParallelTask` to `pipecat.pipeline.parallel_task`.
 
 ### Fixed
 
