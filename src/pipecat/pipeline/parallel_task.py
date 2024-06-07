@@ -85,8 +85,8 @@ class ParallelTask(BasePipeline):
     # BasePipeline
     #
 
-    def services(self) -> List[FrameProcessor]:
-        return list(chain.from_iterable(p.services() for p in self._pipelines))
+    def processors_with_metrics(self) -> List[FrameProcessor]:
+        return list(chain.from_iterable(p.processors_with_metrics() for p in self._pipelines))
 
     #
     # Frame processor

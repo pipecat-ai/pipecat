@@ -56,6 +56,9 @@ class WhisperSTTService(STTService):
         self._model: WhisperModel | None = None
         self._load()
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     def _load(self):
         """Loads the Whisper model. Note that if this is the first time
         this model is being run, it will take time to download."""

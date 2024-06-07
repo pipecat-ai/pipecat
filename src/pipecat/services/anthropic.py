@@ -49,6 +49,9 @@ class AnthropicLLMService(LLMService):
         self._model = model
         self._max_tokens = max_tokens
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     def _get_messages_from_openai_context(
             self, context: OpenAILLMContext):
         openai_messages = context.get_messages()

@@ -17,5 +17,5 @@ class BasePipeline(FrameProcessor):
         super().__init__()
 
     @abstractmethod
-    def services(self) -> List[FrameProcessor]:
+    def processors_with_metrics(self) -> List[FrameProcessor]:
         pass

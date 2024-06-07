@@ -4,12 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+from itertools import chain
+
 from typing import Callable, Coroutine, List
 
 from pipecat.frames.frames import Frame, MetricsFrame, StartFrame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.ai_services import AIService
 
 
 class PipelineSource(FrameProcessor):
@@ -61,13 +62,13 @@ class Pipeline(BasePipeline):
     # BasePipeline
     #
 
-    def services(self):
+    def processors_with_metrics(self):
         services = []
         for p in self._processors:
-            if isinstance(p, AIService):
+            if isinstance(p, BasePipeline):
+                services += p.processors_with_metrics()
+            elif p.can_generate_metrics():
                 services.append(p)
-            elif isinstance(p, Pipeline):
-                services += p.services()
         return services
 
     #
@@ -99,7 +100,7 @@ class Pipeline(BasePipeline):
             prev = curr
 
     async def _send_initial_metrics(self):
-        services = self.services()
-        ttfb = dict(zip([s.name for s in services], [0] * len(services)))
+        processors = self.processors_with_metrics()
+        ttfb = dict(zip([p.name for p in processors], [0] * len(processors)))
         frame = MetricsFrame(ttfb=ttfb)
         await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
