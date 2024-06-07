@@ -45,7 +45,7 @@ class WhisperSTTService(STTService):
                  model: Model = Model.DISTIL_MEDIUM_EN,
                  device: str = "auto",
                  compute_type: str = "default",
-                 no_speech_prob: float = 0.1,
+                 no_speech_prob: float = 0.4,
                  **kwargs):
 
         super().__init__(**kwargs)
