@@ -76,6 +76,9 @@ class BaseOpenAILLMService(LLMService):
     def create_client(self, api_key=None, base_url=None):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
@@ -297,6 +300,9 @@ class OpenAITTSService(TTSService):
         self._model = model
 
         self._client = AsyncOpenAI(api_key=api_key)
+
+    def can_generate_metrics(self) -> bool:
+        return True
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")

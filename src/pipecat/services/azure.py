@@ -44,6 +44,9 @@ class AzureTTSService(TTSService):
         )
         self._voice = voice
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: {text}")
 

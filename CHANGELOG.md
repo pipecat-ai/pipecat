@@ -12,9 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a new `FunctionFilter`. This filter will let you filter frames based on
   a given function, except system messages which should never be filtered.
 
+- Added `FrameProcessor.can_generate_metrics()` method to indicate if a
+  processor can generate metrics. In the future this might get an extra argument
+  to ask for a specific type of metric.
+
 - Added `BasePipeline`. All pipeline classes should be based on this class. All
-  subclasses should implement a `services()` method that returns a list of
-  all `AIServices` in the pipeline.
+  subclasses should implement a `processors_with_metrics()` method that returns
+  a list of all `FrameProcessor`s in the pipeline that can generate metrics.
 
 - Added `enable_metrics` to `PipelineParams`.
 
