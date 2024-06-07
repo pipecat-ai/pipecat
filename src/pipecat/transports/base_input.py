@@ -177,7 +177,7 @@ class BaseInputTransport(FrameProcessor):
                     vad_state = self._handle_vad(frame.audio, vad_state)
                     audio_passthrough = self._params.vad_audio_passthrough
 
-                    # Push audio downstream if passthrough.
+                # Push audio downstream if passthrough.
                 if audio_passthrough:
                     future = asyncio.run_coroutine_threadsafe(
                         self._internal_push_frame(frame), self._loop)
