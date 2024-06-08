@@ -48,7 +48,8 @@ async def main(room_url: str, token):
         tts = DeepgramTTSService(
             aiohttp_session=session,
             api_key=os.getenv("DEEPGRAM_API_KEY"),
-            voice="aura-helios-en"
+            # voice="aura-helios-en"
+            base_url="https://api.deepgram.com/v1/speak"
         )
 
         llm = OpenAILLMService(
@@ -74,7 +75,7 @@ async def main(room_url: str, token):
             tma_out              # Assistant spoken responses
         ])
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
