@@ -80,7 +80,7 @@ class GoogleLLMService(LLMService):
             await asyncio.sleep(0)
 
     async def _process_context(self, context: OpenAILLMContext):
-        await self.push_frame(LLMFullResponseStartFrame())
+        await self.push_service_frame(LLMFullResponseStartFrame())
         try:
             logger.debug(f"Generating chat: {context.get_messages_json()}")
 
@@ -95,9 +95,9 @@ class GoogleLLMService(LLMService):
             async for chunk in self._async_generator_wrapper(response):
                 try:
                     text = chunk.text
-                    await self.push_frame(LLMResponseStartFrame())
-                    await self.push_frame(TextFrame(text))
-                    await self.push_frame(LLMResponseEndFrame())
+                    await self.push_service_frame(LLMResponseStartFrame())
+                    await self.push_service_frame(TextFrame(text))
+                    await self.push_service_frame(LLMResponseEndFrame())
                 except Exception as e:
                     # Google LLMs seem to flag safety issues a lot!
                     if chunk.candidates[0].finish_reason == 3:
@@ -109,7 +109,7 @@ class GoogleLLMService(LLMService):
         except Exception as e:
             logger.error(f"Exception: {e}")
         finally:
-            await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_service_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -123,7 +123,7 @@ class GoogleLLMService(LLMService):
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
         else:
-            await self.push_frame(frame, direction)
+            await self.push_service_frame(frame, direction)
 
         if context:
             await self._process_context(context)

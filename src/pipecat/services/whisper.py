@@ -10,7 +10,6 @@ import asyncio
 import time
 
 from enum import Enum
-from typing_extensions import AsyncGenerator
 
 import numpy as np
 
@@ -69,10 +68,10 @@ class WhisperSTTService(STTService):
             compute_type=self._compute_type)
         logger.debug("Loaded Whisper model")
 
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes):
         """Transcribes given audio using Whisper"""
         if not self._model:
-            yield ErrorFrame("Whisper model not available")
+            await self.push_error(ErrorFrame("Whisper model not available"))
             logger.error("Whisper model not available")
             return
 
@@ -90,4 +89,4 @@ class WhisperSTTService(STTService):
         if text:
             await self.stop_ttfb_metrics()
             logger.debug(f"Transcription: [{text}]")
-            yield TranscriptionFrame(text, "", int(time.time_ns() / 1000000))
+            await self.push_service_frame(TranscriptionFrame(text, "", int(time.time_ns() / 1000000)))

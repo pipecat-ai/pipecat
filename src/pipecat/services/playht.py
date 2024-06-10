@@ -7,8 +7,6 @@
 import io
 import struct
 
-from typing import AsyncGenerator
-
 from pipecat.frames.frames import AudioRawFrame, Frame
 from pipecat.services.ai_services import TTSService
 
@@ -46,7 +44,7 @@ class PlayHTTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str):
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
@@ -78,6 +76,6 @@ class PlayHTTTSService(TTSService):
                     if len(chunk):
                         await self.stop_ttfb_metrics()
                         frame = AudioRawFrame(chunk, 16000, 1)
-                        yield frame
+                        await self.push_service_frame(frame)
         except Exception as e:
             logger.error(f"Error generating TTS: {e}")

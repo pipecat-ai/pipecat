@@ -9,7 +9,6 @@ import asyncio
 import io
 
 from PIL import Image
-from typing import AsyncGenerator
 
 from openai import AsyncAzureOpenAI
 
@@ -47,7 +46,7 @@ class AzureTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str):
         logger.debug(f"Generating TTS: {text}")
 
         await self.start_ttfb_metrics()
@@ -67,7 +66,7 @@ class AzureTTSService(TTSService):
         if result.reason == ResultReason.SynthesizingAudioCompleted:
             await self.stop_ttfb_metrics()
             # Azure always sends a 44-byte header. Strip it off.
-            yield AudioRawFrame(audio=result.audio_data[44:], sample_rate=16000, num_channels=1)
+            await self.push_service_frame(AudioRawFrame(audio=result.audio_data[44:], sample_rate=16000, num_channels=1))
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details
             logger.warning(f"Speech synthesis canceled: {cancellation_details.reason}")
@@ -118,7 +117,7 @@ class AzureImageGenServiceREST(ImageGenService):
         self._aiohttp_session = aiohttp_session
         self._image_size = image_size
 
-    async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
+    async def run_image_gen(self, prompt: str):
         url = f"{self._azure_endpoint}openai/images/generations:submit?api-version={self._api_version}"
 
         headers = {
@@ -144,7 +143,7 @@ class AzureImageGenServiceREST(ImageGenService):
                 attempts_left -= 1
                 if attempts_left == 0:
                     logger.error("Image generation timed out")
-                    yield ErrorFrame("Image generation timed out")
+                    await self.push_error(ErrorFrame("Image generation timed out"))
                     return
 
                 await asyncio.sleep(1)
@@ -157,7 +156,7 @@ class AzureImageGenServiceREST(ImageGenService):
             image_url = json_response["result"]["data"][0]["url"] if json_response else None
             if not image_url:
                 logger.error("Image generation failed")
-                yield ErrorFrame("Image generation failed")
+                await self.push_error(ErrorFrame("Image generation failed"))
                 return
 
             # Load the image from the url
@@ -169,4 +168,4 @@ class AzureImageGenServiceREST(ImageGenService):
                     image=image.tobytes(),
                     size=image.size,
                     format=image.format)
-                yield frame
+                await self.push_service_frame(frame)

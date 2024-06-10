@@ -9,7 +9,7 @@ import base64
 import io
 import json
 
-from typing import AsyncGenerator, List, Literal
+from typing import List, Literal
 
 from loguru import logger
 from PIL import Image
@@ -148,9 +148,9 @@ class BaseOpenAILLMService(LLMService):
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
-                await self.push_frame(LLMResponseStartFrame())
-                await self.push_frame(TextFrame(chunk.choices[0].delta.content))
-                await self.push_frame(LLMResponseEndFrame())
+                await self.push_service_frame(LLMResponseStartFrame())
+                await self.push_service_frame(TextFrame(chunk.choices[0].delta.content))
+                await self.push_service_frame(LLMResponseEndFrame())
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
@@ -221,12 +221,12 @@ class BaseOpenAILLMService(LLMService):
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
         else:
-            await self.push_frame(frame, direction)
+            await self.push_service_frame(frame, direction)
 
         if context:
-            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_service_frame(LLMFullResponseStartFrame())
             await self._process_context(context)
-            await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_service_frame(LLMFullResponseEndFrame())
 
 
 class OpenAILLMService(BaseOpenAILLMService):
@@ -251,7 +251,7 @@ class OpenAIImageGenService(ImageGenService):
         self._client = AsyncOpenAI(api_key=api_key)
         self._aiohttp_session = aiohttp_session
 
-    async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
+    async def run_image_gen(self, prompt: str):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         image = await self._client.images.generate(
@@ -265,7 +265,7 @@ class OpenAIImageGenService(ImageGenService):
 
         if not image_url:
             logger.error(f"No image provided in response: {image}")
-            yield ErrorFrame("Image generation failed")
+            await self.push_error(ErrorFrame("Image generation failed"))
             return
 
         # Load the image from the url
@@ -273,7 +273,7 @@ class OpenAIImageGenService(ImageGenService):
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
             frame = URLImageRawFrame(image_url, image.tobytes(), image.size, image.format)
-            yield frame
+            await self.push_service_frame(frame)
 
 
 class OpenAITTSService(TTSService):
@@ -304,7 +304,7 @@ class OpenAITTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str):
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
@@ -319,12 +319,12 @@ class OpenAITTSService(TTSService):
                 if r.status_code != 200:
                     error = await r.text()
                     logger.error(f"Error getting audio (status: {r.status_code}, error: {error})")
-                    yield ErrorFrame(f"Error getting audio (status: {r.status_code}, error: {error})")
+                    await self.push_error(ErrorFrame(f"Error getting audio (status: {r.status_code}, error: {error})"))
                     return
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
                         frame = AudioRawFrame(chunk, 24_000, 1)
-                        yield frame
+                        await self.push_service_frame(frame)
         except BadRequestError as e:
             logger.error(f"Error generating TTS: {e}")

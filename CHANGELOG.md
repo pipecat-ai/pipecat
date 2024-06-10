@@ -5,6 +5,18 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `AIService`s usage of`AsyncGenerator` has been removed. Now, `AIService`s have
+  a `push_service_frame()` to push frames in order. This allows services to not
+  push frames right away, for example, services that have an ongoing network
+  connection and will receive data a bit later. If services use `push_frame()`
+  directly a warning will be printed, this is to prevent common mistakes. If a
+  service really wants to push a frame right away (e.g. `CancelFrame`) the
+  service can use the `FrameProcessor.push_frame()` parent method.
+
 ## [0.0.29] - 2024-06-07
 
 ### Added

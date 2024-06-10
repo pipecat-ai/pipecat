@@ -98,7 +98,7 @@ class AnthropicLLMService(LLMService):
         return anthropic_messages
 
     async def _process_context(self, context: OpenAILLMContext):
-        await self.push_frame(LLMFullResponseStartFrame())
+        await self.push_service_frame(LLMFullResponseStartFrame())
         try:
             logger.debug(f"Generating chat: {context.get_messages_json()}")
 
@@ -117,14 +117,14 @@ class AnthropicLLMService(LLMService):
             async for event in response:
                 # logger.debug(f"Anthropic LLM event: {event}")
                 if (event.type == "content_block_delta"):
-                    await self.push_frame(LLMResponseStartFrame())
-                    await self.push_frame(TextFrame(event.delta.text))
-                    await self.push_frame(LLMResponseEndFrame())
+                    await self.push_service_frame(LLMResponseStartFrame())
+                    await self.push_service_frame(TextFrame(event.delta.text))
+                    await self.push_service_frame(LLMResponseEndFrame())
 
         except Exception as e:
             logger.error(f"Anthropic exception: {e}")
         finally:
-            await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_service_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -138,7 +138,7 @@ class AnthropicLLMService(LLMService):
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
         else:
-            await self.push_frame(frame, direction)
+            await self.push_service_frame(frame, direction)
 
         if context:
             await self._process_context(context)

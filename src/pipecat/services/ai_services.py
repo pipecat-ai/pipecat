@@ -4,18 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import io
 import wave
 
 from abc import abstractmethod
-from typing import AsyncGenerator
 
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
+    StartFrame,
+    StartInterruptionFrame,
+    SystemFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TextFrame,
@@ -25,17 +27,58 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.utils import exp_smoothing
 
+from loguru import logger
+
 
 class AIService(FrameProcessor):
     def __init__(self):
         super().__init__()
+        self._create_push_task()
 
-    async def process_generator(self, generator: AsyncGenerator[Frame, None]):
-        async for f in generator:
-            if isinstance(f, ErrorFrame):
-                await self.push_error(f)
-            else:
-                await self.push_frame(f)
+    async def start(self, frame: StartFrame):
+        pass
+
+    async def stop(self):
+        self._push_frame_task.cancel()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame):
+            await self.start(frame)
+        elif isinstance(frame, CancelFrame):
+            await self.stop()
+        elif isinstance(frame, StartInterruptionFrame):
+            self._push_frame_task.cancel()
+            self._create_push_task()
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        logger.warning(f"{self}: you should use `push_service_frame()` instead")
+        await super().push_frame(frame, direction)
+
+    async def push_service_frame(
+            self,
+            frame: Frame,
+            direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        if isinstance(frame, SystemFrame):
+            await super().push_frame(frame, direction)
+        else:
+            await self._push_queue.put((frame, direction))
+
+    def _create_push_task(self):
+        self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
+        self._push_queue = asyncio.Queue()
+
+    async def _push_frame_task_handler(self):
+        running = True
+        while running:
+            try:
+                (frame, direction) = await self._push_queue.get()
+                # We call parent method on purpose so we can show the warning above.
+                await super().push_frame(frame, direction)
+                running = not isinstance(frame, EndFrame)
+            except asyncio.CancelledError:
+                break
 
 
 class LLMService(AIService):
@@ -78,7 +121,7 @@ class TTSService(AIService):
 
     # Converts the text to audio.
     @abstractmethod
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str):
         pass
 
     async def say(self, text: str):
@@ -98,12 +141,12 @@ class TTSService(AIService):
             await self._push_tts_frames(text)
 
     async def _push_tts_frames(self, text: str):
-        await self.push_frame(TTSStartedFrame())
-        await self.process_generator(self.run_tts(text))
-        await self.push_frame(TTSStoppedFrame())
+        await self.push_service_frame(TTSStartedFrame())
+        await self.run_tts(text)
+        await self.push_service_frame(TTSStoppedFrame())
         # We send the original text after the audio. This way, if we are
         # interrupted, the text is not added to the assistant context.
-        await self.push_frame(TextFrame(text))
+        await self.push_service_frame(TextFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -113,9 +156,9 @@ class TTSService(AIService):
         elif isinstance(frame, EndFrame):
             if self._current_sentence:
                 await self._push_tts_frames(self._current_sentence)
-            await self.push_frame(frame)
+            await self.push_service_frame(frame)
         else:
-            await self.push_frame(frame, direction)
+            await self.push_service_frame(frame, direction)
 
 
 class STTService(AIService):
@@ -139,8 +182,11 @@ class STTService(AIService):
         self._smoothing_factor = 0.4
         self._prev_volume = 1 - self._smoothing_factor
 
+    async def stop(self):
+        self._wave.close()
+
     @abstractmethod
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+    async def run_stt(self, audio: bytes):
         """Returns transcript as a string"""
         pass
 
@@ -176,22 +222,19 @@ class STTService(AIService):
             self._silence_num_frames = 0
             self._wave.close()
             self._content.seek(0)
-            await self.process_generator(self.run_stt(self._content.read()))
+            await self.run_stt(self._content.read())
             (self._content, self._wave) = self._new_wave()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes a frame of audio data, either buffering or transcribing it."""
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
-            self._wave.close()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, AudioRawFrame):
+        if isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We don't really want to push audio frames down.
             await self._append_audio(frame)
         else:
-            await self.push_frame(frame, direction)
+            await self.push_service_frame(frame, direction)
 
 
 class ImageGenService(AIService):
@@ -201,17 +244,17 @@ class ImageGenService(AIService):
 
     # Renders the image. Returns an Image object.
     @abstractmethod
-    async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
+    async def run_image_gen(self, prompt: str):
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TextFrame):
-            await self.push_frame(frame, direction)
-            await self.process_generator(self.run_image_gen(frame.text))
+            await self.push_service_frame(frame, direction)
+            await self.run_image_gen(frame.text)
         else:
-            await self.push_frame(frame, direction)
+            await self.push_service_frame(frame, direction)
 
 
 class VisionService(AIService):
@@ -222,13 +265,13 @@ class VisionService(AIService):
         self._describe_text = None
 
     @abstractmethod
-    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
+    async def run_vision(self, frame: VisionImageRawFrame):
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VisionImageRawFrame):
-            await self.process_generator(self.run_vision(frame))
+            await self.run_vision(frame)
         else:
-            await self.push_frame(frame, direction)
+            await self.push_service_frame(frame, direction)

@@ -10,7 +10,7 @@ import os
 
 from PIL import Image
 from pydantic import BaseModel
-from typing import AsyncGenerator, Optional, Union, Dict
+from typing import Optional, Union, Dict
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.ai_services import ImageGenService
@@ -51,7 +51,7 @@ class FalImageGenService(ImageGenService):
         if key:
             os.environ["FAL_KEY"] = key
 
-    async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
+    async def run_image_gen(self, prompt: str):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         response = await fal_client.run_async(
@@ -63,7 +63,7 @@ class FalImageGenService(ImageGenService):
 
         if not image_url:
             logger.error("Image generation failed")
-            yield ErrorFrame("Image generation failed")
+            await self.push_error(ErrorFrame("Image generation failed"))
             return
 
         logger.debug(f"Image generated at: {image_url}")
@@ -80,4 +80,4 @@ class FalImageGenService(ImageGenService):
                 image=image.tobytes(),
                 size=image.size,
                 format=image.format)
-            yield frame
+            await self.push_service_frame(frame)

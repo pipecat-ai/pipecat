@@ -6,8 +6,6 @@
 
 from cartesia.tts import AsyncCartesiaTTS
 
-from typing import AsyncGenerator
-
 from pipecat.frames.frames import AudioRawFrame, Frame
 from pipecat.services.ai_services import TTSService
 
@@ -42,7 +40,7 @@ class CartesiaTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str):
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
@@ -58,6 +56,6 @@ class CartesiaTTSService(TTSService):
 
             async for chunk in chunk_generator:
                 await self.stop_ttfb_metrics()
-                yield AudioRawFrame(chunk["audio"], chunk["sampling_rate"], 1)
+                await self.push_service_frame(AudioRawFrame(chunk["audio"], chunk["sampling_rate"], 1))
         except Exception as e:
             logger.error(f"Cartesia exception: {e}")
