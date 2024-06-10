@@ -478,6 +478,8 @@ class DailyInputTransport(BaseInputTransport):
 
         self._client = client
 
+        self._daily_running = False
+
         self._video_renderers = {}
 
         self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
@@ -487,10 +489,13 @@ class DailyInputTransport(BaseInputTransport):
                 num_channels=self._params.audio_in_channels)
 
     async def start(self, frame: StartFrame):
-        if self._running:
-            return
         # Parent start.
         await super().start(frame)
+
+        if self._daily_running:
+            return
+        self._daily_running = True
+
         # Join the room.
         await self._client.join()
         # Create audio task. It reads audio frames from Daily and push them
@@ -500,10 +505,13 @@ class DailyInputTransport(BaseInputTransport):
                 self._executor, self._audio_in_thread_handler)
 
     async def stop(self):
-        if not self._running:
-            return
         # Parent stop. This will set _running to False.
         await super().stop()
+
+        if not self._daily_running:
+            return
+        self._daily_running = False
+
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
@@ -614,19 +622,27 @@ class DailyOutputTransport(BaseOutputTransport):
 
         self._client = client
 
+        self._daily_running = False
+
     async def start(self, frame: StartFrame):
-        if self._running:
-            return
         # Parent start.
         await super().start(frame)
+
+        if self._daily_running:
+            return
+        self._daily_running = True
+
         # Join the room.
         await self._client.join()
 
     async def stop(self):
-        if not self._running:
-            return
         # Parent stop. This will set _running to False.
         await super().stop()
+
+        if not self._daily_running:
+            return
+        self._daily_running = False
+
         # Leave the room.
         await self._client.leave()
 

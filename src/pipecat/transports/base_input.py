@@ -82,16 +82,16 @@ class BaseInputTransport(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, CancelFrame):
+        if isinstance(frame, StartFrame):
+            await self.start(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, CancelFrame):
+            await self.stop()
             # We don't queue a CancelFrame since we want to stop ASAP.
             await self.push_frame(frame, direction)
-            await self.stop()
-        elif isinstance(frame, StartFrame):
-            await self.start(frame)
-            await self._internal_push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
-            await self._internal_push_frame(frame, direction)
             await self.stop()
+            await self._internal_push_frame(frame, direction)
         else:
             await self._internal_push_frame(frame, direction)
 
@@ -100,8 +100,7 @@ class BaseInputTransport(FrameProcessor):
     #
 
     def _create_push_task(self):
-        loop = self.get_event_loop()
-        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
+        self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
         self._push_queue = asyncio.Queue()
 
     async def _internal_push_frame(

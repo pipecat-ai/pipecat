@@ -118,14 +118,14 @@ class BaseOutputTransport(FrameProcessor):
         #
         if isinstance(frame, StartFrame):
             await self.start(frame)
-            self._sink_queue.put_nowait(frame)
+            await self.push_frame(frame, direction)
         # EndFrame is managed in the queue handler.
         elif isinstance(frame, CancelFrame):
-            await self.push_frame(frame, direction)
             await self.stop()
-        elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
             await self.push_frame(frame, direction)
+        elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
             await self._handle_interruptions(frame)
+            await self.push_frame(frame, direction)
         else:
             self._sink_queue.put_nowait(frame)
 
@@ -197,8 +197,7 @@ class BaseOutputTransport(FrameProcessor):
     #
 
     def _create_push_task(self):
-        loop = self.get_event_loop()
-        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
+        self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
         self._push_queue = asyncio.Queue()
 
     async def _internal_push_frame(

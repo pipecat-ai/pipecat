@@ -57,13 +57,13 @@ class WebsocketServerInputTransport(BaseInputTransport):
         self._stop_server_event = asyncio.Event()
 
     async def start(self, frame: StartFrame):
-        self._server_task = self.get_event_loop().create_task(self._server_task_handler())
         await super().start(frame)
+        self._server_task = self.get_event_loop().create_task(self._server_task_handler())
 
     async def stop(self):
+        await super().stop()
         self._stop_server_event.set()
         await self._server_task
-        await super().stop()
 
     def read_next_audio_frame(self) -> AudioRawFrame | None:
         try:
