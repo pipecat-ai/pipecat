@@ -5,11 +5,23 @@
 #
 
 import aiohttp
+import time
 
-from typing import AsyncGenerator
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    ErrorFrame,
+    Frame,
+    InterimTranscriptionFrame,
+    StartFrame,
+    TranscriptionFrame)
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import AIService, TTSService
 
-from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame
-from pipecat.services.ai_services import TTSService
+from deepgram import (
+    DeepgramClient,
+    LiveTranscriptionEvents,
+    LiveOptions,
+)
 
 from loguru import logger
 
@@ -55,3 +67,54 @@ class DeepgramTTSService(TTSService):
                     await self.push_service_frame(frame)
         except Exception as e:
             logger.error(f"Deepgram exception: {e}")
+
+
+class DeepgramSTTService(AIService):
+    def __init__(self,
+                 api_key: str,
+                 live_options: LiveOptions = LiveOptions(
+                     encoding="linear16",
+                     language="en-US",
+                     model="nova-2-conversationalai",
+                     sample_rate=16000,
+                     channels=1,
+                     interim_results=True,
+                     smart_format=True,
+                 ),
+                 **kwargs):
+        super().__init__(**kwargs)
+
+        self._live_options = live_options
+
+        self._client = DeepgramClient(api_key)
+        self._connection = self._client.listen.asynclive.v("1")
+        self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+
+        if not await self._connection.start(self._live_options):
+            logger.error("Unable to connect to Deepgram")
+
+    async def stop(self):
+        await super().stop()
+        await self._connection.finish()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Processes a frame of audio data, either buffering or transcribing it."""
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, AudioRawFrame):
+            await self._connection.send(frame.audio)
+        else:
+            await self.push_service_frame(frame, direction)
+
+    async def _on_message(self, *args, **kwargs):
+        result = kwargs["result"]
+        is_final = result.is_final
+        transcript = result.channel.alternatives[0].transcript
+        if len(transcript) > 0:
+            if is_final:
+                await self.push_service_frame(TranscriptionFrame(transcript, "", int(time.time_ns() / 1000000)))
+            else:
+                await self.push_service_frame(InterimTranscriptionFrame(transcript, "", int(time.time_ns() / 1000000)))
