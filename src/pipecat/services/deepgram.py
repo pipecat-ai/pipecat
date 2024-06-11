@@ -101,30 +101,27 @@ class DeepgramSTTService(AIService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            await self._start()
-            await self.push_frame(frame)
-        elif isinstance(frame, CancelFrame):
-            await self._stop()
-            self._push_frame_task.cancel()
-            await self.push_frame(frame)
-        elif isinstance(frame, SystemFrame):
-            await self.push_frame(frame)
-        elif isinstance(frame, EndFrame):
-            await self._stop()
-            await self._push_queue.put((frame, direction))
-            await self._push_frame_task
+        if isinstance(frame, SystemFrame):
+            await self.push_frame(frame, direction)
         elif isinstance(frame, AudioRawFrame):
             await self._connection.send(frame.audio)
         else:
             await self._push_queue.put((frame, direction))
 
-    async def _start(self):
-        if not await self._connection.start(self._live_options):
-            logger.error("Unable to connect to Deepgram")
+    async def start(self, frame: StartFrame):
+        if await self._connection.start(self._live_options):
+            logger.debug(f"{self}: Connected to Deepgram")
+        else:
+            logger.error(f"{self}: Unable to connect to Deepgram")
 
-    async def _stop(self):
+    async def stop(self, frame: EndFrame):
         await self._connection.finish()
+        await self._push_queue.put((frame, FrameDirection.DOWNSTREAM))
+        await self._push_frame_task
+
+    async def cancel(self, frame: CancelFrame):
+        await self._connection.finish()
+        self._push_frame_task.cancel()
 
     def _create_push_task(self):
         self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
