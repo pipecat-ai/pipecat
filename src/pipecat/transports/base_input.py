@@ -83,9 +83,9 @@ class BaseInputTransport(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, CancelFrame):
+            await self.stop()
             # We don't queue a CancelFrame since we want to stop ASAP.
             await self.push_frame(frame, direction)
-            await self.stop()
         elif isinstance(frame, StartFrame):
             await self.start(frame)
             await self._internal_push_frame(frame, direction)
