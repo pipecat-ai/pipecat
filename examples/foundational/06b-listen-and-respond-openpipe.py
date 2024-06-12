@@ -36,7 +36,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def main(room_url: str, token):
-    
+
     timestamp = int(time.time())
 
     async with aiohttp.ClientSession() as session:
