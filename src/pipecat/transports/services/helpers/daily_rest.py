@@ -25,7 +25,7 @@ class DailyRoomSipParams(BaseModel):
     num_endpoints: int = 1
 
 
-class DailyRoomProperties(BaseModel):
+class DailyRoomProperties(BaseModel, extra="allow"):
     exp: float = time() + 5 * 60
     enable_chat: bool = False
     enable_emoji_reactions: bool = False
