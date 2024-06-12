@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     ImageRawFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
+    SystemFrame,
     TransportMessageFrame)
 from pipecat.transports.base_transport import TransportParams
 
@@ -53,6 +54,7 @@ class BaseOutputTransport(FrameProcessor):
         if self._params.camera_out_enabled:
             self._camera_out_queue = queue.Queue()
         self._sink_queue = queue.Queue()
+        self._sink_thread = None
 
         self._stopped_event = asyncio.Event()
         self._is_interrupted = threading.Event()
@@ -106,7 +108,8 @@ class BaseOutputTransport(FrameProcessor):
         if self._params.camera_out_enabled:
             await self._camera_out_thread
 
-        await self._sink_thread
+        if self._sink_thread:
+            await self._sink_thread
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -121,11 +124,13 @@ class BaseOutputTransport(FrameProcessor):
             self._sink_queue.put_nowait(frame)
         # EndFrame is managed in the queue handler.
         elif isinstance(frame, CancelFrame):
-            await self.push_frame(frame, direction)
             await self.stop()
-        elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
             await self.push_frame(frame, direction)
+        elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
             await self._handle_interruptions(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, SystemFrame):
+            await self.push_frame(frame, direction)
         else:
             self._sink_queue.put_nowait(frame)
 
