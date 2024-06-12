@@ -26,11 +26,21 @@ from pipecat.frames.frames import (
 
 class BaseOpenPipeLLMService(LLMService):
 
-    def __init__(self, model: str, c_id=None, api_key=None, openpipe_api_key=None, openpipe_base_url=None, prompt=None):
+    def __init__(
+            self,
+            model: str,
+            c_id=None,
+            api_key=None,
+            openpipe_api_key=None,
+            openpipe_base_url=None,
+            prompt=None):
         super().__init__()
         self._model = model
-        self._client = self.create_client(api_key=api_key, openpipe_api_key=openpipe_api_key, openpipe_base_url=openpipe_base_url)
-        self.c_id=c_id if c_id else secrets.token_urlsafe(16)
+        self._client = self.create_client(
+            api_key=api_key,
+            openpipe_api_key=openpipe_api_key,
+            openpipe_base_url=openpipe_base_url)
+        self.c_id = c_id if c_id else secrets.token_urlsafe(16)
         self.prompt = prompt
         logger.debug(f"Client Created: {self._client}")
 
@@ -46,41 +56,41 @@ class BaseOpenPipeLLMService(LLMService):
         return client
 
     async def _stream_chat_completions(self, context):
-            logger.debug(f"Generating chat: {context.get_messages_json()}")
+        logger.debug(f"Generating chat: {context.get_messages_json()}")
 
-            messages: List[ChatCompletionMessageParam] = context.get_messages()
+        messages: List[ChatCompletionMessageParam] = context.get_messages()
 
-            # base64 encode any images
-            for message in messages:
-                if message.get("mime_type") == "image/jpeg":
-                    encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
-                    text = message["content"]
-                    message["content"] = [
-                        {"type": "text", "text": text},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}}
-                    ]
-                    del message["data"]
-                    del message["mime_type"]
+        # base64 encode any images
+        for message in messages:
+            if message.get("mime_type") == "image/jpeg":
+                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
+                text = message["content"]
+                message["content"] = [
+                    {"type": "text", "text": text},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}}
+                ]
+                del message["data"]
+                del message["mime_type"]
 
-            start_time = time.time()
-            # Stream chat completions using the OpenPipe client
-            chunks = (
-                await self._client.chat.completions.create(
-                    model=self._model,
-                    stream=True,
-                    messages=messages,
-                    openpipe={
-                        "tags": {"conversation_id": self.c_id,
-                                 "prompt":self.prompt},
-                        "log_request": True
-                    }
-                )
+        start_time = time.time()
+        # Stream chat completions using the OpenPipe client
+        chunks = (
+            await self._client.chat.completions.create(
+                model=self._model,
+                stream=True,
+                messages=messages,
+                openpipe={
+                    "tags": {"conversation_id": self.c_id,
+                             "prompt": self.prompt},
+                    "log_request": True
+                }
             )
+        )
 
-            logger.debug(f"OpenPipe LLM TTFB: {time.time() - start_time}")
+        logger.debug(f"OpenPipe LLM TTFB: {time.time() - start_time}")
 
-            return chunks
-        
+        return chunks
+
     async def _process_context(self, context):
         function_name = ""
         arguments = ""
@@ -141,6 +151,7 @@ class BaseOpenPipeLLMService(LLMService):
 
         if context:
             await self._process_context(context)
+
 
 class OpenPipeLLMService(BaseOpenPipeLLMService):
 
