@@ -37,8 +37,8 @@ from loguru import logger
 
 class BaseOutputTransport(FrameProcessor):
 
-    def __init__(self, params: TransportParams):
-        super().__init__()
+    def __init__(self, params: TransportParams, **kwargs):
+        super().__init__(**kwargs)
 
         self._params = params
 

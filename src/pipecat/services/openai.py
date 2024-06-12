@@ -41,7 +41,6 @@ from pipecat.services.ai_services import (
 try:
     from openai import AsyncOpenAI, AsyncStream, BadRequestError
     from openai.types.chat import (
-        ChatCompletion,
         ChatCompletionChunk,
         ChatCompletionFunctionMessageParam,
         ChatCompletionMessageParam,
@@ -68,8 +67,8 @@ class BaseOpenAILLMService(LLMService):
     calls from the LLM.
     """
 
-    def __init__(self, model: str, api_key=None, base_url=None):
-        super().__init__()
+    def __init__(self, model: str, api_key=None, base_url=None, **kwargs):
+        super().__init__(**kwargs)
         self._model: str = model
         self._client = self.create_client(api_key=api_key, base_url=base_url)
 
