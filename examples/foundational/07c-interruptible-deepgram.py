@@ -48,13 +48,14 @@ async def main(room_url: str, token):
         tts = DeepgramTTSService(
             aiohttp_session=session,
             api_key=os.getenv("DEEPGRAM_API_KEY"),
-            # voice="aura-helios-en"
-            base_url="https://api.deepgram.com/v1/speak"
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+            # api_key=os.getenv("OPENAI_API_KEY"),
+            # model="gpt-4o"
+            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            base_url="http://0.0.0.0:8000/v1"
+        )
 
         messages = [
             {
