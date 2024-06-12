@@ -10,7 +10,8 @@ from typing import AsyncIterable, Iterable
 
 from pydantic import BaseModel
 
-from pipecat.frames.frames import CancelFrame, EndFrame, ErrorFrame, Frame, StartFrame, StopTaskFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, ErrorFrame, Frame, MetricsFrame, StartFrame, StopTaskFrame
+from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -40,7 +41,7 @@ class Source(FrameProcessor):
 
 class PipelineTask:
 
-    def __init__(self, pipeline: FrameProcessor, params: PipelineParams = PipelineParams()):
+    def __init__(self, pipeline: BasePipeline, params: PipelineParams = PipelineParams()):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
 
@@ -89,12 +90,18 @@ class PipelineTask:
         else:
             raise Exception("Frames must be an iterable or async iterable")
 
+    def _initial_metrics_frame(self) -> MetricsFrame:
+        processors = self._pipeline.processors_with_metrics()
+        ttfb = dict(zip([p.name for p in processors], [0] * len(processors)))
+        return MetricsFrame(ttfb=ttfb)
+
     async def _process_down_queue(self):
         start_frame = StartFrame(
             allow_interruptions=self._params.allow_interruptions,
             enable_metrics=self._params.enable_metrics,
         )
         await self._source.process_frame(start_frame, FrameDirection.DOWNSTREAM)
+        await self._source.process_frame(self._initial_metrics_frame(), FrameDirection.DOWNSTREAM)
 
         running = True
         should_cleanup = True

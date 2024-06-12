@@ -4,11 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from itertools import chain
-
 from typing import Callable, Coroutine, List
 
-from pipecat.frames.frames import Frame, MetricsFrame, StartFrame
+from pipecat.frames.frames import Frame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -81,9 +79,6 @@ class Pipeline(BasePipeline):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame) and self.metrics_enabled:
-            await self._send_initial_metrics()
-
         if direction == FrameDirection.DOWNSTREAM:
             await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
         elif direction == FrameDirection.UPSTREAM:
@@ -98,9 +93,3 @@ class Pipeline(BasePipeline):
         for curr in self._processors[1:]:
             prev.link(curr)
             prev = curr
-
-    async def _send_initial_metrics(self):
-        processors = self.processors_with_metrics()
-        ttfb = dict(zip([p.name for p in processors], [0] * len(processors)))
-        frame = MetricsFrame(ttfb=ttfb)
-        await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
