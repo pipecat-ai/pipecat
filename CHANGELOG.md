@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new `Service`. This service will let you run OpenAI through 
+  OpenPipe's SDK.
+
+### Changed
+
+- `OpenPipe` can now be used. Can call OpenAI through OpenPipe SDK to get 
+  LLM logging stored in OpenPipe.
+
+### Fixed
+
+- None
+
+### Other
+
+- Added new `openpipe` example. This example shows how to use OpenPipe to run
+  OpenAI LLMs and get the logs stored in OpenPipe.
+
+## [0.0.29] - 2024-06-12
+
+### Added
+
 - Allow specifying frame processors' name through a new `name` constructor
   argument.
 
