@@ -15,7 +15,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.services.deepgram import DeepgramTTSService
+from pipecat.services.deepgram import DeepgramSTTService, DeepgramTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
@@ -39,23 +39,23 @@ async def main(room_url: str, token):
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
-                transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
+                vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True
             )
         )
+
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = DeepgramTTSService(
             aiohttp_session=session,
             api_key=os.getenv("DEEPGRAM_API_KEY"),
+            voice="aura-helios-en"
         )
 
         llm = OpenAILLMService(
-            # api_key=os.getenv("OPENAI_API_KEY"),
-            # model="gpt-4o"
-            model="meta-llama/Meta-Llama-3-8B-Instruct",
-            base_url="http://0.0.0.0:8000/v1"
-        )
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="gpt-4o")
 
         messages = [
             {
@@ -69,6 +69,7 @@ async def main(room_url: str, token):
 
         pipeline = Pipeline([
             transport.input(),   # Transport user input
+            stt,                 # STT
             tma_in,              # User responses
             llm,                 # LLM
             tts,                 # TTS
@@ -76,7 +77,7 @@ async def main(room_url: str, token):
             tma_out              # Assistant spoken responses
         ])
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
