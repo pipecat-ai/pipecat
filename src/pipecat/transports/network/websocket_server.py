@@ -42,8 +42,9 @@ class WebsocketServerInputTransport(BaseInputTransport):
             host: str,
             port: int,
             params: WebsocketServerParams,
-            callbacks: WebsocketServerCallbacks):
-        super().__init__(params)
+            callbacks: WebsocketServerCallbacks,
+            **kwargs):
+        super().__init__(params, **kwargs)
 
         self._host = host
         self._port = port
@@ -98,8 +99,8 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
 class WebsocketServerOutputTransport(BaseOutputTransport):
 
-    def __init__(self, params: WebsocketServerParams):
-        super().__init__(params)
+    def __init__(self, params: WebsocketServerParams, **kwargs):
+        super().__init__(params, **kwargs)
 
         self._params = params
 
@@ -153,8 +154,10 @@ class WebsocketServerTransport(BaseTransport):
             host: str = "localhost",
             port: int = 8765,
             params: WebsocketServerParams = WebsocketServerParams(),
+            input_name: str | None = None,
+            output_name: str | None = None,
             loop: asyncio.AbstractEventLoop | None = None):
-        super().__init__(loop)
+        super().__init__(input_name=input_name, output_name=output_name, loop=loop)
         self._host = host
         self._port = port
         self._params = params
@@ -175,12 +178,12 @@ class WebsocketServerTransport(BaseTransport):
     def input(self) -> FrameProcessor:
         if not self._input:
             self._input = WebsocketServerInputTransport(
-                self._host, self._port, self._params, self._callbacks)
+                self._host, self._port, self._params, self._callbacks, name=self._input_name)
         return self._input
 
     def output(self) -> FrameProcessor:
         if not self._output:
-            self._output = WebsocketServerOutputTransport(self._params)
+            self._output = WebsocketServerOutputTransport(self._params, name=self._output_name)
         return self._output
 
     async def _on_client_connected(self, websocket):

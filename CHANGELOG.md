@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Allow specifying frame processors' name through a new `name` constructor
+  argument.
+
 ### Changed
 
 - `daily_rest.DailyRoomProperties` now allows extra unknown parameters.
