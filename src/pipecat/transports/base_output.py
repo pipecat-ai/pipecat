@@ -59,6 +59,12 @@ class BaseOutputTransport(FrameProcessor):
         self._stopped_event = asyncio.Event()
         self._is_interrupted = threading.Event()
 
+        # We will send 10ms audio which is the smallest possible amount of audio
+        # we can send. If we receive long audio frames we will chunk them into
+        # 10ms. This will help with interruption handling.
+        self._audio_chunk_size = int(self._params.audio_out_sample_rate / 100) * \
+            self._params.audio_out_channels * 2
+
         # Create push frame task. This is the task that will push frames in
         # order. We also guarantee that all frames are pushed in the same task.
         self._create_push_task()
@@ -121,7 +127,7 @@ class BaseOutputTransport(FrameProcessor):
         #
         if isinstance(frame, StartFrame):
             await self.start(frame)
-            self._sink_queue.put_nowait(frame)
+            await self.push_frame(frame, direction)
         # EndFrame is managed in the queue handler.
         elif isinstance(frame, CancelFrame):
             await self.stop()
@@ -131,6 +137,8 @@ class BaseOutputTransport(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
+        elif isinstance(frame, AudioRawFrame):
+            await self._handle_audio(frame)
         else:
             self._sink_queue.put_nowait(frame)
 
@@ -151,24 +159,23 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, StopInterruptionFrame):
             self._is_interrupted.clear()
 
+    async def _handle_audio(self, frame: AudioRawFrame):
+        audio = frame.audio
+        for i in range(0, len(audio), self._audio_chunk_size):
+            chunk = AudioRawFrame(audio[i: i + self._audio_chunk_size],
+                                  sample_rate=frame.sample_rate, num_channels=frame.num_channels)
+            self._sink_queue.put_nowait(chunk)
+
     def _sink_thread_handler(self):
-        # 10ms bytes
-        bytes_size_10ms = int(self._params.audio_out_sample_rate / 100) * \
-            self._params.audio_out_channels * 2
-
-        # We will send at least 100ms bytes.
-        smallest_write_size = bytes_size_10ms * 10
-
         # Audio accumlation buffer
         buffer = bytearray()
         while self._running:
             try:
                 frame = self._sink_queue.get(timeout=1)
                 if not self._is_interrupted.is_set():
-                    if isinstance(frame, AudioRawFrame):
-                        if self._params.audio_out_enabled:
-                            buffer.extend(frame.audio)
-                            buffer = self._send_audio_truncated(buffer, smallest_write_size)
+                    if isinstance(frame, AudioRawFrame) and self._params.audio_out_enabled:
+                        buffer.extend(frame.audio)
+                        buffer = self._maybe_send_audio(buffer)
                     elif isinstance(frame, ImageRawFrame) and self._params.camera_out_enabled:
                         self._set_camera_image(frame)
                     elif isinstance(frame, SpriteFrame) and self._params.camera_out_enabled:
@@ -186,8 +193,6 @@ class BaseOutputTransport(FrameProcessor):
                     buffer = bytearray()
 
                 if isinstance(frame, EndFrame):
-                    # Send all remaining audio before stopping (multiple of 10ms of audio).
-                    self._send_audio_truncated(buffer, bytes_size_10ms)
                     future = asyncio.run_coroutine_threadsafe(self.stop(), self.get_event_loop())
                     future.result()
 
@@ -273,12 +278,11 @@ class BaseOutputTransport(FrameProcessor):
     async def send_audio(self, frame: AudioRawFrame):
         await self.process_frame(frame, FrameDirection.DOWNSTREAM)
 
-    def _send_audio_truncated(self, buffer: bytearray, smallest_write_size: int) -> bytearray:
+    def _maybe_send_audio(self, buffer: bytearray) -> bytearray:
         try:
-            truncated_length: int = len(buffer) - (len(buffer) % smallest_write_size)
-            if truncated_length:
-                self.write_raw_audio_frames(bytes(buffer[:truncated_length]))
-                buffer = buffer[truncated_length:]
+            if len(buffer) >= self._audio_chunk_size:
+                self.write_raw_audio_frames(bytes(buffer[:self._audio_chunk_size]))
+                buffer = buffer[self._audio_chunk_size:]
             return buffer
         except BaseException as e:
             logger.error(f"Error writing audio frames: {e}")
