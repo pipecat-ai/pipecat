@@ -7,7 +7,6 @@
 
 import asyncio
 import io
-import queue
 import wave
 import websockets
 
@@ -53,7 +52,6 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
         self._websocket: websockets.WebSocketServerProtocol | None = None
 
-        self._client_audio_queue = queue.Queue()
         self._stop_server_event = asyncio.Event()
 
     async def start(self, frame: StartFrame):
@@ -64,12 +62,6 @@ class WebsocketServerInputTransport(BaseInputTransport):
         self._stop_server_event.set()
         await self._server_task
         await super().stop()
-
-    def read_next_audio_frame(self) -> AudioRawFrame | None:
-        try:
-            return self._client_audio_queue.get(timeout=1)
-        except queue.Empty:
-            return None
 
     async def _server_task_handler(self):
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
@@ -90,8 +82,8 @@ class WebsocketServerInputTransport(BaseInputTransport):
         # Handle incoming messages
         async for message in websocket:
             frame = self._params.serializer.deserialize(message)
-            if isinstance(frame, AudioRawFrame) and self._params.audio_in_enabled:
-                self._client_audio_queue.put_nowait(frame)
+            if isinstance(frame, AudioRawFrame):
+                self.push_audio_frame(frame)
             else:
                 await self._internal_push_frame(frame)
 

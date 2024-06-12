@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a couple of issues with `WebsocketServerTransport`. It needed to use
+  `push_audio_frame()` and also VAD was not working properly.
+
 - Fixed an issue that would cause LLM aggregator to fail with small
   `VADParams.stop_secs` values.
 
