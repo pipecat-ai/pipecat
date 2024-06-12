@@ -8,6 +8,7 @@ import asyncio
 import aiohttp
 import os
 import sys
+import json
 
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -15,9 +16,9 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.deepgram import DeepgramTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyTransportMessageFrame
 from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
@@ -45,15 +46,21 @@ async def main(room_url: str, token):
             )
         )
 
-        tts = ElevenLabsTTSService(
+        tts = DeepgramTTSService(
             aiohttp_session=session,
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+            api_key=os.getenv("DEEPGRAM_API_KEY"),
+            voice="aura-asteria-en",
+            base_url="http://0.0.0.0:8080/v1/speak"
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+            # To use OpenAI
+            # api_key=os.getenv("OPENAI_API_KEY"),
+            # model="gpt-4o"
+            # Or, to use a local vLLM (or similar) api server
+            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            base_url="http://0.0.0.0:8000/v1"
+        )
 
         messages = [
             {
@@ -74,21 +81,47 @@ async def main(room_url: str, token):
             tma_out              # Assistant spoken responses
         ])
 
-        task = PipelineTask(pipeline, PipelineParams(
-            allow_interruptions=True,
-            enable_metrics=True
-        ))
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
 
+        # When a participant joins, start transcription for that participant so the
+        # bot can "hear" and respond to them.
+        @transport.event_handler("on_participant_joined")
+        async def on_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
+
+        # When the first participant joins, the bot should introduce itself.
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
-            # Kick off the conversation.
             messages.append(
                 {"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])
 
-        runner = PipelineRunner()
+        # Handle "latency-ping" messages. The client will send app messages that look like
+        # this:
+        #   { "latency-ping": { ts: <client-side timestamp> }}
+        #
+        # We want to send an immediate pong back to the client from this handler function.
+        # Also, we will push a frame into the top of the pipeline and send it after the
+        #
+        @transport.event_handler("on_app_message")
+        async def on_app_message(transport, message, sender):
+            try:
+                if "latency-ping" in message:
+                    logger.debug(f"Received latency ping app message: {message}")
+                    ts = message["latency-ping"]["ts"]
+                    # Send immediately
+                    transport.output().send_message(DailyTransportMessageFrame(
+                        message={"latency-pong-msg-handler": {"ts": ts}},
+                        participant_id=sender))
+                    # And push to the pipeline for the Daily transport.output to send
+                    await tma_in.push_frame(
+                        DailyTransportMessageFrame(
+                            message={"latency-pong-pipeline-delivery": {"ts": ts}},
+                            participant_id=sender))
+            except Exception as e:
+                logger.debug(f"message handling error: {e} - {message}")
 
+        runner = PipelineRunner()
         await runner.run(task)
 
 
