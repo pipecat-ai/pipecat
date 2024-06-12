@@ -43,7 +43,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str):
             token,
             "Chatbot",
             DailyParams(
-                api_url=f"https://{daily_api_url}",
+                api_url=daily_api_url,
                 api_key=daily_api_key,
                 dialin_settings=diallin_settings,
                 audio_in_enabled=True,
