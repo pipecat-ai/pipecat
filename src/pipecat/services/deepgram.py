@@ -25,6 +25,7 @@ from pipecat.services.ai_services import AIService, TTSService
 
 from deepgram import (
     DeepgramClient,
+    DeepgramClientOptions,
     LiveTranscriptionEvents,
     LiveOptions,
 )
@@ -92,7 +93,8 @@ class DeepgramSTTService(AIService):
 
         self._live_options = live_options
 
-        self._client = DeepgramClient(api_key)
+        self._client = DeepgramClient(
+            api_key, config=DeepgramClientOptions(options={"keepalive": "true"}))
         self._connection = self._client.listen.asynclive.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
 
