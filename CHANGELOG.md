@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `FrameSerializer.deserialize()` can now return `None` in case it is not
+  possible to desearialize the given data.
+
 - `daily_rest.DailyRoomProperties` now allows extra unknown parameters.
 
 - Added `DeepgramSTTService`. This service has an ongoing websocket

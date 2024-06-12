@@ -82,6 +82,10 @@ class WebsocketServerInputTransport(BaseInputTransport):
         # Handle incoming messages
         async for message in websocket:
             frame = self._params.serializer.deserialize(message)
+
+            if not frame:
+                continue
+
             if isinstance(frame, AudioRawFrame):
                 self.push_audio_frame(frame)
             else:

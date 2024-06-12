@@ -16,5 +16,5 @@ class FrameSerializer(ABC):
         pass
 
     @abstractmethod
-    def deserialize(self, data: bytes) -> Frame:
+    def deserialize(self, data: bytes) -> Frame | None:
         pass
