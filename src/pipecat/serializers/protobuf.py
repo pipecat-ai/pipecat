@@ -11,6 +11,8 @@ import pipecat.frames.protobufs.frames_pb2 as frame_protos
 from pipecat.frames.frames import AudioRawFrame, Frame, TextFrame, TranscriptionFrame
 from pipecat.serializers.base_serializer import FrameSerializer
 
+from loguru import logger
+
 
 class ProtobufFrameSerializer(FrameSerializer):
     SERIALIZABLE_TYPES = {
@@ -39,7 +41,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         result = proto_frame.SerializeToString()
         return result
 
-    def deserialize(self, data: bytes) -> Frame:
+    def deserialize(self, data: bytes) -> Frame | None:
         """Returns a Frame object from a Frame protobuf. Used to convert frames
         passed over the wire as protobufs to Frame objects used in pipelines
         and frame processors.
@@ -61,8 +63,8 @@ class ProtobufFrameSerializer(FrameSerializer):
         proto = frame_protos.Frame.FromString(data)
         which = proto.WhichOneof("frame")
         if which not in self.SERIALIZABLE_FIELDS:
-            raise ValueError(
-                "Proto does not contain a valid frame. You may need to add a new case to ProtobufFrameSerializer.deserialize.")
+            logger.error("Unable to deserialize a valid frame")
+            return None
 
         class_name = self.SERIALIZABLE_FIELDS[which]
         args = getattr(proto, which)
