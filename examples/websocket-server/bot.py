@@ -12,14 +12,14 @@ import sys
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator
 )
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.whisper import WhisperSTTService
 from pipecat.transports.network.websocket_server import WebsocketServerParams, WebsocketServerTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -36,7 +36,6 @@ async def main():
     async with aiohttp.ClientSession() as session:
         transport = WebsocketServerTransport(
             params=WebsocketServerParams(
-                audio_in_enabled=True,
                 audio_out_enabled=True,
                 add_wav_header=True,
                 vad_enabled=True,
@@ -49,7 +48,7 @@ async def main():
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o")
 
-        stt = WhisperSTTService()
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
