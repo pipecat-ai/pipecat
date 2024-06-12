@@ -70,7 +70,8 @@ class BaseInputTransport(FrameProcessor):
         return self._params.vad_analyzer
 
     def push_audio_frame(self, frame: AudioRawFrame):
-        self._audio_in_queue.put_nowait(frame)
+        if self._params.audio_in_enabled or self._params.vad_enabled:
+            self._audio_in_queue.put_nowait(frame)
 
     #
     # Frame processor
