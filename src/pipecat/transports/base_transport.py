@@ -41,7 +41,12 @@ class TransportParams(BaseModel):
 
 class BaseTransport(ABC):
 
-    def __init__(self, loop: asyncio.AbstractEventLoop | None):
+    def __init__(self,
+                 input_name: str | None = None,
+                 output_name: str | None = None,
+                 loop: asyncio.AbstractEventLoop | None = None):
+        self._input_name = input_name
+        self._output_name = output_name
         self._loop = loop or asyncio.get_running_loop()
         self._event_handlers: dict = {}
 

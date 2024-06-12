@@ -473,8 +473,8 @@ class DailyTransportClient(EventHandler):
 
 class DailyInputTransport(BaseInputTransport):
 
-    def __init__(self, client: DailyTransportClient, params: DailyParams):
-        super().__init__(params)
+    def __init__(self, client: DailyTransportClient, params: DailyParams, **kwargs):
+        super().__init__(params, **kwargs)
 
         self._client = client
 
@@ -609,8 +609,8 @@ class DailyInputTransport(BaseInputTransport):
 
 class DailyOutputTransport(BaseOutputTransport):
 
-    def __init__(self, client: DailyTransportClient, params: DailyParams):
-        super().__init__(params)
+    def __init__(self, client: DailyTransportClient, params: DailyParams, **kwargs):
+        super().__init__(params, **kwargs)
 
         self._client = client
 
@@ -662,8 +662,10 @@ class DailyTransport(BaseTransport):
             token: str | None,
             bot_name: str,
             params: DailyParams,
+            input_name: str | None = None,
+            output_name: str | None = None,
             loop: asyncio.AbstractEventLoop | None = None):
-        super().__init__(loop)
+        super().__init__(input_name=input_name, output_name=output_name, loop=loop)
 
         callbacks = DailyCallbacks(
             on_joined=self._on_joined,
@@ -708,12 +710,12 @@ class DailyTransport(BaseTransport):
 
     def input(self) -> FrameProcessor:
         if not self._input:
-            self._input = DailyInputTransport(self._client, self._params)
+            self._input = DailyInputTransport(self._client, self._params, name=self._input_name)
         return self._input
 
     def output(self) -> FrameProcessor:
         if not self._output:
-            self._output = DailyOutputTransport(self._client, self._params)
+            self._output = DailyOutputTransport(self._client, self._params, name=self._output_name)
         return self._output
 
     #

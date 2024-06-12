@@ -37,8 +37,8 @@ from loguru import logger
 
 class BaseOutputTransport(FrameProcessor):
 
-    def __init__(self, params: TransportParams):
-        super().__init__()
+    def __init__(self, params: TransportParams, **kwargs):
+        super().__init__(**kwargs)
 
         self._params = params
 
@@ -135,6 +135,9 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
             await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, MetricsFrame):
+            self.send_metrics(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         elif isinstance(frame, AudioRawFrame):
@@ -182,8 +185,6 @@ class BaseOutputTransport(FrameProcessor):
                         self._set_camera_images(frame.images)
                     elif isinstance(frame, TransportMessageFrame):
                         self.send_message(frame)
-                    elif isinstance(frame, MetricsFrame):
-                        self.send_metrics(frame)
                     else:
                         future = asyncio.run_coroutine_threadsafe(
                             self._internal_push_frame(frame), self.get_event_loop())

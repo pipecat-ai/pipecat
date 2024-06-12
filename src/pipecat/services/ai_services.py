@@ -28,8 +28,8 @@ from pipecat.utils.utils import exp_smoothing
 
 
 class AIService(FrameProcessor):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     async def start(self, frame: StartFrame):
         pass
@@ -61,8 +61,8 @@ class AIService(FrameProcessor):
 class LLMService(AIService):
     """This class is a no-op but serves as a base class for LLM services."""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self._callbacks = {}
         self._start_callbacks = {}
 
@@ -91,8 +91,8 @@ class LLMService(AIService):
 
 
 class TTSService(AIService):
-    def __init__(self, aggregate_sentences: bool = True):
-        super().__init__()
+    def __init__(self, aggregate_sentences: bool = True, **kwargs):
+        super().__init__(**kwargs)
         self._aggregate_sentences: bool = aggregate_sentences
         self._current_sentence: str = ""
 
@@ -146,8 +146,9 @@ class STTService(AIService):
                  max_silence_secs: float = 0.3,
                  max_buffer_secs: float = 1.5,
                  sample_rate: int = 16000,
-                 num_channels: int = 1):
-        super().__init__()
+                 num_channels: int = 1,
+                 **kwargs):
+        super().__init__(**kwargs)
         self._min_volume = min_volume
         self._max_silence_secs = max_silence_secs
         self._max_buffer_secs = max_buffer_secs
@@ -216,8 +217,8 @@ class STTService(AIService):
 
 class ImageGenService(AIService):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     # Renders the image. Returns an Image object.
     @abstractmethod
@@ -237,8 +238,8 @@ class ImageGenService(AIService):
 class VisionService(AIService):
     """VisionService is a base class for vision services."""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self._describe_text = None
 
     @abstractmethod
