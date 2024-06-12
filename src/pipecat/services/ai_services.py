@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    StartFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TextFrame,
@@ -29,6 +30,25 @@ from pipecat.utils.utils import exp_smoothing
 class AIService(FrameProcessor):
     def __init__(self):
         super().__init__()
+
+    async def start(self, frame: StartFrame):
+        pass
+
+    async def stop(self, frame: EndFrame):
+        pass
+
+    async def cancel(self, frame: CancelFrame):
+        pass
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame):
+            await self.start(frame)
+        elif isinstance(frame, CancelFrame):
+            await self.cancel(frame)
+        elif isinstance(frame, EndFrame):
+            await self.stop(frame)
 
     async def process_generator(self, generator: AsyncGenerator[Frame, None]):
         async for f in generator:
