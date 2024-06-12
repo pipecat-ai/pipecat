@@ -22,9 +22,9 @@ class FrameDirection(Enum):
 
 class FrameProcessor:
 
-    def __init__(self, loop: asyncio.AbstractEventLoop | None = None):
+    def __init__(self, name: str | None = None, loop: asyncio.AbstractEventLoop | None = None):
         self.id: int = obj_id()
-        self.name = f"{self.__class__.__name__}#{obj_count(self)}"
+        self.name = name or f"{self.__class__.__name__}#{obj_count(self)}"
         self._prev: "FrameProcessor" | None = None
         self._next: "FrameProcessor" | None = None
         self._loop: asyncio.AbstractEventLoop = loop or asyncio.get_running_loop()
