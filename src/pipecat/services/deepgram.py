@@ -46,9 +46,17 @@ class DeepgramTTSService(TTSService):
             await self.start_ttfb_metrics()
             async with self._aiohttp_session.post(request_url, headers=headers, json=body) as r:
                 if r.status != 200:
-                    text = await r.text()
-                    logger.error(f"Error getting audio (status: {r.status}, error: {text})")
-                    yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
+                    response_text = await r.text()
+                    # If we get a a "Bad Request: Input is unutterable", just print out a debug log.
+                    # All other unsuccesful requests should emit an error frame. If not specifically
+                    # handled by the running PipelineTask, the ErrorFrame will cancel the task.
+                    if "unutterable" in response_text:
+                        logger.debug(f"Unutterable text: [{text}]")
+                        return
+
+                    logger.error(
+                        f"Error getting audio (status: {r.status}, error: {response_text})")
+                    yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {response_text})")
                     return
 
                 async for data in r.content:
