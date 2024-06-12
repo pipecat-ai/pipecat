@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `daily_rest.DailyRoomProperties` now allows extra unknown parameters.
+
 - Added `DeepgramSTTService`. This service has an ongoing websocket
   connection. To handle this, it subclasses `AIService` instead of
   `STTService`. The output of this service will be pushed from the same task,
