@@ -9,7 +9,7 @@ import base64
 import io
 import json
 
-from typing import AsyncGenerator, List, Literal
+from typing import Any, AsyncGenerator, List, Literal
 
 from loguru import logger
 from PIL import Image
@@ -70,17 +70,29 @@ class BaseOpenAILLMService(LLMService):
     def __init__(self, model: str, api_key=None, base_url=None, **kwargs):
         super().__init__(**kwargs)
         self._model: str = model
-        self._client = self.create_client(api_key=api_key, base_url=base_url)
+        self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
 
-    def create_client(self, api_key=None, base_url=None):
+    def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     def can_generate_metrics(self) -> bool:
         return True
 
+    async def get_chat_completions(
+            self,
+            context: OpenAILLMContext,
+            messages: List[ChatCompletionMessageParam]) -> AsyncStream[ChatCompletionChunk]:
+        chunks = await self._client.chat.completions.create(
+            model=self._model,
+            stream=True,
+            messages=messages,
+            tools=context.tools,
+            tool_choice=context.tool_choice,
+        )
+        return chunks
+
     async def _stream_chat_completions(
-        self, context: OpenAILLMContext
-    ) -> AsyncStream[ChatCompletionChunk]:
+            self, context: OpenAILLMContext) -> AsyncStream[ChatCompletionChunk]:
         logger.debug(f"Generating chat: {context.get_messages_json()}")
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
@@ -97,15 +109,10 @@ class BaseOpenAILLMService(LLMService):
                 del message["data"]
                 del message["mime_type"]
 
-        chunks: AsyncStream[ChatCompletionChunk] = (
-            await self._client.chat.completions.create(
-                model=self._model,
-                stream=True,
-                messages=messages,
-                tools=context.tools,
-                tool_choice=context.tool_choice,
-            )
-        )
+        try:
+            chunks = await self.get_chat_completions(context, messages)
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
 
         return chunks
 
