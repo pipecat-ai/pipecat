@@ -51,6 +51,7 @@ playht = [ "pyht~=0.0.28" ]
 silero = [ "torch~=2.3.0", "torchaudio~=2.3.0" ]
 websocket = [ "websockets~=12.0" ]
 whisper = [ "faster-whisper~=1.0.2" ]
+openpipe = [ "openpipe~=4.13.0" ]
 
 [tool.setuptools.packages.find]
 # All the following settings are optional:
