@@ -5,6 +5,12 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.31] - 2024-06-13
+
+### Performance
+
+- Break long audio frames into 20ms chunks instead of 10ms.
+
 ## [0.0.30] - 2024-06-13
 
 ### Added
@@ -18,18 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow specifying frame processors' name through a new `name` constructor
   argument.
 
+- Added `DeepgramSTTService`. This service has an ongoing websocket
+  connection. To handle this, it subclasses `AIService` instead of
+  `STTService`. The output of this service will be pushed from the same task,
+  except system frames like `StartFrame`, `CancelFrame` or
+  `StartInterruptionFrame`.
+
 ### Changed
 
 - `FrameSerializer.deserialize()` can now return `None` in case it is not
   possible to desearialize the given data.
 
 - `daily_rest.DailyRoomProperties` now allows extra unknown parameters.
-
-- Added `DeepgramSTTService`. This service has an ongoing websocket
-  connection. To handle this, it subclasses `AIService` instead of
-  `STTService`. The output of this service will be pushed from the same task,
-  except system frames like `StartFrame`, `CancelFrame` or
-  `StartInterruptionFrame`.
 
 ### Fixed
 
