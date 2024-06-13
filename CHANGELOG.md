@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow specifying frame processors' name through a new `name` constructor
   argument.
 
+- Added `report_only_initial_ttfb` to `PipelineParams`. This will make it so
+  only the initial TTFB metrics after the user stops talking are reported.
+
 ### Changed
 
 - `FrameSerializer.deserialize()` can now return `None` in case it is not
