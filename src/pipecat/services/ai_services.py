@@ -157,8 +157,8 @@ class STTService(AIService):
         (self._content, self._wave) = self._new_wave()
         self._silence_num_frames = 0
         # Volume exponential smoothing
-        self._smoothing_factor = 0.4
-        self._prev_volume = 1 - self._smoothing_factor
+        self._smoothing_factor = 0.2
+        self._prev_volume = 0
 
     @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
