@@ -10,12 +10,14 @@ Daily REST Helpers
 Methods that wrap the Daily API to create rooms, check room URLs, and get meeting tokens.
 
 """
-from urllib.parse import urlparse
-import requests
-from typing import Literal, Optional
-from time import time
 
-from pydantic import BaseModel, ValidationError
+import requests
+import time
+
+from urllib.parse import urlparse
+
+from pydantic import Field, BaseModel, ValidationError
+from typing import Literal, Optional
 
 
 class DailyRoomSipParams(BaseModel):
@@ -26,7 +28,7 @@ class DailyRoomSipParams(BaseModel):
 
 
 class DailyRoomProperties(BaseModel, extra="allow"):
-    exp: float = time() + 5 * 60
+    exp: float = Field(default_factory=lambda: time.time() + 5 * 60)
     enable_chat: bool = False
     enable_emoji_reactions: bool = False
     eject_at_room_exp: bool = True
@@ -112,7 +114,7 @@ class DailyRESTHelper:
             raise Exception(
                 "No Daily room specified. You must specify a Daily room in order a token to be generated.")
 
-        expiration: float = time() + expiry_time
+        expiration: float = time.time() + expiry_time
 
         room_name = self._get_name_from_url(room_url)
 
