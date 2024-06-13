@@ -265,6 +265,8 @@ openai==1.26.0
     # via
     #   langchain-openai
     #   pipecat-ai (pyproject.toml)
+openpipe==4.13.0
+    # via pipecat-ai (pyproject.toml)
 orjson==3.10.4
     # via langsmith
 packaging==23.2
