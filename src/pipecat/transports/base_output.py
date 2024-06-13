@@ -59,11 +59,11 @@ class BaseOutputTransport(FrameProcessor):
         self._stopped_event = asyncio.Event()
         self._is_interrupted = threading.Event()
 
-        # We will send 10ms audio which is the smallest possible amount of audio
-        # we can send. If we receive long audio frames we will chunk them into
-        # 10ms. This will help with interruption handling.
-        self._audio_chunk_size = int(self._params.audio_out_sample_rate / 100) * \
+        # We will write 20ms audio at a time. If we receive long audio frames we
+        # will chunk them. This will help with interruption handling.
+        audio_bytes_10ms = int(self._params.audio_out_sample_rate / 100) * \
             self._params.audio_out_channels * 2
+        self._audio_chunk_size = audio_bytes_10ms * 2
 
         # Create push frame task. This is the task that will push frames in
         # order. We also guarantee that all frames are pushed in the same task.
