@@ -73,6 +73,7 @@ class LLMResponseAggregator(FrameProcessor):
     #  S I E I T -> X
     #      S E T -> X
     #    S E I T -> X
+    #
     # The following case would not be supported:
     #
     #    S I E T1 I T2 -> X
@@ -90,6 +91,7 @@ class LLMResponseAggregator(FrameProcessor):
             self._seen_start_frame = True
             self._seen_end_frame = False
             self._seen_interim_results = False
+            await self.push_frame(frame, direction)
         elif isinstance(frame, self._end_frame):
             self._seen_end_frame = True
             self._seen_start_frame = False
@@ -102,6 +104,7 @@ class LLMResponseAggregator(FrameProcessor):
             # Send the aggregation if we are not aggregating anymore (i.e. no
             # more interim results received).
             send_aggregation = not self._aggregating
+            await self.push_frame(frame, direction)
         elif isinstance(frame, self._accumulator_frame):
             if self._aggregating:
                 self._aggregation += f" {frame.text}"
