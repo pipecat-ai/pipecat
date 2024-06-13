@@ -73,7 +73,7 @@ class LangchainProcessor(FrameProcessor):
                 await self.push_frame(TextFrame(self.__get_token_value(token)))
                 await self.push_frame(LLMResponseEndFrame())
         except GeneratorExit:
-            logger.warning("Generator was closed prematurely")
+            logger.warning(f"{self} generator was closed prematurely")
         except Exception as e:
-            logger.error(f"An unknown error occurred: {e}")
+            logger.error(f"{self} an unknown error occurred: {e}")
         await self.push_frame(LLMFullResponseEndFrame())

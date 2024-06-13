@@ -37,7 +37,7 @@ class CartesiaTTSService(TTSService):
             voice_id = voices[self._voice_name]["id"]
             self._voice = self._client.get_voice_embedding(voice_id=voice_id)
         except Exception as e:
-            logger.error(f"Cartesia initialization error: {e}")
+            logger.error(f"{self} initialization error: {e}")
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -60,4 +60,4 @@ class CartesiaTTSService(TTSService):
                 await self.stop_ttfb_metrics()
                 yield AudioRawFrame(chunk["audio"], chunk["sampling_rate"], 1)
         except Exception as e:
-            logger.error(f"Cartesia exception: {e}")
+            logger.error(f"{self} exception: {e}")

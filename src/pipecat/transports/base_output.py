@@ -201,7 +201,7 @@ class BaseOutputTransport(FrameProcessor):
             except queue.Empty:
                 pass
             except BaseException as e:
-                logger.error(f"Error processing sink queue: {e}")
+                logger.error(f"{self} error processing sink queue: {e}")
 
     #
     # Push frames task
@@ -270,7 +270,7 @@ class BaseOutputTransport(FrameProcessor):
             except queue.Empty:
                 pass
             except Exception as e:
-                logger.error(f"Error writing to camera: {e}")
+                logger.error(f"{self} error writing to camera: {e}")
 
     #
     # Audio out
@@ -286,5 +286,5 @@ class BaseOutputTransport(FrameProcessor):
                 buffer = buffer[self._audio_chunk_size:]
             return buffer
         except BaseException as e:
-            logger.error(f"Error writing audio frames: {e}")
+            logger.error(f"{self} error writing audio frames: {e}")
             return buffer

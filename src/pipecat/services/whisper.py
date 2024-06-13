@@ -72,8 +72,8 @@ class WhisperSTTService(STTService):
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribes given audio using Whisper"""
         if not self._model:
+            logger.error(f"{self} error: Whisper model not available")
             yield ErrorFrame("Whisper model not available")
-            logger.error("Whisper model not available")
             return
 
         await self.start_ttfb_metrics()

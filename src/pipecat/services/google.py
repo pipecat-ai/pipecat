@@ -104,10 +104,10 @@ class GoogleLLMService(LLMService):
                         logger.debug(
                             f"LLM refused to generate content for safety reasons - {messages}.")
                     else:
-                        logger.error(f"Error {e}")
+                        logger.error(f"{self} error: {e}")
 
         except Exception as e:
-            logger.error(f"Exception: {e}")
+            logger.error(f"{self} exception: {e}")
         finally:
             await self.push_frame(LLMFullResponseEndFrame())
 

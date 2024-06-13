@@ -122,7 +122,7 @@ class AnthropicLLMService(LLMService):
                     await self.push_frame(LLMResponseEndFrame())
 
         except Exception as e:
-            logger.error(f"Anthropic exception: {e}")
+            logger.error(f"{self} exception: {e}")
         finally:
             await self.push_frame(LLMFullResponseEndFrame())
 
