@@ -9,22 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added a new `Service`. This service will let you run OpenAI through 
+- Added `OpenPipeLLMService`. This service will let you run OpenAI through
   OpenPipe's SDK.
+
+- Allow specifying frame processors' name through a new `name` constructor
+  argument.
 
 ### Changed
 
-- `OpenPipe` can now be used. Can call OpenAI through OpenPipe SDK to get 
-  LLM logging stored in OpenPipe.
+- `FrameSerializer.deserialize()` can now return `None` in case it is not
+  possible to desearialize the given data.
+
+- `daily_rest.DailyRoomProperties` now allows extra unknown parameters.
+
+- Added `DeepgramSTTService`. This service has an ongoing websocket
+  connection. To handle this, it subclasses `AIService` instead of
+  `STTService`. The output of this service will be pushed from the same task,
+  except system frames like `StartFrame`, `CancelFrame` or
+  `StartInterruptionFrame`.
 
 ### Fixed
 
-- None
+- Fixed an issue where `DailyRoomProperties.exp` always had the same old
+  timestamp unless set by the user.
+
+- Fixed a couple of issues with `WebsocketServerTransport`. It needed to use
+  `push_audio_frame()` and also VAD was not working properly.
+
+- Fixed an issue that would cause LLM aggregator to fail with small
+  `VADParams.stop_secs` values.
+
+- Fixed an issue where `BaseOutputTransport` would send longer audio frames
+  preventing interruptions.
 
 ### Other
 
-- Added new `openpipe` example. This example shows how to use OpenPipe to run
-  OpenAI LLMs and get the logs stored in OpenPipe.
+- Added new `07h-interruptible-openpipe.py` example. This example shows how to
+  use OpenPipe to run OpenAI LLMs and get the logs stored in OpenPipe.
+
+- Added new `dialin-chatbot` example. This examples shows how to call the bot
+  using a phone number.
 
 ## [0.0.29] - 2024-06-12
 

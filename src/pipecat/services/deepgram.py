@@ -74,7 +74,7 @@ class DeepgramTTSService(TTSService):
                         return
 
                     logger.error(
-                        f"Error getting audio (status: {r.status}, error: {response_text})")
+                        f"{self} error getting audio (status: {r.status}, error: {response_text})")
                     yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {response_text})")
                     return
 
@@ -83,7 +83,7 @@ class DeepgramTTSService(TTSService):
                     frame = AudioRawFrame(audio=data, sample_rate=16000, num_channels=1)
                     yield frame
         except Exception as e:
-            logger.error(f"Deepgram exception: {e}")
+            logger.error(f"{self} exception: {e}")
 
 
 class DeepgramSTTService(AIService):

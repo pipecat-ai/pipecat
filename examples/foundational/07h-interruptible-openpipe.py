@@ -12,12 +12,11 @@ import sys
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator,
 )
-from pipecat.processors.logger import FrameLogger
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openpipe import OpenPipeLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -36,9 +35,6 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def main(room_url: str, token):
-
-    timestamp = int(time.time())
-
     async with aiohttp.ClientSession() as session:
         transport = DailyTransport(
             room_url,
@@ -58,15 +54,15 @@ async def main(room_url: str, token):
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         )
 
+        timestamp = int(time.time())
         llm = OpenPipeLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
+            openpipe_api_key=os.getenv("OPENPIPE_API_KEY"),
             model="gpt-4o",
-            cli_id=f"cli-{timestamp}"
+            tags={
+                "conversation_id": f"pipecat-{timestamp}"
+            }
         )
-
-        fl = FrameLogger("!!! after LLM", "red")
-        fltts = FrameLogger("@@@ out of tts", "green")
-        flend = FrameLogger("### out of the end", "magenta")
 
         messages = [
             {
@@ -78,18 +74,15 @@ async def main(room_url: str, token):
         tma_out = LLMAssistantResponseAggregator(messages)
 
         pipeline = Pipeline([
-            transport.input(),
-            tma_in,
-            llm,
-            fl,
-            tts,
-            fltts,
-            transport.output(),
-            tma_out,
-            flend
+            transport.input(),   # Transport user input
+            tma_in,              # User responses
+            llm,                 # LLM
+            tts,                 # TTS
+            transport.output(),  # Transport bot output
+            tma_out              # Assistant spoken responses
         ])
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
