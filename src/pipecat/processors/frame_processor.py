@@ -22,7 +22,11 @@ class FrameDirection(Enum):
 
 class FrameProcessor:
 
-    def __init__(self, name: str | None = None, loop: asyncio.AbstractEventLoop | None = None):
+    def __init__(
+            self,
+            name: str | None = None,
+            loop: asyncio.AbstractEventLoop | None = None,
+            **kwargs):
         self.id: int = obj_id()
         self.name = name or f"{self.__class__.__name__}#{obj_count(self)}"
         self._prev: "FrameProcessor" | None = None

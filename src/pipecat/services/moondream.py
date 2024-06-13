@@ -71,7 +71,7 @@ class MoondreamService(VisionService):
 
     async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
         if not self._model:
-            logger.error("Moondream model not available")
+            logger.error(f"{self} error: Moondream model not available")
             yield ErrorFrame("Moondream model not available")
             return
 

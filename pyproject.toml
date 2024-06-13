@@ -47,11 +47,11 @@ langchain = [ "langchain~=0.2.1", "langchain-community~=0.2.1", "langchain-opena
 local = [ "pyaudio~=0.2.0" ]
 moondream = [ "einops~=0.8.0", "timm~=0.9.16", "transformers~=4.40.2" ]
 openai = [ "openai~=1.26.0" ]
+openpipe = [ "openpipe~=4.14.0" ]
 playht = [ "pyht~=0.0.28" ]
 silero = [ "torch~=2.3.0", "torchaudio~=2.3.0" ]
 websocket = [ "websockets~=12.0" ]
 whisper = [ "faster-whisper~=1.0.2" ]
-openpipe = [ "openpipe~=4.13.0" ]
 
 [tool.setuptools.packages.find]
 # All the following settings are optional:

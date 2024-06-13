@@ -186,4 +186,4 @@ class BaseInputTransport(FrameProcessor):
             except queue.Empty:
                 pass
             except BaseException as e:
-                logger.error(f"Error reading audio frames: {e}")
+                logger.error(f"{self} error reading audio frames: {e}")
