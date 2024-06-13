@@ -20,7 +20,7 @@ class VADState(Enum):
 
 
 class VADParams(BaseModel):
-    confidence: float = 0.6
+    confidence: float = 0.7
     start_secs: float = 0.2
     stop_secs: float = 0.8
     min_volume: float = 0.6
@@ -46,8 +46,8 @@ class VADAnalyzer:
         self._vad_buffer = b""
 
         # Volume exponential smoothing
-        self._smoothing_factor = 0.4
-        self._prev_volume = 1 - self._smoothing_factor
+        self._smoothing_factor = 0.2
+        self._prev_volume = 0
 
     @property
     def sample_rate(self):
