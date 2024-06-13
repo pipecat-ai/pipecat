@@ -5,6 +5,17 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added new `AzureSTTService`. This allows you to use Azure Speech-To-Text.
+
+### Other
+
+- Updated `07f-interruptible-azure.py` to use `AzureLLMService`,
+  `AzureSTTService` and `AzureTTSService`.
+
 ## [0.0.31] - 2024-06-13
 
 ### Performance
