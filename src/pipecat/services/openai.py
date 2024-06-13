@@ -270,7 +270,7 @@ class OpenAIImageGenService(ImageGenService):
         image_url = image.data[0].url
 
         if not image_url:
-            logger.error(f"No image provided in response: {image}")
+            logger.error(f"{self} No image provided in response: {image}")
             yield ErrorFrame("Image generation failed")
             return
 
@@ -324,7 +324,8 @@ class OpenAITTSService(TTSService):
             ) as r:
                 if r.status_code != 200:
                     error = await r.text()
-                    logger.error(f"Error getting audio (status: {r.status_code}, error: {error})")
+                    logger.error(
+                        f"{self} error getting audio (status: {r.status_code}, error: {error})")
                     yield ErrorFrame(f"Error getting audio (status: {r.status_code}, error: {error})")
                     return
                 async for chunk in r.iter_bytes(8192):
@@ -333,4 +334,4 @@ class OpenAITTSService(TTSService):
                         frame = AudioRawFrame(chunk, 24_000, 1)
                         yield frame
         except BadRequestError as e:
-            logger.error(f"Error generating TTS: {e}")
+            logger.error(f"{self} error generating TTS: {e}")

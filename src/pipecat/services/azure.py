@@ -72,7 +72,7 @@ class AzureTTSService(TTSService):
             cancellation_details = result.cancellation_details
             logger.warning(f"Speech synthesis canceled: {cancellation_details.reason}")
             if cancellation_details.reason == CancellationReason.Error:
-                logger.error(f"Error details: {cancellation_details.error_details}")
+                logger.error(f"{self} error: {cancellation_details.error_details}")
 
 
 class AzureLLMService(BaseOpenAILLMService):
@@ -143,7 +143,7 @@ class AzureImageGenServiceREST(ImageGenService):
             while status != "succeeded":
                 attempts_left -= 1
                 if attempts_left == 0:
-                    logger.error("Image generation timed out")
+                    logger.error(f"{self} error: image generation timed out")
                     yield ErrorFrame("Image generation timed out")
                     return
 
@@ -156,7 +156,7 @@ class AzureImageGenServiceREST(ImageGenService):
 
             image_url = json_response["result"]["data"][0]["url"] if json_response else None
             if not image_url:
-                logger.error("Image generation failed")
+                logger.error(f"{self} error: image generation failed")
                 yield ErrorFrame("Image generation failed")
                 return
 
