@@ -76,7 +76,8 @@ async def main(room_url: str, token):
 
         task = PipelineTask(pipeline, PipelineParams(
             allow_interruptions=True,
-            enable_metrics=True
+            enable_metrics=True,
+            report_only_initial_ttfb=True,
         ))
 
         @transport.event_handler("on_first_participant_joined")
