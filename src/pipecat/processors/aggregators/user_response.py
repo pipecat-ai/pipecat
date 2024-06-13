@@ -74,6 +74,8 @@ class ResponseAggregator(FrameProcessor):
     #    S I T E -> X
     #    S I E T -> X
     #  S I E I T -> X
+    #      S E T -> X
+    #    S E I T -> X
     #
     # The following case would not be supported:
     #
@@ -99,7 +101,7 @@ class ResponseAggregator(FrameProcessor):
             # We might have received the end frame but we might still be
             # aggregating (i.e. we have seen interim results but not the final
             # text).
-            self._aggregating = self._seen_interim_results
+            self._aggregating = self._seen_interim_results or len(self._aggregation) == 0
 
             # Send the aggregation if we are not aggregating anymore (i.e. no
             # more interim results received).
