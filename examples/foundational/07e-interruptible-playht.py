@@ -5,7 +5,6 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
@@ -19,7 +18,6 @@ from pipecat.services.playht import PlayHTTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-from pipecat.processors.logger import FrameLogger
 
 from runner import configure
 
@@ -33,62 +31,61 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def main(room_url: str, token):
-    async with aiohttp.ClientSession() as session:
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Respond bot",
-            DailyParams(
-                audio_out_enabled=True,
-                audio_out_sample_rate=16000,
-                transcription_enabled=True,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+    transport = DailyTransport(
+        room_url,
+        token,
+        "Respond bot",
+        DailyParams(
+            audio_out_enabled=True,
+            audio_out_sample_rate=16000,
+            transcription_enabled=True,
+            vad_enabled=True,
+            vad_analyzer=SileroVADAnalyzer()
         )
+    )
 
-        tts = PlayHTTTSService(
-            user_id=os.getenv("PLAYHT_USER_ID"),
-            api_key=os.getenv("PLAYHT_API_KEY"),
-            voice_url="s3://voice-cloning-zero-shot/801a663f-efd0-4254-98d0-5c175514c3e8/jennifer/manifest.json",
-        )
+    tts = PlayHTTTSService(
+        user_id=os.getenv("PLAYHT_USER_ID"),
+        api_key=os.getenv("PLAYHT_API_KEY"),
+        voice_url="s3://voice-cloning-zero-shot/801a663f-efd0-4254-98d0-5c175514c3e8/jennifer/manifest.json",
+    )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model="gpt-4o")
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
-            },
-        ]
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+        },
+    ]
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+    tma_in = LLMUserResponseAggregator(messages)
+    tma_out = LLMAssistantResponseAggregator(messages)
 
-        pipeline = Pipeline([
-            transport.input(),   # Transport user input
-            tma_in,              # User responses
-            llm,                 # LLM
-            tts,                 # TTS
-            transport.output(),  # Transport bot output
-            tma_out              # Assistant spoken responses
-        ])
+    pipeline = Pipeline([
+        transport.input(),   # Transport user input
+        tma_in,              # User responses
+        llm,                 # LLM
+        tts,                 # TTS
+        transport.output(),  # Transport bot output
+        tma_out              # Assistant spoken responses
+    ])
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+    task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
-            # Kick off the conversation.
-            messages.append(
-                {"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMMessagesFrame(messages)])
+    @transport.event_handler("on_first_participant_joined")
+    async def on_first_participant_joined(transport, participant):
+        transport.capture_participant_transcription(participant["id"])
+        # Kick off the conversation.
+        messages.append(
+            {"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMMessagesFrame(messages)])
 
-        runner = PipelineRunner()
+    runner = PipelineRunner()
 
-        await runner.run(task)
+    await runner.run(task)
 
 
 if __name__ == "__main__":
