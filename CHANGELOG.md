@@ -5,18 +5,18 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.30] - 2024-06-13
 
 ### Added
+
+- Added `report_only_initial_ttfb` to `PipelineParams`. This will make it so
+  only the initial TTFB metrics after the user stops talking are reported.
 
 - Added `OpenPipeLLMService`. This service will let you run OpenAI through
   OpenPipe's SDK.
 
 - Allow specifying frame processors' name through a new `name` constructor
   argument.
-
-- Added `report_only_initial_ttfb` to `PipelineParams`. This will make it so
-  only the initial TTFB metrics after the user stops talking are reported.
 
 ### Changed
 
@@ -49,45 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added new `07h-interruptible-openpipe.py` example. This example shows how to
   use OpenPipe to run OpenAI LLMs and get the logs stored in OpenPipe.
-
-- Added new `dialin-chatbot` example. This examples shows how to call the bot
-  using a phone number.
-
-## [0.0.29] - 2024-06-12
-
-### Added
-
-- Allow specifying frame processors' name through a new `name` constructor
-  argument.
-
-### Changed
-
-- `FrameSerializer.deserialize()` can now return `None` in case it is not
-  possible to desearialize the given data.
-
-- `daily_rest.DailyRoomProperties` now allows extra unknown parameters.
-
-- Added `DeepgramSTTService`. This service has an ongoing websocket
-  connection. To handle this, it subclasses `AIService` instead of
-  `STTService`. The output of this service will be pushed from the same task,
-  except system frames like `StartFrame`, `CancelFrame` or
-  `StartInterruptionFrame`.
-
-### Fixed
-
-- Fixed an issue where `DailyRoomProperties.exp` always had the same old
-  timestamp unless set by the user.
-
-- Fixed a couple of issues with `WebsocketServerTransport`. It needed to use
-  `push_audio_frame()` and also VAD was not working properly.
-
-- Fixed an issue that would cause LLM aggregator to fail with small
-  `VADParams.stop_secs` values.
-
-- Fixed an issue where `BaseOutputTransport` would send longer audio frames
-  preventing interruptions.
-
-### Other
 
 - Added new `dialin-chatbot` example. This examples shows how to call the bot
   using a phone number.
