@@ -14,10 +14,10 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.services.openai import OpenAITTSService
-from pipecat.services.openai import OpenAILLMService
+from pipecat.services.azure import AzureLLMService, AzureSTTService, AzureTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
+
 
 from runner import configure
 
@@ -37,21 +37,28 @@ async def main(room_url: str, token):
         "Respond bot",
         DailyParams(
             audio_out_enabled=True,
-            audio_out_sample_rate=24000,
-            transcription_enabled=True,
+            audio_out_sample_rate=16000,
             vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer()
+            vad_analyzer=SileroVADAnalyzer(),
+            vad_audio_passthrough=True,
         )
     )
 
-    tts = OpenAITTSService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        voice="alloy"
+    stt = AzureSTTService(
+        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+        region=os.getenv("AZURE_SPEECH_REGION"),
     )
 
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o")
+    tts = AzureTTSService(
+        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+        region=os.getenv("AZURE_SPEECH_REGION"),
+    )
+
+    llm = AzureLLMService(
+        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+        model=os.getenv("AZURE_CHATGPT_MODEL"),
+    )
 
     messages = [
         {
@@ -65,6 +72,7 @@ async def main(room_url: str, token):
 
     pipeline = Pipeline([
         transport.input(),   # Transport user input
+        stt,                 # STT
         tma_in,              # User responses
         llm,                 # LLM
         tts,                 # TTS
