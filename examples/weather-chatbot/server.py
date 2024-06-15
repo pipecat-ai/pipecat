@@ -66,7 +66,7 @@ async def start_agent(request: Request):
     try:
         proc = subprocess.Popen(
             [
-                f"python3 -m bot -u {room_url} -t {token}"
+                f"python3 -m weather_bot -u {room_url} -t {token}"
             ],
             shell=True,
             bufsize=1,
