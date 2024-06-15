@@ -81,6 +81,17 @@ class GreedyLLMAggregator(FrameProcessor):
             logger.debug(f"error: {e}")
 
 
+class ClearableDeepgramTTSService(DeepgramTTSService):
+    def __init___(self, **kwargs):
+        super().__init(**kwargs)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartInterruptionFrame):
+            self._current_sentence = ""
+
+
 @dataclass
 class BufferedSentence:
     audio_frames: List[AudioRawFrame] = field(default_factory=list)
@@ -144,8 +155,16 @@ class VADGate(FrameProcessor):
                 await self.push_frame(frame, direction)
                 return
 
-            if isinstance(frame, LLMFullResponseStartFrame):
+            # There are two ways we can be interrupted. During greedy inference, a new
+            # LLM response can start. Or, during playout, we can get a traditional
+            # user interruption frame.
+            if (isinstance(frame, LLMFullResponseStartFrame) or
+                    isinstance(frame, StartInterruptionFrame)):
+                logger.debug(f"{frame} - Handle interruption in VADGate")
                 self._sentences = []
+                if self._audio_pusher_task:
+                    self._audio_pusher_task.cancel()
+                    self._audio_pusher_task = None
                 await self.push_frame(frame, direction)
                 return
 
@@ -166,9 +185,8 @@ class VADGate(FrameProcessor):
         try:
             while True:
                 if not self._sentences:
-                    logger.debug("Audio buffer empty")
-                    self._audio_pusher_task = None
-                    return
+                    await asyncio.sleep(0.01)
+                    continue
 
                 if self.vad_analyzer._vad_state != VADState.QUIET:
                     await asyncio.sleep(0.01)
@@ -190,12 +208,13 @@ class VADGate(FrameProcessor):
                     # assume linear16 encoding (2 bytes per sample). todo: add some more
                     # metadata to AudioRawFrame, maybe
                     duration += (len(frame.audio) / 2 / frame.num_channels) / sample_rate
+                await asyncio.sleep(duration - 20 / 1000)
                 if self.context:
+                    logger.debug(f"Appending assistant message to context: [{s.text_frame.text}]")
                     self.context.messages.append(
                         {"role": "assistant", "content": s.text_frame.text}
                     )
                 await self.push_frame(s.text_frame)
-                await asyncio.sleep(duration - 20 / 1000)
 
         except Exception as e:
             logger.debug(f"Exception {e}")
@@ -215,7 +234,7 @@ async def main(room_url: str, token):
             )
         )
 
-        tts = DeepgramTTSService(
+        tts = ClearableDeepgramTTSService(
             aiohttp_session=session,
             api_key=os.getenv("DEEPGRAM_API_KEY"),
             voice="aura-asteria-en",
