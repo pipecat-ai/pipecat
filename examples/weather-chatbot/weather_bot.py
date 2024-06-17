@@ -5,31 +5,27 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from openai.types.chat import ChatCompletionToolParam
 from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantContextAggregator,
-    LLMUserContextAggregator,
-)
+    LLMAssistantContextAggregator, LLMUserContextAggregator)
 from pipecat.processors.logger import FrameLogger
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
-from openai.types.chat import ChatCompletionToolParam
-
 from runner import configure
 
-from loguru import logger
-
-from dotenv import load_dotenv
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -41,7 +37,30 @@ async def start_fetch_weather(llm):
 
 
 async def fetch_weather_from_api(llm, args):
-    return {"conditions": "nice", "temperature": "75"}
+    location = args.get("location")
+    format = args.get("format")
+
+    url = (
+        f"http://api.openweathermap.org/data/2.5/weather?"
+        f"q={location}&appid={os.getenv('OPENWEATHERMAP_API_KEY')}"
+    )
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = await resp.json()
+
+    temp_k = data["main"]["temp"]
+
+    if format == "celsius":
+        temp = temp_k - 273.15
+    elif format == "fahrenheit":
+        temp = (temp_k - 273.15) * 9 / 5 + 32
+    else:
+        raise ValueError(f"Unknown format: {format}")
+
+    conditions = data["weather"][0]["description"]
+
+    return {"conditions": conditions, "temperature": temp}
 
 
 async def main(room_url: str, token):
@@ -54,23 +73,22 @@ async def main(room_url: str, token):
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id='pNInz6obpgDQGcFmaJgB',
+            voice_id="pNInz6obpgDQGcFmaJgB",
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
         llm.register_function(
             "get_current_weather",
             fetch_weather_from_api,
-            start_callback=start_fetch_weather)
+            start_callback=start_fetch_weather,
+        )
 
         fl_in = FrameLogger("Inner")
         fl_out = FrameLogger("Outer")
@@ -86,49 +104,53 @@ async def main(room_url: str, token):
                         "properties": {
                             "location": {
                                 "type": "string",
-                                "description": "The city and state, e.g. San Francisco, CA",
+                                "description": "The city e.g. 'London, UK' or 'Paris, France'. State or country information is omitted",
                             },
                             "format": {
                                 "type": "string",
-                                "enum": [
-                                    "celsius",
-                                    "fahrenheit"],
+                                "enum": ["celsius", "fahrenheit"],
                                 "description": "The temperature unit to use. Infer this from the users location.",
                             },
                         },
-                        "required": [
-                            "location",
-                            "format"],
+                        "required": ["location", "format"],
                     },
-                })]
+                },
+            )
+        ]
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful LLM in a WebRTC call. "
+                "Your goal is to demonstrate your capabilities in a succinct way. "
+                "Your output will be converted to audio so don't include special characters in your answers. "
+                "Respond to what the user said in a creative and helpful way."
+                "For weather related information, please respond with the temperature, conditions and recommended behavior under those conditions.",
             },
         ]
 
         context = OpenAILLMContext(messages, tools)
         tma_in = LLMUserContextAggregator(context)
         tma_out = LLMAssistantContextAggregator(context)
-        pipeline = Pipeline([
-            fl_in,
-            transport.input(),
-            tma_in,
-            llm,
-            fl_out,
-            tts,
-            transport.output(),
-            tma_out
-        ])
+        pipeline = Pipeline(
+            [
+                fl_in,
+                transport.input(),
+                tma_in,
+                llm,
+                fl_out,
+                tts,
+                transport.output(),
+                tma_out,
+            ]
+        )
 
         task = PipelineTask(pipeline)
 
-        @ transport.event_handler("on_first_participant_joined")
+        @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            await tts.say("Hi! Ask me about the weather in San Francisco.")
+            await tts.say("Hi! Ask me about the weather anywhere in the world.")
 
         runner = PipelineRunner()
 
