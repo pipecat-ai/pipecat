@@ -17,7 +17,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantContextAggregator, LLMUserContextAggregator)
+    LLMAssistantContextAggregator,
+    LLMUserContextAggregator,
+)
 from pipecat.processors.logger import FrameLogger
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMService
@@ -80,7 +82,7 @@ async def main(room_url: str, token):
         tts = ElevenLabsTTSService(
             aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id="pNInz6obpgDQGcFmaJgB",
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
@@ -120,12 +122,16 @@ async def main(room_url: str, token):
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. "
-                "Your goal is to demonstrate your capabilities in a succinct way. "
-                "Your output will be converted to audio so don't include special characters in your answers. "
-                "Respond to what the user said in a creative and helpful way."
-                "For weather related information, please respond with the temperature, conditions and recommended behavior under those conditions.",
-            },
+                "content": """
+                    You are a helpful LLM participating in a WebRTC call. 
+                    Your primary goal is to demonstrate your capabilities concisely. 
+                    Since your responses will be converted to audio, avoid using special characters. 
+                    Respond to user queries in a creative and helpful manner. 
+                    For weather-related questions, provide the temperature, current conditions, and recommended actions. 
+                    If the user's query is not about the weather, politely prompt them to ask a weather-related question instead.
+                """
+            }
+
         ]
 
         context = OpenAILLMContext(messages, tools)
@@ -149,8 +155,11 @@ async def main(room_url: str, token):
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
+            username = participant.get("info").get("userName")
             # Kick off the conversation.
-            await tts.say("Hi! Ask me about the weather anywhere in the world.")
+            await tts.say(
+                f"Hi {username}! Ask me about the weather anywhere in the world."
+            )
 
         runner = PipelineRunner()
 
