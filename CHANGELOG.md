@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added new `AzureSTTService`. This allows you to use Azure Speech-To-Text.
 
+### Performance
+
+- Convert `BaseOutputTransport` and `BaseOutputTransport` to fully use asyncio
+  and remove the use of threads.
+
 ### Other
 
 - Added `twilio-chatbot`. This is an example that shows how to integrate Twilio

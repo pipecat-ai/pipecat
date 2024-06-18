@@ -71,6 +71,8 @@ class PipelineTask:
         await self._source.process_frame(CancelFrame(), FrameDirection.DOWNSTREAM)
         self._process_down_task.cancel()
         self._process_up_task.cancel()
+        await self._process_down_task
+        await self._process_up_task
 
     async def run(self):
         self._process_up_task = asyncio.create_task(self._process_up_queue())
@@ -122,6 +124,7 @@ class PipelineTask:
             await self._pipeline.cleanup()
         # We just enqueue None to terminate the task gracefully.
         self._process_up_task.cancel()
+        await self._process_up_task
 
     async def _process_up_queue(self):
         while True:

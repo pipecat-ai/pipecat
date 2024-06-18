@@ -134,10 +134,11 @@ class DeepgramSTTService(AIService):
     async def cancel(self, frame: CancelFrame):
         await self._connection.finish()
         self._push_frame_task.cancel()
+        await self._push_frame_task
 
     def _create_push_task(self):
-        self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
         self._push_queue = asyncio.Queue()
+        self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
 
     async def _push_frame_task_handler(self):
         running = True

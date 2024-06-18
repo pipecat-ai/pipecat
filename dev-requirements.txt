@@ -2,6 +2,7 @@ autopep8~=2.1.0
 build~=1.2.1
 grpcio-tools~=1.62.2
 pip-tools~=7.4.1
+pyright~=1.1.367
 pytest~=8.2.0
 setuptools~=69.5.1
 setuptools_scm~=8.1.0
