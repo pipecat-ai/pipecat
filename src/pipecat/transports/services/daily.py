@@ -6,11 +6,10 @@
 
 import aiohttp
 import asyncio
-import queue
 import time
 
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 
 from daily import (
@@ -108,19 +107,26 @@ class DailyParams(TransportParams):
 
 
 class DailyCallbacks(BaseModel):
-    on_joined: Callable[[Mapping[str, Any]], None]
-    on_left: Callable[[], None]
-    on_error: Callable[[str], None]
-    on_app_message: Callable[[Any, str], None]
-    on_call_state_updated: Callable[[str], None]
-    on_dialin_ready: Callable[[str], None]
-    on_dialout_connected: Callable[[Any], None]
-    on_dialout_stopped: Callable[[Any], None]
-    on_dialout_error: Callable[[Any], None]
-    on_dialout_warning: Callable[[Any], None]
-    on_first_participant_joined: Callable[[Mapping[str, Any]], None]
-    on_participant_joined: Callable[[Mapping[str, Any]], None]
-    on_participant_left: Callable[[Mapping[str, Any], str], None]
+    on_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_left: Callable[[], Awaitable[None]]
+    on_error: Callable[[str], Awaitable[None]]
+    on_app_message: Callable[[Any, str], Awaitable[None]]
+    on_call_state_updated: Callable[[str], Awaitable[None]]
+    on_dialin_ready: Callable[[str], Awaitable[None]]
+    on_dialout_connected: Callable[[Any], Awaitable[None]]
+    on_dialout_stopped: Callable[[Any], Awaitable[None]]
+    on_dialout_error: Callable[[Any], Awaitable[None]]
+    on_dialout_warning: Callable[[Any], Awaitable[None]]
+    on_first_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
+
+
+def completion_callback(future):
+    def _callback(*args):
+        if not future.cancelled():
+            future.get_loop().call_soon_threadsafe(future.set_result, *args)
+    return _callback
 
 
 class DailyTransportClient(EventHandler):
@@ -160,7 +166,6 @@ class DailyTransportClient(EventHandler):
         self._joined = False
         self._joining = False
         self._leaving = False
-        self._sync_response = {k: queue.Queue() for k in ["join", "leave"]}
 
         self._executor = ThreadPoolExecutor(max_workers=5)
 
@@ -173,10 +178,16 @@ class DailyTransportClient(EventHandler):
             color_format=self._params.camera_out_color_format)
 
         self._mic: VirtualMicrophoneDevice = Daily.create_microphone_device(
-            "mic", sample_rate=self._params.audio_out_sample_rate, channels=self._params.audio_out_channels)
+            "mic",
+            sample_rate=self._params.audio_out_sample_rate,
+            channels=self._params.audio_out_channels,
+            non_blocking=True)
 
         self._speaker: VirtualSpeakerDevice = Daily.create_speaker_device(
-            "speaker", sample_rate=self._params.audio_in_sample_rate, channels=self._params.audio_in_channels)
+            "speaker",
+            sample_rate=self._params.audio_in_sample_rate,
+            channels=self._params.audio_in_channels,
+            non_blocking=True)
         Daily.select_speaker_device("speaker")
 
     @property
@@ -186,30 +197,39 @@ class DailyTransportClient(EventHandler):
     def set_callbacks(self, callbacks: DailyCallbacks):
         self._callbacks = callbacks
 
-    def send_message(self, frame: DailyTransportMessageFrame):
-        self._client.send_app_message(frame.message, frame.participant_id)
+    async def send_message(self, frame: DailyTransportMessageFrame):
+        future = self._loop.create_future()
+        self._client.send_app_message(
+            frame.message,
+            frame.participant_id,
+            completion=completion_callback(future))
+        await future
 
-    def read_next_audio_frame(self) -> AudioRawFrame | None:
+    async def read_next_audio_frame(self) -> AudioRawFrame | None:
         sample_rate = self._params.audio_in_sample_rate
         num_channels = self._params.audio_in_channels
 
         if self._other_participant_has_joined:
             num_frames = int(sample_rate / 100) * 2  # 20ms of audio
 
-            audio = self._speaker.read_frames(num_frames)
+            future = self._loop.create_future()
+            self._speaker.read_frames(num_frames, completion=completion_callback(future))
+            audio = await future
 
             return AudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=num_channels)
         else:
             # If no one has ever joined the meeting `read_frames()` would block,
             # instead we just wait a bit. daily-python should probably return
             # silence instead.
-            time.sleep(0.01)
+            await asyncio.sleep(0.01)
             return None
 
-    def write_raw_audio_frames(self, frames: bytes):
-        self._mic.write_frames(frames)
+    async def write_raw_audio_frames(self, frames: bytes):
+        future = self._loop.create_future()
+        self._mic.write_frames(frames, completion=completion_callback(future))
+        await future
 
-    def write_frame_to_camera(self, frame: ImageRawFrame):
+    async def write_frame_to_camera(self, frame: ImageRawFrame):
         self._camera.write_frame(frame.image)
 
     async def join(self):
@@ -217,12 +237,9 @@ class DailyTransportClient(EventHandler):
         if self._joined or self._joining:
             return
 
-        self._joining = True
-
-        await self._loop.run_in_executor(self._executor, self._join)
-
-    def _join(self):
         logger.info(f"Joining {self._room_url}")
+
+        self._joining = True
 
         # For performance reasons, never subscribe to video streams (unless a
         # video renderer is registered).
@@ -235,10 +252,42 @@ class DailyTransportClient(EventHandler):
 
         self._client.set_user_name(self._bot_name)
 
+        try:
+            (data, error) = await self._join()
+
+            if not error:
+                self._joined = True
+                self._joining = False
+
+                logger.info(f"Joined {self._room_url}")
+
+                if self._token and self._params.transcription_enabled:
+                    logger.info(
+                        f"Enabling transcription with settings {self._params.transcription_settings}")
+                    self._client.start_transcription(
+                        self._params.transcription_settings.model_dump())
+
+                await self._callbacks.on_joined(data["participants"]["local"])
+            else:
+                error_msg = f"Error joining {self._room_url}: {error}"
+                logger.error(error_msg)
+                await self._callbacks.on_error(error_msg)
+        except asyncio.TimeoutError:
+            error_msg = f"Time out joining {self._room_url}"
+            logger.error(error_msg)
+            await self._callbacks.on_error(error_msg)
+
+    async def _join(self):
+        future = self._loop.create_future()
+
+        def handle_join_response(data, error):
+            if not future.cancelled():
+                future.get_loop().call_soon_threadsafe(future.set_result, (data, error))
+
         self._client.join(
             self._room_url,
             self._token,
-            completion=self._call_joined,
+            completion=handle_join_response,
             client_settings={
                 "inputs": {
                     "camera": {
@@ -274,33 +323,7 @@ class DailyTransportClient(EventHandler):
                 },
             })
 
-        self._handle_join_response()
-
-    def _handle_join_response(self):
-        try:
-            (data, error) = self._sync_response["join"].get(timeout=10)
-            if not error:
-                self._joined = True
-                self._joining = False
-
-                logger.info(f"Joined {self._room_url}")
-
-                if self._token and self._params.transcription_enabled:
-                    logger.info(
-                        f"Enabling transcription with settings {self._params.transcription_settings}")
-                    self._client.start_transcription(
-                        self._params.transcription_settings.model_dump())
-
-                self._callbacks.on_joined(data["participants"]["local"])
-            else:
-                error_msg = f"Error joining {self._room_url}: {error}"
-                logger.error(error_msg)
-                self._callbacks.on_error(error_msg)
-            self._sync_response["join"].task_done()
-        except queue.Empty:
-            error_msg = f"Time out joining {self._room_url}"
-            logger.error(error_msg)
-            self._callbacks.on_error(error_msg)
+        return await asyncio.wait_for(future, timeout=10)
 
     async def leave(self):
         # Transport not joined, ignore.
@@ -310,34 +333,36 @@ class DailyTransportClient(EventHandler):
         self._joined = False
         self._leaving = True
 
-        await self._loop.run_in_executor(self._executor, self._leave)
-
-    def _leave(self):
         logger.info(f"Leaving {self._room_url}")
 
         if self._params.transcription_enabled:
             self._client.stop_transcription()
 
-        self._client.leave(completion=self._call_left)
-
-        self._handle_leave_response()
-
-    def _handle_leave_response(self):
         try:
-            error = self._sync_response["leave"].get(timeout=10)
+            error = await self._leave()
             if not error:
                 self._leaving = False
                 logger.info(f"Left {self._room_url}")
-                self._callbacks.on_left()
+                await self._callbacks.on_left()
             else:
                 error_msg = f"Error leaving {self._room_url}: {error}"
                 logger.error(error_msg)
-                self._callbacks.on_error(error_msg)
-            self._sync_response["leave"].task_done()
-        except queue.Empty:
+                await self._callbacks.on_error(error_msg)
+        except asyncio.TimeoutError:
             error_msg = f"Time out leaving {self._room_url}"
             logger.error(error_msg)
-            self._callbacks.on_error(error_msg)
+            await self._callbacks.on_error(error_msg)
+
+    async def _leave(self):
+        future = self._loop.create_future()
+
+        def handle_leave_response(error):
+            if not future.cancelled():
+                future.get_loop().call_soon_threadsafe(future.set_result, error)
+
+        self._client.leave(completion=handle_leave_response)
+
+        return await asyncio.wait_for(future, timeout=10)
 
     async def cleanup(self):
         await self._loop.run_in_executor(self._executor, self._cleanup)
@@ -399,25 +424,25 @@ class DailyTransportClient(EventHandler):
     #
 
     def on_app_message(self, message: Any, sender: str):
-        self._callbacks.on_app_message(message, sender)
+        self._call_async_callback(self._callbacks.on_app_message, message, sender)
 
     def on_call_state_updated(self, state: str):
-        self._callbacks.on_call_state_updated(state)
+        self._call_async_callback(self._callbacks.on_call_state_updated, state)
 
     def on_dialin_ready(self, sip_endpoint: str):
-        self._callbacks.on_dialin_ready(sip_endpoint)
+        self._call_async_callback(self._callbacks.on_dialin_ready, sip_endpoint)
 
     def on_dialout_connected(self, data: Any):
-        self._callbacks.on_dialout_connected(data)
+        self._call_async_callback(self._callbacks.on_dialout_connected, data)
 
     def on_dialout_stopped(self, data: Any):
-        self._callbacks.on_dialout_stopped(data)
+        self._call_async_callback(self._callbacks.on_dialout_stopped, data)
 
     def on_dialout_error(self, data: Any):
-        self._callbacks.on_dialout_error(data)
+        self._call_async_callback(self._callbacks.on_dialout_error, data)
 
     def on_dialout_warning(self, data: Any):
-        self._callbacks.on_dialout_warning(data)
+        self._call_async_callback(self._callbacks.on_dialout_warning, data)
 
     def on_participant_joined(self, participant):
         id = participant["id"]
@@ -425,15 +450,15 @@ class DailyTransportClient(EventHandler):
 
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
-            self._callbacks.on_first_participant_joined(participant)
+            self._call_async_callback(self._callbacks.on_first_participant_joined, participant)
 
-        self._callbacks.on_participant_joined(participant)
+        self._call_async_callback(self._callbacks.on_participant_joined, participant)
 
     def on_participant_left(self, participant, reason):
         id = participant["id"]
         logger.info(f"Participant left {id}")
 
-        self._callbacks.on_participant_left(participant, reason)
+        self._call_async_callback(self._callbacks.on_participant_left, participant, reason)
 
     def on_transcription_message(self, message: Mapping[str, Any]):
         participant_id = ""
@@ -442,7 +467,7 @@ class DailyTransportClient(EventHandler):
 
         if participant_id in self._transcription_renderers:
             callback = self._transcription_renderers[participant_id]
-            callback(participant_id, message)
+            self._call_async_callback(callback, participant_id, message)
 
     def on_transcription_error(self, message):
         logger.error(f"Transcription error: {message}")
@@ -457,18 +482,19 @@ class DailyTransportClient(EventHandler):
     # Daily (CallClient callbacks)
     #
 
-    def _call_joined(self, data, error):
-        self._sync_response["join"].put((data, error))
-
-    def _call_left(self, error):
-        self._sync_response["leave"].put(error)
-
     def _video_frame_received(self, participant_id, video_frame):
         callback = self._video_renderers[participant_id]
-        callback(participant_id,
-                 video_frame.buffer,
-                 (video_frame.width, video_frame.height),
-                 video_frame.color_format)
+        self._call_async_callback(
+            callback,
+            participant_id,
+            video_frame.buffer,
+            (video_frame.width,
+             video_frame.height),
+            video_frame.color_format)
+
+    def _call_async_callback(self, callback, *args):
+        future = asyncio.run_coroutine_threadsafe(callback(*args), self._loop)
+        future.result()
 
 
 class DailyInputTransport(BaseInputTransport):
@@ -487,8 +513,6 @@ class DailyInputTransport(BaseInputTransport):
                 num_channels=self._params.audio_in_channels)
 
     async def start(self, frame: StartFrame):
-        if self._running:
-            return
         # Parent start.
         await super().start(frame)
         # Join the room.
@@ -496,19 +520,17 @@ class DailyInputTransport(BaseInputTransport):
         # Create audio task. It reads audio frames from Daily and push them
         # internally for VAD processing.
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_thread = self._loop.run_in_executor(
-                self._executor, self._audio_in_thread_handler)
+            self._audio_in_task = self.get_event_loop().create_task(self._audio_in_task_handler())
 
     async def stop(self):
-        if not self._running:
-            return
-        # Parent stop. This will set _running to False.
+        # Parent stop.
         await super().stop()
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            await self._audio_in_thread
+            self._audio_in_task.cancel()
+            await self._audio_in_task
 
     async def cleanup(self):
         await super().cleanup()
@@ -531,26 +553,25 @@ class DailyInputTransport(BaseInputTransport):
     # Frames
     #
 
-    def push_transcription_frame(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
-        future = asyncio.run_coroutine_threadsafe(
-            self._internal_push_frame(frame), self.get_event_loop())
-        future.result()
+    async def push_transcription_frame(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
+        await self._internal_push_frame(frame)
 
-    def push_app_message(self, message: Any, sender: str):
+    async def push_app_message(self, message: Any, sender: str):
         frame = DailyTransportMessageFrame(message=message, participant_id=sender)
-        future = asyncio.run_coroutine_threadsafe(
-            self._internal_push_frame(frame), self.get_event_loop())
-        future.result()
+        await self._internal_push_frame(frame)
 
     #
     # Audio in
     #
 
-    def _audio_in_thread_handler(self):
-        while self._running:
-            frame = self._client.read_next_audio_frame()
-            if frame:
-                self.push_audio_frame(frame)
+    async def _audio_in_task_handler(self):
+        while True:
+            try:
+                frame = await self._client.read_next_audio_frame()
+                if frame:
+                    await self.push_audio_frame(frame)
+            except asyncio.CancelledError:
+                break
 
     #
     # Camera in
@@ -580,7 +601,7 @@ class DailyInputTransport(BaseInputTransport):
         if participant_id in self._video_renderers:
             self._video_renderers[participant_id]["render_next_frame"] = True
 
-    def _on_participant_video_frame(self, participant_id: str, buffer, size, format):
+    async def _on_participant_video_frame(self, participant_id: str, buffer, size, format):
         render_frame = False
 
         curr_time = time.time()
@@ -600,9 +621,7 @@ class DailyInputTransport(BaseInputTransport):
                 image=buffer,
                 size=size,
                 format=format)
-            future = asyncio.run_coroutine_threadsafe(
-                self._internal_push_frame(frame), self.get_event_loop())
-            future.result()
+            await self._internal_push_frame(frame)
 
         self._video_renderers[participant_id]["timestamp"] = curr_time
 
@@ -615,17 +634,13 @@ class DailyOutputTransport(BaseOutputTransport):
         self._client = client
 
     async def start(self, frame: StartFrame):
-        if self._running:
-            return
         # Parent start.
         await super().start(frame)
         # Join the room.
         await self._client.join()
 
     async def stop(self):
-        if not self._running:
-            return
-        # Parent stop. This will set _running to False.
+        # Parent stop.
         await super().stop()
         # Leave the room.
         await self._client.leave()
@@ -634,10 +649,10 @@ class DailyOutputTransport(BaseOutputTransport):
         await super().cleanup()
         await self._client.cleanup()
 
-    def send_message(self, frame: DailyTransportMessageFrame):
-        self._client.send_message(frame)
+    async def send_message(self, frame: DailyTransportMessageFrame):
+        await self._client.send_message(frame)
 
-    def send_metrics(self, frame: MetricsFrame):
+    async def send_metrics(self, frame: MetricsFrame):
         ttfb = [{"name": n, "time": t} for n, t in frame.ttfb.items()]
         message = DailyTransportMessageFrame(message={
             "type": "pipecat-metrics",
@@ -645,13 +660,13 @@ class DailyOutputTransport(BaseOutputTransport):
                 "ttfb": ttfb
             },
         })
-        self._client.send_message(message)
+        await self._client.send_message(message)
 
-    def write_raw_audio_frames(self, frames: bytes):
-        self._client.write_raw_audio_frames(frames)
+    async def write_raw_audio_frames(self, frames: bytes):
+        await self._client.write_raw_audio_frames(frames)
 
-    def write_frame_to_camera(self, frame: ImageRawFrame):
-        self._client.write_frame_to_camera(frame)
+    async def write_frame_to_camera(self, frame: ImageRawFrame):
+        await self._client.write_frame_to_camera(frame)
 
 
 class DailyTransport(BaseTransport):
@@ -768,24 +783,24 @@ class DailyTransport(BaseTransport):
             self._input.capture_participant_video(
                 participant_id, framerate, video_source, color_format)
 
-    def _on_joined(self, participant):
-        self._call_async_event_handler("on_joined", participant)
+    async def _on_joined(self, participant):
+        await self._call_event_handler("on_joined", participant)
 
-    def _on_left(self):
-        self._call_async_event_handler("on_left")
+    async def _on_left(self):
+        await self._call_event_handler("on_left")
 
-    def _on_error(self, error):
+    async def _on_error(self, error):
         # TODO(aleix): Report error to input/output transports. The one managing
         # the client should report the error.
         pass
 
-    def _on_app_message(self, message: Any, sender: str):
+    async def _on_app_message(self, message: Any, sender: str):
         if self._input:
-            self._input.push_app_message(message, sender)
-        self._call_async_event_handler("on_app_message", message, sender)
+            await self._input.push_app_message(message, sender)
+        await self._call_event_handler("on_app_message", message, sender)
 
-    def _on_call_state_updated(self, state: str):
-        self._call_async_event_handler("on_call_state_updated", state)
+    async def _on_call_state_updated(self, state: str):
+        await self._call_event_handler("on_call_state_updated", state)
 
     async def _handle_dialin_ready(self, sip_endpoint: str):
         if not self._params.dialin_settings:
@@ -818,33 +833,33 @@ class DailyTransport(BaseTransport):
             except BaseException as e:
                 logger.error(f"Error handling dialin-ready event ({url}): {e}")
 
-    def _on_dialin_ready(self, sip_endpoint):
+    async def _on_dialin_ready(self, sip_endpoint):
         if self._params.dialin_settings:
-            asyncio.run_coroutine_threadsafe(self._handle_dialin_ready(sip_endpoint), self._loop)
-        self._call_async_event_handler("on_dialin_ready", sip_endpoint)
+            await self._handle_dialin_ready(sip_endpoint)
+        await self._call_event_handler("on_dialin_ready", sip_endpoint)
 
-    def _on_dialout_connected(self, data):
-        self._call_async_event_handler("on_dialout_connected", data)
+    async def _on_dialout_connected(self, data):
+        await self._call_event_handler("on_dialout_connected", data)
 
-    def _on_dialout_stopped(self, data):
-        self._call_async_event_handler("on_dialout_stopped", data)
+    async def _on_dialout_stopped(self, data):
+        await self._call_event_handler("on_dialout_stopped", data)
 
-    def _on_dialout_error(self, data):
-        self._call_async_event_handler("on_dialout_error", data)
+    async def _on_dialout_error(self, data):
+        await self._call_event_handler("on_dialout_error", data)
 
-    def _on_dialout_warning(self, data):
-        self._call_async_event_handler("on_dialout_warning", data)
+    async def _on_dialout_warning(self, data):
+        await self._call_event_handler("on_dialout_warning", data)
 
-    def _on_participant_joined(self, participant):
-        self._call_async_event_handler("on_participant_joined", participant)
+    async def _on_participant_joined(self, participant):
+        await self._call_event_handler("on_participant_joined", participant)
 
-    def _on_participant_left(self, participant, reason):
-        self._call_async_event_handler("on_participant_left", participant, reason)
+    async def _on_participant_left(self, participant, reason):
+        await self._call_event_handler("on_participant_left", participant, reason)
 
-    def _on_first_participant_joined(self, participant):
-        self._call_async_event_handler("on_first_participant_joined", participant)
+    async def _on_first_participant_joined(self, participant):
+        await self._call_event_handler("on_first_participant_joined", participant)
 
-    def _on_transcription_message(self, participant_id, message):
+    async def _on_transcription_message(self, participant_id, message):
         text = message["text"]
         timestamp = message["timestamp"]
         is_final = message["rawResponse"]["is_final"]
@@ -855,9 +870,4 @@ class DailyTransport(BaseTransport):
             frame = InterimTranscriptionFrame(text, participant_id, timestamp)
 
         if self._input:
-            self._input.push_transcription_frame(frame)
-
-    def _call_async_event_handler(self, event_name: str, *args, **kwargs):
-        future = asyncio.run_coroutine_threadsafe(
-            self._call_event_handler(event_name, *args, **kwargs), self._loop)
-        future.result()
+            await self._input.push_transcription_frame(frame)

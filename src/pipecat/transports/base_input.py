@@ -5,7 +5,6 @@
 #
 
 import asyncio
-import queue
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -33,8 +32,6 @@ class BaseInputTransport(FrameProcessor):
 
         self._params = params
 
-        self._running = False
-
         self._executor = ThreadPoolExecutor(max_workers=5)
 
         # Create push frame task. This is the task that will push frames in
@@ -42,34 +39,21 @@ class BaseInputTransport(FrameProcessor):
         self._create_push_task()
 
     async def start(self, frame: StartFrame):
-        if self._running:
-            return
-
-        self._running = True
-
-        # Create audio input queue and thread if needed.
+        # Create audio input queue and task if needed.
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_queue = queue.Queue()
-            self._audio_thread = self._loop.run_in_executor(
-                self._executor, self._audio_thread_handler)
+            self._audio_in_queue = asyncio.Queue()
+            self._audio_task = self.get_event_loop().create_task(self._audio_task_handler())
 
     async def stop(self):
-        if not self._running:
-            return
-
-        # This will exit all threads.
-        self._running = False
-
-        # Wait for the threads to finish.
+        # Wait for the task to finish.
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            await self._audio_thread
-
-        self._push_frame_task.cancel()
+            self._audio_task.cancel()
+            await self._audio_task
 
     def vad_analyzer(self) -> VADAnalyzer | None:
         return self._params.vad_analyzer
 
-    def push_audio_frame(self, frame: AudioRawFrame):
+    async def push_audio_frame(self, frame: AudioRawFrame):
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_queue.put_nowait(frame)
 
@@ -78,7 +62,8 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def cleanup(self):
-        pass
+        self._push_frame_task.cancel()
+        await self._push_frame_task
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -102,8 +87,8 @@ class BaseInputTransport(FrameProcessor):
 
     def _create_push_task(self):
         loop = self.get_event_loop()
-        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
         self._push_queue = asyncio.Queue()
+        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
 
     async def _internal_push_frame(
             self,
@@ -129,6 +114,7 @@ class BaseInputTransport(FrameProcessor):
             if isinstance(frame, UserStartedSpeakingFrame):
                 logger.debug("User started speaking")
                 self._push_frame_task.cancel()
+                await self._push_frame_task
                 self._create_push_task()
                 await self.push_frame(StartInterruptionFrame())
             elif isinstance(frame, UserStoppedSpeakingFrame):
@@ -140,15 +126,16 @@ class BaseInputTransport(FrameProcessor):
     # Audio input
     #
 
-    def _vad_analyze(self, audio_frames: bytes) -> VADState:
+    async def _vad_analyze(self, audio_frames: bytes) -> VADState:
         state = VADState.QUIET
         vad_analyzer = self.vad_analyzer()
         if vad_analyzer:
-            state = vad_analyzer.analyze_audio(audio_frames)
+            state = await self.get_event_loop().run_in_executor(
+                self._executor, vad_analyzer.analyze_audio, audio_frames)
         return state
 
-    def _handle_vad(self, audio_frames: bytes, vad_state: VADState):
-        new_vad_state = self._vad_analyze(audio_frames)
+    async def _handle_vad(self, audio_frames: bytes, vad_state: VADState):
+        new_vad_state = await self._vad_analyze(audio_frames)
         if new_vad_state != vad_state and new_vad_state != VADState.STARTING and new_vad_state != VADState.STOPPING:
             frame = None
             if new_vad_state == VADState.SPEAKING:
@@ -157,33 +144,29 @@ class BaseInputTransport(FrameProcessor):
                 frame = UserStoppedSpeakingFrame()
 
             if frame:
-                future = asyncio.run_coroutine_threadsafe(
-                    self._handle_interruptions(frame), self.get_event_loop())
-                future.result()
+                await self._handle_interruptions(frame)
 
             vad_state = new_vad_state
         return vad_state
 
-    def _audio_thread_handler(self):
+    async def _audio_task_handler(self):
         vad_state: VADState = VADState.QUIET
-        while self._running:
+        while True:
             try:
-                frame: AudioRawFrame = self._audio_in_queue.get(timeout=1)
+                frame: AudioRawFrame = await self._audio_in_queue.get()
 
                 audio_passthrough = True
 
                 # Check VAD and push event if necessary. We just care about
                 # changes from QUIET to SPEAKING and vice versa.
                 if self._params.vad_enabled:
-                    vad_state = self._handle_vad(frame.audio, vad_state)
+                    vad_state = await self._handle_vad(frame.audio, vad_state)
                     audio_passthrough = self._params.vad_audio_passthrough
 
                 # Push audio downstream if passthrough.
                 if audio_passthrough:
-                    future = asyncio.run_coroutine_threadsafe(
-                        self._internal_push_frame(frame), self._loop)
-                    future.result()
-            except queue.Empty:
-                pass
+                    await self._internal_push_frame(frame)
+            except asyncio.CancelledError:
+                break
             except BaseException as e:
                 logger.error(f"{self} error reading audio frames: {e}")
