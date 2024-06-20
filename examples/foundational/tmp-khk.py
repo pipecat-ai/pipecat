@@ -211,8 +211,11 @@ class VADGate(FrameProcessor):
                 await asyncio.sleep(duration - 20 / 1000)
                 if self.context:
                     logger.debug(f"Appending assistant message to context: [{s.text_frame.text}]")
-                    self.context.messages.append(
-                        {"role": "assistant", "content": s.text_frame.text}
+                    if self.context.messages and self.context.messages[-1]["role"] == "assistant":
+                        self.context.messages[-1]["content"] += " " + s.text_frame.text
+                    else:
+                        self.context.messages.append(
+                            {"role": "assistant", "content": s.text_frame.text}
                     )
                 await self.push_frame(s.text_frame)
 
@@ -247,13 +250,14 @@ async def main(room_url: str, token):
             model="gpt-4o"
             # Or, to use a local vLLM (or similar) api server
             # model="meta-llama/Meta-Llama-3-8B-Instruct",
+            # model="neuralmagic/Meta-Llama-3-70B-Instruct-FP8",
             # base_url="http://0.0.0.0:8000/v1"
         )
 
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful LLM communicating via audio. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
             },
         ]
 
