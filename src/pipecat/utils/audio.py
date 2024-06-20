@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import audioop
 import numpy as np
 import pyloudnorm as pyln
 
@@ -31,3 +32,21 @@ def calculate_audio_volume(audio: bytes, sample_rate: int) -> float:
 
 def exp_smoothing(value: float, prev_value: float, factor: float) -> float:
     return prev_value + factor * (value - prev_value)
+
+def ulaw_8000_to_pcm_16000(ulaw_8000_bytes):
+    # Convert μ-law to PCM
+    pcm_8000_bytes = audioop.ulaw2lin(ulaw_8000_bytes, 2)
+
+    # Resample from 8000 Hz to 16000 Hz
+    pcm_16000_bytes = audioop.ratecv(pcm_8000_bytes, 2, 1, 8000, 16000, None)[0]
+
+    return pcm_16000_bytes
+
+def pcm_16000_to_ulaw_8000(pcm_16000_bytes):
+    # Resample from 16000 Hz to 8000 Hz
+    pcm_8000_bytes = audioop.ratecv(pcm_16000_bytes, 2, 1, 16000, 8000, None)[0]
+
+    # Convert PCM to μ-law
+    ulaw_8000_bytes = audioop.lin2ulaw(pcm_8000_bytes, 2)
+
+    return ulaw_8000_bytes
