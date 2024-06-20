@@ -114,6 +114,7 @@ class DailyCallbacks(BaseModel):
     on_app_message: Callable[[Any, str], None]
     on_call_state_updated: Callable[[str], None]
     on_dialin_ready: Callable[[str], None]
+    on_dialout_answered: Callable[[Any], None]
     on_dialout_connected: Callable[[Any], None]
     on_dialout_stopped: Callable[[Any], None]
     on_dialout_error: Callable[[Any], None]
@@ -407,6 +408,9 @@ class DailyTransportClient(EventHandler):
     def on_dialin_ready(self, sip_endpoint: str):
         self._callbacks.on_dialin_ready(sip_endpoint)
 
+    def on_dialout_answered(self, data: Any):
+        self._callbacks.on_dialout_answered(data)
+
     def on_dialout_connected(self, data: Any):
         self._callbacks.on_dialout_connected(data)
 
@@ -674,6 +678,7 @@ class DailyTransport(BaseTransport):
             on_app_message=self._on_app_message,
             on_call_state_updated=self._on_call_state_updated,
             on_dialin_ready=self._on_dialin_ready,
+            on_dialout_answered=self._on_dialout_answered,
             on_dialout_connected=self._on_dialout_connected,
             on_dialout_stopped=self._on_dialout_stopped,
             on_dialout_error=self._on_dialout_error,
@@ -696,6 +701,7 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_call_state_updated")
         self._register_event_handler("on_dialin_ready")
+        self._register_event_handler("on_dialout_answered")
         self._register_event_handler("on_dialout_connected")
         self._register_event_handler("on_dialout_stopped")
         self._register_event_handler("on_dialout_error")
@@ -822,6 +828,9 @@ class DailyTransport(BaseTransport):
         if self._params.dialin_settings:
             asyncio.run_coroutine_threadsafe(self._handle_dialin_ready(sip_endpoint), self._loop)
         self._call_async_event_handler("on_dialin_ready", sip_endpoint)
+
+    def _on_dialout_answered(self, data):
+        self._call_async_event_handler("on_dialout_answered", data)
 
     def _on_dialout_connected(self, data):
         self._call_async_event_handler("on_dialout_connected", data)
