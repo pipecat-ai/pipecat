@@ -1,8 +1,10 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+
+from fastapi import FastAPI, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse
-from test_bot import run_bot
+
+from bot import run_bot
 
 app = FastAPI()
 
