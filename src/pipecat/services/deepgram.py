@@ -89,6 +89,7 @@ class DeepgramTTSService(TTSService):
 class DeepgramSTTService(AIService):
     def __init__(self,
                  api_key: str,
+                 url: str = "",
                  live_options: LiveOptions = LiveOptions(
                      encoding="linear16",
                      language="en-US",
@@ -104,7 +105,7 @@ class DeepgramSTTService(AIService):
         self._live_options = live_options
 
         self._client = DeepgramClient(
-            api_key, config=DeepgramClientOptions(options={"keepalive": "true"}))
+            api_key, config=DeepgramClientOptions(url=url, options={"keepalive": "true"}))
         self._connection = self._client.listen.asynclive.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
 
