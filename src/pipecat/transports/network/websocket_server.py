@@ -93,7 +93,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
                 continue
 
             if isinstance(frame, AudioRawFrame):
-                self.push_audio_frame(frame)
+                await self.push_audio_frame(frame)
             else:
                 await self._internal_push_frame(frame)
 
@@ -123,7 +123,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             logger.warning("Only one client allowed, using new connection")
         self._websocket = websocket
 
-    def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes):
         self._audio_buffer += frames
         while len(self._audio_buffer) >= self._params.audio_frame_size:
             frame = AudioRawFrame(
@@ -149,9 +149,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
             proto = self._params.serializer.serialize(frame)
 
-            future = asyncio.run_coroutine_threadsafe(
-                self._websocket.send(proto), self.get_event_loop())
-            future.result()
+            await self._websocket.send(proto)
 
             self._audio_buffer = self._audio_buffer[self._params.audio_frame_size:]
 

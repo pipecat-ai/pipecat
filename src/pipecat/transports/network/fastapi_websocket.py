@@ -75,7 +75,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                 continue
 
             if isinstance(frame, AudioRawFrame):
-                self.push_audio_frame(frame)
+                await self.push_audio_frame(frame)
 
         await self._callbacks.on_client_disconnected(self._websocket)
 
@@ -89,7 +89,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._params = params
         self._audio_buffer = bytes()
 
-    def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes):
         self._audio_buffer += frames
         while len(self._audio_buffer) >= self._params.audio_frame_size:
             frame = AudioRawFrame(
@@ -115,9 +115,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
             payload = self._params.serializer.serialize(frame)
             if payload:
-                future = asyncio.run_coroutine_threadsafe(
-                    self._websocket.send_text(payload), self.get_event_loop())
-                future.result()
+                await self._websocket.send_text(payload)
 
             self._audio_buffer = self._audio_buffer[self._params.audio_frame_size:]
 
