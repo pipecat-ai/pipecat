@@ -7,6 +7,7 @@ This project is a FastAPI-based chatbot that integrates with Twilio to handle We
 - [Features](#features)
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [Configure Twilio URLs](#configure-twilio-urls)
 - [Running the Application](#running-the-application)
 - [Usage](#usage)
 
@@ -38,10 +39,18 @@ This project is a FastAPI-based chatbot that integrates with Twilio to handle We
     ```
 
 3. **Create .env**:
-    create .env based on .env.example
+    create .env based on env.example
 
 4. **Install ngrok**:
     Follow the instructions on the [ngrok website](https://ngrok.com/download) to download and install ngrok.
+
+## Configure Twilio URLs
+
+1. **Update the Twilio Webhook**:
+    Copy the ngrok URL and update your Twilio phone number webhook URL to `http://<ngrok_url>/start_call`.
+
+2. **Update the streams.xml**:
+    Copy the ngrok URL and update templates/streams.xml with `wss://<ngrok_url>/ws`.
 
 ## Running the Application
 
@@ -57,13 +66,6 @@ This project is a FastAPI-based chatbot that integrates with Twilio to handle We
     ```sh
     ngrok http 8765
     ```
-
-3. **Update the Twilio Webhook**:
-    Copy the ngrok URL and update your Twilio phone number webhook URL to `http://<ngrok_url>/start_call`.
-
-3. **Update the streams.xml**:
-    Copy the ngrok URL and update your .xml URL to `wss://<ngrok_url>/ws`.
-
 ### Using Docker
 
 1. **Build the Docker image**:
@@ -73,22 +75,8 @@ This project is a FastAPI-based chatbot that integrates with Twilio to handle We
 
 2. **Run the Docker container**:
     ```sh
-    docker build -t twilio-chatbot .                               
     docker run -it --rm -p 8765:8765 twilio-chatbot
     ```
-
-3. **Start ngrok**:
-    In a new terminal, start ngrok to tunnel the local server:
-    ```sh
-    ngrok http 8765
-    ```
-
-4. **Update the Twilio Webhook**:
-    Copy the ngrok URL and update your Twilio phone number webhook URL to `http://<ngrok_url>/start_call`.
-
-5. **Update the streams.xml**:
-    Copy the ngrok URL and update your .xml URL to `wss://<ngrok_url>/ws`.
-
 ## Usage
 
 To start a call, simply make a call to your Twilio phone number. The webhook URL will direct the call to your FastAPI application, which will handle it accordingly.
