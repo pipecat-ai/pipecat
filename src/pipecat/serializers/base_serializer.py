@@ -12,9 +12,9 @@ from pipecat.frames.frames import Frame
 class FrameSerializer(ABC):
 
     @abstractmethod
-    def serialize(self, frame: Frame) -> bytes:
+    def serialize(self, frame: Frame) -> str | bytes | None:
         pass
 
     @abstractmethod
-    def deserialize(self, data: bytes) -> Frame | None:
+    def deserialize(self, data: str | bytes) -> Frame | None:
         pass

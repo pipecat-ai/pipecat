@@ -9,12 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `FastAPIWebsocketTransport`. This is a new websocket transport that
+  can be integrated with FastAPI websockets.
+
+- Added new `TwilioFrameSerializer`. This is a new serializer that knows how to
+  serialize and deserialize audio frames from Twilio.
+
 - Added Daily transport event: `on_dialout_answered`.  See
   https://reference-python.daily.co/api_reference.html#daily.EventHandler
 
 - Added new `AzureSTTService`. This allows you to use Azure Speech-To-Text.
 
 ### Other
+
+- Added `twilio-chatbot`. This is an example that shows how to integrate Twilio
+  phone numbers with a Pipecat bot.
 
 - Updated `07f-interruptible-azure.py` to use `AzureLLMService`,
   `AzureSTTService` and `AzureTTSService`.

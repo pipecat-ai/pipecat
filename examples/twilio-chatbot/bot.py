@@ -2,7 +2,7 @@ import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import LLMMessagesFrame, Frame, AudioRawFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -10,8 +10,6 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator
 )
-from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
-
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
@@ -32,10 +30,8 @@ async def run_bot(websocket_client):
         transport = FastAPIWebsocketTransport(
             websocket=websocket_client,
             params=FastAPIWebsocketParams(
-                audio_in_enabled=True,
                 audio_out_enabled=True,
                 add_wav_header=False,
-                transcription_enabled=False,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True
@@ -57,7 +53,7 @@ async def run_bot(websocket_client):
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful LLM in an audio call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
             },
         ]
 
@@ -82,6 +78,10 @@ async def run_bot(websocket_client):
             messages.append(
                 {"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])
+
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, client):
+            await task.queue_frames([EndFrame()])
 
         runner = PipelineRunner(handle_sigint=False)
 
