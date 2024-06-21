@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Daily transport event: `on_dialout_answered`.  See
+  https://reference-python.daily.co/api_reference.html#daily.EventHandler
+
 - Added new `AzureSTTService`. This allows you to use Azure Speech-To-Text.
 
 ### Other
