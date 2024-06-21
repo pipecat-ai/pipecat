@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import base64
 import json
 
@@ -12,29 +18,36 @@ class TwilioFrameSerializer(FrameSerializer):
     }
 
     def __init__(self):
-        self.sid = None
+        self._sid = None
 
+    def serialize(self, frame: Frame) -> str | bytes | None:
+        if not isinstance(frame, AudioRawFrame):
+            return None
 
-    def serialize(self, frame: AudioRawFrame) -> dict:
         data = frame.audio
 
         serialized_data = pcm_16000_to_ulaw_8000(data)
-        payload = base64.b64encode(serialized_data).decode('utf-8')
-        answer_dict = {"event": "media",
-                       "streamSid": self.sid,
-                       "media": {"payload": payload}}
+        payload = base64.b64encode(serialized_data).decode("utf-8")
+        answer = {
+            "event": "media",
+            "streamSid": self._sid,
+            "media": {
+                "payload": payload
+            }
+        }
 
-        return answer_dict
+        return json.dumps(answer)
 
-    def deserialize(self, message: bytes) -> AudioRawFrame | None:
-        data = json.loads(message)
-        if not self.sid:
-            self.sid = data['streamSid'] if data.get("streamSid") else None
+    def deserialize(self, data: str | bytes) -> Frame | None:
+        message = json.loads(data)
 
-        if data['event'] != 'media':
+        if not self._sid:
+            self._sid = message["streamSid"] if "streamSid" in message else None
+
+        if message["event"] != "media":
             return None
         else:
-            payload_base64 = data['media']['payload']
+            payload_base64 = message["media"]["payload"]
             payload = base64.b64decode(payload_base64)
 
             deserialized_data = ulaw_8000_to_pcm_16000(payload)
