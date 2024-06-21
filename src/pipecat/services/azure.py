@@ -146,10 +146,11 @@ class AzureSTTService(AIService):
     async def cancel(self, frame: CancelFrame):
         self._speech_recognizer.stop_continuous_recognition_async()
         self._push_frame_task.cancel()
+        await self._push_frame_task
 
     def _create_push_task(self):
-        self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
         self._push_queue = asyncio.Queue()
+        self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
 
     async def _push_frame_task_handler(self):
         running = True
