@@ -4,11 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import asyncio
 import io
 import wave
-import websockets
 
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
@@ -22,6 +20,13 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 from loguru import logger
+
+try:
+    import websockets
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use websockets, you need to `pip install pipecat-ai[websocket]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 class WebsocketServerParams(TransportParams):
