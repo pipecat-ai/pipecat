@@ -26,7 +26,7 @@ class ProtobufFrameSerializer(FrameSerializer):
     def __init__(self):
         pass
 
-    def serialize(self, frame: Frame) -> bytes:
+    def serialize(self, frame: Frame) -> str | bytes | None:
         proto_frame = frame_protos.Frame()
         if type(frame) not in self.SERIALIZABLE_TYPES:
             raise ValueError(
@@ -41,7 +41,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         result = proto_frame.SerializeToString()
         return result
 
-    def deserialize(self, data: bytes) -> Frame | None:
+    def deserialize(self, data: str | bytes) -> Frame | None:
         """Returns a Frame object from a Frame protobuf. Used to convert frames
         passed over the wire as protobufs to Frame objects used in pipelines
         and frame processors.
