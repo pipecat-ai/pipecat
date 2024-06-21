@@ -50,7 +50,7 @@ openai = [ "openai~=1.26.0" ]
 openpipe = [ "openpipe~=4.14.0" ]
 playht = [ "pyht~=0.0.28" ]
 silero = [ "torch~=2.3.0", "torchaudio~=2.3.0" ]
-websocket = [ "websockets~=12.0" ]
+websocket = [ "websockets~=12.0", "fastapi~=0.111.0" ]
 whisper = [ "faster-whisper~=1.0.2" ]
 
 [tool.setuptools.packages.find]
