@@ -40,14 +40,17 @@ class AnthropicLLMService(LLMService):
     """
 
     def __init__(
-            self,
-            api_key: str,
-            model: str = "claude-3-opus-20240229",
-            max_tokens: int = 1024):
+        self,
+        api_key: str,
+        model: str = "claude-3-opus-20240229",
+        max_tokens: int = 1024,
+        temperature: float = 0.0
+    ):
         super().__init__()
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
         self._max_tokens = max_tokens
+        self._temperature = temperature
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -110,6 +113,7 @@ class AnthropicLLMService(LLMService):
                 messages=messages,
                 model=self._model,
                 max_tokens=self._max_tokens,
+                temperature=self._temperature,
                 stream=True)
 
             await self.stop_ttfb_metrics()
