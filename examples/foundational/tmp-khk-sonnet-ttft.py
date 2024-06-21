@@ -83,7 +83,6 @@ async def main(room_url: str, token):
             tts,                 # TTS
             transport.output(),  # Transport bot output
             tma_out,             # Assistant spoken responses
-            tma_trim
         ])
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
