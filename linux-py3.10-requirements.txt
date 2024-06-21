@@ -26,6 +26,8 @@ anyio==4.4.0
     #   anthropic
     #   httpx
     #   openai
+    #   starlette
+    #   watchfiles
 async-timeout==4.0.3
     # via
     #   aiohttp
@@ -54,12 +56,15 @@ cffi==1.16.0
 charset-normalizer==3.3.2
     # via requests
 click==8.1.7
-    # via flask
+    # via
+    #   flask
+    #   typer
+    #   uvicorn
 coloredlogs==15.0.1
     # via onnxruntime
 ctranslate2==4.3.1
     # via faster-whisper
-daily-python==0.9.1
+daily-python==0.10.0
     # via pipecat-ai (pyproject.toml)
 dataclasses-json==0.6.7
     # via
@@ -71,14 +76,22 @@ distro==1.9.0
     # via
     #   anthropic
     #   openai
+dnspython==2.6.1
+    # via email-validator
 einops==0.8.0
     # via pipecat-ai (pyproject.toml)
+email-validator==2.2.0
+    # via fastapi
 exceptiongroup==1.2.1
     # via
     #   anyio
     #   pytest
 fal-client==0.4.0
     # via pipecat-ai (pyproject.toml)
+fastapi==0.111.0
+    # via pipecat-ai (pyproject.toml)
+fastapi-cli==0.0.4
+    # via fastapi
 faster-whisper==1.0.2
     # via pipecat-ai (pyproject.toml)
 filelock==3.15.3
@@ -140,19 +153,24 @@ grpcio==1.64.1
 grpcio-status==1.62.2
     # via google-api-core
 h11==0.14.0
-    # via httpcore
+    # via
+    #   httpcore
+    #   uvicorn
 httpcore==1.0.5
     # via httpx
 httplib2==0.22.0
     # via
     #   google-api-python-client
     #   google-auth-httplib2
+httptools==0.6.1
+    # via uvicorn
 httpx==0.27.0
     # via
     #   anthropic
     #   cartesia
     #   deepgram-sdk
     #   fal-client
+    #   fastapi
     #   openai
     #   openpipe
 httpx-sse==0.4.0
@@ -168,6 +186,7 @@ humanfriendly==10.0
 idna==3.7
     # via
     #   anyio
+    #   email-validator
     #   httpx
     #   requests
     #   yarl
@@ -177,6 +196,7 @@ itsdangerous==2.2.0
     # via flask
 jinja2==3.1.4
     # via
+    #   fastapi
     #   flask
     #   torch
 jsonpatch==1.33
@@ -206,12 +226,16 @@ langsmith==0.1.81
     #   langchain-core
 loguru==0.7.2
     # via pipecat-ai (pyproject.toml)
+markdown-it-py==3.0.0
+    # via rich
 markupsafe==2.1.5
     # via
     #   jinja2
     #   werkzeug
 marshmallow==3.21.3
     # via dataclasses-json
+mdurl==0.1.2
+    # via markdown-it-py
 mpmath==1.3.0
     # via sympy
 multidict==6.0.5
@@ -274,7 +298,9 @@ openai==1.26.0
 openpipe==4.14.0
     # via pipecat-ai (pyproject.toml)
 orjson==3.10.5
-    # via langsmith
+    # via
+    #   fastapi
+    #   langsmith
 packaging==24.1
     # via
     #   huggingface-hub
@@ -317,6 +343,7 @@ pycparser==2.22
 pydantic==2.7.4
     # via
     #   anthropic
+    #   fastapi
     #   google-generativeai
     #   langchain
     #   langchain-core
@@ -324,6 +351,8 @@ pydantic==2.7.4
     #   openai
 pydantic-core==2.18.4
     # via pydantic
+pygments==2.18.0
+    # via rich
 pyht==0.0.28
     # via pipecat-ai (pyproject.toml)
 pyloudnorm==0.1.1
@@ -337,7 +366,11 @@ pytest-asyncio==0.23.7
 python-dateutil==2.9.0.post0
     # via openpipe
 python-dotenv==1.0.1
-    # via pipecat-ai (pyproject.toml)
+    # via
+    #   pipecat-ai (pyproject.toml)
+    #   uvicorn
+python-multipart==0.0.9
+    # via fastapi
 pyyaml==6.0.1
     # via
     #   ctranslate2
@@ -347,6 +380,7 @@ pyyaml==6.0.1
     #   langchain-core
     #   timm
     #   transformers
+    #   uvicorn
 regex==2024.5.15
     # via
     #   tiktoken
@@ -362,6 +396,8 @@ requests==2.32.3
     #   pyht
     #   tiktoken
     #   transformers
+rich==13.7.1
+    # via typer
 rsa==4.9
     # via google-auth
 safetensors==0.4.3
@@ -370,6 +406,8 @@ safetensors==0.4.3
     #   transformers
 scipy==1.13.1
     # via pyloudnorm
+shellingham==1.5.4
+    # via typer
 six==1.16.0
     # via python-dateutil
 sniffio==1.3.1
@@ -384,6 +422,8 @@ sqlalchemy==2.0.31
     # via
     #   langchain
     #   langchain-community
+starlette==0.37.2
+    # via fastapi
 sympy==1.12.1
     # via
     #   onnxruntime
@@ -424,11 +464,14 @@ transformers==4.40.2
     # via pipecat-ai (pyproject.toml)
 triton==2.3.1
     # via torch
+typer==0.12.3
+    # via fastapi-cli
 typing-extensions==4.12.2
     # via
     #   anthropic
     #   anyio
     #   deepgram-sdk
+    #   fastapi
     #   google-generativeai
     #   huggingface-hub
     #   openai
@@ -437,20 +480,31 @@ typing-extensions==4.12.2
     #   pydantic-core
     #   sqlalchemy
     #   torch
+    #   typer
     #   typing-inspect
+    #   uvicorn
 typing-inspect==0.9.0
     # via dataclasses-json
+ujson==5.10.0
+    # via fastapi
 uritemplate==4.1.1
     # via google-api-python-client
 urllib3==2.2.2
     # via requests
+uvicorn[standard]==0.30.1
+    # via fastapi
+uvloop==0.19.0
+    # via uvicorn
 verboselogs==1.7
     # via deepgram-sdk
+watchfiles==0.22.0
+    # via uvicorn
 websockets==12.0
     # via
     #   cartesia
     #   deepgram-sdk
     #   pipecat-ai (pyproject.toml)
+    #   uvicorn
 werkzeug==3.0.3
     # via flask
 yarl==1.9.4
