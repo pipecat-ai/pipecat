@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TextFrame,
     VisionImageRawFrame,
+    LLMFullResponseEndFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.audio import calculate_audio_volume
@@ -144,6 +145,11 @@ class TTSService(AIService):
         elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
             self._current_sentence = ""
             await self._push_tts_frames(self._current_sentence)
+            await self.push_frame(frame)
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            if self._current_sentence:
+                await self._push_tts_frames(self._current_sentence.strip())
+                self._current_sentence = ""
             await self.push_frame(frame)
         else:
             await self.push_frame(frame, direction)
