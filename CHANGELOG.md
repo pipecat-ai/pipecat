@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Allow specifying a `DeepgramSTTService` url which allows using on-prem
+  Deepgram.
+
 - Added new `FastAPIWebsocketTransport`. This is a new websocket transport that
   can be integrated with FastAPI websockets.
 
