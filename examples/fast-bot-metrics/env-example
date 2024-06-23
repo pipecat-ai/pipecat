@@ -1,0 +1,15 @@
+DAILY_SAMPLE_ROOM_URL=...
+DAILY_API_KEY=...
+
+DEEPGRAM_API_KEY=...
+DEEPGRAM_VOICE=alpha-asteria-en-v2
+# DEEPGRAM_STT_URL=ws://localhost:8080
+# DEEPGRAM_TTS_BASE_URL=http://0.0.0.0:8080/v1/speak
+
+OPENAI_API_KEY=...
+# OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o
+# OPENAI_MODEL=meta-llama/Meta-Llama-3-70B-Instruct
+# OPENAI_MODEL=meta-llama/Meta-Llama-3-8B-Instruct
+# OPENAI_MODEL=neuralmagic/Meta-Llama-3-70B-Instruct-FP8
+# OPENAI_BASE_URL=http://0.0.0.0:8000/v1
