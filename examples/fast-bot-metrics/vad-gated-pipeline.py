@@ -64,7 +64,7 @@ async def main(room_url: str, token):
         )
 
         tts = ClearableDeepgramTTSService(
-            name="STT",
+            name="Voice",
             aiohttp_session=session,
             api_key=os.getenv("DEEPGRAM_API_KEY"),
             voice="aura-asteria-en",
