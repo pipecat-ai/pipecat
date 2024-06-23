@@ -292,33 +292,43 @@ async def main(room_url: str, token):
                 audio_out_enabled=True,
                 transcription_enabled=False,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.650)),
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=2.500)),
                 vad_audio_passthrough=True
             )
         )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = DeepgramSTTService(
+            api_key=os.getenv("DEEPGRAM_API_KEY"),
+            url="ws://localhost:8080"
+        )
 
         tts = ClearableDeepgramTTSService(
             aiohttp_session=session,
             api_key=os.getenv("DEEPGRAM_API_KEY"),
             voice="aura-asteria-en",
-            # base_url="http://0.0.0.0:8080/v1/speak"
+            base_url="http://0.0.0.0:8080/v1/speak"
         )
 
         llm = OpenAILLMService(
             # To use OpenAI
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o"
+            # api_key=os.getenv("OPENAI_API_KEY"),
+            # model="gpt-4o"
             # Or, to use a local vLLM (or similar) api server
             # model="meta-llama/Meta-Llama-3-70B-Instruct",
-            # base_url="http://0.0.0.0:8000/v1"
+            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            # model="neuralmagic/Meta-Llama-3-70B-Instruct-FP8",
+            base_url="http://0.0.0.0:8000/v1"
         )
 
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": """You are a helpful assistant in an audio conversation.
+
+Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers.
+
+Respond to what the user said in a creative and helpful way. Be concise in your answers to basic questions. If you are asked to elaborate or tell a story, provide a longer response.
+""",
             },
         ]
 
