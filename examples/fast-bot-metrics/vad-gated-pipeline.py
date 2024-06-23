@@ -52,7 +52,7 @@ async def main(room_url: str, token):
                 audio_out_enabled=True,
                 transcription_enabled=False,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.650)),
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.400)),
                 vad_audio_passthrough=True
             )
         )
