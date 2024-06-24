@@ -24,7 +24,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.logger import FrameLogger
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import LLMMessagesFrame, EndFrame
 
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator
@@ -141,6 +141,11 @@ Respond to what the user said in a creative and helpful way. Be concise in your 
         # async def on_participant_joined(transport, participant):
         #    transport.capture_participant_transcription(participant["id"])
 
+        # When the participant leaves, we exit the bot.
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
+            
         # When the first participant joins, the bot should introduce itself.
         @ transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
