@@ -1,11 +1,9 @@
-"""
-bot_runner.py
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
 
-HTTP service that listens for incoming calls from either Daily or Twilio,
-provisioning a room and starting a Pipecat bot in response.
-
-Refer to README for more information.
-"""
 import os
 import argparse
 import subprocess
