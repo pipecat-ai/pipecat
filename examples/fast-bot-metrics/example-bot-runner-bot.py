@@ -4,44 +4,26 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from loguru import logger
-from runner import configure
 import argparse
 import asyncio
 import aiohttp
-import os
 import sys
-from typing import List, Optional
 
 from pydantic import BaseModel, ValidationError
+from typing import Optional
 
-from pipecat.vad.vad_analyzer import VADParams
-from pipecat.vad.silero import SileroVADAnalyzer
-from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyTransportMessageFrame
-from pipecat.services.openai import OpenAILLMService, OpenAILLMContext
-from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.pipeline.runner import PipelineRunner
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.logger import FrameLogger
-from pipecat.frames.frames import LLMMessagesFrame
-
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator, LLMUserResponseAggregator
-)
+    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+from pipecat.services.deepgram import DeepgramTTSService
+from pipecat.services.openai import OpenAILLMService
+from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyTransportMessageFrame
+from pipecat.vad.silero import SileroVADAnalyzer
 
-
-from fastbothelpers import (
-    GreedyLLMAggregator,
-    ClearableDeepgramTTSService,
-    VADGate,
-    AudioVolumeTimer,
-    TranscriptionTimingLogger
-)
-
-
-from dotenv import load_dotenv
-load_dotenv(override=True)
+from loguru import logger
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
@@ -68,58 +50,37 @@ async def main(settings: BotSettings):
             settings.bot_name,
             DailyParams(
                 audio_out_enabled=True,
-                transcription_enabled=False,
+                transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.200)),
-                vad_audio_passthrough=True
+                vad_analyzer=SileroVADAnalyzer()
             )
         )
 
-        stt = DeepgramSTTService(
-            api_key=os.getenv("DEEPGRAM_API_KEY"),
-            **({'url': url} if (url := os.getenv("DEEPGRAM_STT_URL")) else {})
-
-        )
-
-        tts = ClearableDeepgramTTSService(
-            name="Voice",
+        tts = DeepgramTTSService(
             aiohttp_session=session,
-            api_key=os.getenv("DEEPGRAM_API_KEY"),
-            voice="aura-asteria-en",
-            **({'base_url': url} if (url := os.getenv("DEEPGRAM_TTS_BASE_URL")) else {})
+            api_key=settings.deepgram_api_key,
+            voice=settings.deepgram_voice,
+            base_url=settings.deepgram_base_url
         )
 
         llm = OpenAILLMService(
-            name="LLM",
-            # To use OpenAI
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model=os.getenv("OPENAI_MODEL"),
-            base_url=os.getenv("OPENAI_BASE_URL")
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            base_url=settings.openai_base_url
         )
 
         messages = [
             {
                 "role": "system",
-                "content": """You are a helpful assistant in an audio conversation.
-
-Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers.
-
-Respond to what the user said in a creative and helpful way. Be concise in your answers to basic questions. If you are asked to elaborate or tell a story, provide a longer response.
-""",
+                "content": settings.prompt,
             },
         ]
-
-        avt = AudioVolumeTimer()
-        tl = TranscriptionTimingLogger(avt)
 
         tma_in = LLMUserResponseAggregator(messages)
         tma_out = LLMAssistantResponseAggregator(messages)
 
         pipeline = Pipeline([
             transport.input(),   # Transport user input
-            avt,
-            stt,
-            tl,
             tma_in,              # User responses
             llm,                 # LLM
             tts,                 # TTS
@@ -127,26 +88,32 @@ Respond to what the user said in a creative and helpful way. Be concise in your 
             tma_out,             # Assistant spoken responses
         ])
 
-        task = PipelineTask(
-            pipeline,
-            PipelineParams(
-                allow_interruptions=True,
-                enable_metrics=True,
-                report_only_initial_ttfb=True
-            ))
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
+
+        # When the first participant joins, the bot should introduce itself.
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            # Kick off the conversation.
+            messages.append(
+                {"role": "system", "content": "Please introduce yourself to the user."})
+            await task.queue_frame(LLMMessagesFrame(messages))
 
         # When a participant joins, start transcription for that participant so the
         # bot can "hear" and respond to them.
-        # @ transport.event_handler("on_participant_joined")
-        # async def on_participant_joined(transport, participant):
-        #    transport.capture_participant_transcription(participant["id"])
+        @transport.event_handler("on_participant_joined")
+        async def on_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
 
-        # When the first participant joins, the bot should introduce itself.
-        @ transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            messages.append(
-                {"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMMessagesFrame(messages)])
+        # When the participant leaves, we exit the bot.
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
+
+        # If the call is ended make sure we quit as well.
+        @transport.event_handler("on_call_state_updated")
+        async def on_call_state_updated(transport, state):
+            if state == "left":
+                await task.queue_frame(EndFrame())
 
         # Handle "latency-ping" messages. The client will send app messages that look like
         # this:
@@ -155,7 +122,7 @@ Respond to what the user said in a creative and helpful way. Be concise in your 
         # We want to send an immediate pong back to the client from this handler function.
         # Also, we will push a frame into the top of the pipeline and send it after the
         #
-        @ transport.event_handler("on_app_message")
+        @transport.event_handler("on_app_message")
         async def on_app_message(transport, message, sender):
             try:
                 if "latency-ping" in message:
@@ -174,12 +141,9 @@ Respond to what the user said in a creative and helpful way. Be concise in your 
                 logger.debug(f"message handling error: {e} - {message}")
 
         runner = PipelineRunner()
+
         await runner.run(task)
 
-
-# if __name__ == "__main__":
-#     (url, token) = configure()
-#     asyncio.run(main(url, token))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipecat Bot")

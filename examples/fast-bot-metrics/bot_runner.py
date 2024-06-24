@@ -37,9 +37,10 @@ daily_rest_helper = DailyRESTHelper(
 
 
 class RunnerSettings(BaseModel):
-    prompt: Optional[str] = None
-    deepgram_voice: Optional[str] = None
-    openai_model: Optional[str] = "meta-llama/Meta-Llama-3-70B-Instruct"
+    prompt: Optional[str] = "You are a helpful assistant."
+    deepgram_voice: Optional[str] = os.getenv("DEEPGRAM_VOICE")
+    openai_model: Optional[str] = os.getenv("OPENAI_MODEL")
+    openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     test: Optional[bool] = None
 
 # ----------------- API ----------------- #
@@ -114,10 +115,10 @@ async def start_bot(request: Request) -> JSONResponse:
             prompt=runner_settings.prompt,
             deepgram_voice=runner_settings.deepgram_voice,
             deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
-            deepgram_base_url="http://0.0.0.0:8080/v1/speak",
+            # deepgram_base_url="http://0.0.0.0:8080/v1/speak",
             openai_model=runner_settings.openai_model,
-            openai_api_key="ollama",
-            openai_base_url="http://0.0.0.0:8000/v1",
+            openai_api_key=runner_settings.openai_api_key,
+            # openai_base_url="http://0.0.0.0:8000/v1",
         )
         bot_settings_str = bot_settings.model_dump_json(exclude_none=True)
 
