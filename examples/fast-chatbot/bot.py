@@ -56,10 +56,10 @@ class BotSettings(BaseModel):
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY", None),
     openai_model: Optional[str] = os.getenv("OPENAI_MODEL", None),
     openai_base_url: Optional[str] = os.getenv("OPENAI_BASE_URL", None)
+    vad_stop_secs: Optional[float] = os.getenv("VAD_STOP_SECS", 0.200)
 
 
 async def main(settings: BotSettings):
-    print(settings.prompt)
     async with aiohttp.ClientSession() as session:
         transport = DailyTransport(
             settings.room_url,
@@ -69,7 +69,9 @@ async def main(settings: BotSettings):
                 audio_out_enabled=True,
                 transcription_enabled=False,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.200)),
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(
+                    stop_secs=settings.vad_stop_secs
+                )),
                 vad_audio_passthrough=True
             )
         )
