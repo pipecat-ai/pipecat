@@ -55,7 +55,7 @@ class BaseInputTransport(FrameProcessor):
 
     async def push_audio_frame(self, frame: AudioRawFrame):
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_queue.put_nowait(frame)
+            await self._audio_in_queue.put(frame)
 
     #
     # Frame processor

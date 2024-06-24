@@ -209,19 +209,18 @@ class DailyTransportClient(EventHandler):
     async def read_next_audio_frame(self) -> AudioRawFrame | None:
         sample_rate = self._params.audio_in_sample_rate
         num_channels = self._params.audio_in_channels
+        num_frames = int(sample_rate / 100) * 2  # 20ms of audio
 
-        if self._other_participant_has_joined:
-            num_frames = int(sample_rate / 100) * 2  # 20ms of audio
+        future = self._loop.create_future()
+        self._speaker.read_frames(num_frames, completion=completion_callback(future))
+        audio = await future
 
-            future = self._loop.create_future()
-            self._speaker.read_frames(num_frames, completion=completion_callback(future))
-            audio = await future
-
+        if len(audio) > 0:
             return AudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=num_channels)
         else:
-            # If no one has ever joined the meeting `read_frames()` would block,
-            # instead we just wait a bit. daily-python should probably return
-            # silence instead.
+            # If we don't read any audio it could be there's no participant
+            # connected. daily-python will return immediately if that's the
+            # case, so let's sleep for a little bit (i.e. busy wait).
             await asyncio.sleep(0.01)
             return None
 
