@@ -35,7 +35,7 @@ except ModuleNotFoundError as e:
 class FastAPIWebsocketParams(TransportParams):
     add_wav_header: bool = False
     audio_frame_size: int = 6400  # 200ms
-    serializer: FrameSerializer = TwilioFrameSerializer()
+    serializer: FrameSerializer
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -125,7 +125,7 @@ class FastAPIWebsocketTransport(BaseTransport):
     def __init__(
             self,
             websocket: WebSocket,
-            params: FastAPIWebsocketParams = FastAPIWebsocketParams(),
+            params: FastAPIWebsocketParams,
             input_name: str | None = None,
             output_name: str | None = None,
             loop: asyncio.AbstractEventLoop | None = None):
