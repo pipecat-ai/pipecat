@@ -66,7 +66,6 @@ async def main(room_url: str, token):
             "Pipecat",
             DailyParams(
                 audio_out_enabled=True,
-                audio_out_sample_rate=44100,
                 transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer()
@@ -75,20 +74,17 @@ async def main(room_url: str, token):
 
         news_lady = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_name="Newslady",
-            output_format="pcm_44100"
+            voice_id="bf991597-6c13-47e4-8411-91ec2de5c466",  # Newslady
         )
 
         british_lady = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_name="British Lady",
-            output_format="pcm_44100"
+            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
         barbershop_man = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_name="Barbershop Man",
-            output_format="pcm_44100"
+            voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
         )
 
         llm = OpenAILLMService(
