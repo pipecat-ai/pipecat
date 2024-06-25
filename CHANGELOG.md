@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with asynchronous STT services (Deepgram and Azure) that could
+  cause static audio issues and interruptions to not work properly when dealing
+  with multiple LLMs sentences.
+
 - Fixed an issue that could mix new LLM responses with previous ones when
   handling interruptions.
 
