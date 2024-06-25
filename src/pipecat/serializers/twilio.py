@@ -17,8 +17,8 @@ class TwilioFrameSerializer(FrameSerializer):
         AudioRawFrame: "audio",
     }
 
-    def __init__(self):
-        self._sid = None
+    def __init__(self, stream_sid: str):
+        self._stream_sid = stream_sid
 
     def serialize(self, frame: Frame) -> str | bytes | None:
         if not isinstance(frame, AudioRawFrame):
@@ -30,7 +30,7 @@ class TwilioFrameSerializer(FrameSerializer):
         payload = base64.b64encode(serialized_data).decode("utf-8")
         answer = {
             "event": "media",
-            "streamSid": self._sid,
+            "streamSid": self._stream_sid,
             "media": {
                 "payload": payload
             }
@@ -40,9 +40,6 @@ class TwilioFrameSerializer(FrameSerializer):
 
     def deserialize(self, data: str | bytes) -> Frame | None:
         message = json.loads(data)
-
-        if not self._sid:
-            self._sid = message["streamSid"] if "streamSid" in message else None
 
         if message["event"] != "media":
             return None
