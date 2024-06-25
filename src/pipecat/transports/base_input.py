@@ -113,10 +113,15 @@ class BaseInputTransport(FrameProcessor):
             # Make sure we notify about interruptions quickly out-of-band
             if isinstance(frame, UserStartedSpeakingFrame):
                 logger.debug("User started speaking")
+                # Cancel the task. This will stop pushing frames downstream.
                 self._push_frame_task.cancel()
                 await self._push_frame_task
-                self._create_push_task()
+                # Push an out-of-band frame (i.e. not using the ordered push
+                # frame task) to stop everything, specially at the output
+                # transport.
                 await self.push_frame(StartInterruptionFrame())
+                # Create a new queue and task.
+                self._create_push_task()
             elif isinstance(frame, UserStoppedSpeakingFrame):
                 logger.debug("User stopped speaking")
                 await self.push_frame(StopInterruptionFrame())
