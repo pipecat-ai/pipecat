@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Upgraded to Cartesia's new Python library 1.0.0. `CartesiaTTSService` now
+  expects a voice ID instead of a voice name (you can get the voice ID from
+  Cartesia's playground). You can also specify the audio `sample_rate` and
+  `encoding` instead of the previous `output_format`.
+
 ### Fixed
 
 - Fixed an issue with asynchronous STT services (Deepgram and Azure) that could
