@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that could mix new LLM responses with previous ones when
+  handling interruptions.
+
 - Fixed a Daily transport blocking situation that occurred while reading audio
   frames after a participant left the room. Needs daily-python >= 0.10.1.
 
