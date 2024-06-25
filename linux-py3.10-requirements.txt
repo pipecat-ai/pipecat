@@ -44,7 +44,7 @@ blinker==1.8.2
     # via flask
 cachetools==5.3.3
     # via google-auth
-cartesia==0.1.1
+cartesia==1.0.0
     # via pipecat-ai (pyproject.toml)
 certifi==2024.6.2
     # via

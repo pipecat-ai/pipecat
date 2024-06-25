@@ -16,14 +16,13 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseStartFrame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TextFrame,
     VisionImageRawFrame,
-    LLMFullResponseEndFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.audio import calculate_audio_volume
