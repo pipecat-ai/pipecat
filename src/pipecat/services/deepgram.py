@@ -18,19 +18,28 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
     SystemFrame,
     TranscriptionFrame)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AIService, TTSService
 
-from deepgram import (
-    DeepgramClient,
-    DeepgramClientOptions,
-    LiveTranscriptionEvents,
-    LiveOptions,
-)
-
 from loguru import logger
+
+# See .env.example for Deepgram configuration needed
+try:
+    from deepgram import (
+        DeepgramClient,
+        DeepgramClientOptions,
+        LiveTranscriptionEvents,
+        LiveOptions,
+    )
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use Deepgram, you need to `pip install pipecat-ai[deepgram]`. Also, set `DEEPGRAM_API_KEY` environment variable.")
+    raise Exception(f"Missing module: {e}")
 
 
 class DeepgramTTSService(TTSService):
@@ -109,12 +118,18 @@ class DeepgramSTTService(AIService):
         self._connection = self._client.listen.asynclive.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
 
+        # This event will be used to ignore out-of-band transcriptions while we
+        # are itnerrupted.
+        self._is_interrupted_event = asyncio.Event()
+
         self._create_push_task()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, SystemFrame):
+        if isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
+            await self._handle_interruptions(frame)
+        elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         elif isinstance(frame, AudioRawFrame):
             await self._connection.send(frame.audio)
@@ -137,6 +152,23 @@ class DeepgramSTTService(AIService):
         self._push_frame_task.cancel()
         await self._push_frame_task
 
+    async def _handle_interruptions(self, frame: Frame):
+        if isinstance(frame, StartInterruptionFrame):
+            # Indicate we are interrupted, we should ignore any out-of-band
+            # transcriptions.
+            self._is_interrupted_event.set()
+            # Cancel the task. This will stop pushing frames downstream.
+            self._push_frame_task.cancel()
+            await self._push_frame_task
+            # Push an out-of-band frame (i.e. not using the ordered push
+            # frame task).
+            await self.push_frame(frame)
+            # Create a new queue and task.
+            self._create_push_task()
+        elif isinstance(frame, StopInterruptionFrame):
+            # We should now be able to receive transcriptions again.
+            self._is_interrupted_event.clear()
+
     def _create_push_task(self):
         self._push_queue = asyncio.Queue()
         self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
@@ -152,6 +184,9 @@ class DeepgramSTTService(AIService):
                 break
 
     async def _on_message(self, *args, **kwargs):
+        if self._is_interrupted_event.is_set():
+            return
+
         result = kwargs["result"]
         is_final = result.is_final
         transcript = result.channel.alternatives[0].transcript
