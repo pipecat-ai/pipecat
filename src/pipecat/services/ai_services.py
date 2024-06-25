@@ -16,7 +16,9 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    LLMFullResponseStartFrame,
     StartFrame,
+    StartInterruptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TextFrame,
@@ -114,13 +116,17 @@ class TTSService(AIService):
             if self._current_sentence.strip().endswith(
                     (".", "?", "!")) and not self._current_sentence.strip().endswith(
                     ("Mr,", "Mrs.", "Ms.", "Dr.")):
-                text = self._current_sentence.strip()
+                text = self._current_sentence
                 self._current_sentence = ""
 
         if text:
             await self._push_tts_frames(text)
 
     async def _push_tts_frames(self, text: str):
+        text = text.strip()
+        if not text:
+            return
+
         await self.push_frame(TTSStartedFrame())
         await self.process_generator(self.run_tts(text))
         await self.push_frame(TTSStoppedFrame())
@@ -133,14 +139,12 @@ class TTSService(AIService):
 
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)
-        elif isinstance(frame, EndFrame):
-            if self._current_sentence:
-                await self._push_tts_frames(self._current_sentence)
-            await self.push_frame(frame)
-        elif isinstance(frame, LLMFullResponseEndFrame):
-            if self._current_sentence:
-                await self._push_tts_frames(self._current_sentence.strip())
-                self._current_sentence = ""
+        elif isinstance(frame, StartInterruptionFrame):
+            self._current_sentence = ""
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
+            self._current_sentence = ""
+            await self._push_tts_frames(self._current_sentence)
             await self.push_frame(frame)
         else:
             await self.push_frame(frame, direction)
