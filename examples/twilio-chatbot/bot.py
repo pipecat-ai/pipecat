@@ -15,6 +15,7 @@ from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketTransport, FastAPIWebsocketParams
 from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.serializers.twilio import TwilioFrameSerializer
 
 from loguru import logger
 
@@ -25,7 +26,7 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def run_bot(websocket_client):
+async def run_bot(websocket_client, stream_sid):
     async with aiohttp.ClientSession() as session:
         transport = FastAPIWebsocketTransport(
             websocket=websocket_client,
@@ -34,7 +35,8 @@ async def run_bot(websocket_client):
                 add_wav_header=False,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True
+                vad_audio_passthrough=True,
+                serializer=TwilioFrameSerializer(stream_sid)
             )
         )
 
