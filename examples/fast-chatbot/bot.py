@@ -10,6 +10,7 @@ import asyncio
 import aiohttp
 import os
 import sys
+import time
 from typing import Optional
 
 from pydantic import BaseModel, ValidationError
@@ -138,8 +139,10 @@ async def main(settings: BotSettings):
         # When the first participant joins, the bot should introduce itself.
         @ transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
+            # Provide some air whilst tracks subscribe
+            time.sleep(2)
             messages.append(
-                {"role": "system", "content": "Please introduce yourself to the user."})
+                {"content": "Briefly introduce yourself by saying 'hello, I'm FastBot, how can I help you today?'"})
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()
