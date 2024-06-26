@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMResponseEndFrame,
     LLMResponseStartFrame,
     LLMMessagesFrame,
@@ -151,8 +152,8 @@ class LLMAssistantResponseAggregator(LLMResponseAggregator):
         super().__init__(
             messages=messages,
             role="assistant",
-            start_frame=LLMResponseStartFrame,
-            end_frame=LLMResponseEndFrame,
+            start_frame=LLMFullResponseStartFrame,
+            end_frame=LLMFullResponseEndFrame,
             accumulator_frame=TextFrame,
             handle_interruptions=True
         )
