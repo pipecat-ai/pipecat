@@ -18,7 +18,7 @@ from pydantic import BaseModel, ValidationError
 from pipecat.vad.vad_analyzer import VADParams
 from pipecat.vad.silero import SileroVADAnalyzer
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.services.openai import OpenAILLMService, OpenAILLMContext
+from pipecat.services.openai import OpenAILLMService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
@@ -30,18 +30,10 @@ from pipecat.processors.aggregators.llm_response import (
 )
 
 from helpers import (
-    GreedyLLMAggregator,
     ClearableDeepgramTTSService,
-    VADGate,
     AudioVolumeTimer,
     TranscriptionTimingLogger
 )
-
-# from helpers import (
-#     ClearableDeepgramTTSService,
-#     AudioVolumeTimer,
-#     TranscriptionTimingLogger
-# )
 
 
 from dotenv import load_dotenv
@@ -113,41 +105,22 @@ async def main(settings: BotSettings):
             },
         ]
 
-        # avt = AudioVolumeTimer()
-        # tl = TranscriptionTimingLogger(avt)
-
-        # tma_in = LLMUserResponseAggregator(messages)
-        # tma_out = LLMAssistantResponseAggregator(messages)
-
-        # pipeline = Pipeline([
-        #     transport.input(),   # Transport user input
-        #     avt,                 # Audio volume timer
-        #     stt,                 # Speech-to-text
-        #     tl,                  # Transcription timing logger
-        #     tma_in,              # User responses
-        #     llm,                 # LLM
-        #     tts,                 # TTS
-        #     transport.output(),  # Transport bot output
-        #     tma_out,             # Assistant spoken responses
-        # ])
-
-        ctx = OpenAILLMContext()
-        greedy = GreedyLLMAggregator(name="greedy", context=ctx)
-        gate = VADGate(name="gate", vad_analyzer=transport.input().vad_analyzer(), context=ctx)
         avt = AudioVolumeTimer()
         tl = TranscriptionTimingLogger(avt)
 
+        tma_in = LLMUserResponseAggregator(messages)
+        tma_out = LLMAssistantResponseAggregator(messages)
+
         pipeline = Pipeline([
             transport.input(),   # Transport user input
-            avt,
-            stt,
-            tl,
-            greedy,
+            avt,                 # Audio volume timer
+            stt,                 # Speech-to-text
+            tl,                  # Transcription timing logger
+            tma_in,              # User responses
             llm,                 # LLM
             tts,                 # TTS
-            gate,
             transport.output(),  # Transport bot output
-            # FrameLogger()
+            tma_out,             # Assistant spoken responses
         ])
 
         task = PipelineTask(
@@ -186,7 +159,7 @@ if __name__ == "__main__":
 
     try:
         settings = BotSettings.model_validate_json(args.settings)
-        # print(f"settings: {settings.json()}")
+        print(f"settings: {settings.json()}")
         asyncio.run(main(settings))
     except ValidationError as e:
         print(e)
