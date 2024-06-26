@@ -144,7 +144,7 @@ async def main(settings: BotSettings):
             messages.append(
                 {
                     "role": "system",
-                    "content": "Briefly introduce yourself by saying 'hello, I'm FastBot, how can I help you today?'"})
+                    "content": "Introduce yourself by saying 'hello, I'm FastBot, how can I help you today?'"})
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()
