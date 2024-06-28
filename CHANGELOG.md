@@ -5,6 +5,19 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.35] - 2024-06-28
+
+### Changed
+
+- `FastAPIWebsocketParams` now require a serializer.
+
+- `TwilioFrameSerializer` now requires a `streamSid`.
+
+### Fixed
+
+- Silero VAD number of frames needs to be 512 for 16000 sample rate or 256 for
+  8000 sample rate.
+
 ## [0.0.34] - 2024-06-25
 
 ### Fixed
