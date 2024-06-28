@@ -5,6 +5,14 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The `MetricsFrame` now includes processing metrics if metrics are enabled. The
+  processing metrics indicate the time a processor needs to generate all its
+  output. Note that not all processors generate these kind of metrics.
+
 ## [0.0.35] - 2024-06-28
 
 ### Changed

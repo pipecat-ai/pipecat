@@ -244,8 +244,8 @@ class StopInterruptionFrame(SystemFrame):
 class MetricsFrame(SystemFrame):
     """Emitted by processor that can compute metrics like latencies.
     """
-    ttfb: Mapping[str, float]
-
+    ttfb: List[Mapping[str, Any]] | None = None
+    processing: List[Mapping[str, Any]] | None = None
 
 #
 # Control frames

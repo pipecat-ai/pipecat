@@ -127,7 +127,9 @@ class TTSService(AIService):
             return
 
         await self.push_frame(TTSStartedFrame())
+        await self.start_processing_metrics()
         await self.process_generator(self.run_tts(text))
+        await self.stop_processing_metrics()
         await self.push_frame(TTSStoppedFrame())
         # We send the original text after the audio. This way, if we are
         # interrupted, the text is not added to the assistant context.
@@ -208,7 +210,9 @@ class STTService(AIService):
             self._silence_num_frames = 0
             self._wave.close()
             self._content.seek(0)
+            await self.start_processing_metrics()
             await self.process_generator(self.run_stt(self._content.read()))
+            await self.stop_processing_metrics()
             (self._content, self._wave) = self._new_wave()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -241,7 +245,9 @@ class ImageGenService(AIService):
 
         if isinstance(frame, TextFrame):
             await self.push_frame(frame, direction)
+            await self.start_processing_metrics()
             await self.process_generator(self.run_image_gen(frame.text))
+            await self.stop_processing_metrics()
         else:
             await self.push_frame(frame, direction)
 
@@ -261,6 +267,8 @@ class VisionService(AIService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, VisionImageRawFrame):
+            await self.start_processing_metrics()
             await self.process_generator(self.run_vision(frame))
+            await self.stop_processing_metrics()
         else:
             await self.push_frame(frame, direction)
