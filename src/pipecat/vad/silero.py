@@ -36,6 +36,9 @@ class SileroVADAnalyzer(VADAnalyzer):
     def __init__(self, sample_rate=16000, params: VADParams = VADParams()):
         super().__init__(sample_rate=sample_rate, num_channels=1, params=params)
 
+        if sample_rate != 16000 and sample_rate != 8000:
+            raise Exception("Silero VAD sample rate needs to be 16000 or 8000")
+
         logger.debug("Loading Silero VAD model...")
 
         (self._model, utils) = torch.hub.load(
@@ -51,7 +54,7 @@ class SileroVADAnalyzer(VADAnalyzer):
     #
 
     def num_frames_required(self) -> int:
-        return int(self.sample_rate / 100) * 4  # 40ms
+        return 512 if self.sample_rate == 16000 else 256
 
     def voice_confidence(self, buffer) -> float:
         try:
