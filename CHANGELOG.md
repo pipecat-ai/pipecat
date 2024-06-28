@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   processing metrics indicate the time a processor needs to generate all its
   output. Note that not all processors generate these kind of metrics.
 
+### Fixed
+
+- Fixed an issue in `FastAPIWebsocketTransport` where it would still try to send
+  data to the websocket after being closed.
+
 ## [0.0.35] - 2024-06-28
 
 ### Changed
