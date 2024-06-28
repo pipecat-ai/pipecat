@@ -9,7 +9,7 @@ import time
 
 from enum import Enum
 
-from pipecat.frames.frames import ErrorFrame, Frame, MetricsFrame, StartFrame, UserStoppedSpeakingFrame
+from pipecat.frames.frames import ErrorFrame, Frame, MetricsFrame, StartFrame, StartInterruptionFrame, UserStoppedSpeakingFrame
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
@@ -18,6 +18,48 @@ from loguru import logger
 class FrameDirection(Enum):
     DOWNSTREAM = 1
     UPSTREAM = 2
+
+
+class FrameProcessorMetrics:
+    def __init__(self, name: str):
+        self._name = name
+        self._start_ttfb_time = 0
+        self._start_processing_time = 0
+        self._should_report_ttfb = True
+
+    async def start_ttfb_metrics(self, report_only_initial_ttfb):
+        if self._should_report_ttfb:
+            self._start_ttfb_time = time.time()
+            self._should_report_ttfb = not report_only_initial_ttfb
+
+    async def stop_ttfb_metrics(self):
+        if self._start_ttfb_time == 0:
+            return None
+
+        value = time.time() - self._start_ttfb_time
+        logger.debug(f"{self._name} TTFB: {value}")
+        ttfb = {
+            "processor": self._name,
+            "value": value
+        }
+        self._start_ttfb_time = 0
+        return MetricsFrame(ttfb=[ttfb])
+
+    async def start_processing_metrics(self):
+        self._start_processing_time = time.time()
+
+    async def stop_processing_metrics(self):
+        if self._start_processing_time == 0:
+            return None
+
+        value = time.time() - self._start_processing_time
+        logger.debug(f"{self._name} processing time: {value}")
+        processing = {
+            "processor": self._name,
+            "value": value
+        }
+        self._start_processing_time = 0
+        return MetricsFrame(processing=[processing])
 
 
 class FrameProcessor:
@@ -39,8 +81,7 @@ class FrameProcessor:
         self._report_only_initial_ttfb = False
 
         # Metrics
-        self._start_ttfb_time = 0
-        self._should_report_ttfb = True
+        self._metrics = FrameProcessorMetrics(name=self.name)
 
     @property
     def interruptions_allowed(self):
@@ -58,16 +99,28 @@ class FrameProcessor:
         return False
 
     async def start_ttfb_metrics(self):
-        if self.metrics_enabled and self._should_report_ttfb:
-            self._start_ttfb_time = time.time()
-            self._should_report_ttfb = not self._report_only_initial_ttfb
+        if self.can_generate_metrics() and self.metrics_enabled:
+            await self._metrics.start_ttfb_metrics(self._report_only_initial_ttfb)
 
     async def stop_ttfb_metrics(self):
-        if self.metrics_enabled and self._start_ttfb_time > 0:
-            ttfb = time.time() - self._start_ttfb_time
-            logger.debug(f"{self.name} TTFB: {ttfb}")
-            await self.push_frame(MetricsFrame(ttfb={self.name: ttfb}))
-            self._start_ttfb_time = 0
+        if self.can_generate_metrics() and self.metrics_enabled:
+            frame = await self._metrics.stop_ttfb_metrics()
+            if frame:
+                await self.push_frame(frame)
+
+    async def start_processing_metrics(self):
+        if self.can_generate_metrics() and self.metrics_enabled:
+            await self._metrics.start_processing_metrics()
+
+    async def stop_processing_metrics(self):
+        if self.can_generate_metrics() and self.metrics_enabled:
+            frame = await self._metrics.stop_processing_metrics()
+            if frame:
+                await self.push_frame(frame)
+
+    async def stop_all_metrics(self):
+        await self.stop_ttfb_metrics()
+        await self.stop_processing_metrics()
 
     async def cleanup(self):
         pass
@@ -85,6 +138,8 @@ class FrameProcessor:
             self._allow_interruptions = frame.allow_interruptions
             self._enable_metrics = frame.enable_metrics
             self._report_only_initial_ttfb = frame.report_only_initial_ttfb
+        elif isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._should_report_ttfb = True
 

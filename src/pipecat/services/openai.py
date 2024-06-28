@@ -9,7 +9,7 @@ import base64
 import io
 import json
 
-from typing import Any, AsyncGenerator, List, Literal
+from typing import AsyncGenerator, List, Literal
 
 from loguru import logger
 from PIL import Image
@@ -231,7 +231,9 @@ class BaseOpenAILLMService(LLMService):
 
         if context:
             await self.push_frame(LLMFullResponseStartFrame())
+            await self.start_processing_metrics()
             await self._process_context(context)
+            await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
 
 
