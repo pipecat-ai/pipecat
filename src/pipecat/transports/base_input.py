@@ -173,5 +173,5 @@ class BaseInputTransport(FrameProcessor):
                     await self._internal_push_frame(frame)
             except asyncio.CancelledError:
                 break
-            except BaseException as e:
-                logger.error(f"{self} error reading audio frames: {e}")
+            except Exception as e:
+                logger.exception(f"{self} error reading audio frames: {e}")

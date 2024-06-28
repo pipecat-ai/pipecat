@@ -80,4 +80,4 @@ class PlayHTTTSService(TTSService):
                         frame = AudioRawFrame(chunk, 16000, 1)
                         yield frame
         except Exception as e:
-            logger.error(f"{self} error generating TTS: {e}")
+            logger.exception(f"{self} error generating TTS: {e}")

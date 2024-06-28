@@ -835,8 +835,8 @@ class DailyTransport(BaseTransport):
                     logger.debug("Event dialin-ready was handled successfully")
             except asyncio.TimeoutError:
                 logger.error(f"Timeout handling dialin-ready event ({url})")
-            except BaseException as e:
-                logger.error(f"Error handling dialin-ready event ({url}): {e}")
+            except Exception as e:
+                logger.exception(f"Error handling dialin-ready event ({url}): {e}")
 
     async def _on_dialin_ready(self, sip_endpoint):
         if self._params.dialin_settings:
