@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     URLImageRawFrame)
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AIService, TTSService, ImageGenService
+from pipecat.services.ai_services import AIService, AsyncAIService, TTSService, ImageGenService
 from pipecat.services.openai import BaseOpenAILLMService
 
 from loguru import logger
@@ -110,7 +110,7 @@ class AzureTTSService(TTSService):
                 logger.error(f"{self} error: {cancellation_details.error_details}")
 
 
-class AzureSTTService(AIService):
+class AzureSTTService(AsyncAIService):
     def __init__(
             self,
             *,
@@ -133,18 +133,10 @@ class AzureSTTService(AIService):
             speech_config=speech_config, audio_config=audio_config)
         self._speech_recognizer.recognized.connect(self._on_handle_recognized)
 
-        # This event will be used to ignore out-of-band transcriptions while we
-        # are itnerrupted.
-        self._is_interrupted_event = asyncio.Event()
-
-        self._create_push_task()
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartInterruptionFrame):
-            await self._handle_interruptions(frame)
-        elif isinstance(frame, SystemFrame):
+        if isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         elif isinstance(frame, AudioRawFrame):
             self._audio_stream.write(frame.audio)
@@ -156,44 +148,14 @@ class AzureSTTService(AIService):
 
     async def stop(self, frame: EndFrame):
         self._speech_recognizer.stop_continuous_recognition_async()
-        await self._push_queue.put((frame, FrameDirection.DOWNSTREAM))
-        await self._push_frame_task
 
     async def cancel(self, frame: CancelFrame):
         self._speech_recognizer.stop_continuous_recognition_async()
-        self._push_frame_task.cancel()
-        await self._push_frame_task
-
-    async def _handle_interruptions(self, frame: Frame):
-        # Cancel the task. This will stop pushing frames downstream.
-        self._push_frame_task.cancel()
-        await self._push_frame_task
-        # Push an out-of-band frame (i.e. not using the ordered push
-        # frame task).
-        await self.push_frame(frame)
-        # Create a new queue and task.
-        self._create_push_task()
-
-    def _create_push_task(self):
-        self._push_queue = asyncio.Queue()
-        self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
-
-    async def _push_frame_task_handler(self):
-        running = True
-        while running:
-            try:
-                (frame, direction) = await self._push_queue.get()
-                await self.push_frame(frame, direction)
-                running = not isinstance(frame, EndFrame)
-            except asyncio.CancelledError:
-                break
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
-            direction = FrameDirection.DOWNSTREAM
             frame = TranscriptionFrame(event.result.text, "", int(time.time_ns() / 1000000))
-            asyncio.run_coroutine_threadsafe(
-                self._push_queue.put((frame, direction)), self.get_event_loop())
+            asyncio.run_coroutine_threadsafe(self.queue_frame(frame), self.get_event_loop())
 
 
 class AzureImageGenServiceREST(ImageGenService):
