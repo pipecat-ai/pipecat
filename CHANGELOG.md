@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `AysncFrameProcessor` and `AsyncAIService`.  Some services like
+  `DeepgramSTTService` need to process things asynchronously. For example, audio
+  is sent to Deepgram but transcriptions are not returned immediately. In these
+  cases we still require all frames (except system frames) to be pushed
+  downstream from a single task. That's what `AsyncFrameProcessor` is for. It
+  creates a task and all frames should be pushed from that task. So, whenever a
+  new Deepgram transcription is ready that transcription will also be pushed
+  from this internal task.
+
 - The `MetricsFrame` now includes processing metrics if metrics are enabled. The
   processing metrics indicate the time a processor needs to generate all its
   output. Note that not all processors generate these kind of metrics.
