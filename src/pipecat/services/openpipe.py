@@ -25,6 +25,7 @@ class OpenPipeLLMService(BaseOpenAILLMService):
 
     def __init__(
             self,
+            *,
             model: str = "gpt-4o",
             api_key: str | None = None,
             base_url: str | None = None,
@@ -33,9 +34,9 @@ class OpenPipeLLMService(BaseOpenAILLMService):
             tags: Dict[str, str] | None = None,
             **kwargs):
         super().__init__(
-            model,
-            api_key,
-            base_url,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
             openpipe_api_key=openpipe_api_key,
             openpipe_base_url=openpipe_base_url,
             **kwargs)

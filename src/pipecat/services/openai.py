@@ -67,7 +67,7 @@ class BaseOpenAILLMService(LLMService):
     calls from the LLM.
     """
 
-    def __init__(self, model: str, api_key=None, base_url=None, **kwargs):
+    def __init__(self, *, model: str, api_key=None, base_url=None, **kwargs):
         super().__init__(**kwargs)
         self._model: str = model
         self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
@@ -236,8 +236,8 @@ class BaseOpenAILLMService(LLMService):
 
 class OpenAILLMService(BaseOpenAILLMService):
 
-    def __init__(self, model="gpt-4o", **kwargs):
-        super().__init__(model, **kwargs)
+    def __init__(self, *, model: str = "gpt-4o", **kwargs):
+        super().__init__(model=model, **kwargs)
 
 
 class OpenAIImageGenService(ImageGenService):
