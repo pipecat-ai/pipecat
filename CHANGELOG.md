@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `UserIdleProcessor`. This processor can be used to wait for any
+  interaction with the user. If the user doesn't say anything within a given
+  timeout a provided callback is called.
+
 - Added `IdleFrameProcessor`. This processor can be used to wait for frames
   within a given timeout. If no frame is received within the timeout a provided
   callback is called.
