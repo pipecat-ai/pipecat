@@ -36,7 +36,7 @@ attrs==23.2.0
     # via
     #   aiohttp
     #   openpipe
-av==12.1.0
+av==12.2.0
     # via faster-whisper
 azure-cognitiveservices-speech==1.37.0
     # via pipecat-ai (pyproject.toml)
@@ -44,7 +44,7 @@ blinker==1.8.2
     # via flask
 cachetools==5.3.3
     # via google-auth
-cartesia==1.0.0
+cartesia==1.0.3
     # via pipecat-ai (pyproject.toml)
 certifi==2024.6.2
     # via
@@ -84,13 +84,13 @@ exceptiongroup==1.2.1
     # via
     #   anyio
     #   pytest
-fal-client==0.4.0
+fal-client==0.4.1
     # via pipecat-ai (pyproject.toml)
 fastapi==0.111.0
     # via pipecat-ai (pyproject.toml)
 fastapi-cli==0.0.4
     # via fastapi
-faster-whisper==1.0.2
+faster-whisper==1.0.3
     # via pipecat-ai (pyproject.toml)
 filelock==3.15.4
     # via
@@ -110,7 +110,7 @@ frozenlist==1.4.1
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2024.6.0
+fsspec==2024.6.1
     # via
     #   huggingface-hub
     #   torch
@@ -123,9 +123,9 @@ google-api-core[grpc]==2.19.1
     #   google-ai-generativelanguage
     #   google-api-python-client
     #   google-generativeai
-google-api-python-client==2.134.0
+google-api-python-client==2.135.0
     # via google-generativeai
-google-auth==2.30.0
+google-auth==2.31.0
     # via
     #   google-ai-generativelanguage
     #   google-api-core
@@ -198,13 +198,13 @@ jsonpatch==1.33
     # via langchain-core
 jsonpointer==3.0.0
     # via jsonpatch
-langchain==0.2.5
+langchain==0.2.6
     # via
     #   langchain-community
     #   pipecat-ai (pyproject.toml)
-langchain-community==0.2.5
+langchain-community==0.2.6
     # via pipecat-ai (pyproject.toml)
-langchain-core==0.2.9
+langchain-core==0.2.10
     # via
     #   langchain
     #   langchain-community
@@ -212,13 +212,15 @@ langchain-core==0.2.9
     #   langchain-text-splitters
 langchain-openai==0.1.10
     # via pipecat-ai (pyproject.toml)
-langchain-text-splitters==0.2.1
+langchain-text-splitters==0.2.2
     # via langchain
 langsmith==0.1.82
     # via
     #   langchain
     #   langchain-community
     #   langchain-core
+llvmlite==0.43.0
+    # via numba
 loguru==0.7.2
     # via pipecat-ai (pyproject.toml)
 markdown-it-py==3.0.0
@@ -241,18 +243,22 @@ mypy-extensions==1.0.0
     # via typing-inspect
 networkx==3.3
     # via torch
+numba==0.60.0
+    # via resampy
 numpy==1.26.4
     # via
     #   ctranslate2
     #   langchain
     #   langchain-community
+    #   numba
     #   onnxruntime
     #   pipecat-ai (pyproject.toml)
     #   pyloudnorm
+    #   resampy
     #   scipy
     #   torchvision
     #   transformers
-onnxruntime==1.18.0
+onnxruntime==1.18.1
     # via faster-whisper
 openai==1.26.0
     # via
@@ -302,7 +308,7 @@ pyasn1-modules==0.4.0
     # via google-auth
 pyaudio==0.2.14
     # via pipecat-ai (pyproject.toml)
-pydantic==2.7.4
+pydantic==2.8.0
     # via
     #   anthropic
     #   fastapi
@@ -311,7 +317,7 @@ pydantic==2.7.4
     #   langchain-core
     #   langsmith
     #   openai
-pydantic-core==2.18.4
+pydantic-core==2.20.0
     # via pydantic
 pygments==2.18.0
     # via rich
@@ -358,6 +364,8 @@ requests==2.32.3
     #   pyht
     #   tiktoken
     #   transformers
+resampy==0.4.3
+    # via pipecat-ai (pyproject.toml)
 rich==13.7.1
     # via typer
 rsa==4.9
