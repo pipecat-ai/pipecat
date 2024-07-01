@@ -16,7 +16,13 @@ from loguru import logger
 import requests
 
 import numpy as np
-import resampy
+
+try:
+    import resampy
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use XTTS, you need to `pip install pipecat-ai[xtts]`.")
+    raise Exception(f"Missing module: {e}")
 
 #####
 ## The server below can connect to XTTS through a local running docker
@@ -26,8 +32,6 @@ import resampy
 ## You can find more information on the official repo: https://github.com/coqui-ai/xtts-streaming-server
 ####
 
-SERVER_URL = 'http://localhost:8000'
-
 class XTTSService(TTSService):
 
     def __init__(
@@ -36,22 +40,24 @@ class XTTSService(TTSService):
             aiohttp_session: aiohttp.ClientSession,
             voice_id: str,
             language: str,
+            base_url:str,
             **kwargs):
         super().__init__(**kwargs)
 
         self._voice_id = voice_id
         self._language = language
+        self._base_url = base_url
         self._aiohttp_session = aiohttp_session
-        self.STUDIO_SPEAKERS = requests.get(SERVER_URL + "/studio_speakers").json()
+        self._studio_speakers = requests.get(self._base_url + "/studio_speakers").json()
 
     def can_generate_metrics(self) -> bool:
         return True
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        embeddings = self.STUDIO_SPEAKERS[self._voice_id]
+        embeddings = self._studio_speakers[self._voice_id]
 
-        url = SERVER_URL + "/tts_stream"
+        url = self._base_url + "/tts_stream"
         
         payload={
             "text": text.replace('.','').replace('*',''),
