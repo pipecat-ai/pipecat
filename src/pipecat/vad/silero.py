@@ -33,7 +33,11 @@ _MODEL_RESET_STATES_TIME = 5.0
 
 class SileroVADAnalyzer(VADAnalyzer):
 
-    def __init__(self, sample_rate=16000, params: VADParams = VADParams()):
+    def __init__(
+            self,
+            sample_rate: int = 16000,
+            version: str = "v5.0",
+            params: VADParams = VADParams()):
         super().__init__(sample_rate=sample_rate, num_channels=1, params=params)
 
         if sample_rate != 16000 and sample_rate != 8000:
@@ -41,9 +45,10 @@ class SileroVADAnalyzer(VADAnalyzer):
 
         logger.debug("Loading Silero VAD model...")
 
-        (self._model, utils) = torch.hub.load(
-            repo_or_dir="snakers4/silero-vad", model="silero_vad", force_reload=False
-        )
+        (self._model, _) = torch.hub.load(repo_or_dir=f"snakers4/silero-vad:{version}",
+                                          model="silero_vad",
+                                          force_reload=False,
+                                          trust_repo=True)
 
         self._last_reset_time = 0
 
@@ -83,11 +88,13 @@ class SileroVAD(FrameProcessor):
     def __init__(
             self,
             sample_rate: int = 16000,
+            version: str = "v5.0",
             vad_params: VADParams = VADParams(),
             audio_passthrough: bool = False):
         super().__init__()
 
-        self._vad_analyzer = SileroVADAnalyzer(sample_rate=sample_rate, params=vad_params)
+        self._vad_analyzer = SileroVADAnalyzer(
+            sample_rate=sample_rate, version=version, params=vad_params)
         self._audio_passthrough = audio_passthrough
 
         self._processor_vad_state: VADState = VADState.QUIET

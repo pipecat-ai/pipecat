@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- It is now possible to specify a Silero VAD version when using `SileroVADAnalyzer`
+  or `SileroVAD`.
+
 - Added `AysncFrameProcessor` and `AsyncAIService`.  Some services like
   `DeepgramSTTService` need to process things asynchronously. For example, audio
   is sent to Deepgram but transcriptions are not returned immediately. In these
