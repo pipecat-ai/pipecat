@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `IdleFrameProcessor`. This processor can be used to wait for frames
+  within a given timeout. If no frame is received within the timeout a provided
+  callback is called.
+
 - Added new frame `BotSpeakingFrame`. This frame will be continuously pushed
   upstream while the bot is talking.
 
