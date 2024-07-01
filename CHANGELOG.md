@@ -25,7 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   processing metrics indicate the time a processor needs to generate all its
   output. Note that not all processors generate these kind of metrics.
 
+### Changed
+
+- `WhisperSTTService` model can now also be a string.
+
+- Added missing * keyword separators in services.
+
 ### Fixed
+
+- `WebsocketServerTransport` doesn't try to send frames anymore if serializers
+  returns `None`.
 
 - Fixed an issue where exceptions that occurred inside frame processors were
   being swallowed and not displayed.
