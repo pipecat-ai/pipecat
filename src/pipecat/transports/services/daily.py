@@ -59,8 +59,8 @@ class DailyTransportMessageFrame(TransportMessageFrame):
 
 class WebRTCVADAnalyzer(VADAnalyzer):
 
-    def __init__(self, sample_rate=16000, num_channels=1, params: VADParams = VADParams()):
-        super().__init__(sample_rate, num_channels, params)
+    def __init__(self, *, sample_rate=16000, num_channels=1, params: VADParams = VADParams()):
+        super().__init__(sample_rate=sample_rate, num_channels=num_channels, params=params)
 
         self._webrtc_vad = Daily.create_native_vad(
             reset_period_ms=VAD_RESET_PERIOD_MS,
