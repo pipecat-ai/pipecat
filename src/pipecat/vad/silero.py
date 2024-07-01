@@ -35,6 +35,7 @@ class SileroVADAnalyzer(VADAnalyzer):
 
     def __init__(
             self,
+            *,
             sample_rate: int = 16000,
             version: str = "v5.0",
             params: VADParams = VADParams()):
@@ -87,6 +88,7 @@ class SileroVAD(FrameProcessor):
 
     def __init__(
             self,
+            *,
             sample_rate: int = 16000,
             version: str = "v5.0",
             vad_params: VADParams = VADParams(),

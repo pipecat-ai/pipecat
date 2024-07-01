@@ -15,7 +15,7 @@ from loguru import logger
 
 class PipelineRunner:
 
-    def __init__(self, name: str | None = None, handle_sigint: bool = True):
+    def __init__(self, *, name: str | None = None, handle_sigint: bool = True):
         self.id: int = obj_id()
         self.name: str = name or f"{self.__class__.__name__}#{obj_count(self)}"
 

@@ -28,7 +28,7 @@ class VADParams(BaseModel):
 
 class VADAnalyzer:
 
-    def __init__(self, sample_rate: int, num_channels: int, params: VADParams):
+    def __init__(self, *, sample_rate: int, num_channels: int, params: VADParams):
         self._sample_rate = sample_rate
         self._num_channels = num_channels
         self._params = params
