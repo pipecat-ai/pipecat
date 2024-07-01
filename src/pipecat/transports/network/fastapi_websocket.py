@@ -12,7 +12,6 @@ import wave
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.frames.frames import AudioRawFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -114,7 +113,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                 frame = wav_frame
 
             payload = self._params.serializer.serialize(frame)
-            if payload:
+            if payload and self._websocket.client_state == WebSocketState.CONNECTED:
                 await self._websocket.send_text(payload)
 
             self._audio_buffer = self._audio_buffer[self._params.audio_frame_size:]
