@@ -8,9 +8,13 @@ For this example, we are using Daily as a WebRTC transport and provisioning a ne
 
 ## Setting up your fly.io deployment
 
+### Create your fly.toml file
+
+You can copy the `example-fly.toml` as a reference. Be sure to change the app name to something unique.
+
 ### Create your .env file
 
-Using the `env.example`, enter the necessary API keys. 
+Copy the base `env.example` to `.env` and enter the necessary API keys. 
 
 `FLYFLY_APP_NAME` should match that in the `fly.toml` file.
 
