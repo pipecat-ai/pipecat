@@ -124,6 +124,9 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         self._websocket = websocket
 
     async def write_raw_audio_frames(self, frames: bytes):
+        if not self._websocket:
+            return
+
         self._audio_buffer += frames
         while len(self._audio_buffer) >= self._params.audio_frame_size:
             frame = AudioRawFrame(
@@ -148,8 +151,8 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
                 frame = wav_frame
 
             proto = self._params.serializer.serialize(frame)
-
-            await self._websocket.send(proto)
+            if proto:
+                await self._websocket.send(proto)
 
             self._audio_buffer = self._audio_buffer[self._params.audio_frame_size:]
 

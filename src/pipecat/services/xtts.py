@@ -24,13 +24,14 @@ except ModuleNotFoundError as e:
     logger.error("In order to use XTTS, you need to `pip install pipecat-ai[xtts]`.")
     raise Exception(f"Missing module: {e}")
 
-#####
-## The server below can connect to XTTS through a local running docker
-##
-## Docker command: $ docker run --gpus=all -e COQUI_TOS_AGREED=1 --rm -p 8000:80 ghcr.io/coqui-ai/xtts-streaming-server:latest-cuda121
-## 
-## You can find more information on the official repo: https://github.com/coqui-ai/xtts-streaming-server
-####
+
+# The server below can connect to XTTS through a local running docker
+#
+# Docker command: $ docker run --gpus=all -e COQUI_TOS_AGREED=1 --rm -p 8000:80 ghcr.io/coqui-ai/xtts-streaming-server:latest-cuda121
+#
+# You can find more information on the official repo:
+# https://github.com/coqui-ai/xtts-streaming-server
+
 
 class XTTSService(TTSService):
 
@@ -40,7 +41,7 @@ class XTTSService(TTSService):
             aiohttp_session: aiohttp.ClientSession,
             voice_id: str,
             language: str,
-            base_url:str,
+            base_url: str,
             **kwargs):
         super().__init__(**kwargs)
 
@@ -58,13 +59,13 @@ class XTTSService(TTSService):
         embeddings = self._studio_speakers[self._voice_id]
 
         url = self._base_url + "/tts_stream"
-        
-        payload={
-            "text": text.replace('.','').replace('*',''),
+
+        payload = {
+            "text": text.replace('.', '').replace('*', ''),
             "language": self._language,
             "speaker_embedding": embeddings["speaker_embedding"],
             "gpt_cond_latent": embeddings["gpt_cond_latent"],
-            "add_wav_header": True,
+            "add_wav_header": False,
             "stream_chunk_size": 20,
         }
 
@@ -76,7 +77,7 @@ class XTTSService(TTSService):
                 logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
                 yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
                 return
-            
+
             buffer = bytearray()
 
             async for chunk in r.content.iter_chunked(1024):
@@ -84,14 +85,14 @@ class XTTSService(TTSService):
                     await self.stop_ttfb_metrics()
                     # Append new chunk to the buffer
                     buffer.extend(chunk)
-                    
+
                     # Check if buffer has enough data for processing
                     while len(buffer) >= 48000:  # Assuming at least 0.5 seconds of audio data at 24000 Hz
                         # Process the buffer up to a safe size for resampling
                         process_data = buffer[:48000]
                         # Remove processed data from buffer
                         buffer = buffer[48000:]
-                        
+
                         # Convert the byte data to numpy array for resampling
                         audio_np = np.frombuffer(process_data, dtype=np.int16)
                         # Resample the audio from 24000 Hz to 16000 Hz

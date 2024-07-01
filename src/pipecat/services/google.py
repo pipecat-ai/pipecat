@@ -42,7 +42,7 @@ class GoogleLLMService(LLMService):
     franca for all LLM services, so that it is easy to switch between different LLMs.
     """
 
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash-latest", **kwargs):
+    def __init__(self, *, api_key: str, model: str = "gemini-1.5-flash-latest", **kwargs):
         super().__init__(**kwargs)
         gai.configure(api_key=api_key)
         self._client = gai.GenerativeModel(model)
