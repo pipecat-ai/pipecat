@@ -84,6 +84,11 @@ async def main(room_url: str, token: str):
         async def on_participant_left(transport, participant, reason):
             await task.queue_frame(EndFrame())
 
+        @transport.event_handler("on_call_state_updated")
+        async def on_call_state_updated(transport, state):
+            if state == "left":
+                await task.queue_frame(EndFrame())
+
         runner = PipelineRunner()
 
         await runner.run(task)
