@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `FastAPIWebsocketTransport` where it would still try to send
   data to the websocket after being closed.
 
+### Other
+
+- Added new `17-detect-user-idle.py` example that shows how to use the new
+  `UserIdleProcessor`.
+
 ## [0.0.35] - 2024-06-28
 
 ### Changed
