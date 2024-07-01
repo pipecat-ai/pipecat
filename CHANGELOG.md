@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `XTTSService`. This is a local Text-To-Speech service.
+  See https://github.com/coqui-ai/TTS
+
 - It is now possible to specify a Silero VAD version when using `SileroVADAnalyzer`
   or `SileroVAD`.
 
