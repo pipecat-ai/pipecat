@@ -42,7 +42,8 @@ class WhisperSTTService(STTService):
     """Class to transcribe audio with a locally-downloaded Whisper model"""
 
     def __init__(self,
-                 model: Model = Model.DISTIL_MEDIUM_EN,
+                 *,
+                 model: str | Model = Model.DISTIL_MEDIUM_EN,
                  device: str = "auto",
                  compute_type: str = "default",
                  no_speech_prob: float = 0.4,
@@ -51,7 +52,7 @@ class WhisperSTTService(STTService):
         super().__init__(**kwargs)
         self._device: str = device
         self._compute_type = compute_type
-        self._model_name: Model = model
+        self._model_name: str | Model = model
         self._no_speech_prob = no_speech_prob
         self._model: WhisperModel | None = None
         self._load()
@@ -64,7 +65,7 @@ class WhisperSTTService(STTService):
         this model is being run, it will take time to download."""
         logger.debug("Loading Whisper model...")
         self._model = WhisperModel(
-            self._model_name.value,
+            self._model_name.value if isinstance(self._model_name, Enum) else self._model_name,
             device=self._device,
             compute_type=self._compute_type)
         logger.debug("Loaded Whisper model")
