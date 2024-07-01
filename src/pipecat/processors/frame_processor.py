@@ -66,6 +66,7 @@ class FrameProcessor:
 
     def __init__(
             self,
+            *,
             name: str | None = None,
             loop: asyncio.AbstractEventLoop | None = None,
             **kwargs):

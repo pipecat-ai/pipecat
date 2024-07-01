@@ -46,6 +46,7 @@ def detect_device():
 class MoondreamService(VisionService):
     def __init__(
         self,
+            *,
         model="vikhyatk/moondream2",
         revision="2024-04-02",
         use_cpu=False

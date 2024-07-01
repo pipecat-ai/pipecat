@@ -5,7 +5,6 @@
 #
 
 import aiohttp
-import asyncio
 import time
 
 from typing import AsyncGenerator
@@ -18,11 +17,10 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
-    StartInterruptionFrame,
     SystemFrame,
     TranscriptionFrame)
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AIService, AsyncAIService, TTSService
+from pipecat.services.ai_services import AsyncAIService, TTSService
 
 from loguru import logger
 
@@ -96,6 +94,7 @@ class DeepgramTTSService(TTSService):
 
 class DeepgramSTTService(AsyncAIService):
     def __init__(self,
+                 *,
                  api_key: str,
                  url: str = "",
                  live_options: LiveOptions = LiveOptions(

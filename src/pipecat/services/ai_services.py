@@ -118,7 +118,7 @@ class LLMService(AIService):
 
 
 class TTSService(AIService):
-    def __init__(self, aggregate_sentences: bool = True, **kwargs):
+    def __init__(self, *, aggregate_sentences: bool = True, **kwargs):
         super().__init__(**kwargs)
         self._aggregate_sentences: bool = aggregate_sentences
         self._current_sentence: str = ""
@@ -180,6 +180,7 @@ class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
     def __init__(self,
+                 *,
                  min_volume: float = 0.6,
                  max_silence_secs: float = 0.3,
                  max_buffer_secs: float = 1.5,

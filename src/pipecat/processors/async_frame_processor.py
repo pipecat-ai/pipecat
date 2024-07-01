@@ -14,10 +14,11 @@ class AsyncFrameProcessor(FrameProcessor):
 
     def __init__(
             self,
+            *,
             name: str | None = None,
             loop: asyncio.AbstractEventLoop | None = None,
             **kwargs):
-        super().__init__(name, loop, **kwargs)
+        super().__init__(name=name, loop=loop, **kwargs)
 
         self._create_push_task()
 
