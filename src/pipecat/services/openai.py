@@ -53,7 +53,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class OpenAIUnhandledFunctionException(BaseException):
+class OpenAIUnhandledFunctionException(Exception):
     pass
 
 
@@ -109,10 +109,7 @@ class BaseOpenAILLMService(LLMService):
                 del message["data"]
                 del message["mime_type"]
 
-        try:
-            chunks = await self.get_chat_completions(context, messages)
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
+        chunks = await self.get_chat_completions(context, messages)
 
         return chunks
 
@@ -214,7 +211,7 @@ class BaseOpenAILLMService(LLMService):
         elif isinstance(result, type(None)):
             pass
         else:
-            raise BaseException(f"Unknown return type from function callback: {type(result)}")
+            raise TypeError(f"Unknown return type from function callback: {type(result)}")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -336,4 +333,4 @@ class OpenAITTSService(TTSService):
                         frame = AudioRawFrame(chunk, 24_000, 1)
                         yield frame
         except BadRequestError as e:
-            logger.error(f"{self} error generating TTS: {e}")
+            logger.exception(f"{self} error generating TTS: {e}")

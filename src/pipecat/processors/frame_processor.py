@@ -147,12 +147,15 @@ class FrameProcessor:
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        if direction == FrameDirection.DOWNSTREAM and self._next:
-            logger.trace(f"Pushing {frame} from {self} to {self._next}")
-            await self._next.process_frame(frame, direction)
-        elif direction == FrameDirection.UPSTREAM and self._prev:
-            logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
-            await self._prev.process_frame(frame, direction)
+        try:
+            if direction == FrameDirection.DOWNSTREAM and self._next:
+                logger.trace(f"Pushing {frame} from {self} to {self._next}")
+                await self._next.process_frame(frame, direction)
+            elif direction == FrameDirection.UPSTREAM and self._prev:
+                logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
+                await self._prev.process_frame(frame, direction)
+        except Exception as e:
+            logger.exception(f"Uncaught exception in {self}: {e}")
 
     def __str__(self):
         return self.name
