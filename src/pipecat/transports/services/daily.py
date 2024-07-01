@@ -656,11 +656,11 @@ class DailyOutputTransport(BaseOutputTransport):
         await self._client.send_message(frame)
 
     async def send_metrics(self, frame: MetricsFrame):
-        ttfb = [{"name": n, "time": t} for n, t in frame.ttfb.items()]
         message = DailyTransportMessageFrame(message={
             "type": "pipecat-metrics",
             "metrics": {
-                "ttfb": ttfb
+                "ttfb": frame.ttfb or [],
+                "processing": frame.processing or [],
             },
         })
         await self._client.send_message(message)
