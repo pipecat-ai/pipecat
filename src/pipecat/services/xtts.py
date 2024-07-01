@@ -65,7 +65,7 @@ class XTTSService(TTSService):
             "language": self._language,
             "speaker_embedding": embeddings["speaker_embedding"],
             "gpt_cond_latent": embeddings["gpt_cond_latent"],
-            "add_wav_header": True,
+            "add_wav_header": False,
             "stream_chunk_size": 20,
         }
 
