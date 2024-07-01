@@ -37,7 +37,7 @@ class SileroVADAnalyzer(VADAnalyzer):
         super().__init__(sample_rate=sample_rate, num_channels=1, params=params)
 
         if sample_rate != 16000 and sample_rate != 8000:
-            raise Exception("Silero VAD sample rate needs to be 16000 or 8000")
+            raise ValueError("Silero VAD sample rate needs to be 16000 or 8000")
 
         logger.debug("Loading Silero VAD model...")
 
