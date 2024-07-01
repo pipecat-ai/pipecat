@@ -82,5 +82,4 @@ class BaseTransport(ABC):
                 else:
                     handler(self, *args, **kwargs)
         except Exception as e:
-            logger.error(f"Exception in event handler {event_name}: {e}")
-            raise e
+            logger.exception(f"Exception in event handler {event_name}: {e}")

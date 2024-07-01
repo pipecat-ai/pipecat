@@ -180,8 +180,8 @@ class BaseOutputTransport(FrameProcessor):
                 self._sink_queue.task_done()
             except asyncio.CancelledError:
                 break
-            except BaseException as e:
-                logger.error(f"{self} error processing sink queue: {e}")
+            except Exception as e:
+                logger.exception(f"{self} error processing sink queue: {e}")
 
     #
     # Push frames task
@@ -250,7 +250,7 @@ class BaseOutputTransport(FrameProcessor):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"{self} error writing to camera: {e}")
+                logger.exception(f"{self} error writing to camera: {e}")
 
     #
     # Audio out

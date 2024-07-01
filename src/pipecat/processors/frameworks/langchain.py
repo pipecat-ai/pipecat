@@ -75,5 +75,6 @@ class LangchainProcessor(FrameProcessor):
         except GeneratorExit:
             logger.warning(f"{self} generator was closed prematurely")
         except Exception as e:
-            logger.error(f"{self} an unknown error occurred: {e}")
-        await self.push_frame(LLMFullResponseEndFrame())
+            logger.exception(f"{self} an unknown error occurred: {e}")
+        finally:
+            await self.push_frame(LLMFullResponseEndFrame())

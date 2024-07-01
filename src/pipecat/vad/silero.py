@@ -72,9 +72,9 @@ class SileroVADAnalyzer(VADAnalyzer):
                 self._last_reset_time = curr_time
 
             return new_confidence
-        except BaseException as e:
+        except Exception as e:
             # This comes from an empty audio array
-            logger.error(f"Error analyzing audio with Silero VAD: {e}")
+            logger.exception(f"Error analyzing audio with Silero VAD: {e}")
             return 0
 
 
