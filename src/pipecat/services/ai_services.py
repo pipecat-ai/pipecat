@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     TextFrame,
     VisionImageRawFrame,
 )
+from pipecat.processors.async_frame_processor import AsyncFrameProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.utils import exp_smoothing
@@ -58,6 +59,30 @@ class AIService(FrameProcessor):
                 await self.push_error(f)
             else:
                 await self.push_frame(f)
+
+
+class AsyncAIService(AsyncFrameProcessor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    async def start(self, frame: StartFrame):
+        pass
+
+    async def stop(self, frame: EndFrame):
+        pass
+
+    async def cancel(self, frame: CancelFrame):
+        pass
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame):
+            await self.start(frame)
+        elif isinstance(frame, CancelFrame):
+            await self.cancel(frame)
+        elif isinstance(frame, EndFrame):
+            await self.stop(frame)
 
 
 class LLMService(AIService):
