@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `GladiaSTTService`.
+  See https://docs.gladia.io/chapters/speech-to-text-api/pages/live-speech-recognition
+
+- Added `XTTSService`. This is a local Text-To-Speech service.
+  See https://github.com/coqui-ai/TTS
+
 - Added `UserIdleProcessor`. This processor can be used to wait for any
   interaction with the user. If the user doesn't say anything within a given
   timeout a provided callback is called.
@@ -19,9 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added new frame `BotSpeakingFrame`. This frame will be continuously pushed
   upstream while the bot is talking.
-
-- Added `XTTSService`. This is a local Text-To-Speech service.
-  See https://github.com/coqui-ai/TTS
 
 - It is now possible to specify a Silero VAD version when using `SileroVADAnalyzer`
   or `SileroVAD`.
