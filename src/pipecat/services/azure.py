@@ -19,12 +19,11 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     StartFrame,
-    StartInterruptionFrame,
     SystemFrame,
     TranscriptionFrame,
     URLImageRawFrame)
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AIService, AsyncAIService, TTSService, ImageGenService
+from pipecat.services.ai_services import AsyncAIService, TTSService, ImageGenService
 from pipecat.services.openai import BaseOpenAILLMService
 
 from loguru import logger
@@ -83,7 +82,7 @@ class AzureTTSService(TTSService):
         return True
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: {text}")
+        logger.debug(f"Generating TTS: [{text}]")
 
         await self.start_ttfb_metrics()
 
@@ -148,9 +147,11 @@ class AzureSTTService(AsyncAIService):
 
     async def stop(self, frame: EndFrame):
         self._speech_recognizer.stop_continuous_recognition_async()
+        self._audio_stream.close()
 
     async def cancel(self, frame: CancelFrame):
         self._speech_recognizer.stop_continuous_recognition_async()
+        self._audio_stream.close()
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
