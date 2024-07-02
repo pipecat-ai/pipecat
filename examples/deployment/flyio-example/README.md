@@ -16,7 +16,7 @@ You can copy the `example-fly.toml` as a reference. Be sure to change the app na
 
 Copy the base `env.example` to `.env` and enter the necessary API keys. 
 
-`FLYFLY_APP_NAME` should match that in the `fly.toml` file.
+`FLY_APP_NAME` should match that in the `fly.toml` file.
 
 ### Launch a new fly.io project
 
