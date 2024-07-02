@@ -67,11 +67,12 @@ async def main(room_url: str, token):
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
+                camera_out_enabled=True,
                 camera_out_width=1024,
                 camera_out_height=1024,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
+                vad_analyzer=SileroVADAnalyzer(),
             )
         )
 
@@ -116,7 +117,7 @@ async def main(room_url: str, token):
         async def on_first_participant_joined(transport, participant):
             participant_name = participant["info"]["userName"] or ''
             transport.capture_participant_transcription(participant["id"])
-            await task.queue_frames([TextFrame(f"Hi, this is {participant_name}.")])
+            await task.queue_frames([TextFrame(f"Hi there {participant_name}!")])
 
         runner = PipelineRunner()
 
