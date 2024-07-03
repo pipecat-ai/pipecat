@@ -108,26 +108,26 @@ export default function DevicePicker({}: Props) {
       {hasMicError && (
         <div className="error">
           {micState === "blocked" ? (
-            <p>
+            <p className="text-red-500">
               Please check your browser and system permissions. Make sure that
               this app is allowed to access your microphone.
             </p>
           ) : micState === "in-use" ? (
-            <p>
+            <p className="text-red-500">
               Your microphone is being used by another app. Please close any
               other apps using your microphone and restart this app.
             </p>
           ) : micState === "not-found" ? (
-            <p>
+            <p className="text-red-500">
               No microphone seems to be connected. Please connect a microphone.
             </p>
           ) : micState === "not-supported" ? (
-            <p>
+            <p className="text-red-500">
               This app is not supported on your device. Please update your
               software or use a different device.
             </p>
           ) : (
-            <p>
+            <p className="text-red-500">
               There seems to be an issue accessing your microphone. Try
               restarting the app or consult a system administrator.
             </p>

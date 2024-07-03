@@ -1,4 +1,4 @@
-FROM python:3.11-bullseye
+FROM python:3.11-slim-bookworm
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG USE_PERSISTENT_DATA
@@ -51,4 +51,4 @@ COPY --chown=user ./frontend/ frontend/
 RUN cd frontend && npm install && npm run build
 
 # Start the FastAPI server
-CMD python3 src/server.py --port ${FAST_API_PORT}
+CMD python3 src/bot_runner.py --port ${FAST_API_PORT}

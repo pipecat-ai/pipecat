@@ -27,14 +27,11 @@ export default function Call() {
 
     // Create a new room for the story session
     try {
-      const response = await fetch("/create", {
+      const response = await fetch("/start_bot", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          room_url: process.env.NEXT_PUBLIC_ROOM_URL || null,
-        }),
       });
 
       const { room_url, token } = await response.json();
@@ -55,21 +52,9 @@ export default function Call() {
       // Disable local audio, the bot will say hello first
       daily.setLocalAudio(false);
 
-      // Start the bot
-      const resp = await fetch("/start", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          room_url,
-        }),
-      });
-
       setState("started");
     } catch (error) {
       setState("error");
-      leave();
     }
   }
 
@@ -79,7 +64,13 @@ export default function Call() {
   }
 
   if (state === "error") {
-    return <div>An Error occured</div>;
+    return (
+      <div className="flex items-center mx-auto">
+        <p className="text-red-500 font-semibold bg-white px-4 py-2 shadow-xl rounded-lg">
+          This demo is currently at capacity. Please try again later.
+        </p>
+      </div>
+    );
   }
 
   if (state === "started") {
