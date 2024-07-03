@@ -141,14 +141,13 @@ async def main(room_url, token=None):
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            for key, value in runner._tasks.items():
-                await value.queue_frame(EndFrame())
+            intro_task.queue_frame(EndFrame())
+            await main_task.queue_frame(EndFrame())
 
         @transport.event_handler("on_call_state_updated")
         async def on_call_state_updated(transport, state):
             if state == "left":
-                for key, value in runner._tasks.items():
-                    await value.queue_frame(EndFrame())
+                await main_task.queue_frame(EndFrame())
 
         await runner.run(main_task)
 
