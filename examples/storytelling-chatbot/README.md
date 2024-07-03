@@ -48,6 +48,8 @@ pip install -r requirements.txt
 mv env.example .env
 ```
 
+When deploying to production, to ensure only this app can spawn a new bot, set your `ENV` to `production`
+
 **Build the frontend:**
 
 This project uses a custom frontend, which needs to built. Note: this is done automatically as part of the Docker deployment.
@@ -64,11 +66,11 @@ The build UI files can be found in `frontend/out`
 
 Start the API / bot manager:
 
-`python src/server.py`
+`python src/bot_runner.py`
 
 If you'd like to run a custom domain or port:
 
-`python src/server.py --host somehost --p 7777`
+`python src/bot_runner.py --host somehost --p someport`
 
 ➡️ Open the host URL in your browser `http://localhost:7860`
 

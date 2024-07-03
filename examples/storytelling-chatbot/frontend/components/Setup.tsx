@@ -1,7 +1,7 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
 import DevicePicker from "@/components/DevicePicker";
-import { IconEar, IconLoader2 } from "@tabler/icons-react";
+import { IconAlertCircle, IconEar, IconLoader2 } from "@tabler/icons-react";
 
 type SetupProps = {
   handleStart: () => void;
@@ -24,7 +24,6 @@ export const Setup: React.FC<SetupProps> = ({ handleStart }) => {
           <h1 className="text-4xl font-bold text-pretty tracking-tighter mb-4">
             Welcome to <span className="text-sky-500">Storytime</span>
           </h1>
-
           {state === "intro" ? (
             <>
               <p className="text-gray-600 leading-relaxed text-pretty">
@@ -38,6 +37,9 @@ export const Setup: React.FC<SetupProps> = ({ handleStart }) => {
                 <IconEar size={24} /> For best results, try in a quiet
                 environment!
               </p>
+              <p className="flex flex-row gap-2 text-gray-600 font-medium text-red-500">
+                <IconAlertCircle size={24} /> This demo expires after 5 minutes.
+              </p>
             </>
           ) : (
             <>
@@ -49,7 +51,6 @@ export const Setup: React.FC<SetupProps> = ({ handleStart }) => {
               <DevicePicker />
             </>
           )}
-
           <hr className="border-gray-150 my-2" />
 
           <Button

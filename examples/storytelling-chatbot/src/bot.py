@@ -5,7 +5,7 @@ import os
 import sys
 
 
-from pipecat.frames.frames import LLMMessagesFrame, StopTaskFrame
+from pipecat.frames.frames import LLMMessagesFrame, StopTaskFrame, EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -138,6 +138,17 @@ async def main(room_url, token=None):
         ])
 
         main_task = PipelineTask(main_pipeline)
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            for key, value in runner._tasks.items():
+                await value.queue_frame(EndFrame())
+
+        @transport.event_handler("on_call_state_updated")
+        async def on_call_state_updated(transport, state):
+            if state == "left":
+                for key, value in runner._tasks.items():
+                    await value.queue_frame(EndFrame())
 
         await runner.run(main_task)
 
