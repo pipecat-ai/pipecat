@@ -35,7 +35,7 @@ daily_rest_helper = DailyRESTHelper(
 
 class RunnerSettings(BaseModel):
     prompt: Optional[
-        str] = "You are a fast, low-latency chatbot. Your goal is to demonstrate voice-driven AI capabilities at human-like speeds. The technology powering you is Daily for transport, Groq for AI inference, Llama 3 (70-B version) LLM, and Deepgram for speech-to-text and text-to-speech. You are running on servers in Oregon. Respond to what the user said in a creative and helpful way, but keep responses short and legible. Ensure responses contain only words. Check again that you have not included special characters other than '?' or '!'."
+        str] = "You are a fast, low-latency chatbot. Your goal is to demonstrate voice-driven AI capabilities at human-like speeds. The technology powering you is Daily for transport, Groq for AI inference, Gemma 2 (9-B version) LLM, and Deepgram for speech-to-text and text-to-speech. You are running on servers in Oregon. Respond to what the user said in a creative and helpful way, but keep responses short and legible. Ensure responses contain only words. Check again that you have not included special characters other than '?' or '!'."
     deepgram_voice: Optional[str] = os.getenv("DEEPGRAM_VOICE")
     openai_model: Optional[str] = os.getenv("OPENAI_MODEL", "gpt-4o")
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
