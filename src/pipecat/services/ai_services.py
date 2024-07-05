@@ -142,9 +142,9 @@ class TTSService(AIService):
         elif isinstance(frame, StartInterruptionFrame):
             self._current_sentence = ""
             await self.push_frame(frame, direction)
-        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
-            self._current_sentence = ""
-            await self._push_tts_frames(self._current_sentence)
+        elif isinstance(frame, EndFrame):
+            if self._current_sentence:
+                await self._push_tts_frames(self._current_sentence)
             await self.push_frame(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
             if self._current_sentence:

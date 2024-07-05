@@ -9,7 +9,7 @@ import base64
 import io
 import json
 
-from typing import Any, AsyncGenerator, List, Literal
+from typing import AsyncGenerator, List, Literal
 
 from loguru import logger
 from PIL import Image
@@ -53,7 +53,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class OpenAIUnhandledFunctionException(BaseException):
+class OpenAIUnhandledFunctionException(Exception):
     pass
 
 
@@ -67,7 +67,7 @@ class BaseOpenAILLMService(LLMService):
     calls from the LLM.
     """
 
-    def __init__(self, model: str, api_key=None, base_url=None, **kwargs):
+    def __init__(self, *, model: str, api_key=None, base_url=None, **kwargs):
         super().__init__(**kwargs)
         self._model: str = model
         self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
@@ -109,10 +109,7 @@ class BaseOpenAILLMService(LLMService):
                 del message["data"]
                 del message["mime_type"]
 
-        try:
-            chunks = await self.get_chat_completions(context, messages)
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
+        chunks = await self.get_chat_completions(context, messages)
 
         return chunks
 
@@ -214,7 +211,7 @@ class BaseOpenAILLMService(LLMService):
         elif isinstance(result, type(None)):
             pass
         else:
-            raise BaseException(f"Unknown return type from function callback: {type(result)}")
+            raise TypeError(f"Unknown return type from function callback: {type(result)}")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -231,14 +228,16 @@ class BaseOpenAILLMService(LLMService):
 
         if context:
             await self.push_frame(LLMFullResponseStartFrame())
+            await self.start_processing_metrics()
             await self._process_context(context)
+            await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
 
 
 class OpenAILLMService(BaseOpenAILLMService):
 
-    def __init__(self, model="gpt-4o", **kwargs):
-        super().__init__(model, **kwargs)
+    def __init__(self, *, model: str = "gpt-4o", **kwargs):
+        super().__init__(model=model, **kwargs)
 
 
 class OpenAIImageGenService(ImageGenService):
@@ -334,4 +333,4 @@ class OpenAITTSService(TTSService):
                         frame = AudioRawFrame(chunk, 24_000, 1)
                         yield frame
         except BadRequestError as e:
-            logger.error(f"{self} error generating TTS: {e}")
+            logger.exception(f"{self} error generating TTS: {e}")
