@@ -28,6 +28,15 @@ from pipecat.processors.async_frame_processor import AsyncFrameProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.utils import exp_smoothing
+import re
+
+
+endofsentence_pattern = r"(?<![A-Z])(?<!\d)(?<!\d\s[ap])(?<!Mr|Ms|Dr)(?<!Mrs)(?<!Prof)[\.\?\!:]$"
+endofsentence_re = re.compile(endofsentence_pattern)
+
+
+def match_endofsentence(text: str) -> bool:
+    return endofsentence_re.search(text.rstrip()) is not None
 
 
 class AIService(FrameProcessor):
@@ -137,9 +146,7 @@ class TTSService(AIService):
             text = frame.text
         else:
             self._current_sentence += frame.text
-            if self._current_sentence.strip().endswith(
-                    (".", "?", "!")) and not self._current_sentence.strip().endswith(
-                    ("Mr,", "Mrs.", "Ms.", "Dr.")):
+            if match_endofsentence(self._current_sentence):
                 text = self._current_sentence
                 self._current_sentence = ""
 
