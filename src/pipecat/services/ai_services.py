@@ -31,8 +31,19 @@ from pipecat.utils.utils import exp_smoothing
 import re
 
 
-endofsentence_pattern = r"(?<![A-Z])(?<!\d)(?<!\d\s[ap])(?<!Mr|Ms|Dr)(?<!Mrs)(?<!Prof)[\.\?\!:]$"
-endofsentence_re = re.compile(endofsentence_pattern)
+endofsentence_pattern = r"""
+    (?<![A-Z])       # Negative lookbehind: not preceded by an uppercase letter (e.g., "U.S.A.")
+    (?<!\d)          # Negative lookbehind: not preceded by a digit (e.g., "1. Let's start")
+    (?<!\d\s[ap])    # Negative lookbehind: not preceded by time (e.g., "3:00 a.m.")
+    (?<!Mr)          # Negative lookbehind: not preceded by "Mr"
+    (?<!Ms)          # Negative lookbehind: not preceded by "Ms"
+    (?<!Dr)          # Negative lookbehind: not preceded by "Dr"
+    (?<!Mrs)         # Negative lookbehind: not preceded by "Mrs"
+    (?<!Prof)        # Negative lookbehind: not preceded by "Prof"
+    [\.\?\!:]        # Match a period, question mark, exclamation point, or colon
+    $                # End of string
+"""
+endofsentence_re = re.compile(endofsentence_pattern, re.VERBOSE)
 
 
 def match_endofsentence(text: str) -> bool:
