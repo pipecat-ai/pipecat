@@ -31,7 +31,7 @@ from pipecat.utils.utils import exp_smoothing
 import re
 
 
-endofsentence_pattern = r"""
+ENDOFSENTENCE_PATTERN_STR = r"""
     (?<![A-Z])       # Negative lookbehind: not preceded by an uppercase letter (e.g., "U.S.A.")
     (?<!\d)          # Negative lookbehind: not preceded by a digit (e.g., "1. Let's start")
     (?<!\d\s[ap])    # Negative lookbehind: not preceded by time (e.g., "3:00 a.m.")
@@ -43,11 +43,11 @@ endofsentence_pattern = r"""
     [\.\?\!:]        # Match a period, question mark, exclamation point, or colon
     $                # End of string
 """
-endofsentence_re = re.compile(endofsentence_pattern, re.VERBOSE)
+ENDOFSENTENCE_PATTERN = re.compile(ENDOFSENTENCE_PATTERN_STR, re.VERBOSE)
 
 
 def match_endofsentence(text: str) -> bool:
-    return endofsentence_re.search(text.rstrip()) is not None
+    return ENDOFSENTENCE_PATTERN.search(text.rstrip()) is not None
 
 
 class AIService(FrameProcessor):
