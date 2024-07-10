@@ -251,6 +251,8 @@ class STTService(AIService):
         elif isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We don't really want to push audio frames down.
+            if self._wave and not self._wave._file:
+                (self._content, self._wave) = self._new_wave()
             await self._append_audio(frame)
         else:
             await self.push_frame(frame, direction)
