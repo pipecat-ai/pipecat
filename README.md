@@ -70,8 +70,8 @@ async def main():
     transport = DailyTransport(
       room_url=...,
       token=...,
-      "Bot Name",
-      DailyParams(audio_out_enabled=True))
+      bot_name="Bot Name",
+      params=DailyParams(audio_out_enabled=True))
 
     # Use Eleven Labs for Text-to-Speech
     tts = ElevenLabsTTSService(
