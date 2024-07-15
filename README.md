@@ -70,8 +70,8 @@ async def main():
     transport = DailyTransport(
       room_url=...,
       token=...,
-      "Bot Name",
-      DailyParams(audio_out_enabled=True))
+      bot_name="Bot Name",
+      params=DailyParams(audio_out_enabled=True))
 
     # Use Eleven Labs for Text-to-Speech
     tts = ElevenLabsTTSService(
@@ -125,7 +125,7 @@ Sign up [here](https://dashboard.daily.co/u/signup) and [create a room](https://
 
 Voice Activity Detection &mdash; very important for knowing when a user has finished speaking to your bot. If you are not using press-to-talk, and want Pipecat to detect when the user has finished talking, VAD is an essential component for a natural feeling conversation.
 
-Pipecast makes use of WebRTC VAD by default when using a WebRTC transport layer. Optionally, you can use Silero VAD for improved accuracy at the cost of higher CPU usage.
+Pipecat makes use of WebRTC VAD by default when using a WebRTC transport layer. Optionally, you can use Silero VAD for improved accuracy at the cost of higher CPU usage.
 
 ```shell
 pip install pipecat-ai[silero]
