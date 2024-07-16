@@ -149,6 +149,10 @@ class TTSService(AIService):
     async def say(self, text: str):
         await self.process_frame(TextFrame(text=text), FrameDirection.DOWNSTREAM)
 
+    async def handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+        self._current_sentence = ""
+        await self.push_frame(frame, direction)
+
     async def _process_text_frame(self, frame: TextFrame):
         text: str | None = None
         if not self._aggregate_sentences:
@@ -182,8 +186,7 @@ class TTSService(AIService):
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)
         elif isinstance(frame, StartInterruptionFrame):
-            self._current_sentence = ""
-            await self.push_frame(frame, direction)
+            await self.handle_interruption(frame, direction)
         elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
             self._current_sentence = ""
             await self._push_tts_frames(self._current_sentence)
