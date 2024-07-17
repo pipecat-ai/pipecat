@@ -2,8 +2,8 @@ import unittest
 
 from typing import AsyncGenerator
 
-from pipecat.services.ai_services import AIService
-from pipecat.pipeline.frames import EndFrame, Frame, TextFrame
+from pipecat.services.ai_services import AIService, match_endofsentence
+from pipecat.frames.frames import EndFrame, Frame, TextFrame
 
 
 class SimpleAIService(AIService):
@@ -26,6 +26,22 @@ class TestBaseAIService(unittest.IsolatedAsyncioTestCase):
                 output_frames.append(output_frame)
 
         self.assertEqual(input_frames, output_frames)
+
+    async def test_endofsentence(self):
+        assert match_endofsentence("This is a sentence.")
+        assert match_endofsentence("This is a sentence! ")
+        assert match_endofsentence("This is a sentence?")
+        assert match_endofsentence("This is a sentence:")
+        assert not match_endofsentence("This is not a sentence")
+        assert not match_endofsentence("This is not a sentence,")
+        assert not match_endofsentence("This is not a sentence, ")
+        assert not match_endofsentence("Ok, Mr. Smith let's ")
+        assert not match_endofsentence("Dr. Walker, I presume ")
+        assert not match_endofsentence("Prof. Walker, I presume ")
+        assert not match_endofsentence("zweitens, und 3.")
+        assert not match_endofsentence("Heute ist Dienstag, der 3.")  # 3. Juli 2024
+        assert not match_endofsentence("America, or the U.")  # U.S.A.
+        assert not match_endofsentence("It still early, it's 3:00 a.")  # 3:00 a.m.
 
 
 if __name__ == "__main__":
