@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "An open source framework for voice (and multimodal) assistants"
 license = { text = "BSD 2-Clause License" }
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.10"
 keywords = ["webrtc", "audio", "video", "ai"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
