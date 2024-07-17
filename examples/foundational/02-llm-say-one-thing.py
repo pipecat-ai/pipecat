@@ -13,8 +13,7 @@ from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-# from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -37,20 +36,15 @@ async def main(room_url):
             "Say One Thing From an LLM",
             DailyParams(audio_out_enabled=True))
 
-        # tts = ElevenLabsTTSService(
-        #     aiohttp_session=session,
-        #     api_key=os.getenv("ELEVENLABS_API_KEY"),
-        #     voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
-        # )
+        tts = ElevenLabsTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        )
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o")
-
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
-        )
 
         messages = [
             {
@@ -64,10 +58,10 @@ async def main(room_url):
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            # await task.queue_frames([LLMMessagesFrame(messages), EndFrame()])
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([LLMMessagesFrame(messages), EndFrame()])
 
         await runner.run(task)
+
 
 if __name__ == "__main__":
     (url, token) = configure()
