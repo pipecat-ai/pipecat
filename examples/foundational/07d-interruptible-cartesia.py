@@ -72,7 +72,7 @@ async def main(room_url: str, token):
         tma_out              # Assistant spoken responses
     ])
 
-    task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+    task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
