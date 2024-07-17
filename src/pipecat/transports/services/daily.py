@@ -198,14 +198,18 @@ class DailyTransportClient(EventHandler):
     def set_callbacks(self, callbacks: DailyCallbacks):
         self._callbacks = callbacks
 
-    async def send_message(self, frame: DailyTransportMessageFrame):
+    async def send_message(self, frame: TransportMessageFrame):
         if not self._client:
             return
+
+        participant_id = None
+        if isinstance(frame, DailyTransportMessageFrame):
+            participant_id = frame.participant_id
 
         future = self._loop.create_future()
         self._client.send_app_message(
             frame.message,
-            frame.participant_id,
+            participant_id,
             completion=completion_callback(future))
         await future
 
@@ -655,7 +659,7 @@ class DailyOutputTransport(BaseOutputTransport):
         await super().cleanup()
         await self._client.cleanup()
 
-    async def send_message(self, frame: DailyTransportMessageFrame):
+    async def send_message(self, frame: TransportMessageFrame):
         await self._client.send_message(frame)
 
     async def send_metrics(self, frame: MetricsFrame):
