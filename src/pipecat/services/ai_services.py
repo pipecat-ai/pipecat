@@ -140,6 +140,7 @@ class TTSService(AIService):
             self,
             *,
             aggregate_sentences: bool = True,
+            # if True, subclass is responsible for pushing TextFrames and LLMFullResponseEndFrames
             push_text_frames: bool = True,
             **kwargs):
         super().__init__(**kwargs)
@@ -183,7 +184,6 @@ class TTSService(AIService):
         await self.stop_processing_metrics()
         await self.push_frame(TTSStoppedFrame())
         if self._push_text_frames:
-            print("PUSHING TEXT FRAME")
             # We send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
             await self.push_frame(TextFrame(text))
@@ -198,7 +198,11 @@ class TTSService(AIService):
         elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
             self._current_sentence = ""
             await self._push_tts_frames(self._current_sentence)
-            await self.push_frame(frame)
+            if isinstance(frame, LLMFullResponseEndFrame):
+                if self._push_text_frames:
+                    await self.push_frame(frame, direction)
+            else:
+                await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
