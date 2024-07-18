@@ -42,9 +42,9 @@ class CartesiaTTSService(TTSService):
             self,
             *,
             api_key: str,
+            voice_id: str,
             cartesia_version: str = "2024-06-10",
             url: str = "wss://api.cartesia.ai/tts/websocket",
-            voice_id: str,
             model_id: str = "sonic-english",
             encoding: str = "pcm_s16le",
             sample_rate: int = 16000,
@@ -89,14 +89,13 @@ class CartesiaTTSService(TTSService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        await self.connect()
+        await self._connect()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
-        await self.disconnect()
-        pass
+        await self._disconnect()
 
-    async def connect(self):
+    async def _connect(self):
         try:
             self._websocket = await websockets.connect(
                 f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
@@ -146,14 +145,13 @@ class CartesiaTTSService(TTSService):
                     # unset _context_id but not the _context_id_start_timestamp because we are likely still
                     # playing out audio and need the timestamp to set send context frames
                     self._context_id = None
-                    self._timestamped_words_buffer.append(["LLMFullResponseEndFrame", 0])
-                if msg["type"] == "timestamps":
+                    self._timestamped_words_buffer.append(("LLMFullResponseEndFrame", 0))
+                elif msg["type"] == "timestamps":
                     # logger.debug(f"TIMESTAMPS: {msg}")
                     self._timestamped_words_buffer.extend(
                         list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["end"]))
                     )
-                    continue
-                if msg["type"] == "chunk":
+                elif msg["type"] == "chunk":
                     if not self._context_id_start_timestamp:
                         self._context_id_start_timestamp = time.time()
                     if self._waiting_for_ttfb:
@@ -192,7 +190,7 @@ class CartesiaTTSService(TTSService):
 
         try:
             if not self._websocket:
-                await self.connect()
+                await self._connect()
 
             if not self._waiting_for_ttfb:
                 await self.start_ttfb_metrics()
@@ -219,8 +217,8 @@ class CartesiaTTSService(TTSService):
                 await self._websocket.send(json.dumps(msg))
             except Exception as e:
                 logger.exception(f"{self} error sending message: {e}")
-                await self.disconnect()
-                await self.connect()
+                await self._disconnect()
+                await self._connect()
                 return
             yield None
         except Exception as e:
