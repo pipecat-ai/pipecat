@@ -106,7 +106,7 @@ class CartesiaTTSService(TTSService):
             logger.exception(f"{self} initialization error: {e}")
             self._websocket = None
 
-    async def disconnect(self):
+    async def _disconnect(self):
         try:
             if self._context_appending_task:
                 self._context_appending_task.cancel()
@@ -126,8 +126,8 @@ class CartesiaTTSService(TTSService):
         except Exception as e:
             logger.exception(f"{self} error closing websocket: {e}")
 
-    async def handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
-        await super().handle_interruption(frame, direction)
+    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+        await super()._handle_interruption(frame, direction)
         self._context_id = None
         self._context_id_start_timestamp = None
         self._timestamped_words_buffer = []
