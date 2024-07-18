@@ -14,8 +14,6 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
     LLMMessagesFrame,
     LLMFullResponseStartFrame,
-    LLMResponseStartFrame,
-    LLMResponseEndFrame,
     LLMFullResponseEndFrame
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -95,9 +93,7 @@ class GoogleLLMService(LLMService):
             async for chunk in self._async_generator_wrapper(response):
                 try:
                     text = chunk.text
-                    await self.push_frame(LLMResponseStartFrame())
                     await self.push_frame(TextFrame(text))
-                    await self.push_frame(LLMResponseEndFrame())
                 except Exception as e:
                     # Google LLMs seem to flag safety issues a lot!
                     if chunk.candidates[0].finish_reason == 3:

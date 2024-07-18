@@ -11,8 +11,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    LLMResponseEndFrame,
-    LLMResponseStartFrame,
     TextFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -69,9 +67,7 @@ class LangchainProcessor(FrameProcessor):
                 {self._transcript_key: text},
                 config={"configurable": {"session_id": self._participant_id}},
             ):
-                await self.push_frame(LLMResponseStartFrame())
                 await self.push_frame(TextFrame(self.__get_token_value(token)))
-                await self.push_frame(LLMResponseEndFrame())
         except GeneratorExit:
             logger.warning(f"{self} generator was closed prematurely")
         except Exception as e:

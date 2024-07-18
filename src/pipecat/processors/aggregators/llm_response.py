@@ -14,8 +14,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMResponseEndFrame,
-    LLMResponseStartFrame,
     LLMMessagesFrame,
     StartInterruptionFrame,
     TranscriptionFrame,
@@ -173,7 +171,7 @@ class LLMUserResponseAggregator(LLMResponseAggregator):
 
 class LLMFullResponseAggregator(FrameProcessor):
     """This class aggregates Text frames until it receives a
-    LLMResponseEndFrame, then emits the concatenated text as
+    LLMFullResponseEndFrame, then emits the concatenated text as
     a single text frame.
 
     given the following frames:
@@ -182,12 +180,12 @@ class LLMFullResponseAggregator(FrameProcessor):
         TextFrame(" world.")
         TextFrame(" I am")
         TextFrame(" an LLM.")
-        LLMResponseEndFrame()]
+        LLMFullResponseEndFrame()]
 
     this processor will yield nothing for the first 4 frames, then
 
         TextFrame("Hello, world. I am an LLM.")
-        LLMResponseEndFrame()
+        LLMFullResponseEndFrame()
 
     when passed the last frame.
 
@@ -203,9 +201,9 @@ class LLMFullResponseAggregator(FrameProcessor):
     >>> asyncio.run(print_frames(aggregator, TextFrame(" world.")))
     >>> asyncio.run(print_frames(aggregator, TextFrame(" I am")))
     >>> asyncio.run(print_frames(aggregator, TextFrame(" an LLM.")))
-    >>> asyncio.run(print_frames(aggregator, LLMResponseEndFrame()))
+    >>> asyncio.run(print_frames(aggregator, LLMFullResponseEndFrame()))
     Hello, world. I am an LLM.
-    LLMResponseEndFrame
+    LLMFullResponseEndFrame
     """
 
     def __init__(self):
@@ -234,6 +232,11 @@ class LLMContextAggregator(LLMResponseAggregator):
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:
             self._context.add_message({"role": self._role, "content": self._aggregation})
+
+            # Reset the aggregation. Reset it before pushing it down, otherwise
+            # if the tasks gets cancelled we won't be able to clear things up.
+            self._aggregation = ""
+
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
 
@@ -247,9 +250,10 @@ class LLMAssistantContextAggregator(LLMContextAggregator):
             messages=[],
             context=context,
             role="assistant",
-            start_frame=LLMResponseStartFrame,
-            end_frame=LLMResponseEndFrame,
-            accumulator_frame=TextFrame
+            start_frame=LLMFullResponseStartFrame,
+            end_frame=LLMFullResponseEndFrame,
+            accumulator_frame=TextFrame,
+            handle_interruptions=True
         )
 
 
