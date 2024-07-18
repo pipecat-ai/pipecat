@@ -5,6 +5,17 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- We remove the `LLMResponseStartFrame` and `LLMResponseEndFrame` frames. These
+  were added in the past to properly handle interruptions for the
+  `LLMAssistantContextAggregator`. But the `LLMContextAggregator` is now based
+  on `LLMResponseAggregator` which handles interruptions properly by just
+  processing the `StartInterruptionFrame`, so there's no need for these extra
+  frames any more.
+
 ## [0.0.36] - 2024-07-02
 
 ### Added

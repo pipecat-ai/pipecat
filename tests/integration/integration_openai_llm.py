@@ -8,8 +8,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMFullResponseEndFrame,
-    LLMResponseEndFrame,
-    LLMResponseStartFrame,
     TextFrame
 )
 from pipecat.utils.test_frame_processor import TestFrameProcessor
@@ -64,7 +62,7 @@ if __name__ == "__main__":
         llm.register_function("get_current_weather", get_weather_from_api)
         t = TestFrameProcessor([
             LLMFullResponseStartFrame,
-            [LLMResponseStartFrame, TextFrame, LLMResponseEndFrame],
+            TextFrame,
             LLMFullResponseEndFrame
         ])
         llm.link(t)
@@ -98,7 +96,7 @@ if __name__ == "__main__":
         llm.register_function("get_current_weather", get_weather_from_api)
         t = TestFrameProcessor([
             LLMFullResponseStartFrame,
-            [LLMResponseStartFrame, TextFrame, LLMResponseEndFrame],
+            TextFrame,
             LLMFullResponseEndFrame
         ])
         llm.link(t)
@@ -121,7 +119,7 @@ if __name__ == "__main__":
         api_key = os.getenv("OPENAI_API_KEY")
         t = TestFrameProcessor([
             LLMFullResponseStartFrame,
-            [LLMResponseStartFrame, TextFrame, LLMResponseEndFrame],
+            TextFrame,
             LLMFullResponseEndFrame
         ])
         llm = OpenAILLMService(
