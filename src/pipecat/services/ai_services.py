@@ -136,9 +136,16 @@ class LLMService(AIService):
 
 
 class TTSService(AIService):
-    def __init__(self, *, aggregate_sentences: bool = True, **kwargs):
+    def __init__(
+            self,
+            *,
+            aggregate_sentences: bool = True,
+            # if True, subclass is responsible for pushing TextFrames and LLMFullResponseEndFrames
+            push_text_frames: bool = True,
+            **kwargs):
         super().__init__(**kwargs)
         self._aggregate_sentences: bool = aggregate_sentences
+        self._push_text_frames: bool = push_text_frames
         self._current_sentence: str = ""
 
     # Converts the text to audio.
@@ -148,6 +155,10 @@ class TTSService(AIService):
 
     async def say(self, text: str):
         await self.process_frame(TextFrame(text=text), FrameDirection.DOWNSTREAM)
+
+    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+        self._current_sentence = ""
+        await self.push_frame(frame, direction)
 
     async def _process_text_frame(self, frame: TextFrame):
         text: str | None = None
@@ -172,9 +183,10 @@ class TTSService(AIService):
         await self.process_generator(self.run_tts(text))
         await self.stop_processing_metrics()
         await self.push_frame(TTSStoppedFrame())
-        # We send the original text after the audio. This way, if we are
-        # interrupted, the text is not added to the assistant context.
-        await self.push_frame(TextFrame(text))
+        if self._push_text_frames:
+            # We send the original text after the audio. This way, if we are
+            # interrupted, the text is not added to the assistant context.
+            await self.push_frame(TextFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -182,12 +194,15 @@ class TTSService(AIService):
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)
         elif isinstance(frame, StartInterruptionFrame):
-            self._current_sentence = ""
-            await self.push_frame(frame, direction)
+            await self._handle_interruption(frame, direction)
         elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
             self._current_sentence = ""
             await self._push_tts_frames(self._current_sentence)
-            await self.push_frame(frame)
+            if isinstance(frame, LLMFullResponseEndFrame):
+                if self._push_text_frames:
+                    await self.push_frame(frame, direction)
+            else:
+                await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
