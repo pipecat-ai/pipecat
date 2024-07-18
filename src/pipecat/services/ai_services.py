@@ -156,7 +156,7 @@ class TTSService(AIService):
     async def say(self, text: str):
         await self.process_frame(TextFrame(text=text), FrameDirection.DOWNSTREAM)
 
-    async def handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         self._current_sentence = ""
         await self.push_frame(frame, direction)
 
@@ -194,7 +194,7 @@ class TTSService(AIService):
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)
         elif isinstance(frame, StartInterruptionFrame):
-            await self.handle_interruption(frame, direction)
+            await self._handle_interruption(frame, direction)
         elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
             self._current_sentence = ""
             await self._push_tts_frames(self._current_sentence)
