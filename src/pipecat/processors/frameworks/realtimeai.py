@@ -9,7 +9,7 @@ import dataclasses
 from typing import List, Literal, Optional, Type
 from pydantic import BaseModel, ValidationError
 
-from pipecat.frames.frames import Frame, StartFrame, TransportMessageFrame
+from pipecat.frames.frames import Frame, LLMMessagesFrame, LLMMessagesUpdateFrame, StartFrame, TransportMessageFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -21,34 +21,45 @@ from pipecat.vad.silero import SileroVAD
 
 
 class RealtimeAILLMConfig(BaseModel):
-    model: str
-    messages: List[dict]
+    model: Optional[str] = None
+    messages: Optional[List[dict]] = None
 
 
 class RealtimeAITTSConfig(BaseModel):
-    voice: str
+    voice: Optional[str] = None
 
 
 class RealtimeAIConfig(BaseModel):
-    llm: RealtimeAILLMConfig
-    tts: RealtimeAITTSConfig
+    llm: Optional[RealtimeAILLMConfig] = None
+    tts: Optional[RealtimeAITTSConfig] = None
+
+
+class RealtimeAISetup(BaseModel):
+    config: RealtimeAIConfig
 
 
 class RealtimeAIMessageData(BaseModel):
+    setup: Optional[RealtimeAISetup] = None
     config: Optional[RealtimeAIConfig] = None
 
 
 class RealtimeAIMessage(BaseModel):
     tag: Literal["realtime-ai"] = "realtime-ai"
     type: str
-    data: RealtimeAIMessageData
+    data: Optional[RealtimeAIMessageData] = None
 
 
-class RealtimeAIResponseMessage(BaseModel):
+class RealtimeAIBasicResponse(BaseModel):
     tag: Literal["realtime-ai"] = "realtime-ai"
     type: str
     success: bool
     error: Optional[str] = None
+
+
+class RealtimeAILLMContextResponse(BaseModel):
+    tag: Literal["realtime-ai"] = "realtime-ai"
+    type: Literal["llm-context"] = "llm-context"
+    messages: List[dict]
 
 
 class RealtimeAIProcessor(FrameProcessor):
@@ -57,14 +68,14 @@ class RealtimeAIProcessor(FrameProcessor):
             self,
             *,
             transport: BaseTransport,
-            config: RealtimeAIConfig | None = None,
+            setup: RealtimeAISetup | None = None,
             llm_api_key: str = "",
             tts_api_key: str = "",
             llm_cls: Type[AIService] = OLLamaLLMService,
             tts_cls: Type[AIService] = CartesiaTTSService):
         super().__init__()
         self._transport = transport
-        self._config = config
+        self._setup = setup
         self._llm_api_key = llm_api_key
         self._tts_api_key = tts_api_key
         self._llm_cls = llm_cls
@@ -82,32 +93,48 @@ class RealtimeAIProcessor(FrameProcessor):
 
         if isinstance(frame, StartFrame):
             self._start_frame = frame
-            if self._config:
-                await self._handle_config(self._config)
+            if self._setup and self._setup.config:
+                await self._handle_setup(self._setup)
 
     async def _handle_message(self, frame: TransportMessageFrame):
         try:
             message = RealtimeAIMessage.model_validate(frame.message)
-
-            match message.type:
-                case "config":
-                    await self._handle_config(RealtimeAIConfig.model_validate(message.data.config))
         except ValidationError as e:
-            await self._send_response("config", False, f"invalid configuration: {e}")
+            await self._send_response("setup", False, f"invalid message: {e}")
+            return
 
-    async def _handle_config(self, config: RealtimeAIConfig):
+        print(message)
+
         try:
-            tma_in = LLMUserResponseAggregator(config.llm.messages)
-            tma_out = LLMAssistantResponseAggregator(config.llm.messages)
+            match message.type:
+                case "setup":
+                    await self._handle_setup(RealtimeAISetup.model_validate(message.data.setup))
+                case "llm-get-context":
+                    await self._handle_llm_get_context()
+                case "llm-update-context":
+                    await self._handle_llm_update_context(RealtimeAIConfig.model_validate(message.data.config))
+        except ValidationError as e:
+            await self._send_response(message.type, False, f"invalid message: {e}")
 
+    async def _handle_setup(self, setup: RealtimeAISetup):
+        try:
             vad = SileroVAD()
 
-            self._llm = self._llm_cls(model=config.llm.model)
+            self._tma_in = LLMUserResponseAggregator(setup.config.llm.messages)
+            self._tma_out = LLMAssistantResponseAggregator(setup.config.llm.messages)
 
-            self._tts = self._tts_cls(api_key=self._tts_api_key, voice_id=config.tts.voice)
+            self._llm = self._llm_cls(model=setup.config.llm.model)
 
-            pipeline = Pipeline([vad, tma_in, self._llm, self._tts,
-                                self._transport.output(), tma_out])
+            self._tts = self._tts_cls(api_key=self._tts_api_key, voice_id=setup.config.tts.voice)
+
+            pipeline = Pipeline([
+                vad,
+                self._tma_in,
+                self._llm,
+                self._tts,
+                self._transport.output(),
+                self._tma_out
+            ])
             self._pipeline = pipeline
 
             parent = self.get_parent()
@@ -121,11 +148,37 @@ class RealtimeAIProcessor(FrameProcessor):
 
                 # We now send a message to indicate we successfully initialized
                 # the pipelines.
-                await self._send_response("config", True)
+                await self._send_response("setup", True)
         except Exception as e:
-            await self._send_response("config", False, f"unable to create pipeline: {e}")
+            await self._send_response("setup", False, f"unable to create pipeline: {e}")
+
+    async def _handle_llm_get_context(self):
+        messages = self._tma_in.messages
+        response = RealtimeAILLMContextResponse(messages=messages)
+        message = TransportMessageFrame(message=response.model_dump(exclude_none=True))
+        await self.push_frame(message)
+
+    async def _handle_llm_update_context(self, config: RealtimeAIConfig):
+        if config.llm and config.llm.messages:
+            frame = LLMMessagesUpdateFrame(config.llm.messages)
+            await self.push_frame(frame)
 
     async def _send_response(self, type: str, success: bool, error: str | None = None):
-        response = RealtimeAIResponseMessage(type=type, success=success)
+        # TODO(aleix): This is a bit hacky, but we might get invalid
+        # configuration or something might going wrong during setup and we would
+        # like to send the error to the client. However, if the pipeline is not
+        # setup yet we don't have an output transport and therefore we can't
+        # send any messages. So, we setup a super basic pipeline with just the
+        # output transport so we can send messages.
+        if not self._pipeline:
+            # We add the SilerVAD() so the audio doesn't go through.
+            pipeline = Pipeline([SileroVAD(), self._transport.output()])
+            self._pipeline = pipeline
+
+            parent = self.get_parent()
+            if parent and self._start_frame:
+                parent.link(pipeline)
+
+        response = RealtimeAIBasicResponse(type=type, success=success, error=error)
         message = TransportMessageFrame(message=response.model_dump(exclude_none=True))
         await self.push_frame(message)
