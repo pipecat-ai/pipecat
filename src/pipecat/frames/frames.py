@@ -159,6 +159,16 @@ class LLMMessagesFrame(DataFrame):
 
 
 @dataclass
+class LLMMessagesUpdateFrame(DataFrame):
+    """A frame containing a list of new LLM messages. These messages will
+    replace the current context LLM messages and should generate a new
+    LLMMessagesFrame.
+
+    """
+    messages: List[dict]
+
+
+@dataclass
 class TransportMessageFrame(DataFrame):
     message: Any
 
