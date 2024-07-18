@@ -12,8 +12,6 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
     LLMMessagesFrame,
     LLMFullResponseStartFrame,
-    LLMResponseStartFrame,
-    LLMResponseEndFrame,
     LLMFullResponseEndFrame
 )
 from pipecat.processors.frame_processor import FrameDirection
@@ -118,9 +116,7 @@ class AnthropicLLMService(LLMService):
             async for event in response:
                 # logger.debug(f"Anthropic LLM event: {event}")
                 if (event.type == "content_block_delta"):
-                    await self.push_frame(LLMResponseStartFrame())
                     await self.push_frame(TextFrame(event.delta.text))
-                    await self.push_frame(LLMResponseEndFrame())
 
         except Exception as e:
             logger.exception(f"{self} exception: {e}")

@@ -282,27 +282,13 @@ class EndFrame(ControlFrame):
 
 @dataclass
 class LLMFullResponseStartFrame(ControlFrame):
-    """Used to indicate the beginning of a full LLM response. Following
-    LLMResponseStartFrame, TextFrame and LLMResponseEndFrame for each sentence
-    until a LLMFullResponseEndFrame."""
+    """Used to indicate the beginning of an LLM response. Following by one or
+    more TextFrame and a final LLMFullResponseEndFrame."""
     pass
 
 
 @dataclass
 class LLMFullResponseEndFrame(ControlFrame):
-    """Indicates the end of a full LLM response."""
-    pass
-
-
-@dataclass
-class LLMResponseStartFrame(ControlFrame):
-    """Used to indicate the beginning of an LLM response. Following TextFrames
-    are part of the LLM response until an LLMResponseEndFrame"""
-    pass
-
-
-@dataclass
-class LLMResponseEndFrame(ControlFrame):
     """Indicates the end of an LLM response."""
     pass
 
