@@ -37,6 +37,7 @@ async def main(room_url: str, token):
         token,
         "Respond bot",
         DailyParams(
+            audio_out_sample_rate=44100,
             audio_out_enabled=True,
             transcription_enabled=True,
             vad_enabled=True,
@@ -47,6 +48,7 @@ async def main(room_url: str, token):
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
+        sample_rate=44100,
     )
 
     llm = OpenAILLMService(
