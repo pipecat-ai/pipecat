@@ -25,7 +25,6 @@ from pipecat.services.ai_services import AIService
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.vad.silero import SileroVAD
 
 DEFAULT_MESSAGES = [
     {
@@ -141,8 +140,6 @@ class RealtimeAIProcessor(FrameProcessor):
 
     async def _handle_setup(self, setup: RealtimeAISetup | None):
         try:
-            vad = SileroVAD()
-
             model = DEFAULT_MODEL
             if setup and setup.config and setup.config.llm and setup.config.llm.model:
                 model = setup.config.llm.model
@@ -166,7 +163,6 @@ class RealtimeAIProcessor(FrameProcessor):
             self._tts = self._tts_cls(api_key=self._tts_api_key, voice_id=voice)
 
             pipeline = Pipeline([
-                vad,
                 self._tma_in,
                 self._llm,
                 self._tts,
@@ -220,8 +216,7 @@ class RealtimeAIProcessor(FrameProcessor):
         # send any messages. So, we setup a super basic pipeline with just the
         # output transport so we can send messages.
         if not self._pipeline:
-            # We add the SilerVAD() so the audio doesn't go through.
-            pipeline = Pipeline([SileroVAD(), self._transport.output()])
+            pipeline = Pipeline([self._transport.output()])
             self._pipeline = pipeline
 
             parent = self.get_parent()
