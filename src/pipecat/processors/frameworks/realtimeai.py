@@ -9,9 +9,16 @@ import dataclasses
 from typing import List, Literal, Optional, Type
 from pydantic import BaseModel, ValidationError
 
-from pipecat.frames.frames import Frame, LLMMessagesFrame, LLMMessagesUpdateFrame, StartFrame, TransportMessageFrame
+from pipecat.frames.frames import (
+    Frame,
+    LLMMessagesUpdateFrame,
+    LLMModelUpdateFrame,
+    StartFrame,
+    TTSVoiceUpdateFrame,
+    TransportMessageFrame)
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import AIService
 from pipecat.services.cartesia import CartesiaTTSService
@@ -103,12 +110,12 @@ class RealtimeAIProcessor(FrameProcessor):
             await self._send_response("setup", False, f"invalid message: {e}")
             return
 
-        print(message)
-
         try:
             match message.type:
                 case "setup":
                     await self._handle_setup(RealtimeAISetup.model_validate(message.data.setup))
+                case "config-update":
+                    await self._handle_config_update(RealtimeAIConfig.model_validate(message.data.config))
                 case "llm-get-context":
                     await self._handle_llm_get_context()
                 case "llm-update-context":
@@ -151,6 +158,17 @@ class RealtimeAIProcessor(FrameProcessor):
                 await self._send_response("setup", True)
         except Exception as e:
             await self._send_response("setup", False, f"unable to create pipeline: {e}")
+
+    async def _handle_config_update(self, config: RealtimeAIConfig):
+        if config.llm and config.llm.model:
+            frame = LLMModelUpdateFrame(config.llm.model)
+            await self.push_frame(frame)
+        if config.llm and config.llm.messages:
+            frame = LLMMessagesUpdateFrame(config.llm.messages)
+            await self.push_frame(frame)
+        if config.tts and config.tts.voice:
+            frame = TTSVoiceUpdateFrame(config.tts.voice)
+            await self.push_frame(frame)
 
     async def _handle_llm_get_context(self):
         messages = self._tma_in.messages

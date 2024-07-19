@@ -345,3 +345,17 @@ class UserImageRequestFrame(ControlFrame):
 
     def __str__(self):
         return f"{self.name}, user: {self.user_id}"
+
+
+@dataclass
+class LLMModelUpdateFrame(ControlFrame):
+    """A control frame containing a request to update to a new LLM model.
+    """
+    model: str
+
+
+@dataclass
+class TTSVoiceUpdateFrame(ControlFrame):
+    """A control frame containing a request to update to a new TTS voice.
+    """
+    voice: str

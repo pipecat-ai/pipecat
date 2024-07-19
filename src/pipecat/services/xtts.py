@@ -54,6 +54,10 @@ class XTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    async def set_voice(self, voice: str):
+        logger.debug(f"Switching TTS voice to: [{voice}]")
+        self._voice_id = voice
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
         embeddings = self._studio_speakers[self._voice_id]
