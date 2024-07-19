@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSVoiceUpdateFrame,
     TextFrame,
     VisionImageRawFrame,
 )
@@ -148,6 +149,10 @@ class TTSService(AIService):
         self._push_text_frames: bool = push_text_frames
         self._current_sentence: str = ""
 
+    @abstractmethod
+    async def set_voice(self, voice: str):
+        pass
+
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -203,6 +208,8 @@ class TTSService(AIService):
                     await self.push_frame(frame, direction)
             else:
                 await self.push_frame(frame, direction)
+        elif isinstance(frame, TTSVoiceUpdateFrame):
+            await self.set_voice(frame.voice)
         else:
             await self.push_frame(frame, direction)
 
