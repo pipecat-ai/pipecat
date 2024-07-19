@@ -166,7 +166,7 @@ class RealtimeAIProcessor(FrameProcessor):
 
             voice = DEFAULT_VOICE
             if setup and setup.config and setup.config.tts and setup.config.tts.voice:
-                messages = setup.config.tts.voice
+                voice = setup.config.tts.voice
 
             self._tma_in = LLMUserResponseAggregator(messages)
             self._tma_out = LLMAssistantResponseAggregator(messages)
