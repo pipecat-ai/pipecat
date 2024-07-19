@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from ctypes import DEFAULT_MODE
 import dataclasses
 
 from typing import List, Literal, Optional, Type
@@ -18,7 +17,9 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSSpeakFrame,
     TTSVoiceUpdateFrame,
-    TransportMessageFrame)
+    TransportMessageFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
@@ -92,6 +93,16 @@ class RealtimeAILLMContextResponse(BaseModel):
     messages: List[dict]
 
 
+class RealtimeAIUserStartedSpeakingMessage(BaseModel):
+    tag: Literal["realtime-ai"] = "realtime-ai"
+    type: Literal["user-started-speaking"] = "user-started-speaking"
+
+
+class RealtimeAIUserStoppedSpeakingMessage(BaseModel):
+    tag: Literal["realtime-ai"] = "realtime-ai"
+    type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
+
+
 class RealtimeAIProcessor(FrameProcessor):
 
     def __init__(
@@ -126,6 +137,19 @@ class RealtimeAIProcessor(FrameProcessor):
         if isinstance(frame, StartFrame):
             self._start_frame = frame
             await self._handle_setup(self._setup)
+        elif isinstance(frame, UserStartedSpeakingFrame) or isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_interruptions(frame)
+
+    async def _handle_interruptions(self, frame: Frame):
+        message = None
+        if isinstance(frame, UserStartedSpeakingFrame):
+            message = RealtimeAIUserStartedSpeakingMessage()
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            message = RealtimeAIUserStoppedSpeakingMessage()
+
+        if message:
+            frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+            await self.push_frame(frame)
 
     async def _handle_message(self, frame: TransportMessageFrame):
         try:
