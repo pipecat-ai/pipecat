@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+from ctypes import DEFAULT_MODE
 import dataclasses
 
 from typing import List, Literal, Optional, Type
@@ -26,6 +27,17 @@ from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.vad.silero import SileroVAD
 
+DEFAULT_MESSAGES = [
+    {
+        "role": "system",
+        "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+    }
+]
+
+DEFAULT_MODEL = "llama3-70b-8192"
+
+DEFAULT_VOICE = "79a125e8-cd45-4c13-8a67-188112f4dd22"
+
 
 class RealtimeAILLMConfig(BaseModel):
     model: Optional[str] = None
@@ -42,7 +54,7 @@ class RealtimeAIConfig(BaseModel):
 
 
 class RealtimeAISetup(BaseModel):
-    config: RealtimeAIConfig
+    config: Optional[RealtimeAIConfig] = None
 
 
 class RealtimeAIMessageData(BaseModel):
@@ -115,29 +127,44 @@ class RealtimeAIProcessor(FrameProcessor):
         try:
             match message.type:
                 case "setup":
-                    await self._handle_setup(RealtimeAISetup.model_validate(message.data.setup))
+                    setup = None
+                    if message.data:
+                        setup = message.data.setup
+                    await self._handle_setup(setup)
                 case "config-update":
-                    await self._handle_config_update(RealtimeAIConfig.model_validate(message.data.config))
+                    await self._handle_config_update(message.data.config)
                 case "llm-get-context":
                     await self._handle_llm_get_context()
                 case "llm-update-context":
-                    await self._handle_llm_update_context(RealtimeAIConfig.model_validate(message.data.config))
+                    await self._handle_llm_update_context(message.data.config)
         except ValidationError as e:
             await self._send_response(message.type, False, f"invalid message: {e}")
 
-    async def _handle_setup(self, setup: RealtimeAISetup):
+    async def _handle_setup(self, setup: RealtimeAISetup | None):
         try:
             vad = SileroVAD()
 
-            self._tma_in = LLMUserResponseAggregator(setup.config.llm.messages)
-            self._tma_out = LLMAssistantResponseAggregator(setup.config.llm.messages)
+            model = DEFAULT_MODEL
+            if setup and setup.config and setup.config.llm and setup.config.llm.model:
+                model = setup.config.llm.model
+
+            messages = DEFAULT_MESSAGES
+            if setup and setup.config and setup.config.llm and setup.config.llm.messages:
+                messages = setup.config.llm.messages
+
+            voice = DEFAULT_VOICE
+            if setup and setup.config and setup.config.tts and setup.config.tts.voice:
+                messages = setup.config.tts.voice
+
+            self._tma_in = LLMUserResponseAggregator(messages)
+            self._tma_out = LLMAssistantResponseAggregator(messages)
 
             self._llm = self._llm_cls(
                 base_url=self._llm_base_url,
                 api_key=self._llm_api_key,
-                model=setup.config.llm.model)
+                model=model)
 
-            self._tts = self._tts_cls(api_key=self._tts_api_key, voice_id=setup.config.tts.voice)
+            self._tts = self._tts_cls(api_key=self._tts_api_key, voice_id=voice)
 
             pipeline = Pipeline([
                 vad,
