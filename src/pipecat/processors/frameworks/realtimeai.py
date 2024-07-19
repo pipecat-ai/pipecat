@@ -175,6 +175,9 @@ class RealtimeAIProcessor(FrameProcessor):
                     await self._handle_llm_update_context(message.data.llm)
                 case "tts-speak":
                     await self._handle_tts_speak(message.data.tts)
+
+            # Send a message to indicate we successfully executed the command.
+            await self._send_response(message.type, True)
         except ValidationError as e:
             await self._send_response(message.type, False, f"invalid message: {e}")
 
@@ -219,10 +222,6 @@ class RealtimeAIProcessor(FrameProcessor):
                 # as the initial one.
                 start_frame = dataclasses.replace(self._start_frame)
                 await self.push_frame(start_frame)
-
-                # We now send a message to indicate we successfully initialized
-                # the pipelines.
-                await self._send_response("setup", True)
         except Exception as e:
             await self._send_response("setup", False, f"unable to create pipeline: {e}")
 
