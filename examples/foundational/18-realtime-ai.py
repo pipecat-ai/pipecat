@@ -36,7 +36,10 @@ async def main(room_url, token):
             transcription_enabled=True,
         ))
 
-    rtai = RealtimeAIProcessor(transport=transport, tts_api_key=os.getenv("CARTESIA_API_KEY"))
+    rtai = RealtimeAIProcessor(
+        transport=transport,
+        llm_api_key=os.getenv("OPENAI_API_KEY"),
+        tts_api_key=os.getenv("CARTESIA_API_KEY"))
 
     runner = PipelineRunner()
 
