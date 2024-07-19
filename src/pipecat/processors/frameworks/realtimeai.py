@@ -114,8 +114,7 @@ class RealtimeAIProcessor(FrameProcessor):
 
         if isinstance(frame, StartFrame):
             self._start_frame = frame
-            if self._setup and self._setup.config:
-                await self._handle_setup(self._setup)
+            await self._handle_setup(self._setup)
 
     async def _handle_message(self, frame: TransportMessageFrame):
         try:
