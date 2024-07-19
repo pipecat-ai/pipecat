@@ -178,6 +178,15 @@ class LLMMessagesUpdateFrame(DataFrame):
 
 
 @dataclass
+class TTSSpeakFrame(DataFrame):
+    """A frame that contains a text that should be spoken by the TTS in the
+    pipeline (if any).
+
+    """
+    text: str
+
+
+@dataclass
 class TransportMessageFrame(DataFrame):
     message: Any
 
