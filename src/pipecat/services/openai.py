@@ -8,6 +8,7 @@ import aiohttp
 import base64
 import io
 import json
+import httpx
 
 from typing import AsyncGenerator, List, Literal
 
@@ -37,7 +38,7 @@ from pipecat.services.ai_services import (
 )
 
 try:
-    from openai import AsyncOpenAI, AsyncStream, BadRequestError
+    from openai import AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient, BadRequestError
     from openai.types.chat import (
         ChatCompletionChunk,
         ChatCompletionFunctionMessageParam,
@@ -71,7 +72,14 @@ class BaseOpenAILLMService(LLMService):
         self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
-        return AsyncOpenAI(api_key=api_key, base_url=base_url)
+        return AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            http_client=DefaultAsyncHttpxClient(
+                limits=httpx.Limits(
+                    max_keepalive_connections=100,
+                    max_connections=1000,
+                    keepalive_expiry=None)))
 
     def can_generate_metrics(self) -> bool:
         return True
