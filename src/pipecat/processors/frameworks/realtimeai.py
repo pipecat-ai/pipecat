@@ -22,7 +22,7 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import AIService
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.ollama import OLLamaLLMService
+from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.vad.silero import SileroVAD
 
@@ -77,13 +77,15 @@ class RealtimeAIProcessor(FrameProcessor):
             transport: BaseTransport,
             setup: RealtimeAISetup | None = None,
             llm_api_key: str = "",
+            llm_base_url: str = "https://api.groq.com/openai/v1",
             tts_api_key: str = "",
-            llm_cls: Type[AIService] = OLLamaLLMService,
+            llm_cls: Type[AIService] = OpenAILLMService,
             tts_cls: Type[AIService] = CartesiaTTSService):
         super().__init__()
         self._transport = transport
         self._setup = setup
         self._llm_api_key = llm_api_key
+        self._llm_base_url = llm_base_url
         self._tts_api_key = tts_api_key
         self._llm_cls = llm_cls
         self._tts_cls = tts_cls
@@ -130,7 +132,10 @@ class RealtimeAIProcessor(FrameProcessor):
             self._tma_in = LLMUserResponseAggregator(setup.config.llm.messages)
             self._tma_out = LLMAssistantResponseAggregator(setup.config.llm.messages)
 
-            self._llm = self._llm_cls(model=setup.config.llm.model)
+            self._llm = self._llm_cls(
+                base_url=self._llm_base_url,
+                api_key=self._llm_api_key,
+                model=setup.config.llm.model)
 
             self._tts = self._tts_cls(api_key=self._tts_api_key, voice_id=setup.config.tts.voice)
 
