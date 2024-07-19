@@ -12,6 +12,7 @@ from pydantic import BaseModel, ValidationError
 
 from pipecat.frames.frames import (
     Frame,
+    LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
     LLMModelUpdateFrame,
     StartFrame,
@@ -133,6 +134,8 @@ class RealtimeAIProcessor(FrameProcessor):
                     await self._handle_config_update(message.data.config)
                 case "llm-get-context":
                     await self._handle_llm_get_context()
+                case "llm-append-context":
+                    await self._handle_llm_append_context(message.data.config)
                 case "llm-update-context":
                     await self._handle_llm_update_context(message.data.config)
         except ValidationError as e:
@@ -202,6 +205,11 @@ class RealtimeAIProcessor(FrameProcessor):
         response = RealtimeAILLMContextResponse(messages=messages)
         message = TransportMessageFrame(message=response.model_dump(exclude_none=True))
         await self.push_frame(message)
+
+    async def _handle_llm_append_context(self, config: RealtimeAIConfig):
+        if config.llm and config.llm.messages:
+            frame = LLMMessagesAppendFrame(config.llm.messages)
+            await self.push_frame(frame)
 
     async def _handle_llm_update_context(self, config: RealtimeAIConfig):
         if config.llm and config.llm.messages:
