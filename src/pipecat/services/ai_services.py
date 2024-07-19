@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSVoiceUpdateFrame,
@@ -178,7 +179,7 @@ class TTSService(AIService):
         if text:
             await self._push_tts_frames(text)
 
-    async def _push_tts_frames(self, text: str):
+    async def _push_tts_frames(self, text: str, text_passthrough: bool = True):
         text = text.strip()
         if not text:
             return
@@ -209,6 +210,8 @@ class TTSService(AIService):
                     await self.push_frame(frame, direction)
             else:
                 await self.push_frame(frame, direction)
+        elif isinstance(frame, TTSSpeakFrame):
+            await self._push_tts_frames(frame.text, False)
         elif isinstance(frame, TTSVoiceUpdateFrame):
             await self.set_voice(frame.voice)
         else:

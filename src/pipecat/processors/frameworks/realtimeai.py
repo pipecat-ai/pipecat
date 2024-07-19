@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     LLMMessagesUpdateFrame,
     LLMModelUpdateFrame,
     StartFrame,
+    TTSSpeakFrame,
     TTSVoiceUpdateFrame,
     TransportMessageFrame)
 from pipecat.pipeline.pipeline import Pipeline
@@ -57,9 +58,19 @@ class RealtimeAISetup(BaseModel):
     config: Optional[RealtimeAIConfig] = None
 
 
+class RealtimeAILLMMessageData(BaseModel):
+    messages: List[dict]
+
+
+class RealtimeAITTSMessageData(BaseModel):
+    text: str
+
+
 class RealtimeAIMessageData(BaseModel):
     setup: Optional[RealtimeAISetup] = None
     config: Optional[RealtimeAIConfig] = None
+    llm: Optional[RealtimeAILLMMessageData] = None
+    tts: Optional[RealtimeAITTSMessageData] = None
 
 
 class RealtimeAIMessage(BaseModel):
@@ -135,9 +146,11 @@ class RealtimeAIProcessor(FrameProcessor):
                 case "llm-get-context":
                     await self._handle_llm_get_context()
                 case "llm-append-context":
-                    await self._handle_llm_append_context(message.data.config)
+                    await self._handle_llm_append_context(message.data.llm)
                 case "llm-update-context":
-                    await self._handle_llm_update_context(message.data.config)
+                    await self._handle_llm_update_context(message.data.llm)
+                case "tts-speak":
+                    await self._handle_tts_speak(message.data.tts)
         except ValidationError as e:
             await self._send_response(message.type, False, f"invalid message: {e}")
 
@@ -206,14 +219,19 @@ class RealtimeAIProcessor(FrameProcessor):
         message = TransportMessageFrame(message=response.model_dump(exclude_none=True))
         await self.push_frame(message)
 
-    async def _handle_llm_append_context(self, config: RealtimeAIConfig):
-        if config.llm and config.llm.messages:
-            frame = LLMMessagesAppendFrame(config.llm.messages)
+    async def _handle_llm_append_context(self, data: RealtimeAILLMMessageData):
+        if data and data.messages:
+            frame = LLMMessagesAppendFrame(data.messages)
             await self.push_frame(frame)
 
-    async def _handle_llm_update_context(self, config: RealtimeAIConfig):
-        if config.llm and config.llm.messages:
-            frame = LLMMessagesUpdateFrame(config.llm.messages)
+    async def _handle_llm_update_context(self, data: RealtimeAILLMMessageData):
+        if data and data.messages:
+            frame = LLMMessagesUpdateFrame(data.messages)
+            await self.push_frame(frame)
+
+    async def _handle_tts_speak(self, data: RealtimeAITTSMessageData):
+        if data and data.text:
+            frame = TTSSpeakFrame(text=data.text)
             await self.push_frame(frame)
 
     async def _send_response(self, type: str, success: bool, error: str | None = None):
