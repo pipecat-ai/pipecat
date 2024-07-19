@@ -13,6 +13,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.processors.frameworks.realtimeai import RealtimeAIProcessor
 from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -31,9 +32,10 @@ async def main(room_url, token):
         token,
         "Realtime AI",
         DailyParams(
-            audio_in_enabled=True,
             audio_out_enabled=True,
             transcription_enabled=True,
+            vad_enabled=True,
+            vad_analyzer=SileroVADAnalyzer()
         ))
 
     rtai = RealtimeAIProcessor(
