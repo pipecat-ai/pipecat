@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TTSService` end of sentence detection has been improved. It now works with
   acronyms, numbers, hours and others.
 
+- Fixed an issue in `TTSService` that would not properly flush the current
+  aggregated sentence if an `LLMFullResponseEndFrame` was found.
+
 ### Performance
 
 - `CartesiaTTSService` now uses websockets which improves speed. It also
