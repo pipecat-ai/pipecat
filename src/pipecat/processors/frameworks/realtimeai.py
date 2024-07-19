@@ -166,8 +166,8 @@ class RealtimeAIProcessor(FrameProcessor):
                 self._tma_in,
                 self._llm,
                 self._tts,
+                self._tma_out,
                 self._transport.output(),
-                self._tma_out
             ])
             self._pipeline = pipeline
 
