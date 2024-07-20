@@ -89,10 +89,14 @@ class RealtimeAIBasicResponse(BaseModel):
     error: Optional[str] = None
 
 
-class RealtimeAILLMContextResponse(BaseModel):
+class RealtimeAILLMContextMessageData(BaseModel):
+    messages: List[dict]
+
+
+class RealtimeAILLMContextMessage(BaseModel):
     tag: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["llm-context"] = "llm-context"
-    messages: List[dict]
+    data: RealtimeAILLMContextMessageData
 
 
 class RealtimeAITranscriptionMessageData(BaseModel):
@@ -279,10 +283,10 @@ class RealtimeAIProcessor(FrameProcessor):
             await self.push_frame(frame)
 
     async def _handle_llm_get_context(self):
-        messages = self._tma_in.messages
-        response = RealtimeAILLMContextResponse(messages=messages)
-        message = TransportMessageFrame(message=response.model_dump(exclude_none=True))
-        await self.push_frame(message)
+        data = RealtimeAILLMContextMessageData(messages=self._tma_in.messages)
+        message = RealtimeAILLMContextMessage(data=data)
+        frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+        await self.push_frame(frame)
 
     async def _handle_llm_append_context(self, data: RealtimeAILLMMessageData):
         if data and data.messages:
