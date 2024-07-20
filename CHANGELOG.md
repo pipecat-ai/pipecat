@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `RealtimeAIProcessor`...
+
+- Added `LLMMessagesAppendFrame` which allows appending messages to the current
+  LLM context.
+
+- Added `LLMMessagesUpdateFrame` which allows changing the LLM context for the
+  one provided in this new frame.
+
+- Added `LLMModelUpdateFrame` which allows updating the LLM model.
+
+- Added `TTSSpeakFrame` which causes the bot say some text. This text will not
+  be part of the LLM context.
+
+- Added `TTSVoiceUpdateFrame` which allows updating the TTS voice.
+
 ### Removed
 
 - We remove the `LLMResponseStartFrame` and `LLMResponseEndFrame` frames. These
@@ -32,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CartesiaTTSService` now uses websockets which improves speed. It also
   leverages the new Cartesia contexts which maintains generated audio prosody
   when multiple inputs are sent, therefore improving audio quality a lot.
+
+### Other
+
+- Added `examples/realtime-ai/bot.py`...
 
 ## [0.0.36] - 2024-07-02
 
