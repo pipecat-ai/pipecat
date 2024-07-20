@@ -4,18 +4,21 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import dataclasses
 
 from typing import List, Literal, Optional, Type
 from pydantic import BaseModel, ValidationError
 
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     Frame,
     InterimTranscriptionFrame,
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
     LLMModelUpdateFrame,
     StartFrame,
+    SystemFrame,
     TTSSpeakFrame,
     TTSVoiceUpdateFrame,
     TranscriptionFrame,
@@ -67,6 +70,7 @@ class RealtimeAILLMMessageData(BaseModel):
 
 class RealtimeAITTSMessageData(BaseModel):
     text: str
+    interrupt: Optional[bool] = False
 
 
 class RealtimeAIMessageData(BaseModel):
@@ -152,24 +156,49 @@ class RealtimeAIProcessor(FrameProcessor):
         self._tts: FrameProcessor | None = None
         self._pipeline: FrameProcessor | None = None
 
+        self._frame_handler_task = self.get_event_loop().create_task(self._frame_handler())
+        self._frame_queue = asyncio.Queue()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, SystemFrame):
+            await self.push_frame(frame, direction)
+        else:
+            await self._frame_queue.put((frame, direction))
+
+        if isinstance(frame, StartFrame):
+            self._start_frame = frame
+            await self._handle_setup(self._setup)
+
+    async def cleanup(self):
+        self._frame_handler_task.cancel()
+        await self._frame_handler_task
+
+    async def _frame_handler(self):
+        while True:
+            try:
+                (frame, direction) = await self._frame_queue.get()
+                await self._handle_frame(frame, direction)
+            except asyncio.CancelledError:
+                break
+
+    async def _handle_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, TransportMessageFrame):
             await self._handle_message(frame)
         else:
             await self.push_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            self._start_frame = frame
-            await self._handle_setup(self._setup)
-        elif isinstance(frame, TranscriptionFrame) or isinstance(frame, InterimTranscriptionFrame):
+        if isinstance(frame, TranscriptionFrame) or isinstance(frame, InterimTranscriptionFrame):
             await self._handle_transcriptions(frame)
         elif isinstance(frame, UserStartedSpeakingFrame) or isinstance(frame, UserStoppedSpeakingFrame):
             await self._handle_interruptions(frame)
 
-    # TODO(aleix): Once we add support for using custom piplines, the STTs will
-    # be in the pipeline after this processor. This means the STT will have to
-    # push transcriptions upstream as well.
     async def _handle_transcriptions(self, frame: Frame):
+        # TODO(aleix): Once we add support for using custom piplines, the STTs will
+        # be in the pipeline after this processor. This means the STT will have to
+        # push transcriptions upstream as well.
+
         message = None
         if isinstance(frame, TranscriptionFrame):
             message = RealtimeAITranscriptionMessage(
@@ -221,6 +250,8 @@ class RealtimeAIProcessor(FrameProcessor):
                     await self._handle_llm_update_context(message.data.llm)
                 case "tts-speak":
                     await self._handle_tts_speak(message.data.tts)
+                case "tts-interrupt":
+                    await self._handle_tts_interrupt()
 
             # Send a message to indicate we successfully executed the command.
             await self._send_response(message.type, True)
@@ -300,8 +331,13 @@ class RealtimeAIProcessor(FrameProcessor):
 
     async def _handle_tts_speak(self, data: RealtimeAITTSMessageData):
         if data and data.text:
+            if data.interrupt:
+                await self._handle_tts_interrupt()
             frame = TTSSpeakFrame(text=data.text)
             await self.push_frame(frame)
+
+    async def _handle_tts_interrupt(self):
+        await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
 
     async def _send_response(self, type: str, success: bool, error: str | None = None):
         # TODO(aleix): This is a bit hacky, but we might get invalid

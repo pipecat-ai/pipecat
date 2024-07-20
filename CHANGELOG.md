@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `RealtimeAIProcessor`...
 
+- Added `BotInterruptionFrame` which allows interrupting the bot while talking.
+
 - Added `LLMMessagesAppendFrame` which allows appending messages to the current
   LLM context.
 

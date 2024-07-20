@@ -11,7 +11,12 @@ import os
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.processors.frameworks.realtimeai import RealtimeAIConfig, RealtimeAILLMConfig, RealtimeAIProcessor, RealtimeAISetup, RealtimeAITTSConfig
+from pipecat.processors.frameworks.realtimeai import (
+    RealtimeAIConfig,
+    RealtimeAILLMConfig,
+    RealtimeAIProcessor,
+    RealtimeAISetup,
+    RealtimeAITTSConfig)
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
