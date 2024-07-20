@@ -269,6 +269,16 @@ class StopInterruptionFrame(SystemFrame):
 
 
 @dataclass
+class BotInterruptionFrame(SystemFrame):
+    """Emitted by when the bot should be interrupted. This will mainly cause the
+    same actions as if the user interrupted except that the
+    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
+
+    """
+    pass
+
+
+@dataclass
 class BotSpeakingFrame(SystemFrame):
     """Emitted by transport outputs while the bot is still speaking. This can be
     used, for example, to detect when a user is idle. That is, while the bot is
