@@ -83,33 +83,45 @@ class RTVIMessageData(BaseModel):
 class RTVIMessage(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: str
+    id: str
     data: Optional[RTVIMessageData] = None
 
 
 class RTVIResponseData(BaseModel):
-    type: str
     success: bool
     error: Optional[str] = None
+
 
 class RTVIResponse(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["response"] = "response"
+    id: str
     data: RTVIResponseData
+
+
+class RTVIErrorData(BaseModel):
+    message: str
+
+
+class RTVIError(BaseModel):
+    label: Literal["realtime-ai"] = "realtime-ai"
+    type: Literal["error"] = "error"
+    data: RTVIErrorData
 
 
 class RTVILLMContextMessageData(BaseModel):
     messages: List[dict]
 
 
-class RTVIBotReady(BaseModel):
-    label: Literal["realtime-ai"] = "realtime-ai"
-    type: Literal["bot-ready"] = "bot-ready"
-
-
 class RTVILLMContextMessage(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["llm-context"] = "llm-context"
     data: RTVILLMContextMessageData
+
+
+class RTVIBotReady(BaseModel):
+    label: Literal["realtime-ai"] = "realtime-ai"
+    type: Literal["bot-ready"] = "bot-ready"
 
 
 class RTVITranscriptionMessageData(BaseModel):
@@ -178,7 +190,10 @@ class RTVIProcessor(FrameProcessor):
 
         if isinstance(frame, StartFrame):
             self._start_frame = frame
-            await self._handle_setup(self._setup)
+            try:
+                await self._handle_setup(self._setup)
+            except Exception as e:
+                await self._send_error(f"unable to setup RTVI: {e}")
 
     async def cleanup(self):
         self._frame_handler_task.cancel()
@@ -239,16 +254,18 @@ class RTVIProcessor(FrameProcessor):
         try:
             message = RTVIMessage.model_validate(frame.message)
         except ValidationError as e:
-            await self._send_response("setup", False, f"invalid message: {e}")
+            await self._send_error(f"invalid message: {e}")
             return
 
         try:
+            success = True
+            error = None
             match message.type:
                 case "setup":
                     setup = None
                     if message.data:
                         setup = message.data.setup
-                    await self._handle_setup(setup)
+                    await self._handle_setup(message.id, setup)
                 case "config-update":
                     await self._handle_config_update(message.data.config)
                 case "llm-get-context":
@@ -261,59 +278,60 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_tts_speak(message.data.tts)
                 case "tts-interrupt":
                     await self._handle_tts_interrupt()
+                case _:
+                    success = False
+                    error = f"unsupported type {message.type}"
 
-            # Send a message to indicate we successfully executed the command.
-            await self._send_response(message.type, True)
+            await self._send_response(message.id, success, error)
         except ValidationError as e:
-            await self._send_response(message.type, False, f"invalid message: {e}")
+            await self._send_response(message.id, False, f"invalid message: {e}")
+        except Exception as e:
+            await self._send_response(message.id, False, f"{e}")
 
     async def _handle_setup(self, setup: RTVISetup | None):
-        try:
-            model = DEFAULT_MODEL
-            if setup and setup.config and setup.config.llm and setup.config.llm.model:
-                model = setup.config.llm.model
+        model = DEFAULT_MODEL
+        if setup and setup.config and setup.config.llm and setup.config.llm.model:
+            model = setup.config.llm.model
 
-            messages = DEFAULT_MESSAGES
-            if setup and setup.config and setup.config.llm and setup.config.llm.messages:
-                messages = setup.config.llm.messages
+        messages = DEFAULT_MESSAGES
+        if setup and setup.config and setup.config.llm and setup.config.llm.messages:
+            messages = setup.config.llm.messages
 
-            voice = DEFAULT_VOICE
-            if setup and setup.config and setup.config.tts and setup.config.tts.voice:
-                voice = setup.config.tts.voice
+        voice = DEFAULT_VOICE
+        if setup and setup.config and setup.config.tts and setup.config.tts.voice:
+            voice = setup.config.tts.voice
 
-            self._tma_in = LLMUserResponseAggregator(messages)
-            self._tma_out = LLMAssistantResponseAggregator(messages)
+        self._tma_in = LLMUserResponseAggregator(messages)
+        self._tma_out = LLMAssistantResponseAggregator(messages)
 
-            self._llm = self._llm_cls(
-                base_url=self._llm_base_url,
-                api_key=self._llm_api_key,
-                model=model)
+        self._llm = self._llm_cls(
+            base_url=self._llm_base_url,
+            api_key=self._llm_api_key,
+            model=model)
 
-            self._tts = self._tts_cls(api_key=self._tts_api_key, voice_id=voice)
+        self._tts = self._tts_cls(api_key=self._tts_api_key, voice_id=voice)
 
-            pipeline = Pipeline([
-                self._tma_in,
-                self._llm,
-                self._tts,
-                self._tma_out,
-                self._transport.output(),
-            ])
-            self._pipeline = pipeline
+        pipeline = Pipeline([
+            self._tma_in,
+            self._llm,
+            self._tts,
+            self._tma_out,
+            self._transport.output(),
+        ])
+        self._pipeline = pipeline
 
-            parent = self.get_parent()
-            if parent and self._start_frame:
-                parent.link(pipeline)
+        parent = self.get_parent()
+        if parent and self._start_frame:
+            parent.link(pipeline)
 
-                # We need to initialize the new pipeline with the same settings
-                # as the initial one.
-                start_frame = dataclasses.replace(self._start_frame)
-                await self.push_frame(start_frame)
+            # We need to initialize the new pipeline with the same settings
+            # as the initial one.
+            start_frame = dataclasses.replace(self._start_frame)
+            await self.push_frame(start_frame)
 
-            message = RTVIBotReady()
-            frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
-            await self.push_frame(frame)
-        except Exception as e:
-            await self._send_response("setup", False, f"unable to create pipeline: {e}")
+        message = RTVIBotReady()
+        frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+        await self.push_frame(frame)
 
     async def _handle_config_update(self, config: RTVIConfig):
         if config.llm and config.llm.model:
@@ -352,7 +370,12 @@ class RTVIProcessor(FrameProcessor):
     async def _handle_tts_interrupt(self):
         await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
 
-    async def _send_response(self, type: str, success: bool, error: str | None = None):
+    async def _send_error(self, error: str):
+        message = RTVIError(data=RTVIErrorData(message=error))
+        frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+        await self.push_frame(frame)
+
+    async def _send_response(self, id: str, success: bool, error: str | None = None):
         # TODO(aleix): This is a bit hacky, but we might get invalid
         # configuration or something might going wrong during setup and we would
         # like to send the error to the client. However, if the pipeline is not
@@ -367,6 +390,6 @@ class RTVIProcessor(FrameProcessor):
             if parent and self._start_frame:
                 parent.link(pipeline)
 
-        message = RTVIResponse(data=RTVIResponseData(type=type, success=success, error=error))
+        message = RTVIResponse(id=id, data=RTVIResponseData(success=success, error=error))
         frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
         await self.push_frame(frame)
