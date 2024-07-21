@@ -86,11 +86,15 @@ class RTVIMessage(BaseModel):
     data: Optional[RTVIMessageData] = None
 
 
-class RTVIBasicResponse(BaseModel):
-    label: Literal["realtime-ai"] = "realtime-ai"
+class RTVIResponseData(BaseModel):
     type: str
     success: bool
     error: Optional[str] = None
+
+class RTVIResponse(BaseModel):
+    label: Literal["realtime-ai"] = "realtime-ai"
+    type: Literal["response"] = "response"
+    data: RTVIResponseData
 
 
 class RTVILLMContextMessageData(BaseModel):
@@ -363,6 +367,6 @@ class RTVIProcessor(FrameProcessor):
             if parent and self._start_frame:
                 parent.link(pipeline)
 
-        message = RTVIBasicResponse(type=type, success=success, error=error)
+        message = RTVIResponse(data=RTVIResponseData(type=type, success=success, error=error))
         frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
         await self.push_frame(frame)
