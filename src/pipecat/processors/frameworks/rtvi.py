@@ -46,103 +46,103 @@ DEFAULT_MODEL = "llama3-70b-8192"
 DEFAULT_VOICE = "79a125e8-cd45-4c13-8a67-188112f4dd22"
 
 
-class RealtimeAILLMConfig(BaseModel):
+class RTVILLMConfig(BaseModel):
     model: Optional[str] = None
     messages: Optional[List[dict]] = None
 
 
-class RealtimeAITTSConfig(BaseModel):
+class RTVITTSConfig(BaseModel):
     voice: Optional[str] = None
 
 
-class RealtimeAIConfig(BaseModel):
-    llm: Optional[RealtimeAILLMConfig] = None
-    tts: Optional[RealtimeAITTSConfig] = None
+class RTVIConfig(BaseModel):
+    llm: Optional[RTVILLMConfig] = None
+    tts: Optional[RTVITTSConfig] = None
 
 
-class RealtimeAISetup(BaseModel):
-    config: Optional[RealtimeAIConfig] = None
+class RTVISetup(BaseModel):
+    config: Optional[RTVIConfig] = None
 
 
-class RealtimeAILLMMessageData(BaseModel):
+class RTVILLMMessageData(BaseModel):
     messages: List[dict]
 
 
-class RealtimeAITTSMessageData(BaseModel):
+class RTVITTSMessageData(BaseModel):
     text: str
     interrupt: Optional[bool] = False
 
 
-class RealtimeAIMessageData(BaseModel):
-    setup: Optional[RealtimeAISetup] = None
-    config: Optional[RealtimeAIConfig] = None
-    llm: Optional[RealtimeAILLMMessageData] = None
-    tts: Optional[RealtimeAITTSMessageData] = None
+class RTVIMessageData(BaseModel):
+    setup: Optional[RTVISetup] = None
+    config: Optional[RTVIConfig] = None
+    llm: Optional[RTVILLMMessageData] = None
+    tts: Optional[RTVITTSMessageData] = None
 
 
-class RealtimeAIMessage(BaseModel):
+class RTVIMessage(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: str
-    data: Optional[RealtimeAIMessageData] = None
+    data: Optional[RTVIMessageData] = None
 
 
-class RealtimeAIBasicResponse(BaseModel):
+class RTVIBasicResponse(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: str
     success: bool
     error: Optional[str] = None
 
 
-class RealtimeAILLMContextMessageData(BaseModel):
+class RTVILLMContextMessageData(BaseModel):
     messages: List[dict]
 
 
-class RealtimeAIBotReady(BaseModel):
+class RTVIBotReady(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["bot-ready"] = "bot-ready"
 
 
-class RealtimeAILLMContextMessage(BaseModel):
+class RTVILLMContextMessage(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["llm-context"] = "llm-context"
-    data: RealtimeAILLMContextMessageData
+    data: RTVILLMContextMessageData
 
 
-class RealtimeAITranscriptionMessageData(BaseModel):
+class RTVITranscriptionMessageData(BaseModel):
     text: str
     user_id: str
     timestamp: str
 
 
-class RealtimeAITranscriptionMessage(BaseModel):
+class RTVITranscriptionMessage(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["user-transcription"] = "user-transcription"
-    data: RealtimeAITranscriptionMessageData
+    data: RTVITranscriptionMessageData
 
 
-class RealtimeAIInterimTranscriptionMessage(BaseModel):
+class RTVIInterimTranscriptionMessage(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["user-interim-transcription"] = "user-interim-transcription"
-    data: RealtimeAITranscriptionMessageData
+    data: RTVITranscriptionMessageData
 
 
-class RealtimeAIUserStartedSpeakingMessage(BaseModel):
+class RTVIUserStartedSpeakingMessage(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["user-started-speaking"] = "user-started-speaking"
 
 
-class RealtimeAIUserStoppedSpeakingMessage(BaseModel):
+class RTVIUserStoppedSpeakingMessage(BaseModel):
     label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
 
 
-class RealtimeAIProcessor(FrameProcessor):
+class RTVIProcessor(FrameProcessor):
 
     def __init__(
             self,
             *,
             transport: BaseTransport,
-            setup: RealtimeAISetup | None = None,
+            setup: RTVISetup | None = None,
             llm_api_key: str = "",
             llm_base_url: str = "https://api.groq.com/openai/v1",
             tts_api_key: str = "",
@@ -206,14 +206,14 @@ class RealtimeAIProcessor(FrameProcessor):
 
         message = None
         if isinstance(frame, TranscriptionFrame):
-            message = RealtimeAITranscriptionMessage(
-                data=RealtimeAITranscriptionMessageData(
+            message = RTVITranscriptionMessage(
+                data=RTVITranscriptionMessageData(
                     text=frame.text,
                     user_id=frame.user_id,
                     timestamp=frame.timestamp))
         elif isinstance(frame, InterimTranscriptionFrame):
-            message = RealtimeAIInterimTranscriptionMessage(
-                data=RealtimeAITranscriptionMessageData(
+            message = RTVIInterimTranscriptionMessage(
+                data=RTVITranscriptionMessageData(
                     text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp))
 
         if message:
@@ -223,9 +223,9 @@ class RealtimeAIProcessor(FrameProcessor):
     async def _handle_interruptions(self, frame: Frame):
         message = None
         if isinstance(frame, UserStartedSpeakingFrame):
-            message = RealtimeAIUserStartedSpeakingMessage()
+            message = RTVIUserStartedSpeakingMessage()
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            message = RealtimeAIUserStoppedSpeakingMessage()
+            message = RTVIUserStoppedSpeakingMessage()
 
         if message:
             frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
@@ -233,7 +233,7 @@ class RealtimeAIProcessor(FrameProcessor):
 
     async def _handle_message(self, frame: TransportMessageFrame):
         try:
-            message = RealtimeAIMessage.model_validate(frame.message)
+            message = RTVIMessage.model_validate(frame.message)
         except ValidationError as e:
             await self._send_response("setup", False, f"invalid message: {e}")
             return
@@ -263,7 +263,7 @@ class RealtimeAIProcessor(FrameProcessor):
         except ValidationError as e:
             await self._send_response(message.type, False, f"invalid message: {e}")
 
-    async def _handle_setup(self, setup: RealtimeAISetup | None):
+    async def _handle_setup(self, setup: RTVISetup | None):
         try:
             model = DEFAULT_MODEL
             if setup and setup.config and setup.config.llm and setup.config.llm.model:
@@ -305,13 +305,13 @@ class RealtimeAIProcessor(FrameProcessor):
                 start_frame = dataclasses.replace(self._start_frame)
                 await self.push_frame(start_frame)
 
-            message = RealtimeAIBotReady()
+            message = RTVIBotReady()
             frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
             await self.push_frame(frame)
         except Exception as e:
             await self._send_response("setup", False, f"unable to create pipeline: {e}")
 
-    async def _handle_config_update(self, config: RealtimeAIConfig):
+    async def _handle_config_update(self, config: RTVIConfig):
         if config.llm and config.llm.model:
             frame = LLMModelUpdateFrame(config.llm.model)
             await self.push_frame(frame)
@@ -323,22 +323,22 @@ class RealtimeAIProcessor(FrameProcessor):
             await self.push_frame(frame)
 
     async def _handle_llm_get_context(self):
-        data = RealtimeAILLMContextMessageData(messages=self._tma_in.messages)
-        message = RealtimeAILLMContextMessage(data=data)
+        data = RTVILLMContextMessageData(messages=self._tma_in.messages)
+        message = RTVILLMContextMessage(data=data)
         frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
         await self.push_frame(frame)
 
-    async def _handle_llm_append_context(self, data: RealtimeAILLMMessageData):
+    async def _handle_llm_append_context(self, data: RTVILLMMessageData):
         if data and data.messages:
             frame = LLMMessagesAppendFrame(data.messages)
             await self.push_frame(frame)
 
-    async def _handle_llm_update_context(self, data: RealtimeAILLMMessageData):
+    async def _handle_llm_update_context(self, data: RTVILLMMessageData):
         if data and data.messages:
             frame = LLMMessagesUpdateFrame(data.messages)
             await self.push_frame(frame)
 
-    async def _handle_tts_speak(self, data: RealtimeAITTSMessageData):
+    async def _handle_tts_speak(self, data: RTVITTSMessageData):
         if data and data.text:
             if data.interrupt:
                 await self._handle_tts_interrupt()
@@ -363,6 +363,6 @@ class RealtimeAIProcessor(FrameProcessor):
             if parent and self._start_frame:
                 parent.link(pipeline)
 
-        message = RealtimeAIBasicResponse(type=type, success=success, error=error)
+        message = RTVIBasicResponse(type=type, success=success, error=error)
         frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
         await self.push_frame(frame)
