@@ -1,3 +1,7 @@
+#
+# requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables
+#
+
 import boto3
 import json
 import subprocess
@@ -20,9 +24,6 @@ QUEUE_URL = 'https://sqs.us-west-2.amazonaws.com/955740203061/khk-sqs-launch-day
 
 # The program to be spawned
 SUBPROCESS_PROGRAM = 'your_subprocess_program.py'
-
-# Timeout in seconds
-TIMEOUT = 320
 
 # ------------ Configuration ------------ #
 
@@ -80,21 +81,6 @@ def delete_message(sqs, receipt_handle):
     )
 
 
-# def run_subprocess(message_body):
-#     """Run the subprocess with the message data."""
-#     process = subprocess.Popen(['python', SUBPROCESS_PROGRAM, message_body])
-
-#     start_time = time.time()
-#     while time.time() - start_time < TIMEOUT:
-#         if process.poll() is not None:
-#             # Process has finished
-#             return True
-#         time.sleep(1)
-
-#     # If we're here, the process has timed out
-#     os.kill(process.pid, signal.SIGKILL)
-#     return False
-
 def run_bot(room_url):
     runner_settings = RunnerSettings()
 
@@ -131,7 +117,7 @@ def run_bot(room_url):
             cwd=os.path.dirname(os.path.abspath(__file__)))
 
         start_time = time.time()
-        while time.time() - start_time < TIMEOUT:
+        while time.time() - start_time < (MAX_SESSION_TIME + 10):
             if process.poll() is not None:
                 # process has finished
                 print("BOT EXITED BEFORE TIMEOUT")
