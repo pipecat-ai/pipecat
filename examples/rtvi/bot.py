@@ -11,12 +11,12 @@ import os
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.processors.frameworks.realtimeai import (
-    RealtimeAIConfig,
-    RealtimeAILLMConfig,
-    RealtimeAIProcessor,
-    RealtimeAISetup,
-    RealtimeAITTSConfig)
+from pipecat.processors.frameworks.rtvi import (
+    RTVIConfig,
+    RTVILLMConfig,
+    RTVIProcessor,
+    RTVISetup,
+    RTVITTSConfig)
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -43,14 +43,14 @@ async def main(room_url, token):
             vad_analyzer=SileroVADAnalyzer()
         ))
 
-    llm = RealtimeAILLMConfig(
+    llm = RTVILLMConfig(
         model="llama3-70b-8192",
         messages=[{"role": "system", "content": "You are a helpful assistant named Gary. Briefly say hello!"}]
     )
-    tts = RealtimeAITTSConfig(voice="79a125e8-cd45-4c13-8a67-188112f4dd22")
-    setup = RealtimeAISetup(config=RealtimeAIConfig(llm=llm, tts=tts))
+    tts = RTVITTSConfig(voice="79a125e8-cd45-4c13-8a67-188112f4dd22")
+    setup = RTVISetup(config=RTVIConfig(llm=llm, tts=tts))
 
-    rtai = RealtimeAIProcessor(
+    rtai = RTVIProcessor(
         transport=transport,
         setup=setup,
         llm_api_key=os.getenv("OPENAI_API_KEY"),
