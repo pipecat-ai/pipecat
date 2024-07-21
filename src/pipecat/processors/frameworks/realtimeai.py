@@ -81,13 +81,13 @@ class RealtimeAIMessageData(BaseModel):
 
 
 class RealtimeAIMessage(BaseModel):
-    tag: Literal["realtime-ai"] = "realtime-ai"
+    label: Literal["realtime-ai"] = "realtime-ai"
     type: str
     data: Optional[RealtimeAIMessageData] = None
 
 
 class RealtimeAIBasicResponse(BaseModel):
-    tag: Literal["realtime-ai"] = "realtime-ai"
+    label: Literal["realtime-ai"] = "realtime-ai"
     type: str
     success: bool
     error: Optional[str] = None
@@ -97,8 +97,13 @@ class RealtimeAILLMContextMessageData(BaseModel):
     messages: List[dict]
 
 
+class RealtimeAIBotReady(BaseModel):
+    label: Literal["realtime-ai"] = "realtime-ai"
+    type: Literal["bot-ready"] = "bot-ready"
+
+
 class RealtimeAILLMContextMessage(BaseModel):
-    tag: Literal["realtime-ai"] = "realtime-ai"
+    label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["llm-context"] = "llm-context"
     data: RealtimeAILLMContextMessageData
 
@@ -110,24 +115,24 @@ class RealtimeAITranscriptionMessageData(BaseModel):
 
 
 class RealtimeAITranscriptionMessage(BaseModel):
-    tag: Literal["realtime-ai"] = "realtime-ai"
+    label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["user-transcription"] = "user-transcription"
     data: RealtimeAITranscriptionMessageData
 
 
 class RealtimeAIInterimTranscriptionMessage(BaseModel):
-    tag: Literal["realtime-ai"] = "realtime-ai"
+    label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["user-interim-transcription"] = "user-interim-transcription"
     data: RealtimeAITranscriptionMessageData
 
 
 class RealtimeAIUserStartedSpeakingMessage(BaseModel):
-    tag: Literal["realtime-ai"] = "realtime-ai"
+    label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["user-started-speaking"] = "user-started-speaking"
 
 
 class RealtimeAIUserStoppedSpeakingMessage(BaseModel):
-    tag: Literal["realtime-ai"] = "realtime-ai"
+    label: Literal["realtime-ai"] = "realtime-ai"
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
 
 
@@ -299,6 +304,10 @@ class RealtimeAIProcessor(FrameProcessor):
                 # as the initial one.
                 start_frame = dataclasses.replace(self._start_frame)
                 await self.push_frame(start_frame)
+
+            message = RealtimeAIBotReady()
+            frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+            await self.push_frame(frame)
         except Exception as e:
             await self._send_response("setup", False, f"unable to create pipeline: {e}")
 
@@ -354,6 +363,6 @@ class RealtimeAIProcessor(FrameProcessor):
             if parent and self._start_frame:
                 parent.link(pipeline)
 
-        response = RealtimeAIBasicResponse(type=type, success=success, error=error)
-        message = TransportMessageFrame(message=response.model_dump(exclude_none=True))
-        await self.push_frame(message)
+        message = RealtimeAIBasicResponse(type=type, success=success, error=error)
+        frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+        await self.push_frame(frame)
