@@ -1,7 +1,3 @@
-# - block while running bot
-# - watchdog timer
-# - build docker and deploy to eks
-
 import boto3
 import json
 import subprocess
@@ -26,7 +22,7 @@ QUEUE_URL = 'https://sqs.us-west-2.amazonaws.com/955740203061/khk-sqs-launch-day
 SUBPROCESS_PROGRAM = 'your_subprocess_program.py'
 
 # Timeout in seconds
-TIMEOUT = 620
+TIMEOUT = 320
 
 # ------------ Configuration ------------ #
 
@@ -99,7 +95,7 @@ def delete_message(sqs, receipt_handle):
 #     os.kill(process.pid, signal.SIGKILL)
 #     return False
 
-def start_bot(room_url):
+def run_bot(room_url):
     runner_settings = RunnerSettings()
 
     # Check passed room URL exists, we should assume that it already has a sip set up
@@ -128,20 +124,33 @@ def start_bot(room_url):
         )
         bot_settings_str = bot_settings.model_dump_json(exclude_none=True)
 
-        subprocess.Popen(
+        process = subprocess.Popen(
             [f"python3 -m bot -s '{bot_settings_str}'"],
             shell=True,
             bufsize=1,
             cwd=os.path.dirname(os.path.abspath(__file__)))
+
+        start_time = time.time()
+        while time.time() - start_time < TIMEOUT:
+            if process.poll() is not None:
+                # process has finished
+                print("BOT EXITED BEFORE TIMEOUT")
+                return
+            time.sleep(1)
+        # process did not exit. need to kill -9 it
+        print("KILLING BOT PROCESS")
+        os.kill(process.pid, signal.SIGKILL)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to start subprocess: {e}")
 
 
 def main():
+    print("sqs-runner.py - started.")
     sqs = setup_sqs()
 
     while True:
+        print("sqs-runner.py - polling")
         message = receive_message(sqs)
         if message:
             delete_message(sqs, message['ReceiptHandle'])
@@ -149,16 +158,7 @@ def main():
             message_body = json.loads(message['Body'])
             print(f"Received message. {message_body}")
 
-            start_bot(message_body['url'])
-
-            # success = run_subprocess(message_body)
-            # if success:
-            #    print("Subprocess completed successfully.")
-            # else:
-            #     print("Subprocess timed out and was terminated.")
-
-        else:
-            print("No messages received. Continuing to poll...")
+            run_bot(message_body['url'])
 
 
 if __name__ == "__main__":
