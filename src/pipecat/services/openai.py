@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
+    LLMModelUpdateFrame,
     TextFrame,
     URLImageRawFrame,
     VisionImageRawFrame
@@ -227,6 +228,9 @@ class BaseOpenAILLMService(LLMService):
             context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
+        elif isinstance(frame, LLMModelUpdateFrame):
+            logger.debug(f"Switching LLM model to: [{frame.model}]")
+            self._model = frame.model
         else:
             await self.push_frame(frame, direction)
 
@@ -312,6 +316,10 @@ class OpenAITTSService(TTSService):
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    async def set_voice(self, voice: str):
+        logger.debug(f"Switching TTS voice to: [{voice}]")
+        self._voice = voice
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")

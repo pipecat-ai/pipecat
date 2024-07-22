@@ -59,5 +59,6 @@ class AsyncFrameProcessor(FrameProcessor):
                 (frame, direction) = await self._push_queue.get()
                 await self.push_frame(frame, direction)
                 running = not isinstance(frame, EndFrame)
+                self._push_queue.task_done()
             except asyncio.CancelledError:
                 break
