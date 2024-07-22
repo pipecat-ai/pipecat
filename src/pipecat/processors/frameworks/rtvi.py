@@ -422,11 +422,12 @@ class RTVIProcessor(FrameProcessor):
         self._tma_out = LLMAssistantResponseAggregator(messages)
 
         self._llm = self._llm_cls(
+            name="LLM",
             base_url=self._llm_base_url,
             api_key=self._llm_api_key,
             model=model)
 
-        self._tts = self._tts_cls(api_key=self._tts_api_key, voice_id=voice)
+        self._tts = self._tts_cls(name="TTS", api_key=self._tts_api_key, voice_id=voice)
 
         # TODO-CB: Eventually we'll need to switch the context aggregators to use the
         # OpenAI context frames instead of message frames
