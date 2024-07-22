@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `StatelessTextTransformer` where it was pushing a string
+  instead of a `TextFrame`.
+
 - `TTSService` end of sentence detection has been improved. It now works with
   acronyms, numbers, hours and others.
 
@@ -71,9 +74,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added missing * keyword separators in services.
 
 ### Fixed
-
-- Fixed an issue with `StatelessTextTransformer` where it was pushing a string
-  instead of a `TextFrame`.
 
 - `WebsocketServerTransport` doesn't try to send frames anymore if serializers
   returns `None`.
