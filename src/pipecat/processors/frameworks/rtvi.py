@@ -34,7 +34,7 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import AIService
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.openai import OpenAILLMService, OpenAILLMContext, OpenAILLMContextFrame
+from pipecat.services.openai import OpenAILLMService, OpenAILLMContext
 from pipecat.transports.base_transport import BaseTransport
 
 DEFAULT_MESSAGES = [
@@ -122,6 +122,16 @@ class RTVILLMContextMessage(BaseModel):
     data: RTVILLMContextMessageData
 
 
+class RTVITTSTextMessageData(BaseModel):
+    text: str
+
+
+class RTVITTSTextMessage(BaseModel):
+    label: Literal["rtvi"] = "rtvi"
+    type: Literal["tts-text"] = "tts-text"
+    data: RTVITTSTextMessageData
+
+
 class RTVIBotReady(BaseModel):
     label: Literal["rtvi"] = "rtvi"
     type: Literal["bot-ready"] = "bot-ready"
@@ -157,6 +167,7 @@ class RTVIJSONCompletion(BaseModel):
 
 
 class FunctionCaller(FrameProcessor):
+
     def __init__(self, context):
         super().__init__()
         self._checking = False
@@ -191,6 +202,8 @@ class FunctionCaller(FrameProcessor):
             await self._start_callbacks[function_name](self)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, LLMFullResponseStartFrame):
             self._checking = True
             await self.push_frame(frame, direction)
@@ -234,6 +247,21 @@ class FunctionCaller(FrameProcessor):
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
+
+
+class RTVITTSTextProcessor(FrameProcessor):
+
+    def __init__(self):
+        super().__init__()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        await self.push_frame(frame, direction)
+
+        if isinstance(frame, TextFrame):
+            message = RTVITTSTextMessage(data=RTVITTSTextMessageData(text=frame.text))
+            await self.push_frame(TransportMessageFrame(message=message.model_dump(exclude_none=True)))
 
 
 class RTVIProcessor(FrameProcessor):
@@ -404,11 +432,14 @@ class RTVIProcessor(FrameProcessor):
         context = OpenAILLMContext(messages=messages)
         self._fc = FunctionCaller(context)
 
+        self._tts_text = RTVITTSTextProcessor()
+
         pipeline = Pipeline([
             self._tma_in,
             self._llm,
             self._fc,
             self._tts,
+            self._tts_text,
             self._tma_out,
             self._transport.output(),
         ])
