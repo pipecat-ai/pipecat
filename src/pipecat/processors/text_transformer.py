@@ -33,6 +33,6 @@ class StatelessTextTransformer(FrameProcessor):
             result = self._transform_fn(frame.text)
             if isinstance(result, Coroutine):
                 result = await result
-            await self.push_frame(result)
+            await self.push_frame(TextFrame(text=result))
         else:
             await self.push_frame(frame, direction)
