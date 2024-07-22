@@ -10,6 +10,7 @@ from typing import List
 
 from pipecat.frames.frames import (
     Frame,
+    LLMModelUpdateFrame,
     TextFrame,
     VisionImageRawFrame,
     LLMMessagesFrame,
@@ -43,10 +44,13 @@ class GoogleLLMService(LLMService):
     def __init__(self, *, api_key: str, model: str = "gemini-1.5-flash-latest", **kwargs):
         super().__init__(**kwargs)
         gai.configure(api_key=api_key)
-        self._client = gai.GenerativeModel(model)
+        self._create_client(model)
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    def _create_client(self, model: str):
+        self._client = gai.GenerativeModel(model)
 
     def _get_messages_from_openai_context(
             self, context: OpenAILLMContext) -> List[glm.Content]:
@@ -118,6 +122,9 @@ class GoogleLLMService(LLMService):
             context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
+        elif isinstance(frame, LLMModelUpdateFrame):
+            logger.debug(f"Switching LLM model to: [{frame.model}]")
+            self._create_client(frame.model)
         else:
             await self.push_frame(frame, direction)
 

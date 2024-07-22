@@ -82,10 +82,13 @@ class CartesiaTTSService(TTSService):
         self._timestamped_words_buffer = []
         self._receive_task = None
         self._context_appending_task = None
-        self._waiting_for_ttfb = False
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    async def set_voice(self, voice: str):
+        logger.debug(f"Switching TTS voice to: [{voice}]")
+        self._voice_id = voice
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -110,9 +113,11 @@ class CartesiaTTSService(TTSService):
         try:
             if self._context_appending_task:
                 self._context_appending_task.cancel()
+                await self._context_appending_task
                 self._context_appending_task = None
             if self._receive_task:
                 self._receive_task.cancel()
+                await self._receive_task
                 self._receive_task = None
             if self._websocket:
                 ws = self._websocket
@@ -121,7 +126,6 @@ class CartesiaTTSService(TTSService):
             self._context_id = None
             self._context_id_start_timestamp = None
             self._timestamped_words_buffer = []
-            self._waiting_for_ttfb = False
             await self.stop_all_metrics()
         except Exception as e:
             logger.exception(f"{self} error closing websocket: {e}")
@@ -142,6 +146,7 @@ class CartesiaTTSService(TTSService):
                 if not msg or msg["context_id"] != self._context_id:
                     continue
                 if msg["type"] == "done":
+                    await self.stop_ttfb_metrics()
                     # unset _context_id but not the _context_id_start_timestamp because we are likely still
                     # playing out audio and need the timestamp to set send context frames
                     self._context_id = None
@@ -152,11 +157,9 @@ class CartesiaTTSService(TTSService):
                         list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["end"]))
                     )
                 elif msg["type"] == "chunk":
+                    await self.stop_ttfb_metrics()
                     if not self._context_id_start_timestamp:
                         self._context_id_start_timestamp = time.time()
-                    if self._waiting_for_ttfb:
-                        await self.stop_ttfb_metrics()
-                        self._waiting_for_ttfb = False
                     frame = AudioRawFrame(
                         audio=base64.b64decode(msg["data"]),
                         sample_rate=self._output_format["sample_rate"],
@@ -192,11 +195,8 @@ class CartesiaTTSService(TTSService):
             if not self._websocket:
                 await self._connect()
 
-            if not self._waiting_for_ttfb:
-                await self.start_ttfb_metrics()
-                self._waiting_for_ttfb = True
-
             if not self._context_id:
+                await self.start_ttfb_metrics()
                 self._context_id = str(uuid.uuid4())
 
             msg = {

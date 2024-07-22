@@ -159,6 +159,34 @@ class LLMMessagesFrame(DataFrame):
 
 
 @dataclass
+class LLMMessagesAppendFrame(DataFrame):
+    """A frame containing a list of LLM messages that neeed to be added to the
+    current context.
+
+    """
+    messages: List[dict]
+
+
+@dataclass
+class LLMMessagesUpdateFrame(DataFrame):
+    """A frame containing a list of new LLM messages. These messages will
+    replace the current context LLM messages and should generate a new
+    LLMMessagesFrame.
+
+    """
+    messages: List[dict]
+
+
+@dataclass
+class TTSSpeakFrame(DataFrame):
+    """A frame that contains a text that should be spoken by the TTS in the
+    pipeline (if any).
+
+    """
+    text: str
+
+
+@dataclass
 class TransportMessageFrame(DataFrame):
     message: Any
 
@@ -235,6 +263,16 @@ class StopInterruptionFrame(SystemFrame):
     interruptions). This is similar to UserStoppedSpeakingFrame except that it
     should be pushed concurrently with other frames (so the order is not
     guaranteed).
+
+    """
+    pass
+
+
+@dataclass
+class BotInterruptionFrame(SystemFrame):
+    """Emitted by when the bot should be interrupted. This will mainly cause the
+    same actions as if the user interrupted except that the
+    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
 
     """
     pass
@@ -335,3 +373,17 @@ class UserImageRequestFrame(ControlFrame):
 
     def __str__(self):
         return f"{self.name}, user: {self.user_id}"
+
+
+@dataclass
+class LLMModelUpdateFrame(ControlFrame):
+    """A control frame containing a request to update to a new LLM model.
+    """
+    model: str
+
+
+@dataclass
+class TTSVoiceUpdateFrame(ControlFrame):
+    """A control frame containing a request to update to a new TTS voice.
+    """
+    voice: str

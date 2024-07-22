@@ -14,7 +14,9 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
     LLMMessagesFrame,
+    LLMMessagesUpdateFrame,
     StartInterruptionFrame,
     TranscriptionFrame,
     TextFrame,
@@ -120,6 +122,19 @@ class LLMResponseAggregator(FrameProcessor):
             # Reset anyways
             self._reset()
             await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            self._messages.extend(frame.messages)
+            messages_frame = LLMMessagesFrame(self._messages)
+            await self.push_frame(messages_frame)
+        elif isinstance(frame, LLMMessagesUpdateFrame):
+            # We push the frame downstream so the assistant aggregator gets
+            # updated as well.
+            await self.push_frame(frame)
+            # We can now reset this one.
+            self._reset()
+            self._messages = frame.messages
+            messages_frame = LLMMessagesFrame(self._messages)
+            await self.push_frame(messages_frame)
         else:
             await self.push_frame(frame, direction)
 

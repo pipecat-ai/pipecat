@@ -19,8 +19,10 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSVoiceUpdateFrame,
     TextFrame,
     VisionImageRawFrame,
 )
@@ -148,6 +150,10 @@ class TTSService(AIService):
         self._push_text_frames: bool = push_text_frames
         self._current_sentence: str = ""
 
+    @abstractmethod
+    async def set_voice(self, voice: str):
+        pass
+
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -173,7 +179,7 @@ class TTSService(AIService):
         if text:
             await self._push_tts_frames(text)
 
-    async def _push_tts_frames(self, text: str):
+    async def _push_tts_frames(self, text: str, text_passthrough: bool = True):
         text = text.strip()
         if not text:
             return
@@ -196,13 +202,18 @@ class TTSService(AIService):
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame, direction)
         elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
+            sentence = self._current_sentence
             self._current_sentence = ""
-            await self._push_tts_frames(self._current_sentence)
+            await self._push_tts_frames(sentence)
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
                     await self.push_frame(frame, direction)
             else:
                 await self.push_frame(frame, direction)
+        elif isinstance(frame, TTSSpeakFrame):
+            await self._push_tts_frames(frame.text, False)
+        elif isinstance(frame, TTSVoiceUpdateFrame):
+            await self.set_voice(frame.voice)
         else:
             await self.push_frame(frame, direction)
 

@@ -91,5 +91,7 @@ class Pipeline(BasePipeline):
     def _link_processors(self):
         prev = self._processors[0]
         for curr in self._processors[1:]:
+            prev.set_parent(self)
             prev.link(curr)
             prev = curr
+        prev.set_parent(self)

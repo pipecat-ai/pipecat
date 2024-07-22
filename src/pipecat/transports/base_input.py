@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotInterruptionFrame,
     CancelFrame,
     StartFrame,
     EndFrame,
@@ -78,6 +79,8 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, EndFrame):
             await self._internal_push_frame(frame, direction)
             await self.stop()
+        elif isinstance(frame, BotInterruptionFrame):
+            await self._handle_interruptions(frame, False)
         else:
             await self._internal_push_frame(frame, direction)
 
@@ -101,6 +104,7 @@ class BaseInputTransport(FrameProcessor):
             try:
                 (frame, direction) = await self._push_queue.get()
                 await self.push_frame(frame, direction)
+                self._push_queue.task_done()
             except asyncio.CancelledError:
                 break
 
@@ -108,24 +112,35 @@ class BaseInputTransport(FrameProcessor):
     # Handle interruptions
     #
 
-    async def _handle_interruptions(self, frame: Frame):
+    async def _start_interruption(self):
+        # Cancel the task. This will stop pushing frames downstream.
+        self._push_frame_task.cancel()
+        await self._push_frame_task
+        # Push an out-of-band frame (i.e. not using the ordered push
+        # frame task) to stop everything, specially at the output
+        # transport.
+        await self.push_frame(StartInterruptionFrame())
+        # Create a new queue and task.
+        self._create_push_task()
+
+    async def _stop_interruption(self):
+        await self.push_frame(StopInterruptionFrame())
+
+    async def _handle_interruptions(self, frame: Frame, push_frame: bool):
         if self.interruptions_allowed:
             # Make sure we notify about interruptions quickly out-of-band
-            if isinstance(frame, UserStartedSpeakingFrame):
+            if isinstance(frame, BotInterruptionFrame):
+                logger.debug("Bot interruption")
+                await self._start_interruption()
+            elif isinstance(frame, UserStartedSpeakingFrame):
                 logger.debug("User started speaking")
-                # Cancel the task. This will stop pushing frames downstream.
-                self._push_frame_task.cancel()
-                await self._push_frame_task
-                # Push an out-of-band frame (i.e. not using the ordered push
-                # frame task) to stop everything, specially at the output
-                # transport.
-                await self.push_frame(StartInterruptionFrame())
-                # Create a new queue and task.
-                self._create_push_task()
+                await self._start_interruption()
             elif isinstance(frame, UserStoppedSpeakingFrame):
                 logger.debug("User stopped speaking")
-                await self.push_frame(StopInterruptionFrame())
-        await self._internal_push_frame(frame)
+                await self._stop_interruption()
+
+        if push_frame:
+            await self._internal_push_frame(frame)
 
     #
     # Audio input
@@ -149,7 +164,7 @@ class BaseInputTransport(FrameProcessor):
                 frame = UserStoppedSpeakingFrame()
 
             if frame:
-                await self._handle_interruptions(frame)
+                await self._handle_interruptions(frame, True)
 
             vad_state = new_vad_state
         return vad_state
@@ -171,6 +186,8 @@ class BaseInputTransport(FrameProcessor):
                 # Push audio downstream if passthrough.
                 if audio_passthrough:
                     await self._internal_push_frame(frame)
+
+                self._audio_in_queue.task_done()
             except asyncio.CancelledError:
                 break
             except Exception as e:

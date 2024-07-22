@@ -5,7 +5,27 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.37] - 2024-07-22
+
+### Added
+
+- Added `RTVIProcessor` which implements the RTVI-AI standard.
+  See https://github.com/rtvi-ai
+
+- Added `BotInterruptionFrame` which allows interrupting the bot while talking.
+
+- Added `LLMMessagesAppendFrame` which allows appending messages to the current
+  LLM context.
+
+- Added `LLMMessagesUpdateFrame` which allows changing the LLM context for the
+  one provided in this new frame.
+
+- Added `LLMModelUpdateFrame` which allows updating the LLM model.
+
+- Added `TTSSpeakFrame` which causes the bot say some text. This text will not
+  be part of the LLM context.
+
+- Added `TTSVoiceUpdateFrame` which allows updating the TTS voice.
 
 ### Removed
 
@@ -23,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `TTSService` end of sentence detection has been improved. It now works with
   acronyms, numbers, hours and others.
+
+- Fixed an issue in `TTSService` that would not properly flush the current
+  aggregated sentence if an `LLMFullResponseEndFrame` was found.
 
 ### Performance
 

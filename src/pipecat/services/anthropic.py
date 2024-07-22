@@ -8,6 +8,7 @@ import base64
 
 from pipecat.frames.frames import (
     Frame,
+    LLMModelUpdateFrame,
     TextFrame,
     VisionImageRawFrame,
     LLMMessagesFrame,
@@ -134,6 +135,9 @@ class AnthropicLLMService(LLMService):
             context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
+        elif isinstance(frame, LLMModelUpdateFrame):
+            logger.debug(f"Switching LLM model to: [{frame.model}]")
+            self._model = frame.model
         else:
             await self.push_frame(frame, direction)
 
