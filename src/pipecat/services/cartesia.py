@@ -114,9 +114,11 @@ class CartesiaTTSService(TTSService):
         try:
             if self._context_appending_task:
                 self._context_appending_task.cancel()
+                await self._context_appending_task
                 self._context_appending_task = None
             if self._receive_task:
                 self._receive_task.cancel()
+                await self._receive_task
                 self._receive_task = None
             if self._websocket:
                 ws = self._websocket

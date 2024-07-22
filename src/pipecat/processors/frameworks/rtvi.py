@@ -316,6 +316,7 @@ class RTVIProcessor(FrameProcessor):
             try:
                 (frame, direction) = await self._frame_queue.get()
                 await self._handle_frame(frame, direction)
+                self._frame_queue.task_done()
             except asyncio.CancelledError:
                 break
 
