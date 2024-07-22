@@ -131,17 +131,12 @@ class RTVITranscriptionMessageData(BaseModel):
     text: str
     user_id: str
     timestamp: str
+    final: bool
 
 
 class RTVITranscriptionMessage(BaseModel):
     label: Literal["rtvi"] = "rtvi"
     type: Literal["user-transcription"] = "user-transcription"
-    data: RTVITranscriptionMessageData
-
-
-class RTVIInterimTranscriptionMessage(BaseModel):
-    label: Literal["rtvi"] = "rtvi"
-    type: Literal["user-interim-transcription"] = "user-interim-transcription"
     data: RTVITranscriptionMessageData
 
 
@@ -318,11 +313,15 @@ class RTVIProcessor(FrameProcessor):
                 data=RTVITranscriptionMessageData(
                     text=frame.text,
                     user_id=frame.user_id,
-                    timestamp=frame.timestamp))
+                    timestamp=frame.timestamp,
+                    final=True))
         elif isinstance(frame, InterimTranscriptionFrame):
-            message = RTVIInterimTranscriptionMessage(
+            message = RTVITranscriptionMessage(
                 data=RTVITranscriptionMessageData(
-                    text=frame.text, user_id=frame.user_id, timestamp=frame.timestamp))
+                    text=frame.text,
+                    user_id=frame.user_id,
+                    timestamp=frame.timestamp,
+                    final=False))
 
         if message:
             frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
