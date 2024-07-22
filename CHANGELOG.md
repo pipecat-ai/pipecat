@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `RealtimeAIProcessor`...
+- Added `RTVIProcessor` which implements the RTVI-AI standard.
+  See https://github.com/rtvi-ai
 
 - Added `BotInterruptionFrame` which allows interrupting the bot while talking.
 
@@ -51,10 +52,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CartesiaTTSService` now uses websockets which improves speed. It also
   leverages the new Cartesia contexts which maintains generated audio prosody
   when multiple inputs are sent, therefore improving audio quality a lot.
-
-### Other
-
-- Added `examples/realtime-ai/bot.py`...
 
 ## [0.0.36] - 2024-07-02
 
