@@ -72,6 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `StatelessTextTransformer` where it was pushing a string
+  instead of a `TextFrame`.
+
 - `WebsocketServerTransport` doesn't try to send frames anymore if serializers
   returns `None`.
 
