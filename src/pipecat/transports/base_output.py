@@ -204,6 +204,7 @@ class BaseOutputTransport(FrameProcessor):
             try:
                 (frame, direction) = await self._push_queue.get()
                 await self.push_frame(frame, direction)
+                self._push_queue.task_done()
             except asyncio.CancelledError:
                 break
 

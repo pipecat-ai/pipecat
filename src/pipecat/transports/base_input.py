@@ -104,6 +104,7 @@ class BaseInputTransport(FrameProcessor):
             try:
                 (frame, direction) = await self._push_queue.get()
                 await self.push_frame(frame, direction)
+                self._push_queue.task_done()
             except asyncio.CancelledError:
                 break
 
@@ -185,6 +186,8 @@ class BaseInputTransport(FrameProcessor):
                 # Push audio downstream if passthrough.
                 if audio_passthrough:
                     await self._internal_push_frame(frame)
+
+                self._audio_in_queue.task_done()
             except asyncio.CancelledError:
                 break
             except Exception as e:
