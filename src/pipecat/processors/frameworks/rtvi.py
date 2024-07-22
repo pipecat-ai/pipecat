@@ -429,14 +429,15 @@ class RTVIProcessor(FrameProcessor):
         await self.push_frame(frame)
 
     async def _handle_config_update(self, config: RTVIConfig):
+        # Change voice before LLM updates, so we can hear the new vocie.
+        if config.tts and config.tts.voice:
+            frame = TTSVoiceUpdateFrame(config.tts.voice)
+            await self.push_frame(frame)
         if config.llm and config.llm.model:
             frame = LLMModelUpdateFrame(config.llm.model)
             await self.push_frame(frame)
         if config.llm and config.llm.messages:
             frame = LLMMessagesUpdateFrame(config.llm.messages)
-            await self.push_frame(frame)
-        if config.tts and config.tts.voice:
-            frame = TTSVoiceUpdateFrame(config.tts.voice)
             await self.push_frame(frame)
 
     async def _handle_llm_get_context(self):
