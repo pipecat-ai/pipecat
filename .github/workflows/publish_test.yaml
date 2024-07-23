@@ -1,10 +1,6 @@
 name: publish-test
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+on: workflow_dispatch
 
 jobs:
   build:
@@ -13,10 +9,6 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.gitref }}
-          fetch-tags: true
-          fetch-depth: 100
       - name: Set up Python
         id: setup_python
         uses: actions/setup-python@v4
