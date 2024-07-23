@@ -38,6 +38,9 @@ class SileroVADAnalyzer(VADAnalyzer):
             *,
             sample_rate: int = 16000,
             version: str = "v5.0",
+            force_reload: bool = False,
+            skip_validation: bool = True,
+            trust_repo: bool = True,
             params: VADParams = VADParams()):
         super().__init__(sample_rate=sample_rate, num_channels=1, params=params)
 
@@ -48,8 +51,9 @@ class SileroVADAnalyzer(VADAnalyzer):
 
         (self._model, _) = torch.hub.load(repo_or_dir=f"snakers4/silero-vad:{version}",
                                           model="silero_vad",
-                                          force_reload=False,
-                                          trust_repo=True)
+                                          force_reload=force_reload,
+                                          skip_validation=skip_validation,
+                                          trust_repo=trust_repo)
 
         self._last_reset_time = 0
 
@@ -91,12 +95,20 @@ class SileroVAD(FrameProcessor):
             *,
             sample_rate: int = 16000,
             version: str = "v5.0",
+            force_reload: bool = False,
+            skip_validation: bool = True,
+            trust_repo: bool = True,
             vad_params: VADParams = VADParams(),
             audio_passthrough: bool = False):
         super().__init__()
 
         self._vad_analyzer = SileroVADAnalyzer(
-            sample_rate=sample_rate, version=version, params=vad_params)
+            sample_rate=sample_rate,
+            version=version,
+            force_reload=force_reload,
+            skip_validation=skip_validation,
+            trust_repo=trust_repo,
+            params=vad_params)
         self._audio_passthrough = audio_passthrough
 
         self._processor_vad_state: VADState = VADState.QUIET
