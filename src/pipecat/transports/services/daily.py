@@ -269,10 +269,7 @@ class DailyTransportClient(EventHandler):
                 logger.info(f"Joined {self._room_url}")
 
                 if self._token and self._params.transcription_enabled:
-                    logger.info(
-                        f"Enabling transcription with settings {self._params.transcription_settings}")
-                    self._client.start_transcription(
-                        self._params.transcription_settings.model_dump(exclude_none=True))
+                    await self._start_transcription()
 
                 await self._callbacks.on_joined(data["participants"]["local"])
             else:
@@ -283,6 +280,17 @@ class DailyTransportClient(EventHandler):
             error_msg = f"Time out joining {self._room_url}"
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
+
+    async def _start_transcription(self):
+        future = self._loop.create_future()
+        logger.info(f"Enabling transcription with settings {self._params.transcription_settings}")
+        self._client.start_transcription(
+            settings=self._params.transcription_settings.model_dump(exclude_none=True),
+            completion=lambda error: future.set_result(error)
+        )
+        error = await future
+        if error:
+            logger.error(f"Unable to start transcription: {error}")
 
     async def _join(self):
         future = self._loop.create_future()
@@ -343,7 +351,7 @@ class DailyTransportClient(EventHandler):
         logger.info(f"Leaving {self._room_url}")
 
         if self._params.transcription_enabled:
-            self._client.stop_transcription()
+            await self._stop_transcription()
 
         try:
             error = await self._leave()
@@ -359,6 +367,13 @@ class DailyTransportClient(EventHandler):
             error_msg = f"Time out leaving {self._room_url}"
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
+
+    async def _stop_transcription(self):
+        future = self._loop.create_future()
+        self._client.stop_transcription(completion=lambda error: future.set_result(error))
+        error = await future
+        if error:
+            logger.error(f"Unable to stop transcription: {error}")
 
     async def _leave(self):
         future = self._loop.create_future()
