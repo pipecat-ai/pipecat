@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `force_reload`, `skip_validation` and `trust_repo` to `SileroVAD` and
+  `SileroVADAnalyzer`. This allows caching and various GitHub repo validations.
+
 - Added `send_initial_empty_metrics` flag to `PipelineParams` to request for
   initial empty metrics (zero values). True by default.
 
