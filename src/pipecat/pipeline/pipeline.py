@@ -64,7 +64,7 @@ class Pipeline(BasePipeline):
         services = []
         for p in self._processors:
             if isinstance(p, BasePipeline):
-                services += p.processors_with_metrics()
+                services.extend(p.processors_with_metrics())
             elif p.can_generate_metrics():
                 services.append(p)
         return services
