@@ -7,7 +7,6 @@
 """This module implements Whisper transcription with a locally-downloaded model."""
 
 import asyncio
-import time
 
 from enum import Enum
 from typing_extensions import AsyncGenerator
@@ -16,6 +15,7 @@ import numpy as np
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.ai_services import STTService
+from pipecat.utils.time import time_now_iso8601
 
 from loguru import logger
 
@@ -91,4 +91,4 @@ class WhisperSTTService(STTService):
         if text:
             await self.stop_ttfb_metrics()
             logger.debug(f"Transcription: [{text}]")
-            yield TranscriptionFrame(text, "", int(time.time_ns() / 1000000))
+            yield TranscriptionFrame(text, "", time_now_iso8601())
