@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
     LLMModelUpdateFrame,
+    MetricsFrame,
     StartFrame,
     SystemFrame,
     TTSSpeakFrame,
@@ -455,6 +456,13 @@ class RTVIProcessor(FrameProcessor):
             # as the initial one.
             start_frame = dataclasses.replace(self._start_frame)
             await self.push_frame(start_frame)
+
+            # Send new initial metrics with the new processors
+            processors = parent.processors_with_metrics()
+            processors.extend(self._pipeline.processors_with_metrics())
+            ttfb = [{"name": p.name, "time": 0.0} for p in processors]
+            processing = [{"name": p.name, "time": 0.0} for p in processors]
+            await self.push_frame(MetricsFrame(ttfb=ttfb, processing=processing))
 
         message = RTVIBotReady()
         frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
