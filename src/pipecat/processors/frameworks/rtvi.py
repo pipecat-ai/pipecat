@@ -460,8 +460,8 @@ class RTVIProcessor(FrameProcessor):
             # Send new initial metrics with the new processors
             processors = parent.processors_with_metrics()
             processors.extend(self._pipeline.processors_with_metrics())
-            ttfb = [{"name": p.name, "time": 0.0} for p in processors]
-            processing = [{"name": p.name, "time": 0.0} for p in processors]
+            ttfb = [{"processor": p.name, "value": 0.0} for p in processors]
+            processing = [{"processor": p.name, "value": 0.0} for p in processors]
             await self.push_frame(MetricsFrame(ttfb=ttfb, processing=processing))
 
         message = RTVIBotReady()
