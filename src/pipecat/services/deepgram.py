@@ -5,7 +5,6 @@
 #
 
 import aiohttp
-import time
 
 from typing import AsyncGenerator
 
@@ -21,8 +20,10 @@ from pipecat.frames.frames import (
     TranscriptionFrame)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncAIService, TTSService
+from pipecat.utils.time import time_now_iso8601
 
 from loguru import logger
+
 
 # See .env.example for Deepgram configuration needed
 try:
@@ -148,6 +149,6 @@ class DeepgramSTTService(AsyncAIService):
         transcript = result.channel.alternatives[0].transcript
         if len(transcript) > 0:
             if is_final:
-                await self.queue_frame(TranscriptionFrame(transcript, "", int(time.time_ns() / 1000000)))
+                await self.queue_frame(TranscriptionFrame(transcript, "", time_now_iso8601()))
             else:
-                await self.queue_frame(InterimTranscriptionFrame(transcript, "", int(time.time_ns() / 1000000)))
+                await self.queue_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601()))

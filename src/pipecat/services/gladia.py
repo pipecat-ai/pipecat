@@ -6,7 +6,6 @@
 
 import base64
 import json
-import time
 
 from typing import Optional
 from pydantic.main import BaseModel
@@ -22,6 +21,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncAIService
+from pipecat.utils.time import time_now_iso8601
 
 from loguru import logger
 
@@ -110,6 +110,6 @@ class GladiaSTTService(AsyncAIService):
                 transcript = utterance["transcription"]
                 if confidence >= self._confidence:
                     if type == "final":
-                        await self.queue_frame(TranscriptionFrame(transcript, "", int(time.time_ns() / 1000000)))
+                        await self.queue_frame(TranscriptionFrame(transcript, "", time_now_iso8601()))
                     else:
-                        await self.queue_frame(InterimTranscriptionFrame(transcript, "", int(time.time_ns() / 1000000)))
+                        await self.queue_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601()))
