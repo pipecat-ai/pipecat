@@ -56,6 +56,29 @@ def create_daily_room() -> Dict[str, Any]:
     return response.json()
 
 
+def create_token(room_name: str) -> Dict[str, Any]:
+    if not DAILY_API_KEY:
+        raise ValueError("DAILY_API_KEY environment variable is not set")
+
+    url = f"https://api.daily.co/v1/meeting-tokens"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {DAILY_API_KEY}"
+    }
+
+    exp = int(time.time()) + 305
+    payload = {
+        "properties": {
+            "exp": exp,
+            "room_name": room_name
+        }
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.json()
+
+
 def send_to_sqs(room_info: Dict[str, Any]) -> None:
     if not SQS_QUEUE_URL:
         raise ValueError("SQS_QUEUE_URL environment variable is not set")
@@ -73,17 +96,36 @@ def send_to_sqs(room_info: Dict[str, Any]) -> None:
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
-        print("Creating Daily room...")
-        daily_room = create_daily_room()
-        print(f"Daily room created: {json.dumps(daily_room, indent=2)}")
+        path = event.get('rawPath', '')
+        path = path.rstrip('/')
 
-        print("Sending room info to SQS...")
-        send_to_sqs(daily_room)
+        if path == '/authenticate':
+            print("Creating Daily room...")
+            daily_room = create_daily_room()
+            print(f"Daily room created: {json.dumps(daily_room, indent=2)}")
 
-        return {
-            'statusCode': 200,
-            'body': json.dumps({"room_url": daily_room['url']})
-        }
+            token = create_token(daily_room['name'])
+            print(f"Meeting token created: {json.dumps(token, indent=2)}")
+
+            return {
+                'statusCode': 200,
+                'body': json.dumps({"room": daily_room['name'], "token": token['token']})
+            }
+        elif path == '/start_bot':
+            body = json.loads(event['body'])
+
+            print("Sending room info to SQS...")
+
+            send_to_sqs(body)
+            return {
+                'statusCode': 200,
+                'body': json.dumps({"status": "healthy"})
+            }
+        else:
+            return {
+                'statusCode': 200,
+                'body': json.dumps({"success": True})
+            }
     except Exception as e:
         print(f"Error occurred: {str(e)}")
         return {
@@ -94,7 +136,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     # Simulate the Lambda event and context
-    event = {}
+    # event = {}
+    event = {
+        "rawPath": "/authenticate"
+    }
     context = None
 
     result = lambda_handler(event, context)
