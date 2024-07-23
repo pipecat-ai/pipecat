@@ -21,6 +21,7 @@ from loguru import logger
 class PipelineParams(BaseModel):
     allow_interruptions: bool = False
     enable_metrics: bool = False
+    send_initial_empty_metrics: bool = True
     report_only_initial_ttfb: bool = False
 
 
@@ -106,7 +107,9 @@ class PipelineTask:
             report_only_initial_ttfb=self._params.report_only_initial_ttfb
         )
         await self._source.process_frame(start_frame, FrameDirection.DOWNSTREAM)
-        await self._source.process_frame(self._initial_metrics_frame(), FrameDirection.DOWNSTREAM)
+
+        if self._params.send_initial_empty_metrics:
+            await self._source.process_frame(self._initial_metrics_frame(), FrameDirection.DOWNSTREAM)
 
         running = True
         should_cleanup = True

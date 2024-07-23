@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unrelease]
 
+### Added
+
+- Added `send_initial_empty_metrics` flag to `PipelineParams` to request for
+  initial empty metrics (zero values). True by default.
+
 ### Fixed
 
 - STT services should be using ISO 8601 time format for transcription frames.
