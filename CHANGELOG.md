@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - STT services should be using ISO 8601 time format for transcription frames.
 
+- Fix an issue that would cause Daily transport to show a stop transcription
+  error when actually none occurred.
+
 ## [0.0.37] - 2024-07-22
 
 ### Added
