@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed a `BaseInputTransport` issue that was causing incoming system frames to
   be queued instead of being pushed immediately.
 
+- Fixed a `BaseInputTransport` issue that was causing start/stop interruptions
+  incoming frames to not cancel tasks and be processed properly.
+
 ## [0.0.39] - 2024-07-23
 
 ### Fixed
