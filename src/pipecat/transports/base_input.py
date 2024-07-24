@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     Frame,
     StartInterruptionFrame,
     StopInterruptionFrame,
+    SystemFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame)
 from pipecat.transports.base_transport import TransportParams
@@ -69,18 +70,24 @@ class BaseInputTransport(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
+        # Specific system frames
         if isinstance(frame, CancelFrame):
             await self.stop()
             # We don't queue a CancelFrame since we want to stop ASAP.
             await self.push_frame(frame, direction)
+        elif isinstance(frame, BotInterruptionFrame):
+            await self._handle_interruptions(frame, False)
+        # All other system frames
+        elif isinstance(frame, SystemFrame):
+            await self.push_frame(frame, direction)
+        # Control frames
         elif isinstance(frame, StartFrame):
             await self.start(frame)
             await self._internal_push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
             await self._internal_push_frame(frame, direction)
             await self.stop()
-        elif isinstance(frame, BotInterruptionFrame):
-            await self._handle_interruptions(frame, False)
+        # Other frames
         else:
             await self._internal_push_frame(frame, direction)
 
