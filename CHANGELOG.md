@@ -128,6 +128,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   processing metrics indicate the time a processor needs to generate all its
   output. Note that not all processors generate these kind of metrics.
 
+- `noisereduce.py` which allows you to run noisereduce to reduce background noises 
+  on calls. Important for calls run through Twilio. Added example: 
+  `examples/foundational/07c-i-interruptible-deepgram-noisereduce.py` of noisereduce 
+  with DeepgramSTT
+
 ### Changed
 
 - `WhisperSTTService` model can now also be a string.
