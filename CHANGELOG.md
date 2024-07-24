@@ -5,6 +5,17 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `StartFrame` is now a control frame similar to `EndFrame`.
+
+### Fixed
+
+- Fixed a `BaseInputTransport` issue that was causing incoming system frames to
+  be queued instead of being pushed immediately.
+
 ## [0.0.39] - 2024-07-23
 
 ### Fixed
