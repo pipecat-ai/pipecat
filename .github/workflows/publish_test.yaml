@@ -9,6 +9,9 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 100
       - name: Set up Python
         id: setup_python
         uses: actions/setup-python@v4
