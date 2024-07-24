@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `StartFrame` is now a control frame similar to `EndFrame`.
+
 ### Fixed
 
 - Fixed a `BaseInputTransport` issue that was causing incoming system frames to
