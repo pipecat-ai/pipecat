@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- RTVI's `bot-ready` message is now sent when the RTVI pipeline is ready and
+  a first participant joins.
+
 - Fixed a `BaseInputTransport` issue that was causing incoming system frames to
   be queued instead of being pushed immediately.
 
