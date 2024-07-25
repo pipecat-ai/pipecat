@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Transports now allow you to register event handlers without decorators.
+
 ### Changed
 
 - `StartFrame` is now a control frame similar to `EndFrame`.
