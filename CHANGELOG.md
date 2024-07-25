@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `StartFrame` is now a control frame similar to `EndFrame`.
 
+- `DeepgramTTSService` now is more customizable. You can adjust the encoding and
+  sample rate.
+
 ### Fixed
 
 - Fixed a `BaseInputTransport` issue that was causing incoming system frames to
@@ -136,8 +139,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `WhisperSTTService` model can now also be a string.
 
 - Added missing * keyword separators in services.
-
-- `DeepgramTTS` now is more customizable. You can adjust the encoding and sample rate.
 
 ### Fixed
 
