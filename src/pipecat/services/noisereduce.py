@@ -1,5 +1,6 @@
 
 import noisereduce as nr
+from loguru import logger
 import numpy as np
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -20,7 +21,8 @@ class NoiseReduce(FrameProcessor):
 
     def reduce_noise(self, frame: AudioRawFrame):
         if frame.num_channels != 1:
-            raise ValueError(f"Expected 1 channel, got {frame.num_channels}")
+            logger.error(f"Expected 1 channel, got {frame.num_channels}")
+            return
 
         # load data
         data = np.frombuffer(frame.audio, dtype=np.int16)
