@@ -289,6 +289,13 @@ class RTVIProcessor(FrameProcessor):
         self._llm: FrameProcessor | None = None
         self._tts: FrameProcessor | None = None
         self._pipeline: FrameProcessor | None = None
+        self._first_participant_joined: bool = False
+
+        # Register transport event so we can send a `bot-ready` event (and maybe
+        # others) when the participant joins.
+        transport.add_event_handler(
+            "on_first_participant_joined",
+            self._on_first_participant_joined)
 
         self._frame_handler_task = self.get_event_loop().create_task(self._frame_handler())
         self._frame_queue = asyncio.Queue()
@@ -446,7 +453,6 @@ class RTVIProcessor(FrameProcessor):
             self._tma_out,
             self._transport.output(),
         ])
-        self._pipeline = pipeline
 
         parent = self.get_parent()
         if parent and self._start_frame:
@@ -459,14 +465,14 @@ class RTVIProcessor(FrameProcessor):
 
             # Send new initial metrics with the new processors
             processors = parent.processors_with_metrics()
-            processors.extend(self._pipeline.processors_with_metrics())
+            processors.extend(pipeline.processors_with_metrics())
             ttfb = [{"processor": p.name, "value": 0.0} for p in processors]
             processing = [{"processor": p.name, "value": 0.0} for p in processors]
             await self.push_frame(MetricsFrame(ttfb=ttfb, processing=processing))
 
-        message = RTVIBotReady()
-        frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
-        await self.push_frame(frame)
+        self._pipeline = pipeline
+
+        await self._maybe_send_bot_ready()
 
     async def _handle_config_update(self, config: RTVIConfig):
         # Change voice before LLM updates, so we can hear the new vocie.
@@ -505,6 +511,16 @@ class RTVIProcessor(FrameProcessor):
 
     async def _handle_tts_interrupt(self):
         await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+
+    async def _on_first_participant_joined(self, transport, participant):
+        self._first_participant_joined = True
+        await self._maybe_send_bot_ready()
+
+    async def _maybe_send_bot_ready(self):
+        if self._pipeline and self._first_participant_joined:
+            message = RTVIBotReady()
+            frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+            await self.push_frame(frame)
 
     async def _send_error(self, error: str):
         message = RTVIError(data=RTVIErrorData(message=error))
