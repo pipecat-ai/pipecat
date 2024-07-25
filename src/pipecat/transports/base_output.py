@@ -15,6 +15,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     AudioRawFrame,
     BotSpeakingFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     MetricsFrame,
     SpriteFrame,
@@ -25,6 +27,8 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     TransportMessageFrame)
 from pipecat.transports.base_transport import TransportParams
 
@@ -172,6 +176,12 @@ class BaseOutputTransport(FrameProcessor):
                     await self._set_camera_images(frame.images)
                 elif isinstance(frame, TransportMessageFrame):
                     await self.send_message(frame)
+                elif isinstance(frame, TTSStartedFrame):
+                    await self._internal_push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+                    await self._internal_push_frame(frame)
+                elif isinstance(frame, TTSStoppedFrame):
+                    await self._internal_push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+                    await self._internal_push_frame(frame)
                 else:
                     await self._internal_push_frame(frame)
 
