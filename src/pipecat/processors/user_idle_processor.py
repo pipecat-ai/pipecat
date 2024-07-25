@@ -8,7 +8,12 @@ import asyncio
 
 from typing import Awaitable, Callable
 
-from pipecat.frames.frames import BotSpeakingFrame, Frame, StartInterruptionFrame, StopInterruptionFrame, SystemFrame
+from pipecat.frames.frames import (
+    BotSpeakingFrame,
+    Frame,
+    SystemFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame)
 from pipecat.processors.async_frame_processor import AsyncFrameProcessor
 from pipecat.processors.frame_processor import FrameDirection
 
@@ -47,10 +52,10 @@ class UserIdleProcessor(AsyncFrameProcessor):
             await self.queue_frame(frame, direction)
 
         # We shouldn't call the idle callback if the user or the bot are speaking.
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, UserStartedSpeakingFrame):
             self._interrupted = True
             self._idle_event.set()
-        elif isinstance(frame, StopInterruptionFrame):
+        elif isinstance(frame, UserStoppedSpeakingFrame):
             self._interrupted = False
             self._idle_event.set()
         elif isinstance(frame, BotSpeakingFrame):
