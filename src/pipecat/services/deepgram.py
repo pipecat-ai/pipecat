@@ -49,6 +49,8 @@ class DeepgramTTSService(TTSService):
             api_key: str,
             voice: str = "aura-helios-en",
             base_url: str = "https://api.deepgram.com/v1/speak",
+            sample_rate: int = 16000,
+            encoding: str = "linear16",
             **kwargs):
         super().__init__(**kwargs)
 
@@ -56,6 +58,8 @@ class DeepgramTTSService(TTSService):
         self._api_key = api_key
         self._aiohttp_session = aiohttp_session
         self._base_url = base_url
+        self._sample_rate = sample_rate
+        self._encoding = encoding
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -68,7 +72,7 @@ class DeepgramTTSService(TTSService):
         logger.debug(f"Generating TTS: [{text}]")
 
         base_url = self._base_url
-        request_url = f"{base_url}?model={self._voice}&encoding=linear16&container=none&sample_rate=16000"
+        request_url = f"{base_url}?model={self._voice}&encoding={self._encoding}&container=none&sample_rate={self._sample_rate}"
         headers = {"authorization": f"token {self._api_key}"}
         body = {"text": text}
 
@@ -91,7 +95,7 @@ class DeepgramTTSService(TTSService):
 
                 async for data in r.content:
                     await self.stop_ttfb_metrics()
-                    frame = AudioRawFrame(audio=data, sample_rate=16000, num_channels=1)
+                    frame = AudioRawFrame(audio=data, sample_rate=self._sample_rate, num_channels=1)
                     yield frame
         except Exception as e:
             logger.exception(f"{self} exception: {e}")

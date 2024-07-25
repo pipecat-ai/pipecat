@@ -137,6 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added missing * keyword separators in services.
 
+- `DeepgramTTS` now is more customizable. You can adjust the encoding and sample rate.
+
 ### Fixed
 
 - `WebsocketServerTransport` doesn't try to send frames anymore if serializers
