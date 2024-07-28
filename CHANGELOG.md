@@ -9,9 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `BotStartedSpeakingFrame` and `BotStoppedSpeakingFrame` control
+  frames. These frames are pushed upstream and they should wrap
+  `BotSpeakingFrame`.
+
 - Transports now allow you to register event handlers without decorators.
 
 ### Changed
+
+- `BotSpeakingFrame` is now a control frame.
 
 - `StartFrame` is now a control frame similar to `EndFrame`.
 
