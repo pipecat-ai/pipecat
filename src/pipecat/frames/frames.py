@@ -271,17 +271,6 @@ class BotInterruptionFrame(SystemFrame):
 
 
 @dataclass
-class BotSpeakingFrame(SystemFrame):
-    """Emitted by transport outputs while the bot is still speaking. This can be
-    used, for example, to detect when a user is idle. That is, while the bot is
-    speaking we don't want to trigger any user idle timeout since the user might
-    be listening.
-
-    """
-    pass
-
-
-@dataclass
 class MetricsFrame(SystemFrame):
     """Emitted by processor that can compute metrics like latencies.
     """
@@ -345,6 +334,33 @@ class UserStartedSpeakingFrame(ControlFrame):
 @dataclass
 class UserStoppedSpeakingFrame(ControlFrame):
     """Emitted by the VAD to indicate that a user stopped speaking."""
+    pass
+
+
+@dataclass
+class BotStartedSpeakingFrame(ControlFrame):
+    """Emitted upstream by transport outputs to indicate the bot started speaking.
+
+    """
+    pass
+
+
+@dataclass
+class BotStoppedSpeakingFrame(ControlFrame):
+    """Emitted upstream by transport outputs to indicate the bot stopped speaking.
+
+    """
+    pass
+
+
+@dataclass
+class BotSpeakingFrame(ControlFrame):
+    """Emitted upstream by transport outputs while the bot is still
+    speaking. This can be used, for example, to detect when a user is idle. That
+    is, while the bot is speaking we don't want to trigger any user idle timeout
+    since the user might be listening.
+
+    """
     pass
 
 
