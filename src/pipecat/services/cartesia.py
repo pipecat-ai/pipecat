@@ -14,6 +14,7 @@ from typing import AsyncGenerator
 
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.frames.frames import (
+    CancelFrame,
     Frame,
     AudioRawFrame,
     StartInterruptionFrame,
@@ -98,6 +99,10 @@ class CartesiaTTSService(TTSService):
         await super().stop(frame)
         await self._disconnect()
 
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self._disconnect()
+
     async def _connect(self):
         try:
             self._websocket = await websockets.connect(
@@ -111,6 +116,8 @@ class CartesiaTTSService(TTSService):
 
     async def _disconnect(self):
         try:
+            await self.stop_all_metrics()
+
             if self._context_appending_task:
                 self._context_appending_task.cancel()
                 await self._context_appending_task
@@ -120,13 +127,12 @@ class CartesiaTTSService(TTSService):
                 await self._receive_task
                 self._receive_task = None
             if self._websocket:
-                ws = self._websocket
+                await self._websocket.close()
                 self._websocket = None
-                await ws.close()
+
             self._context_id = None
             self._context_id_start_timestamp = None
             self._timestamped_words_buffer = []
-            await self.stop_all_metrics()
         except Exception as e:
             logger.exception(f"{self} error closing websocket: {e}")
 
@@ -142,13 +148,13 @@ class CartesiaTTSService(TTSService):
         try:
             async for message in self._websocket:
                 msg = json.loads(message)
-                # logger.debug(f"Received message: {msg['type']} {msg['context_id']}")
                 if not msg or msg["context_id"] != self._context_id:
                     continue
                 if msg["type"] == "done":
                     await self.stop_ttfb_metrics()
-                    # unset _context_id but not the _context_id_start_timestamp because we are likely still
-                    # playing out audio and need the timestamp to set send context frames
+                    # Unset _context_id but not the _context_id_start_timestamp
+                    # because we are likely still playing out audio and need the
+                    # timestamp to set send context frames.
                     self._context_id = None
                     self._timestamped_words_buffer.append(("LLMFullResponseEndFrame", 0))
                 elif msg["type"] == "timestamps":
@@ -166,6 +172,8 @@ class CartesiaTTSService(TTSService):
                         num_channels=1
                     )
                     await self.push_frame(frame)
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
 
@@ -176,15 +184,17 @@ class CartesiaTTSService(TTSService):
                 if not self._context_id_start_timestamp:
                     continue
                 elapsed_seconds = time.time() - self._context_id_start_timestamp
-                # pop all words from self._timestamped_words_buffer that are older than the
-                # elapsed time and print a message about them to the console
+                # Pop all words from self._timestamped_words_buffer that are
+                # older than the elapsed time and print a message about them to
+                # the console.
                 while self._timestamped_words_buffer and self._timestamped_words_buffer[0][1] <= elapsed_seconds:
                     word, timestamp = self._timestamped_words_buffer.pop(0)
                     if word == "LLMFullResponseEndFrame" and timestamp == 0:
                         await self.push_frame(LLMFullResponseEndFrame())
                         continue
-                    # print(f"Word '{word}' with timestamp {timestamp:.2f}s has been spoken.")
                     await self.push_frame(TextFrame(word))
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
 
@@ -212,7 +222,6 @@ class CartesiaTTSService(TTSService):
                 "language": self._language,
                 "add_timestamps": True,
             }
-            # logger.debug(f"SENDING MESSAGE {json.dumps(msg)}")
             try:
                 await self._websocket.send(json.dumps(msg))
             except Exception as e:

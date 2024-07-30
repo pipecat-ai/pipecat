@@ -23,6 +23,8 @@ from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
     AudioRawFrame,
+    CancelFrame,
+    EndFrame,
     Frame,
     ImageRawFrame,
     InterimTranscriptionFrame,
@@ -125,11 +127,15 @@ class DailyCallbacks(BaseModel):
 
 def completion_callback(future):
     def _callback(*args):
-        if not future.cancelled():
-            if len(args) > 1:
-                future.get_loop().call_soon_threadsafe(future.set_result, args)
-            else:
-                future.get_loop().call_soon_threadsafe(future.set_result, *args)
+        def set_result(future, *args):
+            try:
+                if len(args) > 1:
+                    future.set_result(args)
+                else:
+                    future.set_result(*args)
+            except asyncio.InvalidStateError:
+                pass
+        future.get_loop().call_soon_threadsafe(set_result, future, *args)
     return _callback
 
 
@@ -541,9 +547,19 @@ class DailyInputTransport(BaseInputTransport):
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_task = self.get_event_loop().create_task(self._audio_in_task_handler())
 
-    async def stop(self):
+    async def stop(self, frame: EndFrame):
         # Parent stop.
-        await super().stop()
+        await super().stop(frame)
+        # Leave the room.
+        await self._client.leave()
+        # Stop audio thread.
+        if self._params.audio_in_enabled or self._params.vad_enabled:
+            self._audio_in_task.cancel()
+            await self._audio_in_task
+
+    async def cancel(self, frame: CancelFrame):
+        # Parent stop.
+        await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
@@ -658,9 +674,15 @@ class DailyOutputTransport(BaseOutputTransport):
         # Join the room.
         await self._client.join()
 
-    async def stop(self):
+    async def stop(self, frame: EndFrame):
         # Parent stop.
-        await super().stop()
+        await super().stop(frame)
+        # Leave the room.
+        await self._client.leave()
+
+    async def cancel(self, frame: CancelFrame):
+        # Parent stop.
+        await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
 
