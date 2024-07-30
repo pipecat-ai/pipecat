@@ -12,6 +12,8 @@ from pydantic import PrivateAttr, BaseModel, ValidationError
 
 from pipecat.frames.frames import (
     BotInterruptionFrame,
+    CancelFrame,
+    EndFrame,
     Frame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
@@ -343,32 +345,64 @@ class RTVIProcessor(FrameProcessor):
         self._ctor_args = ctor_args
 
     async def update_config(self, config: RTVIConfig):
-        await self._handle_config_update(config)
+        if self._pipeline:
+            await self._handle_config_update(config)
+        self._config = config
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, SystemFrame):
+        # Specific system frames
+        if isinstance(frame, CancelFrame):
+            await self._cancel(frame)
             await self.push_frame(frame, direction)
+        # All other system frames
+        elif isinstance(frame, SystemFrame):
+            await self.push_frame(frame, direction)
+        # Control frames
+        elif isinstance(frame, StartFrame):
+            await self._start(frame)
+            await self._internal_push_frame(frame, direction)
+        elif isinstance(frame, EndFrame):
+            # Push EndFrame before stop(), because stop() waits on the task to
+            # finish and the task finishes when EndFrame is processed.
+            await self._internal_push_frame(frame, direction)
+            await self._stop(frame)
+        # Other frames
         else:
-            await self._frame_queue.put((frame, direction))
-
-        if isinstance(frame, StartFrame):
-            try:
-                await self._handle_pipeline_setup(frame, self._config)
-            except Exception as e:
-                await self._send_error(f"unable to setup RTVI pipeline: {e}")
+            await self._internal_push_frame(frame, direction)
 
     async def cleanup(self):
+        if self._pipeline:
+            await self._pipeline.cleanup()
+
+    async def _start(self, frame: StartFrame):
+        try:
+            await self._handle_pipeline_setup(frame, self._config)
+        except Exception as e:
+            await self._send_error(f"unable to setup RTVI pipeline: {e}")
+
+    async def _stop(self, frame: EndFrame):
+        await self._frame_handler_task
+
+    async def _cancel(self, frame: CancelFrame):
         self._frame_handler_task.cancel()
         await self._frame_handler_task
 
+    async def _internal_push_frame(
+            self,
+            frame: Frame | None,
+            direction: FrameDirection | None = FrameDirection.DOWNSTREAM):
+        await self._frame_queue.put((frame, direction))
+
     async def _frame_handler(self):
-        while True:
+        running = True
+        while running:
             try:
                 (frame, direction) = await self._frame_queue.get()
                 await self._handle_frame(frame, direction)
                 self._frame_queue.task_done()
+                running = not isinstance(frame, EndFrame)
             except asyncio.CancelledError:
                 break
 
