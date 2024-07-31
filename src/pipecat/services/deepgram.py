@@ -45,24 +45,30 @@ class DeepgramTTSService(TTSService):
     def __init__(
             self,
             *,
-            aiohttp_session: aiohttp.ClientSession,
             api_key: str,
             voice: str = "aura-helios-en",
             base_url: str = "https://api.deepgram.com/v1/speak",
             sample_rate: int = 16000,
             encoding: str = "linear16",
+            aiohttp_session: aiohttp.ClientSession | None = None,
             **kwargs):
         super().__init__(**kwargs)
 
         self._voice = voice
         self._api_key = api_key
-        self._aiohttp_session = aiohttp_session
         self._base_url = base_url
         self._sample_rate = sample_rate
         self._encoding = encoding
+        self._aiohttp_session = aiohttp_session or aiohttp.ClientSession()
+        self._close_aiohttp_session = aiohttp_session is None
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    async def cleanup(self):
+        await super().cleanup()
+        if self._close_aiohttp_session:
+            await self._aiohttp_session.close()
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
