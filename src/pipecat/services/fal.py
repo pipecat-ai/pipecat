@@ -39,17 +39,23 @@ class FalImageGenService(ImageGenService):
     def __init__(
         self,
         *,
-        aiohttp_session: aiohttp.ClientSession,
         params: InputParams,
         model: str = "fal-ai/fast-sdxl",
         key: str | None = None,
+        aiohttp_session: aiohttp.ClientSession | None = None,
     ):
         super().__init__()
         self._model = model
         self._params = params
-        self._aiohttp_session = aiohttp_session
+        self._aiohttp_session = aiohttp_session or aiohttp.ClientSession()
+        self._close_aiohttp_session = aiohttp_session is None
         if key:
             os.environ["FAL_KEY"] = key
+
+    async def cleanup(self):
+        await super().cleanup()
+        if self._close_aiohttp_session:
+            await self._aiohttp_session.close()
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating image from prompt: {prompt}")
