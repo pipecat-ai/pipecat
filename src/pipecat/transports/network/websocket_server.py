@@ -11,7 +11,7 @@ import wave
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.frames.frames import AudioRawFrame, StartFrame
+from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
@@ -64,10 +64,15 @@ class WebsocketServerInputTransport(BaseInputTransport):
         self._server_task = self.get_event_loop().create_task(self._server_task_handler())
         await super().start(frame)
 
-    async def stop(self):
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
         self._stop_server_event.set()
         await self._server_task
-        await super().stop()
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        self._server_task.cancel()
+        await self._server_task
 
     async def _server_task_handler(self):
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
