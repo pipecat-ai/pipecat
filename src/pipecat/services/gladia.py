@@ -68,14 +68,17 @@ class GladiaSTTService(AsyncAIService):
             await self.queue_frame(frame, direction)
 
     async def start(self, frame: StartFrame):
+        await super().start(frame)
         self._websocket = await websockets.connect(self._url)
         self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
         await self._setup_gladia()
 
     async def stop(self, frame: EndFrame):
+        await super().stop(frame)
         await self._websocket.close()
 
     async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
         await self._websocket.close()
 
     async def _setup_gladia(self):

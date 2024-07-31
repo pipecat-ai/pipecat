@@ -283,14 +283,17 @@ class STTService(AIService):
             await self.stop_processing_metrics()
             (self._content, self._wave) = self._new_wave()
 
+    async def stop(self, frame: EndFrame):
+        self._wave.close()
+
+    async def cancel(self, frame: CancelFrame):
+        self._wave.close()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes a frame of audio data, either buffering or transcribing it."""
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
-            self._wave.close()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, AudioRawFrame):
+        if isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We don't really want to push audio frames down.
             await self._append_audio(frame)

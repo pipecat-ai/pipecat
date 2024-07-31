@@ -46,11 +46,25 @@ class BaseInputTransport(FrameProcessor):
             self._audio_in_queue = asyncio.Queue()
             self._audio_task = self.get_event_loop().create_task(self._audio_task_handler())
 
-    async def stop(self):
-        # Wait for the task to finish.
+    async def stop(self, frame: EndFrame):
+        # Cancel and wait for the audio input task to finish.
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_task.cancel()
             await self._audio_task
+
+        # Wait for the push frame task to finish. It will finish when the
+        # EndFrame is actually processed.
+        await self._push_frame_task
+
+    async def cancel(self, frame: CancelFrame):
+        # Cancel all the tasks and wait for them to finish.
+
+        if self._params.audio_in_enabled or self._params.vad_enabled:
+            self._audio_task.cancel()
+            await self._audio_task
+
+        self._push_frame_task.cancel()
+        await self._push_frame_task
 
     def vad_analyzer(self) -> VADAnalyzer | None:
         return self._params.vad_analyzer
@@ -63,17 +77,12 @@ class BaseInputTransport(FrameProcessor):
     # Frame processor
     #
 
-    async def cleanup(self):
-        self._push_frame_task.cancel()
-        await self._push_frame_task
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         # Specific system frames
         if isinstance(frame, CancelFrame):
-            await self.stop()
-            # We don't queue a CancelFrame since we want to stop ASAP.
+            await self.cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotInterruptionFrame):
             await self._handle_interruptions(frame, False)
@@ -89,8 +98,10 @@ class BaseInputTransport(FrameProcessor):
             await self.start(frame)
             await self._internal_push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
+            # Push EndFrame before stop(), because stop() waits on the task to
+            # finish and the task finishes when EndFrame is processed.
             await self._internal_push_frame(frame, direction)
-            await self.stop()
+            await self.stop(frame)
         # Other frames
         else:
             await self._internal_push_frame(frame, direction)
@@ -111,10 +122,12 @@ class BaseInputTransport(FrameProcessor):
         await self._push_queue.put((frame, direction))
 
     async def _push_frame_task_handler(self):
-        while True:
+        running = True
+        while running:
             try:
                 (frame, direction) = await self._push_queue.get()
                 await self.push_frame(frame, direction)
+                running = not isinstance(frame, EndFrame)
                 self._push_queue.task_done()
             except asyncio.CancelledError:
                 break
