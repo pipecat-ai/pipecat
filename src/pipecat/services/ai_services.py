@@ -75,10 +75,11 @@ class AIService(FrameProcessor):
 
     async def process_generator(self, generator: AsyncGenerator[Frame, None]):
         async for f in generator:
-            if isinstance(f, ErrorFrame):
-                await self.push_error(f)
-            else:
-                await self.push_frame(f)
+            if f:
+                if isinstance(f, ErrorFrame):
+                    await self.push_error(f)
+                else:
+                    await self.push_frame(f)
 
 
 class AsyncAIService(AsyncFrameProcessor):
