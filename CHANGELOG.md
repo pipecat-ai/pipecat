@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A few services required an `aiohttp.ClientSession` to be passed to the
+  constructor. This is now option an a new session will be created if none is
+  given.
+
 - `BotSpeakingFrame` is now a control frame.
 
 - `StartFrame` is now a control frame similar to `EndFrame`.
@@ -25,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sample rate.
 
 ### Fixed
+
+- Improved `EndFrame` and `CancelFrame` handling. `EndFrame` should end things
+  gracefully while a `CancelFrame` should cancel all running tasks as soon as
+  possible.
 
 - Fixed an issue in `AIService` that would cause a yielded `None` value to be
   processed.
