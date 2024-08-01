@@ -30,7 +30,8 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def main(room_url: str):
+async def main():
+    (room_url, _) = await configure()
     async with aiohttp.ClientSession() as session:
         transport = DailyTransport(room_url, None, "Static And Dynamic Speech")
 
@@ -82,5 +83,4 @@ async def main(room_url: str):
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url))
+    asyncio.run(main())

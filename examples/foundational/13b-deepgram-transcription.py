@@ -36,11 +36,13 @@ class TranscriptionLogger(FrameProcessor):
             print(f"Transcription: {frame.text}")
 
 
-async def main(room_url: str):
+async def main():
+    (room_url, _) = await configure()
+
     transport = DailyTransport(room_url, None, "Transcription bot",
                                DailyParams(audio_in_enabled=True))
 
-    stt = DeepgramSTTService(os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tl = TranscriptionLogger()
 
@@ -54,5 +56,4 @@ async def main(room_url: str):
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url))
+    asyncio.run(main())

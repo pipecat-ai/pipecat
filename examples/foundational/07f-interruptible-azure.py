@@ -30,7 +30,8 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def main(room_url: str, token):
+async def main():
+    (room_url, token) = await configure()
     transport = DailyTransport(
         room_url,
         token,
@@ -96,5 +97,4 @@ async def main(room_url: str, token):
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url, token))
+    asyncio.run(main())

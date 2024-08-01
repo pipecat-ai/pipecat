@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import os
 import argparse
 import subprocess
@@ -7,17 +13,22 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from utils.daily_helpers import create_room as _create_room, get_token
+from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomParams
 
 MAX_BOTS_PER_ROOM = 1
 
 # Bot sub-process dict for status reporting and concurrency control
 bot_procs = {}
 
+daily_rest_helper = DailyRESTHelper(
+    os.getenv("DAILY_API_KEY", ""),
+    os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'))
+
 
 def cleanup():
     # Clean up function, just to be extra safe
-    for proc in bot_procs.values():
+    for entry in bot_procs.values():
+        proc = entry[0]
         proc.terminate()
         proc.wait()
 
@@ -39,45 +50,45 @@ app.add_middleware(
 @app.get("/start")
 async def start_agent(request: Request):
     print(f"!!! Creating room")
-    room_url, room_name = _create_room()
-    print(f"!!! Room URL: {room_url}")
+    room = await daily_rest_helper.create_room(DailyRoomParams())
+    print(f"!!! Room URL: {room.url}")
     # Ensure the room property is present
-    if not room_url:
+    if not room.url:
         raise HTTPException(
             status_code=500,
             detail="Missing 'room' property in request data. Cannot start agent without a target room!")
 
     # Check if there is already an existing process running in this room
     num_bots_in_room = sum(
-        1 for proc in bot_procs.values() if proc[1] == room_url and proc[0].poll() is None)
+        1 for proc in bot_procs.values() if proc[1] == room.url and proc[0].poll() is None)
     if num_bots_in_room >= MAX_BOTS_PER_ROOM:
         raise HTTPException(
-            status_code=500, detail=f"Max bot limited reach for room: {room_url}")
+            status_code=500, detail=f"Max bot limited reach for room: {room.url}")
 
     # Get the token for the room
-    token = get_token(room_url)
+    token = await daily_rest_helper.get_token(room.url)
 
     if not token:
         raise HTTPException(
-            status_code=500, detail=f"Failed to get token for room: {room_url}")
+            status_code=500, detail=f"Failed to get token for room: {room.url}")
 
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in README)
     try:
         proc = subprocess.Popen(
             [
-                f"python3 -m bot -u {room_url} -t {token}"
+                f"python3 -m bot -u {room.url} -t {token}"
             ],
             shell=True,
             bufsize=1,
             cwd=os.path.dirname(os.path.abspath(__file__))
         )
-        bot_procs[proc.pid] = (proc, room_url)
+        bot_procs[proc.pid] = (proc, room.url)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to start subprocess: {e}")
 
-    return RedirectResponse(room_url)
+    return RedirectResponse(room.url)
 
 
 @app.get("/status/{pid}")

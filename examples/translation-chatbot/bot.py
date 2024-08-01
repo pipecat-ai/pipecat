@@ -1,5 +1,10 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
-import aiohttp
 import os
 import sys
 
@@ -12,7 +17,11 @@ from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.azure import AzureTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTranscriptionSettings, DailyTransport, DailyTransportMessageFrame
+from pipecat.transports.services.daily import (
+    DailyParams,
+    DailyTranscriptionSettings,
+    DailyTransport,
+    DailyTransportMessageFrame)
 
 from runner import configure
 
@@ -79,59 +88,59 @@ class TranslationSubtitles(FrameProcessor):
         await self.push_frame(frame)
 
 
-async def main(room_url: str, token):
-    async with aiohttp.ClientSession() as session:
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Translator",
-            DailyParams(
-                audio_out_enabled=True,
-                transcription_enabled=True,
-                transcription_settings=DailyTranscriptionSettings(extra={
-                    "interim_results": False
-                })
-            )
+async def main():
+    (room_url, token) = await configure()
+
+    transport = DailyTransport(
+        room_url,
+        token,
+        "Translator",
+        DailyParams(
+            audio_out_enabled=True,
+            transcription_enabled=True,
+            transcription_settings=DailyTranscriptionSettings(extra={
+                "interim_results": False
+            })
         )
+    )
 
-        tts = AzureTTSService(
-            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-            region=os.getenv("AZURE_SPEECH_REGION"),
-            voice="es-ES-AlvaroNeural",
-        )
+    tts = AzureTTSService(
+        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+        region=os.getenv("AZURE_SPEECH_REGION"),
+        voice="es-ES-AlvaroNeural",
+    )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o"
-        )
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model="gpt-4o"
+    )
 
-        sa = SentenceAggregator()
-        tp = TranslationProcessor("Spanish")
-        lfra = LLMFullResponseAggregator()
-        ts = TranslationSubtitles("spanish")
+    sa = SentenceAggregator()
+    tp = TranslationProcessor("Spanish")
+    lfra = LLMFullResponseAggregator()
+    ts = TranslationSubtitles("spanish")
 
-        pipeline = Pipeline([
-            transport.input(),
-            sa,
-            tp,
-            llm,
-            lfra,
-            ts,
-            tts,
-            transport.output()
-        ])
+    pipeline = Pipeline([
+        transport.input(),
+        sa,
+        tp,
+        llm,
+        lfra,
+        ts,
+        tts,
+        transport.output()
+    ])
 
-        task = PipelineTask(pipeline)
+    task = PipelineTask(pipeline)
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+    @transport.event_handler("on_first_participant_joined")
+    async def on_first_participant_joined(transport, participant):
+        transport.capture_participant_transcription(participant["id"])
 
-        runner = PipelineRunner()
+    runner = PipelineRunner()
 
-        await runner.run(task)
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url, token))
+    asyncio.run(main())
