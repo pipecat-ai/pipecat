@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `AIService` that would cause a yielded `None` value to be
+  processed.
+
 - RTVI's `bot-ready` message is now sent when the RTVI pipeline is ready and
   a first participant joins.
 
