@@ -253,16 +253,22 @@ class OpenAIImageGenService(ImageGenService):
     def __init__(
         self,
         *,
-        image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"],
-        aiohttp_session: aiohttp.ClientSession,
         api_key: str,
         model: str = "dall-e-3",
+        image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"],
+        aiohttp_session: aiohttp.ClientSession | None = None,
     ):
         super().__init__()
         self._model = model
         self._image_size = image_size
         self._client = AsyncOpenAI(api_key=api_key)
-        self._aiohttp_session = aiohttp_session
+        self._aiohttp_session = aiohttp_session or aiohttp.ClientSession()
+        self._close_aiohttp_session = aiohttp_session is None
+
+    async def cleanup(self):
+        await super().cleanup()
+        if self._close_aiohttp_session:
+            await self._aiohttp_session.close()
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating image from prompt: {prompt}")
