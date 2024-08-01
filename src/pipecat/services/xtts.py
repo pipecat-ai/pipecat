@@ -38,21 +38,27 @@ class XTTSService(TTSService):
     def __init__(
             self,
             *,
-            aiohttp_session: aiohttp.ClientSession,
             voice_id: str,
             language: str,
             base_url: str,
+            aiohttp_session: aiohttp.ClientSession | None = None,
             **kwargs):
         super().__init__(**kwargs)
 
         self._voice_id = voice_id
         self._language = language
         self._base_url = base_url
-        self._aiohttp_session = aiohttp_session
         self._studio_speakers = requests.get(self._base_url + "/studio_speakers").json()
+        self._aiohttp_session = aiohttp_session or aiohttp.ClientSession()
+        self._close_aiohttp_session = aiohttp_session is None
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    async def cleanup(self):
+        await super().cleanup()
+        if self._close_aiohttp_session:
+            await self._aiohttp_session.close()
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
