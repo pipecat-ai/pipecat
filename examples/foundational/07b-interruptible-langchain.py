@@ -47,7 +47,8 @@ def get_session_history(session_id: str) -> BaseChatMessageHistory:
     return message_store[session_id]
 
 
-async def main(room_url: str, token):
+async def main():
+    (room_url, token) = await configure()
     async with aiohttp.ClientSession() as session:
         transport = DailyTransport(
             room_url,
@@ -121,5 +122,4 @@ async def main(room_url: str, token):
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url, token))
+    asyncio.run(main())

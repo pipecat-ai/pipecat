@@ -35,7 +35,9 @@ class TranscriptionLogger(FrameProcessor):
             print(f"Transcription: {frame.text}")
 
 
-async def main(room_url: str):
+async def main():
+    (room_url, _) = await configure()
+
     transport = DailyTransport(room_url, None, "Transcription bot",
                                DailyParams(audio_in_enabled=True))
 
@@ -53,5 +55,4 @@ async def main(room_url: str):
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url))
+    asyncio.run(main())

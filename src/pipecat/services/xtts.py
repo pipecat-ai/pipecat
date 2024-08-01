@@ -6,14 +6,12 @@
 
 import aiohttp
 
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Dict
 
-from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame
+from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, StartFrame
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
-
-import requests
 
 import numpy as np
 
@@ -48,12 +46,24 @@ class XTTSService(TTSService):
         self._voice_id = voice_id
         self._language = language
         self._base_url = base_url
-        self._studio_speakers = requests.get(self._base_url + "/studio_speakers").json()
+        self._studio_speakers: Dict[str, Any] | None = None
         self._aiohttp_session = aiohttp_session or aiohttp.ClientSession()
         self._close_aiohttp_session = aiohttp_session is None
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        async with self._aiohttp_session.get(self._base_url + "/studio_speakers") as r:
+            if r.status != 200:
+                text = await r.text()
+                logger.error(
+                    f"{self} error getting studio speakers (status: {r.status}, error: {text})")
+                await self.push_error(
+                    ErrorFrame(f"Error error getting studio speakers (status: {r.status}, error: {text})"))
+                return
+            self._studio_speakers = await r.json()
 
     async def cleanup(self):
         await super().cleanup()
@@ -66,6 +76,11 @@ class XTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
+
+        if not self._studio_speakers:
+            logger.error(f"{self} no studio speakers available")
+            return
+
         embeddings = self._studio_speakers[self._voice_id]
 
         url = self._base_url + "/tts_stream"
