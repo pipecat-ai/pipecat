@@ -46,10 +46,16 @@ This project is a FastAPI-based chatbot that integrates with Twilio to handle We
 
 ## Configure Twilio URLs
 
-1. **Update the Twilio Webhook**:
+1. **Start ngrok**:
+    In a new terminal, start ngrok to tunnel the local server:
+    ```sh
+    ngrok http 8765
+    ```
+
+2. **Update the Twilio Webhook**:
     Copy the ngrok URL and update your Twilio phone number webhook URL to `http://<ngrok_url>/start_call`.
 
-2. **Update the streams.xml**:
+3. **Update the streams.xml**:
     Copy the ngrok URL and update templates/streams.xml with `wss://<ngrok_url>/ws`.
 
 ## Running the Application
@@ -61,11 +67,6 @@ This project is a FastAPI-based chatbot that integrates with Twilio to handle We
     python server.py
     ```
 
-2. **Start ngrok**:
-    In a new terminal, start ngrok to tunnel the local server:
-    ```sh
-    ngrok http 8765
-    ```
 ### Using Docker
 
 1. **Build the Docker image**:

@@ -175,8 +175,8 @@ class AzureImageGenServiceREST(ImageGenService):
         api_key: str,
         endpoint: str,
         model: str,
+        aiohttp_session: aiohttp.ClientSession,
         api_version="2023-06-01-preview",
-        aiohttp_session: aiohttp.ClientSession | None = None,
     ):
         super().__init__()
 
@@ -185,13 +185,7 @@ class AzureImageGenServiceREST(ImageGenService):
         self._api_version = api_version
         self._model = model
         self._image_size = image_size
-        self._aiohttp_session = aiohttp_session or aiohttp.ClientSession()
-        self._close_aiohttp_session = aiohttp_session is None
-
-    async def cleanup(self):
-        await super().cleanup()
-        if self._close_aiohttp_session:
-            await self._aiohttp_session.close()
+        self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         url = f"{self._azure_endpoint}openai/images/generations:submit?api-version={self._api_version}"

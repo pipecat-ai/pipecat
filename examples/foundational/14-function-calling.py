@@ -44,8 +44,10 @@ async def fetch_weather_from_api(llm, args):
     return {"conditions": "nice", "temperature": "75"}
 
 
-async def main(room_url: str, token):
+async def main():
     async with aiohttp.ClientSession() as session:
+        (room_url, token) = await configure(session)
+
         transport = DailyTransport(
             room_url,
             token,
@@ -124,7 +126,7 @@ async def main(room_url: str, token):
 
         task = PipelineTask(pipeline)
 
-        @ transport.event_handler("on_first_participant_joined")
+        @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
@@ -134,7 +136,5 @@ async def main(room_url: str, token):
 
         await runner.run(task)
 
-
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url, token))
+    asyncio.run(main())

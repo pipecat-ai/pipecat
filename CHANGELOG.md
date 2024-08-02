@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Improved `EndFrame` and `CancelFrame` handling. `EndFrame` should end things
+  gracefully while a `CancelFrame` should cancel all running tasks as soon as
+  possible.
+
+- Fixed an issue in `AIService` that would cause a yielded `None` value to be
+  processed.
+
 - RTVI's `bot-ready` message is now sent when the RTVI pipeline is ready and
   a first participant joins.
 
@@ -34,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed a `BaseInputTransport` issue that was causing start/stop interruptions
   incoming frames to not cancel tasks and be processed properly.
+
+### Other
+
+- Remove `requests` library usage.
+
+- Cleanup examples and use `DailyRESTHelper`.
 
 ## [0.0.39] - 2024-07-23
 

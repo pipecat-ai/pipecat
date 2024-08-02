@@ -71,7 +71,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
-        self._server_task.cancel()
+        self._stop_server_event.set()
         await self._server_task
 
     async def _server_task_handler(self):

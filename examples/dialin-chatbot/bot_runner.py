@@ -6,14 +6,26 @@ provisioning a room and starting a Pipecat bot in response.
 
 Refer to README for more information.
 """
+
+
+import aiohttp
 import os
 import argparse
 import subprocess
-from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomObject, DailyRoomProperties, DailyRoomSipParams, DailyRoomParams
+
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from twilio.twiml.voice_response import VoiceResponse
+
+from pipecat.transports.services.helpers.daily_rest import (
+    DailyRESTHelper,
+    DailyRoomObject,
+    DailyRoomProperties,
+    DailyRoomSipParams,
+    DailyRoomParams)
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
@@ -25,14 +37,23 @@ MAX_SESSION_TIME = 5 * 60  # 5 minutes
 REQUIRED_ENV_VARS = ['OPENAI_API_KEY', 'DAILY_API_KEY',
                      'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']
 
-daily_rest_helper = DailyRESTHelper(
-    os.getenv("DAILY_API_KEY", ""),
-    os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'))
-
+daily_helpers = {}
 
 # ----------------- API ----------------- #
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    aiohttp_session = aiohttp.ClientSession()
+    daily_helpers["rest"] = DailyRESTHelper(
+        daily_api_key=os.getenv("DAILY_API_KEY", ""),
+        daily_api_url=os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'),
+        aiohttp_session=aiohttp_session
+    )
+    yield
+    await aiohttp_session.close()
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,7 +74,7 @@ action using the Twilio Client library.
 """
 
 
-def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
+async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     if not room_url:
         params = DailyRoomParams(
             properties=DailyRoomProperties(
@@ -68,14 +89,13 @@ def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
         )
 
         print(f"Creating new room...")
-        room: DailyRoomObject = daily_rest_helper.create_room(params=params)
+        room: DailyRoomObject = await daily_helpers["rest"].create_room(params=params)
 
     else:
         # Check passed room URL exist (we assume that it already has a sip set up!)
         try:
             print(f"Joining existing room: {room_url}")
-            room: DailyRoomObject = daily_rest_helper.get_room_from_url(
-                room_url)
+            room: DailyRoomObject = await daily_helpers["rest"].get_room_from_url(room_url)
         except Exception:
             raise HTTPException(
                 status_code=500, detail=f"Room not found: {room_url}")
@@ -83,7 +103,7 @@ def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     print(f"Daily room: {room.url} {room.config.sip_endpoint}")
 
     # Give the agent a token to join the session
-    token = daily_rest_helper.get_token(room.url, MAX_SESSION_TIME)
+    token = await daily_helpers["rest"].get_token(room.url, MAX_SESSION_TIME)
 
     if not room or not token:
         raise HTTPException(
@@ -92,11 +112,11 @@ def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
     if vendor == "daily":
-        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {
-            callId} -d {callDomain}"
+        bot_proc = f"python3 - m bot_daily - u {room.url} - t {token} - i {
+            callId} - d {callDomain}"
     else:
-        bot_proc = f"python3 -m bot_twilio -u {room.url} -t {
-            token} -i {callId} -s {room.config.sip_endpoint}"
+        bot_proc = f"python3 - m bot_twilio - u {room.url} - t {
+            token} - i {callId} - s {room.config.sip_endpoint}"
 
     try:
         subprocess.Popen(
@@ -140,8 +160,7 @@ async def twilio_start_bot(request: Request):
 
     # create room and tell the bot to join the created room
     # note: Twilio does not require a callDomain
-    room: DailyRoomObject = _create_daily_room(
-        room_url, callId, None, "twilio")
+    room: DailyRoomObject = await _create_daily_room(room_url, callId, None, "twilio")
 
     print(f"Put Twilio on hold...")
     # We have the room and the SIP URI,
@@ -178,8 +197,7 @@ async def daily_start_bot(request: Request) -> JSONResponse:
             detail="Missing properties 'callId' or 'callDomain'")
 
     print(f"CallId: {callId}, CallDomain: {callDomain}")
-    room: DailyRoomObject = _create_daily_room(
-        room_url, callId, callDomain, "daily")
+    room: DailyRoomObject = await _create_daily_room(room_url, callId, callDomain, "daily")
 
     # Grab a token for the user to join with
     return JSONResponse({

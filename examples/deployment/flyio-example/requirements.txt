@@ -1,6 +1,5 @@
 pipecat-ai[daily,openai,silero]
 fastapi
 uvicorn
-requests
 python-dotenv
 loguru

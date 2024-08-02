@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import aiohttp
 import asyncio
 import sys
 
@@ -23,32 +24,34 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def main(room_url, token):
-    transport = DailyTransport(
-        room_url, token, "Test",
-        DailyParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            camera_out_enabled=True,
-            camera_out_is_live=True,
-            camera_out_width=1280,
-            camera_out_height=720
+async def main():
+    async with aiohttp.ClientSession() as session:
+        (room_url, token) = await configure(session)
+
+        transport = DailyTransport(
+            room_url, token, "Test",
+            DailyParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                camera_out_enabled=True,
+                camera_out_is_live=True,
+                camera_out_width=1280,
+                camera_out_height=720
+            )
         )
-    )
 
-    @transport.event_handler("on_first_participant_joined")
-    async def on_first_participant_joined(transport, participant):
-        transport.capture_participant_video(participant["id"])
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            transport.capture_participant_video(participant["id"])
 
-    pipeline = Pipeline([transport.input(), transport.output()])
+        pipeline = Pipeline([transport.input(), transport.output()])
 
-    runner = PipelineRunner()
+        runner = PipelineRunner()
 
-    task = PipelineTask(pipeline)
+        task = PipelineTask(pipeline)
 
-    await runner.run(task)
+        await runner.run(task)
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url, token))
+    asyncio.run(main())

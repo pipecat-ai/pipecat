@@ -22,8 +22,10 @@ logger = logging.getLogger("pipecat")
 logger.setLevel(logging.DEBUG)
 
 
-async def main(room_url: str):
+async def main():
     async with aiohttp.ClientSession() as session:
+        (room_url, _) = await configure(session)
+
         transport = DailyTransport(
             room_url,
             None,
@@ -144,5 +146,4 @@ async def main(room_url: str):
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url))
+    asyncio.run(main())
