@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import aiohttp
 import asyncio
 import sys
 
@@ -36,22 +37,23 @@ class TranscriptionLogger(FrameProcessor):
 
 
 async def main():
-    (room_url, _) = await configure()
+    async with aiohttp.ClientSession() as session:
+        (room_url, _) = await configure(session)
 
-    transport = DailyTransport(room_url, None, "Transcription bot",
-                               DailyParams(audio_in_enabled=True))
+        transport = DailyTransport(room_url, None, "Transcription bot",
+                                   DailyParams(audio_in_enabled=True))
 
-    stt = WhisperSTTService()
+        stt = WhisperSTTService()
 
-    tl = TranscriptionLogger()
+        tl = TranscriptionLogger()
 
-    pipeline = Pipeline([transport.input(), stt, tl])
+        pipeline = Pipeline([transport.input(), stt, tl])
 
-    task = PipelineTask(pipeline)
+        task = PipelineTask(pipeline)
 
-    runner = PipelineRunner()
+        runner = PipelineRunner()
 
-    await runner.run(task)
+        await runner.run(task)
 
 
 if __name__ == "__main__":

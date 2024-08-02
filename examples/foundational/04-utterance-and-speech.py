@@ -31,8 +31,9 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def main():
-    (room_url, _) = await configure()
     async with aiohttp.ClientSession() as session:
+        (room_url, _) = await configure(session)
+
         transport = DailyTransport(room_url, None, "Static And Dynamic Speech")
 
         meeting = TransportServiceOutput(transport, mic_enabled=True)

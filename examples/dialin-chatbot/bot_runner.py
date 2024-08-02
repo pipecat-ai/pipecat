@@ -7,9 +7,13 @@ provisioning a room and starting a Pipecat bot in response.
 Refer to README for more information.
 """
 
+
+import aiohttp
 import os
 import argparse
 import subprocess
+
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,14 +37,23 @@ MAX_SESSION_TIME = 5 * 60  # 5 minutes
 REQUIRED_ENV_VARS = ['OPENAI_API_KEY', 'DAILY_API_KEY',
                      'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']
 
-daily_rest_helper = DailyRESTHelper(
-    os.getenv("DAILY_API_KEY", ""),
-    os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'))
-
+daily_helpers = {}
 
 # ----------------- API ----------------- #
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    aiohttp_session = aiohttp.ClientSession()
+    daily_helpers["rest"] = DailyRESTHelper(
+        daily_api_key=os.getenv("DAILY_API_KEY", ""),
+        daily_api_url=os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'),
+        aiohttp_session=aiohttp_session
+    )
+    yield
+    await aiohttp_session.close()
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -76,13 +89,13 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
         )
 
         print(f"Creating new room...")
-        room: DailyRoomObject = await daily_rest_helper.create_room(params=params)
+        room: DailyRoomObject = await daily_helpers["rest"].create_room(params=params)
 
     else:
         # Check passed room URL exist (we assume that it already has a sip set up!)
         try:
             print(f"Joining existing room: {room_url}")
-            room: DailyRoomObject = await daily_rest_helper.get_room_from_url(room_url)
+            room: DailyRoomObject = await daily_helpers["rest"].get_room_from_url(room_url)
         except Exception:
             raise HTTPException(
                 status_code=500, detail=f"Room not found: {room_url}")
@@ -90,7 +103,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     print(f"Daily room: {room.url} {room.config.sip_endpoint}")
 
     # Give the agent a token to join the session
-    token = await daily_rest_helper.get_token(room.url, MAX_SESSION_TIME)
+    token = await daily_helpers["rest"].get_token(room.url, MAX_SESSION_TIME)
 
     if not room or not token:
         raise HTTPException(

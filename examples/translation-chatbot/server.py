@@ -4,10 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import aiohttp
 import os
 import argparse
 import subprocess
-import atexit
+
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,9 +22,7 @@ MAX_BOTS_PER_ROOM = 1
 # Bot sub-process dict for status reporting and concurrency control
 bot_procs = {}
 
-daily_rest_helper = DailyRESTHelper(
-    os.getenv("DAILY_API_KEY", ""),
-    os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'))
+daily_helpers = {}
 
 
 def cleanup():
@@ -33,10 +33,19 @@ def cleanup():
         proc.wait()
 
 
-atexit.register(cleanup)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    aiohttp_session = aiohttp.ClientSession()
+    daily_helpers["rest"] = DailyRESTHelper(
+        daily_api_key=os.getenv("DAILY_API_KEY", ""),
+        daily_api_url=os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'),
+        aiohttp_session=aiohttp_session
+    )
+    yield
+    await aiohttp_session.close()
+    cleanup()
 
-
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,7 +59,7 @@ app.add_middleware(
 @app.get("/start")
 async def start_agent(request: Request):
     print(f"!!! Creating room")
-    room = await daily_rest_helper.create_room(DailyRoomParams())
+    room = await daily_helpers["rest"].create_room(DailyRoomParams())
     print(f"!!! Room URL: {room.url}")
     # Ensure the room property is present
     if not room.url:
@@ -66,7 +75,7 @@ async def start_agent(request: Request):
             status_code=500, detail=f"Max bot limited reach for room: {room.url}")
 
     # Get the token for the room
-    token = await daily_rest_helper.get_token(room.url)
+    token = await daily_helpers["rest"].get_token(room.url)
 
     if not token:
         raise HTTPException(
