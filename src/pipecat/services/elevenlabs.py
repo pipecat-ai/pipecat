@@ -21,24 +21,18 @@ class ElevenLabsTTSService(TTSService):
             *,
             api_key: str,
             voice_id: str,
+            aiohttp_session: aiohttp.ClientSession,
             model: str = "eleven_turbo_v2",
-            aiohttp_session: aiohttp.ClientSession | None = None,
             **kwargs):
         super().__init__(**kwargs)
 
         self._api_key = api_key
         self._voice_id = voice_id
         self._model = model
-        self._aiohttp_session = aiohttp_session or aiohttp.ClientSession()
-        self._close_aiohttp_session = aiohttp_session is None
+        self._aiohttp_session = aiohttp_session
 
     def can_generate_metrics(self) -> bool:
         return True
-
-    async def cleanup(self):
-        await super().cleanup()
-        if self._close_aiohttp_session:
-            await self._aiohttp_session.close()
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
