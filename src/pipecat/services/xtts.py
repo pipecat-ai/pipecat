@@ -39,7 +39,7 @@ class XTTSService(TTSService):
             voice_id: str,
             language: str,
             base_url: str,
-            aiohttp_session: aiohttp.ClientSession | None = None,
+            aiohttp_session: aiohttp.ClientSession,
             **kwargs):
         super().__init__(**kwargs)
 
@@ -47,8 +47,7 @@ class XTTSService(TTSService):
         self._language = language
         self._base_url = base_url
         self._studio_speakers: Dict[str, Any] | None = None
-        self._aiohttp_session = aiohttp_session or aiohttp.ClientSession()
-        self._close_aiohttp_session = aiohttp_session is None
+        self._aiohttp_session = aiohttp_session
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -64,11 +63,6 @@ class XTTSService(TTSService):
                     ErrorFrame(f"Error error getting studio speakers (status: {r.status}, error: {text})"))
                 return
             self._studio_speakers = await r.json()
-
-    async def cleanup(self):
-        await super().cleanup()
-        if self._close_aiohttp_session:
-            await self._aiohttp_session.close()
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
