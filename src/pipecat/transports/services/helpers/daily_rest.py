@@ -62,24 +62,26 @@ class DailyRoomObject(BaseModel):
 
 class DailyRESTHelper:
     def __init__(self,
+                 *,
                  daily_api_key: str,
-                 daily_api_url: str = "https://api.daily.co/v1"):
+                 daily_api_url: str = "https://api.daily.co/v1",
+                 aiohttp_session: aiohttp.ClientSession):
         self.daily_api_key = daily_api_key
         self.daily_api_url = daily_api_url
+        self.aiohttp_session = aiohttp_session
 
     def _get_name_from_url(self, room_url: str) -> str:
         return urlparse(room_url).path[1:]
 
     async def create_room(self, params: DailyRoomParams) -> DailyRoomObject:
-        async with aiohttp.ClientSession() as session:
-            headers = {"Authorization": f"Bearer {self.daily_api_key}"}
-            json = {**params.model_dump(exclude_none=True)}
-            async with session.post(f"{self.daily_api_url}/rooms", headers=headers, json=json) as r:
-                if r.status != 200:
-                    text = await r.text()
-                    raise Exception(f"Unable to create room: {text}")
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        json = {**params.model_dump(exclude_none=True)}
+        async with self.aiohttp_session.post(f"{self.daily_api_url}/rooms", headers=headers, json=json) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Unable to create room: {text}")
 
-                data = await r.json()
+            data = await r.json()
 
         try:
             room = DailyRoomObject(**data)
@@ -89,17 +91,17 @@ class DailyRESTHelper:
         return room
 
     async def _get_room_from_name(self, room_name: str) -> DailyRoomObject:
-        async with aiohttp.ClientSession() as session:
-            headers = {"Authorization": f"Bearer {self.daily_api_key}"}
-            async with session.get(f"{self.daily_api_url}/rooms/{room_name}", headers=headers) as r:
-                if r.status != 200:
-                    raise Exception(f"Room not found: {room_name}")
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        async with self.aiohttp_session.get(f"{self.daily_api_url}/rooms/{room_name}", headers=headers) as r:
+            if r.status != 200:
+                raise Exception(f"Room not found: {room_name}")
 
-                data = await r.json()
-            try:
-                room = DailyRoomObject(**data)
-            except ValidationError as e:
-                raise Exception(f"Invalid response: {e}")
+            data = await r.json()
+
+        try:
+            room = DailyRoomObject(**data)
+        except ValidationError as e:
+            raise Exception(f"Invalid response: {e}")
 
         return room
 
@@ -120,21 +122,19 @@ class DailyRESTHelper:
 
         room_name = self._get_name_from_url(room_url)
 
-        async with aiohttp.ClientSession() as session:
-            headers = {"Authorization": f"Bearer {self.daily_api_key}"}
-            json = {
-                "properties": {
-                    "room_name": room_name,
-                    "is_owner": owner,
-                    "exp": expiration
-                }
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        json = {
+            "properties": {
+                "room_name": room_name,
+                "is_owner": owner,
+                "exp": expiration
             }
-            async with session.post(f"{self.daily_api_url}/meeting-tokens", headers=headers, json=json) as r:
-                if r.status != 200:
-                    text = await r.text()
-                    raise Exception(f"Failed to create meeting token: {r.status} {text}")
+        }
+        async with self.aiohttp_session.post(f"{self.daily_api_url}/meeting-tokens", headers=headers, json=json) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Failed to create meeting token: {r.status} {text}")
 
-                data = await r.json()
-                token: str = data["token"]
+            data = await r.json()
 
-        return token
+        return data["token"]

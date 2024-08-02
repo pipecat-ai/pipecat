@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import aiohttp
 import asyncio
 import os
 import sys
@@ -31,62 +32,63 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def main():
-    (room_url, token) = await configure()
+    async with aiohttp.ClientSession() as session:
+        (room_url, token) = await configure(session)
 
-    transport = DailyTransport(
-        room_url,
-        token,
-        "Respond bot",
-        DailyParams(
-            audio_out_enabled=True,
-            audio_out_sample_rate=24000,
-            transcription_enabled=True,
-            vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer()
+        transport = DailyTransport(
+            room_url,
+            token,
+            "Respond bot",
+            DailyParams(
+                audio_out_enabled=True,
+                audio_out_sample_rate=24000,
+                transcription_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer()
+            )
         )
-    )
 
-    tts = OpenAITTSService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        voice="alloy"
-    )
+        tts = OpenAITTSService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            voice="alloy"
+        )
 
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o")
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="gpt-4o")
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
-        },
-    ]
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            },
+        ]
 
-    tma_in = LLMUserResponseAggregator(messages)
-    tma_out = LLMAssistantResponseAggregator(messages)
+        tma_in = LLMUserResponseAggregator(messages)
+        tma_out = LLMAssistantResponseAggregator(messages)
 
-    pipeline = Pipeline([
-        transport.input(),   # Transport user input
-        tma_in,              # User responses
-        llm,                 # LLM
-        tts,                 # TTS
-        transport.output(),  # Transport bot output
-        tma_out              # Assistant spoken responses
-    ])
+        pipeline = Pipeline([
+            transport.input(),   # Transport user input
+            tma_in,              # User responses
+            llm,                 # LLM
+            tts,                 # TTS
+            transport.output(),  # Transport bot output
+            tma_out              # Assistant spoken responses
+        ])
 
-    task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
-    @transport.event_handler("on_first_participant_joined")
-    async def on_first_participant_joined(transport, participant):
-        transport.capture_participant_transcription(participant["id"])
-        # Kick off the conversation.
-        messages.append(
-            {"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([LLMMessagesFrame(messages)])
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
+            # Kick off the conversation.
+            messages.append(
+                {"role": "system", "content": "Please introduce yourself to the user."})
+            await task.queue_frames([LLMMessagesFrame(messages)])
 
-    runner = PipelineRunner()
+        runner = PipelineRunner()
 
-    await runner.run(task)
+        await runner.run(task)
 
 
 if __name__ == "__main__":

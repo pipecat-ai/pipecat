@@ -23,9 +23,9 @@ logger.setLevel(logging.DEBUG)
 
 
 async def main():
-    (room_url, _) = await configure()
-
     async with aiohttp.ClientSession() as session:
+        (room_url, _) = await configure(session)
+
         transport = DailyTransport(
             room_url,
             None,

@@ -45,9 +45,9 @@ async def fetch_weather_from_api(llm, args):
 
 
 async def main():
-    (room_url, token) = await configure()
-
     async with aiohttp.ClientSession() as session:
+        (room_url, token) = await configure(session)
+
         transport = DailyTransport(
             room_url,
             token,

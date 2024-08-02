@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import aiohttp
 import asyncio
 import os
 import sys
@@ -89,57 +90,58 @@ class TranslationSubtitles(FrameProcessor):
 
 
 async def main():
-    (room_url, token) = await configure()
+    async with aiohttp.ClientSession() as session:
+        (room_url, token) = await configure(session)
 
-    transport = DailyTransport(
-        room_url,
-        token,
-        "Translator",
-        DailyParams(
-            audio_out_enabled=True,
-            transcription_enabled=True,
-            transcription_settings=DailyTranscriptionSettings(extra={
-                "interim_results": False
-            })
+        transport = DailyTransport(
+            room_url,
+            token,
+            "Translator",
+            DailyParams(
+                audio_out_enabled=True,
+                transcription_enabled=True,
+                transcription_settings=DailyTranscriptionSettings(extra={
+                    "interim_results": False
+                })
+            )
         )
-    )
 
-    tts = AzureTTSService(
-        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-        region=os.getenv("AZURE_SPEECH_REGION"),
-        voice="es-ES-AlvaroNeural",
-    )
+        tts = AzureTTSService(
+            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+            region=os.getenv("AZURE_SPEECH_REGION"),
+            voice="es-ES-AlvaroNeural",
+        )
 
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o"
-    )
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="gpt-4o"
+        )
 
-    sa = SentenceAggregator()
-    tp = TranslationProcessor("Spanish")
-    lfra = LLMFullResponseAggregator()
-    ts = TranslationSubtitles("spanish")
+        sa = SentenceAggregator()
+        tp = TranslationProcessor("Spanish")
+        lfra = LLMFullResponseAggregator()
+        ts = TranslationSubtitles("spanish")
 
-    pipeline = Pipeline([
-        transport.input(),
-        sa,
-        tp,
-        llm,
-        lfra,
-        ts,
-        tts,
-        transport.output()
-    ])
+        pipeline = Pipeline([
+            transport.input(),
+            sa,
+            tp,
+            llm,
+            lfra,
+            ts,
+            tts,
+            transport.output()
+        ])
 
-    task = PipelineTask(pipeline)
+        task = PipelineTask(pipeline)
 
-    @transport.event_handler("on_first_participant_joined")
-    async def on_first_participant_joined(transport, participant):
-        transport.capture_participant_transcription(participant["id"])
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
 
-    runner = PipelineRunner()
+        runner = PipelineRunner()
 
-    await runner.run(task)
+        await runner.run(task)
 
 
 if __name__ == "__main__":
