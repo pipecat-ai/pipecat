@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import aiohttp
 import asyncio
 import os
 import sys
@@ -36,23 +37,25 @@ class TranscriptionLogger(FrameProcessor):
             print(f"Transcription: {frame.text}")
 
 
-async def main(room_url: str):
-    transport = DailyTransport(room_url, None, "Transcription bot",
-                               DailyParams(audio_in_enabled=True))
+async def main():
+    async with aiohttp.ClientSession() as session:
+        (room_url, _) = await configure(session)
 
-    stt = DeepgramSTTService(os.getenv("DEEPGRAM_API_KEY"))
+        transport = DailyTransport(room_url, None, "Transcription bot",
+                                   DailyParams(audio_in_enabled=True))
 
-    tl = TranscriptionLogger()
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    pipeline = Pipeline([transport.input(), stt, tl])
+        tl = TranscriptionLogger()
 
-    task = PipelineTask(pipeline)
+        pipeline = Pipeline([transport.input(), stt, tl])
 
-    runner = PipelineRunner()
+        task = PipelineTask(pipeline)
 
-    await runner.run(task)
+        runner = PipelineRunner()
+
+        await runner.run(task)
 
 
 if __name__ == "__main__":
-    (url, token) = configure()
-    asyncio.run(main(url))
+    asyncio.run(main())

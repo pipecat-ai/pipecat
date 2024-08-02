@@ -1,13 +1,22 @@
-import os
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+import aiohttp
 import argparse
 import subprocess
-import requests
+import os
 
-from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomObject, DailyRoomProperties, DailyRoomParams
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from pipecat.transports.services.helpers.daily_rest import (
+    DailyRESTHelper, DailyRoomObject, DailyRoomProperties, DailyRoomParams)
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
@@ -32,14 +41,23 @@ FLY_HEADERS = {
     'Content-Type': 'application/json'
 }
 
-daily_rest_helper = DailyRESTHelper(
-    os.getenv("DAILY_API_KEY", ""),
-    os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'))
+daily_helpers = {}
 
 
 # ----------------- API ----------------- #
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    aiohttp_session = aiohttp.ClientSession()
+    daily_helpers["rest"] = DailyRESTHelper(
+        daily_api_key=os.getenv("DAILY_API_KEY", ""),
+        daily_api_url=os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'),
+        aiohttp_session=aiohttp_session
+    )
+    yield
+    await aiohttp_session.close()
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,53 +70,52 @@ app.add_middleware(
 # ----------------- Main ----------------- #
 
 
-def spawn_fly_machine(room_url: str, token: str):
-    # Use the same image as the bot runner
-    res = requests.get(f"{FLY_API_HOST}/apps/{FLY_APP_NAME}/machines", headers=FLY_HEADERS)
-    if res.status_code != 200:
-        raise Exception(f"Unable to get machine info from Fly: {res.text}")
-    image = res.json()[0]['config']['image']
+async def spawn_fly_machine(room_url: str, token: str):
+    async with aiohttp.ClientSession() as session:
+        # Use the same image as the bot runner
+        async with session.get(f"{FLY_API_HOST}/apps/{FLY_APP_NAME}/machines", headers=FLY_HEADERS) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Unable to get machine info from Fly: {text}")
 
-    # Machine configuration
-    cmd = f"python3 bot.py -u {room_url} -t {token}"
-    cmd = cmd.split()
-    worker_props = {
-        "config": {
-            "image": image,
-            "auto_destroy": True,
-            "init": {
-                "cmd": cmd
+            data = await r.json()
+            image = data[0]['config']['image']
+
+        # Machine configuration
+        cmd = f"python3 bot.py -u {room_url} -t {token}"
+        cmd = cmd.split()
+        worker_props = {
+            "config": {
+                "image": image,
+                "auto_destroy": True,
+                "init": {
+                    "cmd": cmd
+                },
+                "restart": {
+                    "policy": "no"
+                },
+                "guest": {
+                    "cpu_kind": "shared",
+                    "cpus": 1,
+                    "memory_mb": 1024
+                }
             },
-            "restart": {
-                "policy": "no"
-            },
-            "guest": {
-                "cpu_kind": "shared",
-                "cpus": 1,
-                "memory_mb": 1024
-            }
-        },
+        }
 
-    }
+        # Spawn a new machine instance
+        async with session.post(f"{FLY_API_HOST}/apps/{FLY_APP_NAME}/machines", headers=FLY_HEADERS, json=worker_props) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Problem starting a bot worker: {text}")
 
-    # Spawn a new machine instance
-    res = requests.post(
-        f"{FLY_API_HOST}/apps/{FLY_APP_NAME}/machines",
-        headers=FLY_HEADERS,
-        json=worker_props)
+            data = await r.json()
+            # Wait for the machine to enter the started state
+            vm_id = data['id']
 
-    if res.status_code != 200:
-        raise Exception(f"Problem starting a bot worker: {res.text}")
-
-    # Wait for the machine to enter the started state
-    vm_id = res.json()['id']
-
-    res = requests.get(
-        f"{FLY_API_HOST}/apps/{FLY_APP_NAME}/machines/{vm_id}/wait?state=started",
-        headers=FLY_HEADERS)
-
-    if res.status_code != 200:
-        raise Exception(f"Bot was unable to enter started state: {res.text}")
+        async with session.get(f"{FLY_API_HOST}/apps/{FLY_APP_NAME}/machines/{vm_id}/wait?state=started", headers=FLY_HEADERS) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Bot was unable to enter started state: {text}")
 
     print(f"Machine joined room: {room_url}")
 
@@ -121,7 +138,7 @@ async def start_bot(request: Request) -> JSONResponse:
             properties=DailyRoomProperties()
         )
         try:
-            room: DailyRoomObject = daily_rest_helper.create_room(params=params)
+            room: DailyRoomObject = await daily_helpers["rest"].create_room(params=params)
         except Exception as e:
             raise HTTPException(
                 status_code=500,
@@ -129,13 +146,13 @@ async def start_bot(request: Request) -> JSONResponse:
     else:
         # Check passed room URL exists, we should assume that it already has a sip set up
         try:
-            room: DailyRoomObject = daily_rest_helper.get_room_from_url(room_url)
+            room: DailyRoomObject = await daily_helpers["rest"].get_room_from_url(room_url)
         except Exception:
             raise HTTPException(
                 status_code=500, detail=f"Room not found: {room_url}")
 
     # Give the agent a token to join the session
-    token = daily_rest_helper.get_token(room.url, MAX_SESSION_TIME)
+    token = await daily_helpers["rest"].get_token(room.url, MAX_SESSION_TIME)
 
     if not room or not token:
         raise HTTPException(
@@ -156,13 +173,13 @@ async def start_bot(request: Request) -> JSONResponse:
                 status_code=500, detail=f"Failed to start subprocess: {e}")
     else:
         try:
-            spawn_fly_machine(room.url, token)
+            await spawn_fly_machine(room.url, token)
         except Exception as e:
             raise HTTPException(
                 status_code=500, detail=f"Failed to spawn VM: {e}")
 
     # Grab a token for the user to join with
-    user_token = daily_rest_helper.get_token(room.url, MAX_SESSION_TIME)
+    user_token = await daily_helpers["rest"].get_token(room.url, MAX_SESSION_TIME)
 
     return JSONResponse({
         "room_url": room.url,
@@ -194,6 +211,5 @@ if __name__ == "__main__":
             port=config.port,
             reload=config.reload
         )
-
     except KeyboardInterrupt:
         print("Pipecat runner shutting down...")
