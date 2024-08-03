@@ -7,7 +7,6 @@
 import aiohttp
 import asyncio
 import io
-import time
 
 from PIL import Image
 from typing import AsyncGenerator
@@ -25,6 +24,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncAIService, TTSService, ImageGenService
 from pipecat.services.openai import BaseOpenAILLMService
+from pipecat.utils.time import time_now_iso8601
 
 from loguru import logger
 
@@ -162,7 +162,7 @@ class AzureSTTService(AsyncAIService):
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
-            frame = TranscriptionFrame(event.result.text, "", int(time.time_ns() / 1000000))
+            frame = TranscriptionFrame(event.result.text, "", time_now_iso8601())
             asyncio.run_coroutine_threadsafe(self.queue_frame(frame), self.get_event_loop())
 
 
