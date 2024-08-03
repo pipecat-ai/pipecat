@@ -162,7 +162,7 @@ class AzureSTTService(AsyncAIService):
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
-            frame = TranscriptionFrame(event.result.text, "", int(time.time_ns() / 1000000))
+            frame = TranscriptionFrame(event.result.text, "", str(int(time.time_ns() / 1000000)))
             asyncio.run_coroutine_threadsafe(self.queue_frame(frame), self.get_event_loop())
 
 
