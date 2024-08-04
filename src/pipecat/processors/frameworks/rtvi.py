@@ -97,7 +97,7 @@ class RTVITTSSpeakData(BaseModel):
 
 
 class RTVIMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: Literal["rtvi"] = "rtvi"
     type: str
     id: str
     data: Optional[Dict[str, Any]] = None
@@ -113,7 +113,7 @@ class RTVIResponseData(BaseModel):
 
 
 class RTVIResponse(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: Literal["rtvi"] = "rtvi"
     type: Literal["response"] = "response"
     id: str
     data: RTVIResponseData
@@ -124,7 +124,7 @@ class RTVIErrorData(BaseModel):
 
 
 class RTVIError(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: Literal["rtvi"] = "rtvi"
     type: Literal["error"] = "error"
     data: RTVIErrorData
 
@@ -134,7 +134,7 @@ class RTVILLMContextMessageData(BaseModel):
 
 
 class RTVILLMContextMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: Literal["rtvi"] = "rtvi"
     type: Literal["llm-context"] = "llm-context"
     data: RTVILLMContextMessageData
 
@@ -144,13 +144,13 @@ class RTVITTSTextMessageData(BaseModel):
 
 
 class RTVITTSTextMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: Literal["rtvi"] = "rtvi"
     type: Literal["tts-text"] = "tts-text"
     data: RTVITTSTextMessageData
 
 
 class RTVIBotReady(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: Literal["rtvi"] = "rtvi"
     type: Literal["bot-ready"] = "bot-ready"
 
 
@@ -162,23 +162,23 @@ class RTVITranscriptionMessageData(BaseModel):
 
 
 class RTVITranscriptionMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: Literal["rtvi"] = "rtvi"
     type: Literal["user-transcription"] = "user-transcription"
     data: RTVITranscriptionMessageData
 
 
 class RTVIUserStartedSpeakingMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: Literal["rtvi"] = "rtvi"
     type: Literal["user-started-speaking"] = "user-started-speaking"
 
 
 class RTVIUserStoppedSpeakingMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: Literal["rtvi"] = "rtvi"
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
 
 
 class RTVIJSONCompletion(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: Literal["rtvi"] = "rtvi"
     type: Literal["json-completion"] = "json-completion"
     data: str
 
