@@ -29,6 +29,7 @@ class TransportParams(BaseModel):
     camera_out_framerate: int = 30
     camera_out_color_format: str = "RGB"
     audio_out_enabled: bool = False
+    audio_out_is_live: bool = False
     audio_out_sample_rate: int = 16000
     audio_out_channels: int = 1
     audio_in_enabled: bool = False
