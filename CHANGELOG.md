@@ -51,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Added examples `foundational/18-gstreamer-filesrc.py` and
+  `foundational/18a-gstreamer-videotestsrc.py` that show how to use
+  `GStreamerPipelineSource`
+
 - Remove `requests` library usage.
 
 - Cleanup examples and use `DailyRESTHelper`.
