@@ -203,6 +203,7 @@ class BaseOutputTransport(FrameProcessor):
                 frame = await self._sink_queue.get()
                 if isinstance(frame, AudioRawFrame):
                     await self.write_raw_audio_frames(frame.audio)
+                    await self._internal_push_frame(frame)
                     await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
                 elif isinstance(frame, ImageRawFrame):
                     await self._set_camera_image(frame)
@@ -329,6 +330,7 @@ class BaseOutputTransport(FrameProcessor):
             try:
                 frame = await self._audio_out_queue.get()
                 await self.write_raw_audio_frames(frame.audio)
+                await self._internal_push_frame(frame)
                 await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
             except asyncio.CancelledError:
                 break
