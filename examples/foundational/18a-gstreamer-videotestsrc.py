@@ -6,7 +6,6 @@
 
 import asyncio
 import aiohttp
-import argparse
 import sys
 
 from pipecat.pipeline.pipeline import Pipeline
@@ -43,12 +42,11 @@ async def main():
         )
 
         gst = GStreamerPipelineSource(
-            pipeline="videotestsrc ! capsfilter caps=\"video/x-raw,width=1280,height=720\"",
+            pipeline="videotestsrc ! capsfilter caps=\"video/x-raw,width=1280,height=720,framerate=30/1\"",
             out_params=GStreamerPipelineSource.OutputParams(
                 video_width=1280,
                 video_height=720,
-            )
-        )
+                clock_sync=False))
 
         pipeline = Pipeline([
             gst,                 # GStreamer file source
