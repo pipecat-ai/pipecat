@@ -17,11 +17,6 @@ from loguru import logger
 try:
     from silero_vad import load_silero_vad
     import torch
-    # We don't use torchaudio here, but we need to try importing it because
-    # Silero uses it.
-    import torchaudio
-
-    torch.set_num_threads(1)
 
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
