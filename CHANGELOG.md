@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `GStreamerPipelineSource`. This processor can generate image or
+  audio frames from a GStreamer pipeline (e.g. reading an MP4 file, and RTP
+  stream or anything supported by GStreamer).
+
+- Added `TransportParams.audio_out_is_live`. This flag is False by default and
+  it is useful to indicate we should not synchronize audio with sporadic images.
+
 - Added new `BotStartedSpeakingFrame` and `BotStoppedSpeakingFrame` control
   frames. These frames are pushed upstream and they should wrap
   `BotSpeakingFrame`.
@@ -43,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   incoming frames to not cancel tasks and be processed properly.
 
 ### Other
+
+- Added examples `foundational/18-gstreamer-filesrc.py` and
+  `foundational/18a-gstreamer-videotestsrc.py` that show how to use
+  `GStreamerPipelineSource`
 
 - Remove `requests` library usage.
 

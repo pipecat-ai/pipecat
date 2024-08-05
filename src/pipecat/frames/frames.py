@@ -101,7 +101,7 @@ class UserImageRawFrame(ImageRawFrame):
 class SpriteFrame(Frame):
     """An animated sprite. Will be shown by the transport if the transport's
     camera is enabled. Will play at the framerate specified in the transport's
-    `fps` constructor parameter.
+    `camera_out_framerate` constructor parameter.
 
     """
     images: List[ImageRawFrame]
