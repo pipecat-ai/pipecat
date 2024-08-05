@@ -6,7 +6,7 @@
 
 import asyncio
 
-from openai import BaseModel
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -37,6 +37,7 @@ class GStreamerPipelineSource(FrameProcessor):
         video_height: int = 720
         audio_sample_rate: int = 16000
         audio_channels: int = 1
+        clock_sync: bool = True
 
     def __init__(self, *, pipeline: str, out_params: OutputParams = OutputParams(), **kwargs):
         super().__init__(**kwargs)
@@ -156,7 +157,7 @@ class GStreamerPipelineSource(FrameProcessor):
         audiocapsfilter.set_property("caps", audiocaps)
         appsink_audio = Gst.ElementFactory.make("appsink", None)
         appsink_audio.set_property("emit-signals", True)
-        appsink_audio.set_property("sync", False)
+        appsink_audio.set_property("sync", self._out_params.clock_sync)
         appsink_audio.connect("new-sample", self._appsink_audio_new_sample)
 
         self._player.add(queue_audio)
@@ -189,7 +190,7 @@ class GStreamerPipelineSource(FrameProcessor):
 
         appsink_video = Gst.ElementFactory.make("appsink", None)
         appsink_video.set_property("emit-signals", True)
-        appsink_video.set_property("sync", False)
+        appsink_video.set_property("sync", self._out_params.clock_sync)
         appsink_video.connect("new-sample", self._appsink_video_new_sample)
 
         self._player.add(queue_video)
