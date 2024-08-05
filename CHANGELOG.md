@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `AudioRawFrame`s are not pushed downstream from the base output
+  transport. This allows capturing the exact words the bot says by adding an STT
+  service at the end of the pipeline.
+
 - Added new `GStreamerPipelineSource`. This processor can generate image or
   audio frames from a GStreamer pipeline (e.g. reading an MP4 file, and RTP
   stream or anything supported by GStreamer).
