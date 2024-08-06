@@ -9,7 +9,7 @@ import struct
 
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import AudioRawFrame, Frame
+from pipecat.frames.frames import AudioRawFrame, Frame, MetricsFrame
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -48,7 +48,12 @@ class PlayHTTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-
+        if self.can_generate_metrics() and self.metrics_enabled:
+            characters = {
+                "processor": self.name,
+                "value": len(text),
+            }
+            await self.push_frame(MetricsFrame(characters=[characters]))
         try:
             b = bytearray()
             in_header = True

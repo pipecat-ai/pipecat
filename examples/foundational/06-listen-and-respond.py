@@ -9,14 +9,15 @@ import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import Frame, LLMMessagesFrame, MetricsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.logger import FrameLogger
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
@@ -32,6 +33,14 @@ load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+
+class MetricsLogger(FrameProcessor):
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, MetricsFrame):
+            print(
+                f"!!! MetricsFrame: {frame}, ttfb: {frame.ttfb}, processing: {frame.processing}, tokens: {frame.tokens}, characters: {frame.characters}")
+        await self.push_frame(frame, direction)
 
 
 async def main():
@@ -57,12 +66,22 @@ async def main():
         )
 
         llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+            # api_key=os.getenv("OPENAI_GROQ_API_KEY"),
+            # base_url="https://api.groq.com/openai/v1",
+            # model="mixtral-8x7b-32768"
+
+            # api_key=os.getenv("OPENAI_API_KEY"),
+            # model="gpt-4o-mini"
+
+            api_key=os.getenv("OPENAI_TOGETHER_API_KEY"),
+            base_url="https://api.together.xyz/v1",
+            model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+        )
 
         fl = FrameLogger("!!! after LLM", "red")
         fltts = FrameLogger("@@@ out of tts", "green")
         flend = FrameLogger("### out of the end", "magenta")
+        ml = MetricsLogger()
 
         messages = [
             {
@@ -77,17 +96,20 @@ async def main():
             transport.input(),
             tma_in,
             llm,
-            fl,
             tts,
-            fltts,
+            ml,
             transport.output(),
             tma_out,
-            flend
         ])
 
         task = PipelineTask(pipeline)
+        task = PipelineTask(pipeline, PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+            report_only_initial_ttfb=False,
+        ))
 
-        @transport.event_handler("on_first_participant_joined")
+        @ transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.

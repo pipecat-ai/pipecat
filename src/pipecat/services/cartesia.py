@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     StartFrame,
     EndFrame,
     TextFrame,
+    MetricsFrame,
     LLMFullResponseEndFrame
 )
 from pipecat.services.ai_services import TTSService
@@ -200,6 +201,12 @@ class CartesiaTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
+        if self.can_generate_metrics() and self.metrics_enabled:
+            characters = {
+                "processor": self.name,
+                "value": len(text),
+            }
+            await self.push_frame(MetricsFrame(characters=[characters]))
 
         try:
             if not self._websocket:
