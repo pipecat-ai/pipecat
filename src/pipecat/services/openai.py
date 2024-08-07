@@ -121,6 +121,10 @@ class BaseOpenAILLMService(LLMService):
         return chunks
 
     async def _process_context(self, context: OpenAILLMContext):
+        functions_list = []
+        arguments_list = []
+        tool_id_list = []
+        func_idx = 0
         function_name = ""
         arguments = ""
         tool_call_id = ""
@@ -150,6 +154,14 @@ class BaseOpenAILLMService(LLMService):
                 # yield a frame containing the function name and the arguments.
 
                 tool_call = chunk.choices[0].delta.tool_calls[0]
+                if tool_call.index != func_idx:
+                    functions_list.append(function_name)
+                    arguments_list.append(arguments)
+                    tool_id_list.append(tool_call_id)
+                    function_name = ""
+                    arguments = ""
+                    tool_call_id = ""
+                    func_idx += 1
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
                     tool_call_id = tool_call.id
@@ -165,11 +177,20 @@ class BaseOpenAILLMService(LLMService):
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
         if function_name and arguments:
-            if self.has_function(function_name):
-                await self._handle_function_call(context, tool_call_id, function_name, arguments)
-            else:
-                raise OpenAIUnhandledFunctionException(
-                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
+            # added to the list as last function name and arguments not added to the list
+            functions_list.append(function_name)
+            arguments_list.append(arguments)
+            tool_id_list.append(tool_call_id)
+            for function_name,arguments,tool_id in zip(functions_list,arguments_list,tool_id_list):
+                if self.has_function(function_name):
+                    await self._handle_function_call(context, tool_call_id, function_name, arguments)
+                else:
+                    raise OpenAIUnhandledFunctionException(
+                        f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
+            # re-prompt to get a human answer after all the functions are called
+            await self._process_context(context)
+
+
 
     async def _handle_function_call(
             self,
@@ -206,13 +227,12 @@ class BaseOpenAILLMService(LLMService):
                 "content": result
             })
             context.add_message(tool_result)
-            # re-prompt to get a human answer
-            await self._process_context(context)
+
         elif isinstance(result, list):
             # reduced magic
             for msg in result:
                 context.add_message(msg)
-            await self._process_context(context)
+
         elif isinstance(result, type(None)):
             pass
         else:
