@@ -283,6 +283,7 @@ class BaseOutputTransport(FrameProcessor):
         self._camera_out_start_time = None
         self._camera_out_frame_index = 0
         self._camera_out_frame_duration = 1 / self._params.camera_out_framerate
+        self._camera_out_frame_reset = self._camera_out_frame_duration * 5
         while True:
             try:
                 if self._params.camera_out_is_live:
@@ -304,14 +305,19 @@ class BaseOutputTransport(FrameProcessor):
         # We get the start time as soon as we get the first image.
         if not self._camera_out_start_time:
             self._camera_out_start_time = time.time()
+            self._camera_out_frame_index = 0
 
         # Calculate how much time we need to wait before rendering next image.
-        render_time = self._camera_out_start_time + \
-            self._camera_out_frame_index * self._camera_out_frame_duration
-        time_until_render = render_time - time.time()
-        if time_until_render > 0:
-            await asyncio.sleep(time_until_render)
-        self._camera_out_frame_index += 1
+        real_elapsed_time = time.time() - self._camera_out_start_time
+        real_render_time = self._camera_out_frame_index * self._camera_out_frame_duration
+        delay_time = self._camera_out_frame_duration + real_render_time - real_elapsed_time
+
+        if abs(delay_time) > self._camera_out_frame_reset:
+            self._camera_out_start_time = time.time()
+            self._camera_out_frame_index = 0
+        elif delay_time > 0:
+            await asyncio.sleep(delay_time)
+            self._camera_out_frame_index += 1
 
         # Render image
         await self._draw_image(image)
