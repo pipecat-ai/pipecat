@@ -93,6 +93,7 @@ class AzureTTSService(TTSService):
                 "processor": self.name,
                 "value": len(text),
             }
+            logger.debug(f"{self.name} Characters: {characters['value']}")
             await self.push_frame(MetricsFrame(characters=[characters]))
         await self.start_ttfb_metrics()
 

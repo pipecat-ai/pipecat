@@ -142,6 +142,9 @@ class BaseOpenAILLMService(LLMService):
                         "completion_tokens": chunk.usage.completion_tokens,
                         "total_tokens": chunk.usage.total_tokens
                     }
+                    logger.debug(
+                        f"{self.name} prompt tokens: {tokens['prompt_tokens']}, completion tokens: {tokens['completion_tokens']}")
+
                     await self.push_frame(MetricsFrame(tokens=[tokens]))
 
             if len(chunk.choices) == 0:
@@ -340,6 +343,7 @@ class OpenAITTSService(TTSService):
                 "processor": self.name,
                 "value": len(text),
             }
+            logger.debug(f"{self.name} Characters: {characters['value']}")
             await self.push_frame(MetricsFrame(characters=[characters]))
         try:
             await self.start_ttfb_metrics()

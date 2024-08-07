@@ -53,6 +53,7 @@ class PlayHTTTSService(TTSService):
                 "processor": self.name,
                 "value": len(text),
             }
+            logger.debug(f"{self.name} Characters: {characters['value']}")
             await self.push_frame(MetricsFrame(characters=[characters]))
         try:
             b = bytearray()

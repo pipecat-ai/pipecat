@@ -45,6 +45,7 @@ class ElevenLabsTTSService(TTSService):
                 "processor": self.name,
                 "value": len(text),
             }
+            logger.debug(f"{self.name} Characters: {characters['value']}")
             await self.push_frame(MetricsFrame(characters=[characters]))
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}/stream"
 

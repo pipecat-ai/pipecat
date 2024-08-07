@@ -81,6 +81,7 @@ class RTVIConfig(BaseModel):
     _config_dict: Dict[str, RTVIServiceConfig] = PrivateAttr(default={})
 
     def model_post_init(self, __context: Any) -> None:
+        print(f"model post init")
         self._config_dict = {}
         for c in self.config:
             self._config_dict[c.service] = c
@@ -537,7 +538,11 @@ class RTVIProcessor(FrameProcessor):
             processors.extend(pipeline.processors_with_metrics())
             ttfb = [{"processor": p.name, "value": 0.0} for p in processors]
             processing = [{"processor": p.name, "value": 0.0} for p in processors]
-            await self.push_frame(MetricsFrame(ttfb=ttfb, processing=processing))
+            tokens = [{"processor": p.name, "value": {"prompt_tokens": 0,
+                                                      "completion_tokens": 0,
+                                                      "total_tokens": 0}} for p in processors]
+            characters = [{"processor": p.name, "value": 0} for p in processors]
+            await self.push_frame(MetricsFrame(ttfb=ttfb, processing=processing, tokens=tokens, characters=characters))
 
         self._pipeline = pipeline
 

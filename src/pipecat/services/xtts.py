@@ -75,6 +75,7 @@ class XTTSService(TTSService):
                 "processor": self.name,
                 "value": len(text),
             }
+            logger.debug(f"{self.name} Characters: {characters['value']}")
             await self.push_frame(MetricsFrame(characters=[characters]))
         if not self._studio_speakers:
             logger.error(f"{self} no studio speakers available")
