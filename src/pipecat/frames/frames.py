@@ -276,6 +276,8 @@ class MetricsFrame(SystemFrame):
     """
     ttfb: List[Mapping[str, Any]] | None = None
     processing: List[Mapping[str, Any]] | None = None
+    tokens: List[Mapping[str, Any]] | None = None
+    characters: List[Mapping[str, Any]] | None = None
 
 #
 # Control frames

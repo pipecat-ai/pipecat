@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
+    MetricsFrame,
     StartFrame,
     SystemFrame,
     TranscriptionFrame)
@@ -70,7 +71,13 @@ class DeepgramTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-
+        if self.can_generate_metrics() and self.metrics_enabled:
+            characters = {
+                "processor": self.name,
+                "value": len(text),
+            }
+            logger.debug(f"{self.name} Characters: {characters['value']}")
+            await self.push_frame(MetricsFrame(characters=[characters]))
         base_url = self._base_url
         request_url = f"{base_url}?model={self._voice}&encoding={self._encoding}&container=none&sample_rate={self._sample_rate}"
         headers = {"authorization": f"token {self._api_key}"}

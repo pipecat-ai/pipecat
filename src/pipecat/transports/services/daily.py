@@ -699,6 +699,10 @@ class DailyOutputTransport(BaseOutputTransport):
             metrics["ttfb"] = frame.ttfb
         if frame.processing:
             metrics["processing"] = frame.processing
+        if frame.tokens:
+            metrics["tokens"] = frame.tokens
+        if frame.characters:
+            metrics["characters"] = frame.characters
 
         message = DailyTransportMessageFrame(message={
             "type": "pipecat-metrics",
