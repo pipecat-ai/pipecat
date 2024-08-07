@@ -454,6 +454,8 @@ werkzeug==3.0.3
     # via flask
 yarl==1.9.4
     # via aiohttp
-
+noisereduce==3.0.2
+    # via noisereduce
+    
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools
