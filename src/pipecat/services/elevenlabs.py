@@ -8,7 +8,7 @@ import aiohttp
 
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame
+from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, MetricsFrame
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -40,7 +40,13 @@ class ElevenLabsTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-
+        if self.can_generate_metrics() and self.metrics_enabled:
+            characters = {
+                "processor": self.name,
+                "value": len(text),
+            }
+            logger.debug(f"{self.name} Characters: {characters['value']}")
+            await self.push_frame(MetricsFrame(characters=[characters]))
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}/stream"
 
         payload = {"text": text, "model_id": self._model}

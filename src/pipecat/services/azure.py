@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    MetricsFrame,
     StartFrame,
     SystemFrame,
     TranscriptionFrame,
@@ -87,7 +88,13 @@ class AzureTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-
+        if self.can_generate_metrics() and self.metrics_enabled:
+            characters = {
+                "processor": self.name,
+                "value": len(text),
+            }
+            logger.debug(f"{self.name} Characters: {characters['value']}")
+            await self.push_frame(MetricsFrame(characters=[characters]))
         await self.start_ttfb_metrics()
 
         ssml = (

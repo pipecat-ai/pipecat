@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMModelUpdateFrame,
+    MetricsFrame,
     TextFrame,
     URLImageRawFrame,
     VisionImageRawFrame
@@ -95,6 +96,7 @@ class BaseOpenAILLMService(LLMService):
             messages=messages,
             tools=context.tools,
             tool_choice=context.tool_choice,
+            stream_options={"include_usage": True}
         )
         return chunks
 
@@ -132,6 +134,19 @@ class BaseOpenAILLMService(LLMService):
         )
 
         async for chunk in chunk_stream:
+            if chunk.usage:
+                if self.can_generate_metrics() and self.metrics_enabled:
+                    tokens = {
+                        "processor": self.name,
+                        "prompt_tokens": chunk.usage.prompt_tokens,
+                        "completion_tokens": chunk.usage.completion_tokens,
+                        "total_tokens": chunk.usage.total_tokens
+                    }
+                    logger.debug(
+                        f"{self.name} prompt tokens: {tokens['prompt_tokens']}, completion tokens: {tokens['completion_tokens']}")
+
+                    await self.push_frame(MetricsFrame(tokens=[tokens]))
+
             if len(chunk.choices) == 0:
                 continue
 
@@ -323,7 +338,13 @@ class OpenAITTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-
+        if self.can_generate_metrics() and self.metrics_enabled:
+            characters = {
+                "processor": self.name,
+                "value": len(text),
+            }
+            logger.debug(f"{self.name} Characters: {characters['value']}")
+            await self.push_frame(MetricsFrame(characters=[characters]))
         try:
             await self.start_ttfb_metrics()
 
