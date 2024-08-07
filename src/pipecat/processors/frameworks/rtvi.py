@@ -81,7 +81,6 @@ class RTVIConfig(BaseModel):
     _config_dict: Dict[str, RTVIServiceConfig] = PrivateAttr(default={})
 
     def model_post_init(self, __context: Any) -> None:
-        print(f"model post init")
         self._config_dict = {}
         for c in self.config:
             self._config_dict[c.service] = c

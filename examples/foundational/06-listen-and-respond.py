@@ -66,21 +66,10 @@ async def main():
         )
 
         llm = OpenAILLMService(
-            # api_key=os.getenv("OPENAI_GROQ_API_KEY"),
-            # base_url="https://api.groq.com/openai/v1",
-            # model="mixtral-8x7b-32768"
-
-            # api_key=os.getenv("OPENAI_API_KEY"),
-            # model="gpt-4o-mini"
-
-            api_key=os.getenv("OPENAI_TOGETHER_API_KEY"),
-            base_url="https://api.together.xyz/v1",
-            model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="gpt-4o"
         )
 
-        fl = FrameLogger("!!! after LLM", "red")
-        fltts = FrameLogger("@@@ out of tts", "green")
-        flend = FrameLogger("### out of the end", "magenta")
         ml = MetricsLogger()
 
         messages = [
@@ -109,7 +98,7 @@ async def main():
             report_only_initial_ttfb=False,
         ))
 
-        @ transport.event_handler("on_first_participant_joined")
+        @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
