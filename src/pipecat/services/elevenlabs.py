@@ -40,13 +40,7 @@ class ElevenLabsTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
+
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}/stream"
 
         payload = {"text": text, "model_id": self._model}
@@ -68,6 +62,8 @@ class ElevenLabsTTSService(TTSService):
                 logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
                 yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
                 return
+
+            await self.start_tts_usage_metrics(text)
 
             async for chunk in r.content:
                 if len(chunk) > 0:

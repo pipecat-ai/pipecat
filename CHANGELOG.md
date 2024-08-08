@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `DailyRESTHelper.delete_room_by_name()`.
+
+- Added LLM and TTS usage metrics. Those will be enabled by when
+  `enable_usage_metrics` is True.
+
 - `AudioRawFrame`s are not pushed downstream from the base output
   transport. This allows capturing the exact words the bot says by adding an STT
   service at the end of the pipeline.

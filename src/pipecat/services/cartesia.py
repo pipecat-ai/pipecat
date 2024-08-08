@@ -201,13 +201,6 @@ class CartesiaTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
 
         try:
             if not self._websocket:
@@ -232,6 +225,7 @@ class CartesiaTTSService(TTSService):
             }
             try:
                 await self._websocket.send(json.dumps(msg))
+                await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.exception(f"{self} error sending message: {e}")
                 await self._disconnect()
