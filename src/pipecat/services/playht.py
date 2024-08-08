@@ -48,13 +48,7 @@ class PlayHTTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
+
         try:
             b = bytearray()
             in_header = True
@@ -65,6 +59,8 @@ class PlayHTTTSService(TTSService):
                 text,
                 voice_engine="PlayHT2.0-turbo",
                 options=self._options)
+
+            await self.start_tts_usage_metrics(text)
 
             async for chunk in playht_gen:
                 # skip the RIFF header.

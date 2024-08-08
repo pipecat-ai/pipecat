@@ -71,13 +71,7 @@ class DeepgramTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
+
         base_url = self._base_url
         request_url = f"{base_url}?model={self._voice}&encoding={self._encoding}&container=none&sample_rate={self._sample_rate}"
         headers = {"authorization": f"token {self._api_key}"}
@@ -99,6 +93,8 @@ class DeepgramTTSService(TTSService):
                         f"{self} error getting audio (status: {r.status}, error: {response_text})")
                     yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {response_text})")
                     return
+
+                await self.start_tts_usage_metrics(text)
 
                 async for data in r.content:
                     await self.stop_ttfb_metrics()
