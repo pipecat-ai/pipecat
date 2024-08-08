@@ -138,3 +138,13 @@ class DailyRESTHelper:
             data = await r.json()
 
         return data["token"]
+
+    async def delete_room_by_name(self, room_name: str) -> bool:
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        async with self.aiohttp_session.delete(f"{self.daily_api_url}/rooms/{room_name}", headers=headers) as r:
+            if r.status != 200 and r.status != 404:
+                raise Exception(f"Failed to delete room: {room_name}")
+
+            data = await r.json()
+
+        return True
