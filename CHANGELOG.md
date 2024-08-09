@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ElevenLabsTTSService` now uses `eleven_turbo_v2_5` model by default.
+
 - `BotSpeakingFrame` is now a control frame.
 
 - `StartFrame` is now a control frame similar to `EndFrame`.
