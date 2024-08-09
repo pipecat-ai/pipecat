@@ -22,7 +22,7 @@ class ElevenLabsTTSService(TTSService):
             api_key: str,
             voice_id: str,
             aiohttp_session: aiohttp.ClientSession,
-            model: str = "eleven_turbo_v2",
+            model: str = "eleven_turbo_v2_5",
             **kwargs):
         super().__init__(**kwargs)
 
