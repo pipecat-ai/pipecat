@@ -88,13 +88,7 @@ class AzureTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
+
         await self.start_ttfb_metrics()
 
         ssml = (
@@ -110,6 +104,7 @@ class AzureTTSService(TTSService):
         result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, (ssml))
 
         if result.reason == ResultReason.SynthesizingAudioCompleted:
+            await self.start_tts_usage_metrics(text)
             await self.stop_ttfb_metrics()
             # Azure always sends a 44-byte header. Strip it off.
             yield AudioRawFrame(audio=result.audio_data[44:], sample_rate=16000, num_channels=1)
