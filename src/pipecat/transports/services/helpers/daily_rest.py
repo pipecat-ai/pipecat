@@ -47,7 +47,7 @@ class DailyRoomProperties(BaseModel, extra="allow"):
 class DailyRoomParams(BaseModel):
     name: Optional[str] = None
     privacy: Literal['private', 'public'] = "public"
-    properties: DailyRoomProperties = DailyRoomProperties()
+    properties: DailyRoomProperties = Field(default_factory=DailyRoomProperties)
 
 
 class DailyRoomObject(BaseModel):
