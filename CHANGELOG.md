@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed and issue with `DailyRESTHelper.create_room()` expirations which would
+  cause this function to stop working after the initial expiration elapsed.
+
 - Improved `EndFrame` and `CancelFrame` handling. `EndFrame` should end things
   gracefully while a `CancelFrame` should cancel all running tasks as soon as
   possible.
