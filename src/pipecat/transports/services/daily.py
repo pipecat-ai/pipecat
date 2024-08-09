@@ -123,6 +123,7 @@ class DailyCallbacks(BaseModel):
     on_first_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
+    on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
 
 
 def completion_callback(future):
@@ -485,6 +486,9 @@ class DailyTransportClient(EventHandler):
 
         self._call_async_callback(self._callbacks.on_participant_left, participant, reason)
 
+    def on_participant_updated(self, participant):
+        self._call_async_callback(self._callbacks.on_participant_updated, participant)
+
     def on_transcription_message(self, message: Mapping[str, Any]):
         participant_id = ""
         if "participantId" in message:
@@ -745,6 +749,7 @@ class DailyTransport(BaseTransport):
             on_first_participant_joined=self._on_first_participant_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
+            on_participant_updated=self._on_participant_updated,
         )
         self._params = params
 
@@ -768,6 +773,7 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
+        self._register_event_handler("on_participant_updated")
 
     #
     # BaseTransport
@@ -908,6 +914,9 @@ class DailyTransport(BaseTransport):
 
     async def _on_participant_left(self, participant, reason):
         await self._call_event_handler("on_participant_left", participant, reason)
+
+    async def _on_participant_updated(self, participant):
+        await self._call_event_handler("on_participant_updated", participant)
 
     async def _on_first_participant_joined(self, participant):
         await self._call_event_handler("on_first_participant_joined", participant)
