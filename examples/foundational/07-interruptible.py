@@ -79,6 +79,7 @@ async def main():
         task = PipelineTask(pipeline, PipelineParams(
             allow_interruptions=True,
             enable_metrics=True,
+            enable_usage_metrics=True,
             report_only_initial_ttfb=True,
         ))
 

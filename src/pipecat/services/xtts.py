@@ -70,13 +70,7 @@ class XTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
+
         if not self._studio_speakers:
             logger.error(f"{self} no studio speakers available")
             return
@@ -102,6 +96,8 @@ class XTTSService(TTSService):
                 logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
                 yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
                 return
+
+            await self.start_tts_usage_metrics(text)
 
             buffer = bytearray()
 
