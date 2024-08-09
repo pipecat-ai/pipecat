@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `TwilioFrameSerializer` can now specify Twilio's and Pipecat's desired sample
+  rates to use.
+
 - Added new `on_participant_updated` event to `DailyTransport`.
 
 - Added `DailyRESTHelper.delete_room_by_name()`.
