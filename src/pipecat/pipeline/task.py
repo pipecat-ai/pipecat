@@ -92,8 +92,6 @@ class PipelineTask:
         elif isinstance(frames, Iterable):
             for frame in frames:
                 await self.queue_frame(frame)
-        else:
-            raise Exception("Frames must be an iterable or async iterable")
 
     def _initial_metrics_frame(self) -> MetricsFrame:
         processors = self._pipeline.processors_with_metrics()
