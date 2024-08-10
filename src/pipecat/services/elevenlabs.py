@@ -6,7 +6,8 @@
 
 import aiohttp
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal
+from pydantic import BaseModel
 
 from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, MetricsFrame
 from pipecat.services.ai_services import TTSService
@@ -15,6 +16,8 @@ from loguru import logger
 
 
 class ElevenLabsTTSService(TTSService):
+    class InputParams(BaseModel):
+        output_format: Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"] = "pcm_16000"
 
     def __init__(
             self,
@@ -22,13 +25,15 @@ class ElevenLabsTTSService(TTSService):
             api_key: str,
             voice_id: str,
             aiohttp_session: aiohttp.ClientSession,
-            model: str = "eleven_turbo_v2",
+            model: str = "eleven_turbo_v2_5",
+            params: InputParams = InputParams(),
             **kwargs):
         super().__init__(**kwargs)
 
         self._api_key = api_key
         self._voice_id = voice_id
         self._model = model
+        self._params = params
         self._aiohttp_session = aiohttp_session
 
     def can_generate_metrics(self) -> bool:
@@ -40,20 +45,14 @@ class ElevenLabsTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
+
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}/stream"
 
         payload = {"text": text, "model_id": self._model}
 
         querystring = {
-            "output_format": "pcm_16000",
-            "optimize_streaming_latency": 2}
+            "output_format": self._params.output_format
+        }
 
         headers = {
             "xi-api-key": self._api_key,
@@ -68,6 +67,8 @@ class ElevenLabsTTSService(TTSService):
                 logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
                 yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
                 return
+
+            await self.start_tts_usage_metrics(text)
 
             async for chunk in r.content:
                 if len(chunk) > 0:

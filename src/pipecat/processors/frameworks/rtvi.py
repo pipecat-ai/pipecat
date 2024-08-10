@@ -6,7 +6,7 @@
 
 import asyncio
 
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.frames.frames import (
@@ -26,6 +26,7 @@ from loguru import logger
 
 RTVI_PROTOCOL_VERSION = "0.1"
 
+ActionResult = Union[bool,int,float,str,list,dict]
 
 class RTVIServiceOption(BaseModel):
     name: str
@@ -60,7 +61,7 @@ class RTVIAction(BaseModel):
     service: str
     action: str
     arguments: List[RTVIActionArgument] = []
-    handler: Callable[["RTVIProcessor", str, Dict[str, Any]], Awaitable[None]] = Field(exclude=True)
+    handler: Callable[["RTVIProcessor", str, Dict[str, Any]], Awaitable[ActionResult]] = Field(exclude=True)
     _arguments_dict: Dict[str, RTVIActionArgument] = PrivateAttr(default={})
 
     def model_post_init(self, __context: Any) -> None:
@@ -135,6 +136,9 @@ class RTVIError(BaseModel):
 class RTVIDescribeConfigData(BaseModel):
     config: List[RTVIService]
 
+class RTVILLMContextMessageData(BaseModel):
+    messages: List[dict]
+
 
 class RTVIDescribeConfig(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
@@ -150,15 +154,15 @@ class RTVIConfigResponse(BaseModel):
     data: RTVIConfig
 
 
-class RTVILLMContextMessageData(BaseModel):
-    messages: List[dict]
+class RTVIActionResponseData(BaseModel):
+    result: ActionResult
 
 
-class RTVILLMContextMessage(BaseModel):
+class RTVIActionResponse(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
-    type: Literal["llm-context"] = "llm-context"
-    data: RTVILLMContextMessageData
-
+    type: Literal["action-response"] = "action-response"
+    id: str
+    data: RTVIActionResponseData
 
 class RTVIBotReadyData(BaseModel):
     version: str
@@ -343,8 +347,6 @@ class RTVIProcessor(FrameProcessor):
                 case "action":
                     action = RTVIActionRun.model_validate(message.data)
                     await self._handle_action(message.id, action)
-                # case "llm-get-context":
-                #     await self._handle_llm_get_context()
                 case _:
                     await self._send_error_response(message.id, f"Unsupported type {message.type}")
 
@@ -399,13 +401,10 @@ class RTVIProcessor(FrameProcessor):
         if data.arguments:
             for arg in data.arguments:
                 arguments[arg.name] = arg.value
-        await action.handler(self, action.service, arguments)
-
-    # async def _handle_llm_get_context(self):
-    #     data = RTVILLMContextMessageData(messages=self._tma_in.messages)
-    #     message = RTVILLMContextMessage(data=data)
-    #     frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
-    #     await self.push_frame(frame)
+        result = await action.handler(self, action.service, arguments)
+        message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
+        frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+        await self.push_frame(frame)
 
     async def _send_bot_ready(self):
         message = RTVIBotReady(

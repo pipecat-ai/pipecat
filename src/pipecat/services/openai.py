@@ -135,17 +135,13 @@ class BaseOpenAILLMService(LLMService):
 
         async for chunk in chunk_stream:
             if chunk.usage:
-                if self.can_generate_metrics() and self.metrics_enabled:
-                    tokens = {
-                        "processor": self.name,
-                        "prompt_tokens": chunk.usage.prompt_tokens,
-                        "completion_tokens": chunk.usage.completion_tokens,
-                        "total_tokens": chunk.usage.total_tokens
-                    }
-                    logger.debug(
-                        f"{self.name} prompt tokens: {tokens['prompt_tokens']}, completion tokens: {tokens['completion_tokens']}")
-
-                    await self.push_frame(MetricsFrame(tokens=[tokens]))
+                tokens = {
+                    "processor": self.name,
+                    "prompt_tokens": chunk.usage.prompt_tokens,
+                    "completion_tokens": chunk.usage.completion_tokens,
+                    "total_tokens": chunk.usage.total_tokens
+                }
+                await self.start_llm_usage_metrics(tokens)
 
             if len(chunk.choices) == 0:
                 continue
@@ -339,13 +335,6 @@ class OpenAITTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
         try:
             await self.start_ttfb_metrics()
 
@@ -361,6 +350,9 @@ class OpenAITTSService(TTSService):
                         f"{self} error getting audio (status: {r.status_code}, error: {error})")
                     yield ErrorFrame(f"Error getting audio (status: {r.status_code}, error: {error})")
                     return
+
+                await self.start_tts_usage_metrics(text)
+
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()

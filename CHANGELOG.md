@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ElevenLabsTTSService` can now specify ElevenLabs input parameters such as
+  `output_format`.
+
+- `TwilioFrameSerializer` can now specify Twilio's and Pipecat's desired sample
+  rates to use.
+
+- Added new `on_participant_updated` event to `DailyTransport`.
+
+- Added `DailyRESTHelper.delete_room_by_name()`.
+
+- Added LLM and TTS usage metrics. Those will be enabled by when
+  `enable_usage_metrics` is True.
+
 - `AudioRawFrame`s are not pushed downstream from the base output
   transport. This allows capturing the exact words the bot says by adding an STT
   service at the end of the pipeline.
@@ -28,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ElevenLabsTTSService` now uses `eleven_turbo_v2_5` model by default.
+
 - `BotSpeakingFrame` is now a control frame.
 
 - `StartFrame` is now a control frame similar to `EndFrame`.
@@ -36,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sample rate.
 
 ### Fixed
+
+- Fixed and issue with `DailyRESTHelper.create_room()` expirations which would
+  cause this function to stop working after the initial expiration elapsed.
 
 - Improved `EndFrame` and `CancelFrame` handling. `EndFrame` should end things
   gracefully while a `CancelFrame` should cancel all running tasks as soon as
