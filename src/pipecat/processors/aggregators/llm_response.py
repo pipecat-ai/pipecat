@@ -260,7 +260,6 @@ class LLMContextAggregator(LLMResponseAggregator):
     async def _set_tools(self, tools: List):
         # We push the frame downstream so the assistant aggregator gets
         # updated as well.
-        print(f"!!! Setting tools: {tools}")
         self._context.tools = tools
 
 

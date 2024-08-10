@@ -50,12 +50,11 @@ class OpenAILLMContext:
     @staticmethod
     def from_messages(messages: List[dict]) -> "OpenAILLMContext":
         context = OpenAILLMContext()
+
         for message in messages:
-            context.add_message({
-                "content": message["content"],
-                "role": message["role"],
-                "name": message["name"] if "name" in message else message["role"]
-            })
+            if "name" not in message:
+                message["name"] = message["role"]
+            context.add_message(message)
         return context
 
     @staticmethod
