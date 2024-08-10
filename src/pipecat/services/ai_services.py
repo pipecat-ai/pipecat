@@ -116,37 +116,36 @@ class LLMService(AIService):
 
     # TODO-CB: callback function type
     def register_function(self, function_name: str | None, callback, start_callback=None):
-        if not function_name: # then use this callback for all functions
-            function_name = "*" 
+        # Registering a function with the function_name set to None will run that callback
+        # for all functions
         self._callbacks[function_name] = callback
         if start_callback:
             self._start_callbacks[function_name] = start_callback
         
 
     def unregister_function(self, function_name: str | None):
-        if not function_name: # then use this callback for all functions
-            function_name = "*"
         del self._callbacks[function_name]
         if self._start_callbacks[function_name]:
             del self._start_callbacks[function_name]
 
     def has_function(self, function_name: str):
-        if "*" in self._callbacks.keys():
+        if None in self._callbacks.keys():
             return True
         return function_name in self._callbacks.keys()
 
     async def call_function(self, function_name: str, tool_call_id: str, args):
         if function_name in self._callbacks.keys():
             return await self._callbacks[function_name](self, args)
-        elif "*" in self._callbacks.keys():
-            return await self._callbacks["*"](self, function_name, tool_call_id, args)
+        elif None in self._callbacks.keys():
+            return await self._callbacks[None](self, function_name, tool_call_id, args)
+
         return None
 
     async def call_start_function(self, function_name: str):
         if function_name in self._start_callbacks.keys():
             await self._start_callbacks[function_name](self)
         elif "*" in self._callbacks.keys():
-            return await self._start_callbacks["*"](self, function_name)
+            return await self._start_callbacks[None](self, function_name)
 
 class TTSService(AIService):
     def __init__(
