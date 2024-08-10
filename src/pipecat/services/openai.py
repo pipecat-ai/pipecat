@@ -194,8 +194,9 @@ class BaseOpenAILLMService(LLMService):
             arguments
     ):
         arguments = json.loads(arguments)
-        result = await self.call_function(function_name, arguments)
+        result = await self.call_function(function_name, tool_call_id, arguments)
         arguments = json.dumps(arguments)
+        # TODO-CB: We're not using any of this anymore
         if isinstance(result, (str, dict)):
             # Handle it in "full magic mode"
             tool_call = ChatCompletionFunctionMessageParam({

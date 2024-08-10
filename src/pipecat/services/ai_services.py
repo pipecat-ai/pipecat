@@ -135,11 +135,11 @@ class LLMService(AIService):
             return True
         return function_name in self._callbacks.keys()
 
-    async def call_function(self, function_name: str, args):
+    async def call_function(self, function_name: str, tool_call_id: str, args):
         if function_name in self._callbacks.keys():
             return await self._callbacks[function_name](self, args)
         elif "*" in self._callbacks.keys():
-            return await self._callbacks["*"](self, function_name, args)
+            return await self._callbacks["*"](self, function_name, tool_call_id, args)
         return None
 
     async def call_start_function(self, function_name: str):

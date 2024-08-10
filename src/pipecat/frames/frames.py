@@ -176,6 +176,16 @@ class LLMMessagesUpdateFrame(DataFrame):
     """
     messages: List[dict]
 
+@dataclass
+class LLMSetToolsFrame(DataFrame):
+    """A frame containing a list of tools for an LLM to use for function calling.
+    The specific format depends on the LLM being used, but it should typically
+    contain JSON Schema objects.
+    
+    """
+    tools: List[dict]
+    
+
 
 @dataclass
 class TTSSpeakFrame(DataFrame):
