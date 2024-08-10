@@ -13,11 +13,9 @@ from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
 
-from pipecat.services.anthropic import AnthropicLLMService, AnthropicAssistantContextAggregator
+from pipecat.services.anthropic import AnthropicLLMService, AnthropicUserContextAggregator, AnthropicAssistantContextAggregator
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -57,16 +55,10 @@ async def main():
             )
         )
 
-        # tts = CartesiaTTSService(
-        #     api_key=os.getenv("CARTESIA_API_KEY"),
-        #     voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
-        #     sample_rate=16000,
-        # )
-
-        tts = ElevenLabsTTSService(
-            aiohttp_session=session,
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        tts = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            sample_rate=16000,
         )
 
         llm = AnthropicLLMService(
@@ -91,25 +83,24 @@ async def main():
                 },
             }
         ]
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant who can report the weather in any location in the universe. Respond concisely. Your response will be turned into speech so use only simple words and punctuation. Start the conversation by saying a very brief hello."  # bug with appending
 
-            }
-        ]
+        # todo: test with very short initial user message
+
+        messages = [{"role": "system",
+                     "content": "You are a helpful assistant who can report the weather in any location in the universe. Respond concisely. Your response will be turned into speech so use only simple words and punctuation."},
+                    {"role": "user",
+                     "content": " Start the conversation by introducing yourself."}]
 
         context = OpenAILLMContext(messages, tools)
-        tma_in = LLMUserContextAggregator(context)
-        tma_out = AnthropicAssistantContextAggregator(context)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline([
-            transport.input(),   # Transport user input
-            tma_in,              # User responses
-            llm,                 # LLM
-            tts,                 # TTS
-            transport.output(),  # Transport bot output
-            tma_out,             # Assistant spoken responses and tool context
+            transport.input(),               # Transport user input
+            context_aggregator.user(),       # User speech to text
+            llm,                             # LLM
+            tts,                             # TTS
+            transport.output(),              # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses and tool context
         ])
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))

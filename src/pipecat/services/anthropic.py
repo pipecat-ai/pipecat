@@ -6,7 +6,11 @@
 
 import base64
 import json
+import io
+import copy
+from typing import List
 from dataclasses import dataclass
+from PIL import Image
 
 from pipecat.frames.frames import (
     Frame,
@@ -20,7 +24,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
-from pipecat.processors.aggregators.llm_response import LLMAssistantContextAggregator
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 
 from loguru import logger
 
@@ -40,6 +44,18 @@ class AnthropicToolUseFrame(Frame):
     tool_input: dict
     result_content: str | list
     llm: 'AnthropicLLMService'
+
+
+@dataclass
+class AnthropicContextAggregatorPair:
+    _user: 'AnthropicUserContextAggregator'
+    _assistant: 'AnthropicAssistantContextAggregator'
+
+    def user(self) -> str:
+        return self._user
+
+    def assistant(self) -> str:
+        return self._assistant
 
 
 class AnthropicLLMService(LLMService):
@@ -64,50 +80,14 @@ class AnthropicLLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def _get_messages_from_openai_context(
-            self, context: OpenAILLMContext):
-        openai_messages = context.get_messages()
-        anthropic_messages = []
-
-        for message in openai_messages:
-            role = message["role"]
-            text = message["content"]
-            if role == "system":
-                role = "user"
-            if message.get("mime_type") == "image/jpeg":
-                # vision frame
-                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
-                anthropic_messages.append({
-                    "role": role,
-                    "content": [{
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": message.get("mime_type"),
-                            "data": encoded_image,
-                        }
-                    }, {
-                        "type": "text",
-                        "text": text
-                    }]
-                })
-            else:
-                # Text frame. Anthropic needs the roles to alternate. This will
-                # cause an issue with interruptions. So, if we detect we are the
-                # ones asking again it probably means we were interrupted.
-                if role == "user" and len(anthropic_messages) > 1:
-                    last_message = anthropic_messages[-1]
-                    if last_message["role"] == "user":
-                        anthropic_messages = anthropic_messages[:-1]
-                        content = last_message["content"]
-                        anthropic_messages.append(
-                            {"role": "user", "content": f"Sorry, I just asked you about [{content}] but now I would like to know [{text}]."})
-                    else:
-                        anthropic_messages.append({"role": role, "content": text})
-                else:
-                    anthropic_messages.append({"role": role, "content": text})
-
-        return anthropic_messages
+    @ staticmethod
+    def create_context_aggregator(context: OpenAILLMContext) -> AnthropicContextAggregatorPair:
+        user = AnthropicUserContextAggregator(context)
+        assistant = AnthropicAssistantContextAggregator(user._context)
+        return AnthropicContextAggregatorPair(
+            _user=user,
+            _assistant=assistant
+        )
 
     async def _handle_function_call(
         self, context, tool_call_id, function_name, arguments
@@ -142,9 +122,9 @@ class AnthropicLLMService(LLMService):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
 
-            logger.debug(f"Generating chat: {context.get_messages_json()}")
+            logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
 
-            messages = self._get_messages_from_openai_context(context)
+            messages = context.messages
 
             await self.start_ttfb_metrics()
 
@@ -189,11 +169,14 @@ class AnthropicLLMService(LLMService):
 
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
-            context: OpenAILLMContext = frame.context
+            logger.debug(f"LLM context from: {frame.context}")
+            context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
-            context = OpenAILLMContext.from_messages(frame.messages)
+            logger.debug(f"LLM context from messages: {frame.messages}")
+            context = AnthropicLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
-            context = OpenAILLMContext.from_image_frame(frame)
+            logger.debug(f"LLM context from image frame")
+            context = AnthropicLLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMModelUpdateFrame):
             logger.debug(f"Switching LLM model to: [{frame.model}]")
             self._model = frame.model
@@ -202,6 +185,96 @@ class AnthropicLLMService(LLMService):
 
         if context:
             await self._process_context(context)
+
+
+class AnthropicLLMContext(OpenAILLMContext):
+    def __init__(
+        self,
+        messages: list[dict] | None = None,
+        tools: list[dict] | None = None,
+        tool_choice: dict | None = None,
+        *,
+        system: str | None = None
+    ):
+        super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
+        self.system_message = system
+
+    @ classmethod
+    def from_openai_context(cls, openai_context: OpenAILLMContext):
+        self = cls(
+            messages=openai_context.messages,
+            tools=openai_context.tools,
+            tool_choice=openai_context.tool_choice,
+        )
+        # See if we should pull the system message out of our context.messages list. (For
+        # compatibility with Open AI messages format.)
+        if self.messages and self.messages[0]["role"] == "system":
+            logger.debug(f"Pulling system message from context.")
+            if len(self.messages) == 1:
+                logger.debug(f"Only system message in context.")
+                # If we have only have a system message in the list, all we can really do
+                # without introducing too much magic is change the role to "user".
+                self.messages[0]["role"] = "user"
+            else:
+                # If we have more than one message, we'll pull the system message out of the
+                # list.
+                self.system_message = self.messages[0]["content"]
+                self.messages.pop(0)
+                logger.debug(f"Messages: {self.messages}")
+        return self
+
+    @ classmethod
+    def from_messages(cls, messages: List[dict]) -> "AnthropicLLMContext":
+        return cls(messages=messages)
+
+    @ classmethod
+    def from_image_frame(cls, frame: VisionImageRawFrame) -> "AnthropicLLMContext":
+        context = cls()
+        context.add_image_frame_message(frame)
+        return context
+
+    def add_image_frame_message(self, frame: VisionImageRawFrame):
+        buffer = io.BytesIO()
+        Image.frombytes(
+            frame.format,
+            frame.size,
+            frame.image
+        ).save(
+            buffer,
+            format="JPEG")
+        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        logger.debug(f"Encoded image length: {type(encoded_image)} {len(encoded_image)}")
+        # Anthropic docs say that the image should be the first content block in the message.
+        content = [{"type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": encoded_image,
+                    }}]
+        if frame.text:
+            content.append({"type": "text", "text": frame.text})
+        self.messages.append({"role": "user", "content": content})
+
+    def get_messages_for_logging(self) -> str:
+        msgs = []
+        for message in self.messages:
+            msg = copy.deepcopy(message)
+            if "content" in msg:
+                if isinstance(msg["content"], list):
+                    if len(msg["content"]) > 1 and msg["content"][0]["type"] == "image":
+                        msg["content"][0]["source"]["data"] = "..."
+            msgs.append(msg)
+        return json.dumps(msgs)
+
+
+class AnthropicUserContextAggregator(LLMUserContextAggregator):
+    def __init__(self, context: OpenAILLMContext | AnthropicLLMContext):
+        logger.debug(f"AnthropicUserContextAggregator init")
+        super().__init__(context=context)
+
+        if isinstance(context, OpenAILLMContext):
+            logger.debug("upcycling OpenAILLMContext to AnthropicLLMContext")
+            self._context = AnthropicLLMContext.from_openai_context(context)
 
 
 #
@@ -222,8 +295,9 @@ class AnthropicLLMService(LLMService):
 #   3. runs the LLM inference again with the updated context.
 #
 
+
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, context: OpenAILLMContext):
+    def __init__(self, context: AnthropicLLMContext):
         super().__init__(context=context)
         self.tool_use_frame = None
 
