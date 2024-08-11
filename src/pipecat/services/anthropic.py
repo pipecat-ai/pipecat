@@ -99,7 +99,7 @@ class AnthropicLLMService(LLMService):
         arguments_obj = json.loads(arguments)
         result = await self.call_function(function_name, arguments_obj)
 
-        if isinstance(result, type(None)):
+        if result is None:
             pass
         elif hasattr(result, 'is_error'):
             await self.push_frame(AnthropicToolUseFrame(
@@ -394,38 +394,48 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         self._user_context_aggregator.add_message(message)
 
     async def _push_aggregation(self):
-        await super()._push_aggregation()
+        if not self._aggregation:
+            return
+
+        run_llm = False
+        aggregation = self._aggregation
+        self._aggregation = ""
+
         try:
             if self._tool_use_frame:
                 tuf = self._tool_use_frame
                 self._tool_use_frame = None
-
-                if self._context.messages[-1]["role"] == "assistant" and "content" in self._context.messages[-1]:
-                    if isinstance(self._context.messages[-1]["content"], str):
-                        self._context.messages[-1]["content"] = [
-                            {"type": "text", "text": self._context.messages[-1]["content"]}]
-                    else:
-                        raise Exception(
-                            f"Last message content type is not str. Need to implement for this case. {self._context.messages}")
-                    self._context.messages[-1]["content"].append({
-                        "type": "tool_use",
-                        "id": tuf.tool_id,
-                        "name": tuf.tool_name,
-                        "input": tuf.tool_input,
-                    })
-                    self._context.messages.append({
-                        "role": "user",
-                        "content": [
+                self._context.add_message({
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": aggregation
+                        },
+                        {
+                            "type": "tool_use",
+                            "id": tuf.tool_id,
+                            "name": tuf.tool_name,
+                            "input": tuf.tool_input,
+                        }
+                    ]
+                })
+                self._context.add_message({
+                    "role": "user",
+                    "content": [
                             {
                                 "type": "tool_result",
                                 "tool_use_id": tuf.tool_id,
                                 "content": tuf.result_content,
                             }
-                        ]
-                    })
-                    await self._user_context_aggregator.push_messages_frame()
-                else:
-                    logger.error(
-                        "Expected last message to be an assistant message with content block, but it wasn't.")
+                    ]
+                })
+                run_llm = True
+            else:
+                self._context.add_message({"role": "assistant", "content": aggregation})
+
+            if run_llm:
+                await self._user_context_aggregator.push_messages_frame()
+
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
