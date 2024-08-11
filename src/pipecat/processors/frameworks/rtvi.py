@@ -197,11 +197,10 @@ class RTVIUserStoppedSpeakingMessage(BaseModel):
 
 class RTVIProcessor(FrameProcessor):
 
-    def __init__(self, default_config: RTVIConfig):
+    def __init__(self, config: RTVIConfig):
         super().__init__()
-        self._config = default_config
+        self._config = config
 
-        self._start_config: RTVIConfig | None = None
         self._pipeline: FrameProcessor | None = None
 
         self._registered_actions: Dict[str, RTVIAction] = {}
@@ -216,9 +215,6 @@ class RTVIProcessor(FrameProcessor):
 
     def register_service(self, service: RTVIService):
         self._registered_services[service.name] = service
-
-    def configure_on_start(self, config: RTVIConfig):
-        self._start_config = config
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -249,8 +245,6 @@ class RTVIProcessor(FrameProcessor):
 
     async def _start(self, frame: StartFrame):
         await self._update_config(self._config)
-        if self._start_config:
-            await self._update_config(self._start_config)
         await self._send_bot_ready()
 
     async def _stop(self, frame: EndFrame):
@@ -290,8 +284,7 @@ class RTVIProcessor(FrameProcessor):
 
     async def _handle_transcriptions(self, frame: Frame):
         # TODO(aleix): Once we add support for using custom pipelines, the STTs will
-        # be in the pipeline after this processor. This means the STT will have to
-        # push transcriptions upstream as well.
+        # be in the pipeline after this processor.
 
         message = None
         if isinstance(frame, TranscriptionFrame):
