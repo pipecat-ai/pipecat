@@ -366,6 +366,9 @@ class RTVIProcessor(FrameProcessor):
                     if option_config.name == config.name:
                         option_config.value = config.value
                         return
+                # If we couldn't find a value for this config, we simply need to
+                # add it.
+                service_config.options.append(config)
 
     async def _update_service_config(self, config: RTVIServiceConfig):
         service = self._registered_services[config.service]
