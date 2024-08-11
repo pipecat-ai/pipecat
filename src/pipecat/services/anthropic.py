@@ -8,7 +8,7 @@ import base64
 import json
 import io
 import copy
-from typing import List
+from typing import List, Optional
 from dataclasses import dataclass
 from PIL import Image
 
@@ -17,6 +17,8 @@ from pipecat.frames.frames import (
     LLMModelUpdateFrame,
     TextFrame,
     VisionImageRawFrame,
+    UserImageRequestFrame,
+    UserImageRawFrame,
     LLMMessagesFrame,
     LLMFullResponseStartFrame,
     LLMFullResponseEndFrame
@@ -47,6 +49,12 @@ class AnthropicToolUseFrame(Frame):
 
 
 @dataclass
+class AnthropicImageMessageFrame(Frame):
+    user_image_raw_frame: UserImageRawFrame
+    text: Optional[str] = None
+
+
+@dataclass
 class AnthropicContextAggregatorPair:
     _user: 'AnthropicUserContextAggregator'
     _assistant: 'AnthropicAssistantContextAggregator'
@@ -60,10 +68,6 @@ class AnthropicContextAggregatorPair:
 
 class AnthropicLLMService(LLMService):
     """This class implements inference with Anthropic's AI models
-
-    This service translates internally from OpenAILLMContext to the messages format
-    expected by the Anthropic Python SDK. We are using the OpenAILLMContext as a lingua
-    franca for all LLM services, so that it is easy to switch between different LLMs.
     """
 
     def __init__(
@@ -83,7 +87,7 @@ class AnthropicLLMService(LLMService):
     @ staticmethod
     def create_context_aggregator(context: OpenAILLMContext) -> AnthropicContextAggregatorPair:
         user = AnthropicUserContextAggregator(context)
-        assistant = AnthropicAssistantContextAggregator(user._context)
+        assistant = AnthropicAssistantContextAggregator(user)
         return AnthropicContextAggregatorPair(
             _user=user,
             _assistant=assistant
@@ -175,6 +179,10 @@ class AnthropicLLMService(LLMService):
             logger.debug(f"LLM context from messages: {frame.messages}")
             context = AnthropicLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
+            # This is only useful in very simple pipelines because it creates
+            # a new context. Generally we want a context manager to catch
+            # UserImageRawFrames coming through the pipeline and add them
+            # to the context.
             logger.debug(f"LLM context from image frame")
             context = AnthropicLLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMModelUpdateFrame):
@@ -185,6 +193,9 @@ class AnthropicLLMService(LLMService):
 
         if context:
             await self._process_context(context)
+
+    async def request_image_frame(self, user_id: str, *, text_content: str = None):
+        await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content), FrameDirection.UPSTREAM)
 
 
 class AnthropicLLMContext(OpenAILLMContext):
@@ -197,6 +208,8 @@ class AnthropicLLMContext(OpenAILLMContext):
         system: str | None = None
     ):
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
+        self._user_image_request_context = {}
+
         self.system_message = system
 
     @ classmethod
@@ -230,18 +243,17 @@ class AnthropicLLMContext(OpenAILLMContext):
     @ classmethod
     def from_image_frame(cls, frame: VisionImageRawFrame) -> "AnthropicLLMContext":
         context = cls()
-        context.add_image_frame_message(frame)
+        context.add_image_frame_message(
+            format=frame.format,
+            size=frame.size,
+            image=frame.image,
+            text=frame.text)
         return context
 
-    def add_image_frame_message(self, frame: VisionImageRawFrame):
+    def add_image_frame_message(
+            self, *, format: str, size: tuple[int, int], image: bytes, text: str = None):
         buffer = io.BytesIO()
-        Image.frombytes(
-            frame.format,
-            frame.size,
-            frame.image
-        ).save(
-            buffer,
-            format="JPEG")
+        Image.frombytes(format, size, image).save(buffer, format="JPEG")
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
         logger.debug(f"Encoded image length: {type(encoded_image)} {len(encoded_image)}")
         # Anthropic docs say that the image should be the first content block in the message.
@@ -251,9 +263,33 @@ class AnthropicLLMContext(OpenAILLMContext):
                         "media_type": "image/jpeg",
                         "data": encoded_image,
                     }}]
-        if frame.text:
-            content.append({"type": "text", "text": frame.text})
-        self.messages.append({"role": "user", "content": content})
+        if text:
+            content.append({"type": "text", "text": text})
+        self.add_message({"role": "user", "content": content})
+
+    def add_message(self, message):
+        try:
+            if self.messages:
+                # Anthropic requires that roles alternate. If this message's role is the same as the
+                # last message, we should add this message's content to the last message.
+                if self.messages[-1]["role"] == message["role"]:
+                    # if the last message has just a content string, convert it to a list
+                    # in the proper format
+                    if isinstance(self.messages[-1]["content"], str):
+                        self.messages[-1]["content"] = [{"type": "text",
+                                                         "text": self.messages[-1]["content"]}]
+                    # if this message has just a content string, convert it to a list
+                    # in the proper format
+                    if isinstance(message["content"], str):
+                        message["content"] = [{"type": "text", "text": message["content"]}]
+                    # append the content of this message to the last message
+                    self.messages[-1]["content"].extend(message["content"])
+                else:
+                    self.messages.append(message)
+            else:
+                self.messages.append(message)
+        except Exception as e:
+            logger.error(f"Error adding message: {e}")
 
     def get_messages_for_logging(self) -> str:
         msgs = []
@@ -261,21 +297,57 @@ class AnthropicLLMContext(OpenAILLMContext):
             msg = copy.deepcopy(message)
             if "content" in msg:
                 if isinstance(msg["content"], list):
-                    if len(msg["content"]) > 1 and msg["content"][0]["type"] == "image":
-                        msg["content"][0]["source"]["data"] = "..."
+                    for item in msg["content"]:
+                        if item["type"] == "image":
+                            item["source"]["data"] = "..."
             msgs.append(msg)
         return json.dumps(msgs)
 
 
 class AnthropicUserContextAggregator(LLMUserContextAggregator):
     def __init__(self, context: OpenAILLMContext | AnthropicLLMContext):
-        logger.debug(f"AnthropicUserContextAggregator init")
         super().__init__(context=context)
 
         if isinstance(context, OpenAILLMContext):
             logger.debug("upcycling OpenAILLMContext to AnthropicLLMContext")
             self._context = AnthropicLLMContext.from_openai_context(context)
 
+    async def push_messages_frame(self):
+        frame = OpenAILLMContextFrame(self._context)
+        await self.push_frame(frame)
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        # Our parent method has already called push_frame(). So we can't interrupt the
+        # flow here and we don't need to call push_frame() ourselves. Possibly something
+        # to talk through (tagging @aleix). At some point we might need to refactor these
+        # context aggregators.
+        try:
+            if isinstance(frame, UserImageRequestFrame):
+                # The LLM sends a UserImageRequestFrame upstream. Cache any context provided with
+                # that frame so we can use it when we assemble the image message in the assistant
+                # context aggregator.
+                if (frame.context):
+                    if isinstance(frame.context, str):
+                        self._context._user_image_request_context[frame.user_id] = frame.context
+                    else:
+                        logger.error(
+                            f"Unexpected UserImageRequestFrame context type: {type(frame.context)}")
+                        del self._context._user_image_request_context[frame.user_id]
+                else:
+                    if frame.user_id in self._context._user_image_request_context:
+                        del self._context._user_image_request_context[frame.user_id]
+            elif isinstance(frame, UserImageRawFrame):
+                # Push a new AnthropicImageMessageFrame with the text context we cached
+                # downstream to be handled by our assistant context aggregator. This is
+                # necessary so that we add the message to the context in the right order.
+                text = self._context._user_image_request_context.get(frame.user_id) or ""
+                if text:
+                    del self._context._user_image_request_context[frame.user_id]
+                frame = AnthropicImageMessageFrame(user_image_raw_frame=frame, text=text)
+                await self.push_frame(frame)
+        except Exception as e:
+            logger.error(f"Error processing frame: {e}")
 
 #
 # Claude returns a text content block along with a tool use content block. This works quite nicely
@@ -297,21 +369,36 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
 
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, context: AnthropicLLMContext):
-        super().__init__(context=context)
-        self.tool_use_frame = None
+    def __init__(self, user_context_aggregator: AnthropicUserContextAggregator):
+        super().__init__(context=user_context_aggregator._context)
+        self._tool_use_frame = None
+        self._user_context_aggregator = user_context_aggregator
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
+        # See note above about not calling push_frame() here.
         if isinstance(frame, AnthropicToolUseFrame):
-            self.tool_use_frame = frame
+            self._tool_use_frame = frame
+        elif isinstance(frame, AnthropicImageMessageFrame):
+            try:
+                self._context.add_image_frame_message(
+                    format=frame.user_image_raw_frame.format,
+                    size=frame.user_image_raw_frame.size,
+                    image=frame.user_image_raw_frame.image,
+                    text=frame.text)
+                await self._user_context_aggregator.push_messages_frame()
+            except Exception as e:
+                logger.error(f"Error processing UserImageRawFrame: {e}")
+
+    def add_message(self, message):
+        self._user_context_aggregator.add_message(message)
 
     async def _push_aggregation(self):
         await super()._push_aggregation()
         try:
-            if self.tool_use_frame:
-                tuf = self.tool_use_frame
-                self.tool_use_frame = None
+            if self._tool_use_frame:
+                tuf = self._tool_use_frame
+                self._tool_use_frame = None
 
                 if self._context.messages[-1]["role"] == "assistant" and "content" in self._context.messages[-1]:
                     if isinstance(self._context.messages[-1]["content"], str):
@@ -336,7 +423,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                             }
                         ]
                     })
-                    await tuf.llm._process_context(self._context)
+                    await self._user_context_aggregator.push_messages_frame()
                 else:
                     logger.error(
                         "Expected last message to be an assistant message with content block, but it wasn't.")
