@@ -136,9 +136,6 @@ class RTVIError(BaseModel):
 class RTVIDescribeConfigData(BaseModel):
     config: List[RTVIService]
 
-class RTVILLMContextMessageData(BaseModel):
-    messages: List[dict]
-
 
 class RTVIDescribeConfig(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
