@@ -64,3 +64,4 @@ pythonpath = ["src"]
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
+fallback_version = "0.0.0-dev"
