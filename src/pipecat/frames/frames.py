@@ -176,15 +176,14 @@ class LLMMessagesUpdateFrame(DataFrame):
     """
     messages: List[dict]
 
+
 @dataclass
 class LLMSetToolsFrame(DataFrame):
     """A frame containing a list of tools for an LLM to use for function calling.
     The specific format depends on the LLM being used, but it should typically
     contain JSON Schema objects.
-    
     """
     tools: List[dict]
-    
 
 
 @dataclass
@@ -417,3 +416,22 @@ class TTSVoiceUpdateFrame(ControlFrame):
     """A control frame containing a request to update to a new TTS voice.
     """
     voice: str
+
+
+@dataclass
+class FunctionCallInProgressFrame(SystemFrame):
+    """A frame signaling that a function call is in progress.
+    """
+    function_name: str
+    tool_call_id: str
+    arguments: str
+
+
+@dataclass
+class FunctionCallResultFrame(DataFrame):
+    """A frame containing the result of an LLM function (tool) call.
+    """
+    function_name: str
+    tool_call_id: str
+    arguments: str
+    result: any

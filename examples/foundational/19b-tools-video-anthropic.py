@@ -36,18 +36,24 @@ logger.add(sys.stderr, level="DEBUG")
 
 video_participant_id = None
 
-
-async def get_weather(llm, args):
-    location = args["location"]
-    return f"The weather in {location} is currently 72 degrees and sunny."
+# globally declare llm so that we can access it in the get_image function
+llm = None
 
 
-async def get_image(llm, args):
-    question = args["question"]
+async def get_weather(function_name, tool_call_id, arguments, context, result_callback):
+    location = arguments["location"]
+    await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
+
+
+async def get_image(function_name, tool_call_id, arguments, context, result_callback):
+    global llm
+    question = arguments["question"]
     await llm.request_image_frame(user_id=video_participant_id, text_content=question)
 
 
 async def main():
+    global llm
+
     async with aiohttp.ClientSession() as session:
         (room_url, token) = await configure(session)
 

@@ -34,9 +34,9 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def get_weather(llm, args):
-    location = args["location"]
-    return f"The weather in {location} is currently 72 degrees and sunny."
+async def get_weather(function_name, tool_call_id, arguments, context, result_callback):
+    location = arguments["location"]
+    await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
 async def main():

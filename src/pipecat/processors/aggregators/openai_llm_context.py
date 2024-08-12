@@ -12,7 +12,9 @@ from typing import List
 
 from PIL import Image
 
-from pipecat.frames.frames import Frame, VisionImageRawFrame
+from pipecat.frames.frames import Frame, VisionImageRawFrame, FunctionCallInProgressFrame, FunctionCallResultFrame
+from pipecat.processors.frame_processor import FrameProcessor
+
 
 from openai._types import NOT_GIVEN, NotGiven
 
@@ -101,6 +103,34 @@ class OpenAILLMContext:
             tools = NOT_GIVEN
 
         self.tools = tools
+
+    async def call_function(
+            self,
+            f: callable,
+            *,
+            function_name: str,
+            tool_call_id: str,
+            arguments: str,
+            llm: FrameProcessor) -> None:
+
+        # Push a SystemFrame downstream. This frame will let our assistant context aggregator
+        # know that we are in the middle of a function call. Some contexts/aggregators may
+        # not need this. But some definitely do (Anthropic, for example).
+        await llm.push_frame(FunctionCallInProgressFrame(
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+        ))
+
+        # Define a callback function that pushes a FunctionCallResultFrame downstream.
+        async def function_call_result_callback(result):
+            await llm.push_frame(FunctionCallResultFrame(
+                function_name=function_name,
+                tool_call_id=tool_call_id,
+                arguments=arguments,
+                result=result))
+        await f(function_name=function_name, tool_call_id=tool_call_id, arguments=arguments,
+                context=self, result_callback=function_call_result_callback)
 
 
 @dataclass

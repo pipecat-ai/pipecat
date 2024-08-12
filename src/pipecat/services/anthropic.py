@@ -21,7 +21,10 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     LLMMessagesFrame,
     LLMFullResponseStartFrame,
-    LLMFullResponseEndFrame
+    LLMFullResponseEndFrame,
+    FunctionCallResultFrame,
+    FunctionCallInProgressFrame,
+    StartInterruptionFrame
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
@@ -37,15 +40,6 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`. Also, set `ANTHROPIC_API_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
-
-
-@dataclass
-class AnthropicToolUseFrame(Frame):
-    tool_id: str
-    tool_name: str
-    tool_input: dict
-    result_content: str | list
-    llm: 'AnthropicLLMService'
 
 
 @dataclass
@@ -93,34 +87,6 @@ class AnthropicLLMService(LLMService):
             _assistant=assistant
         )
 
-    async def _handle_function_call(
-        self, context, tool_call_id, function_name, arguments
-    ):
-        arguments_obj = json.loads(arguments)
-        result = await self.call_function(function_name, arguments_obj)
-
-        if result is None:
-            pass
-        elif hasattr(result, 'is_error'):
-            await self.push_frame(AnthropicToolUseFrame(
-                tool_id=tool_call_id,
-                tool_name=function_name,
-                tool_input=arguments_obj,
-                result_content=result.content,
-                is_error=result.is_error,
-                llm=self
-            ))
-        elif isinstance(result, str) or isinstance(result, list):
-            await self.push_frame(AnthropicToolUseFrame(
-                tool_id=tool_call_id,
-                tool_name=function_name,
-                tool_input=arguments_obj,
-                result_content=result,
-                llm=self
-            ))
-        else:
-            raise TypeError(f"Unknown return type from function callback: {type(result)}")
-
     async def _process_context(self, context: OpenAILLMContext):
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -159,9 +125,10 @@ class AnthropicLLMService(LLMService):
                 elif (event.type == "message_delta" and
                       hasattr(event.delta, 'stop_reason') and event.delta.stop_reason == 'tool_use'):
                     if tool_use_block:
-                        await self._handle_function_call(
-                            context, tool_use_block.id, tool_use_block.name, json_accumulator)
-
+                        await self.call_function(context=context,
+                                                 tool_call_id=tool_use_block.id,
+                                                 function_name=tool_use_block.name,
+                                                 arguments=json.loads(json_accumulator))
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
@@ -173,17 +140,14 @@ class AnthropicLLMService(LLMService):
 
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
-            logger.debug(f"LLM context from: {frame.context}")
             context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
-            logger.debug(f"LLM context from messages: {frame.messages}")
             context = AnthropicLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             # This is only useful in very simple pipelines because it creates
             # a new context. Generally we want a context manager to catch
             # UserImageRawFrames coming through the pipeline and add them
             # to the context.
-            logger.debug(f"LLM context from image frame")
             context = AnthropicLLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMModelUpdateFrame):
             logger.debug(f"Switching LLM model to: [{frame.model}]")
@@ -222,9 +186,7 @@ class AnthropicLLMContext(OpenAILLMContext):
         # See if we should pull the system message out of our context.messages list. (For
         # compatibility with Open AI messages format.)
         if self.messages and self.messages[0]["role"] == "system":
-            logger.debug(f"Pulling system message from context.")
             if len(self.messages) == 1:
-                logger.debug(f"Only system message in context.")
                 # If we have only have a system message in the list, all we can really do
                 # without introducing too much magic is change the role to "user".
                 self.messages[0]["role"] = "user"
@@ -233,7 +195,6 @@ class AnthropicLLMContext(OpenAILLMContext):
                 # list.
                 self.system_message = self.messages[0]["content"]
                 self.messages.pop(0)
-                logger.debug(f"Messages: {self.messages}")
         return self
 
     @ classmethod
@@ -255,7 +216,6 @@ class AnthropicLLMContext(OpenAILLMContext):
         buffer = io.BytesIO()
         Image.frombytes(format, size, image).save(buffer, format="JPEG")
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        logger.debug(f"Encoded image length: {type(encoded_image)} {len(encoded_image)}")
         # Anthropic docs say that the image should be the first content block in the message.
         content = [{"type": "image",
                     "source": {
@@ -309,7 +269,6 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
         super().__init__(context=context)
 
         if isinstance(context, OpenAILLMContext):
-            logger.debug("upcycling OpenAILLMContext to AnthropicLLMContext")
             self._context = AnthropicLLMContext.from_openai_context(context)
 
     async def push_messages_frame(self):
@@ -354,31 +313,35 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 # with streaming. We get the text first, so we can start streaming it right away. Then we get the
 # tool_use block. While the text is streaming to TTS and the transport, we can run the tool call.
 #
-# The tricky thing is that we need to append the tool use result to the context, after the initial
-# text content is entirely streamed. Then we need to re-run LLM inference with the updated context.
-#
-# We manage that flow by sending an AnthropicToolUseFrame from the AnthropicLLMService when the LLM
-# emits a tool_use block. This AnthropicAssistantContextAggregator catches that frame and caches it.
-# Then, when we see an LLMFullResponseEndFrame, the AnthropicAssistantContextAggregator:
-#   1. appends the tool_use content block to the last message in the context. For this to happen
-#      properly, we're subclassing LLMAssistantContextAggregator and running our logic here
-#      immediately after our super class appends the standard text content message.
-#   2. appends the tool_result as a new "user" message.
-#   3. runs the LLM inference again with the updated context.
+# But Claude is verbose. It would be nice to come up with prompt language that suppresses Claude's
+# chattiness about it's tool thinking.
 #
 
 
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
     def __init__(self, user_context_aggregator: AnthropicUserContextAggregator):
         super().__init__(context=user_context_aggregator._context)
-        self._tool_use_frame = None
         self._user_context_aggregator = user_context_aggregator
+        self._function_call_in_progress = None
+        self._function_call_result = None
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
         # See note above about not calling push_frame() here.
-        if isinstance(frame, AnthropicToolUseFrame):
-            self._tool_use_frame = frame
+        if isinstance(frame, StartInterruptionFrame):
+            self._function_call_in_progress = None
+            self._function_call_finished = None
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            self._function_call_in_progress = frame
+        elif isinstance(frame, FunctionCallResultFrame):
+            if self._function_call_in_progress and self._function_call_in_progress.tool_call_id == frame.tool_call_id:
+                self._function_call_in_progress = None
+                self._function_call_result = frame
+            else:
+                logger.warning(
+                    f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id")
+                self._function_call_in_progress = None
+                self._function_call_result = None
         elif isinstance(frame, AnthropicImageMessageFrame):
             try:
                 self._context.add_image_frame_message(
@@ -388,7 +351,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                     text=frame.text)
                 await self._user_context_aggregator.push_messages_frame()
             except Exception as e:
-                logger.error(f"Error processing UserImageRawFrame: {e}")
+                logger.error(f"Error processing AnthropicImageMessageFrame: {e}")
 
     def add_message(self, message):
         self._user_context_aggregator.add_message(message)
@@ -398,12 +361,13 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
             return
 
         run_llm = False
+
         aggregation = self._aggregation
         self._aggregation = ""
 
         try:
-            if self._tool_use_frame:
-                tuf = self._tool_use_frame
+            if self._function_call_result:
+                frame = self._function_call_result
                 self._tool_use_frame = None
                 self._context.add_message({
                     "role": "assistant",
@@ -414,9 +378,9 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                         },
                         {
                             "type": "tool_use",
-                            "id": tuf.tool_id,
-                            "name": tuf.tool_name,
-                            "input": tuf.tool_input,
+                            "id": frame.tool_call_id,
+                            "name": frame.function_name,
+                            "input": frame.arguments
                         }
                     ]
                 })
@@ -425,8 +389,8 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                     "content": [
                             {
                                 "type": "tool_result",
-                                "tool_use_id": tuf.tool_id,
-                                "content": tuf.result_content,
+                                "tool_use_id": frame.tool_call_id,
+                                "content": frame.result
                             }
                     ]
                 })
