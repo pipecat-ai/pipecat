@@ -447,6 +447,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                             }
                     ]
                 })
+                self._function_call_result = None
                 run_llm = True
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
