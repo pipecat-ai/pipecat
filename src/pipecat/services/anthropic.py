@@ -127,6 +127,7 @@ class AnthropicLLMService(LLMService):
                 # logger.debug(f"Anthropic LLM event: {event}")
 
                 # Aggregate streaming content, create frames, trigger events
+
                 if (event.type == "content_block_delta"):
                     if hasattr(event.delta, 'text'):
                         await self.push_frame(TextFrame(event.delta.text))
