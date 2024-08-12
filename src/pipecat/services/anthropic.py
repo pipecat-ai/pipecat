@@ -11,6 +11,8 @@ import copy
 from typing import List, Optional
 from dataclasses import dataclass
 from PIL import Image
+from asyncio import CancelledError
+import re
 
 from pipecat.frames.frames import (
     Frame,
@@ -107,17 +109,31 @@ class AnthropicLLMService(LLMService):
 
             await self.stop_ttfb_metrics()
 
-            # for tool use
+            # Tool use
             tool_use_block = None
             json_accumulator = ''
 
+            # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
+            # completion_tokens. We also estimate the completion tokens from output text
+            # and use that estimate if we are interrupted, because we almost certainly won't
+            # get a complete usage report if the task we're running in is cancelled.
+            prompt_tokens = 0
+            completion_tokens = 0
+            completion_tokens_estimate = 0
+            use_completion_tokens_estimate = False
+
             async for event in response:
                 # logger.debug(f"Anthropic LLM event: {event}")
+
+                # Aggregate streaming content, create frames, trigger events
                 if (event.type == "content_block_delta"):
                     if hasattr(event.delta, 'text'):
                         await self.push_frame(TextFrame(event.delta.text))
+                        completion_tokens_estimate += self._estimate_tokens(event.delta.text)
                     elif hasattr(event.delta, 'partial_json') and tool_use_block:
                         json_accumulator += event.delta.partial_json
+                        completion_tokens_estimate += self._estimate_tokens(
+                            event.delta.partial_json)
                 elif (event.type == "content_block_start"):
                     if event.content_block.type == "tool_use":
                         tool_use_block = event.content_block
@@ -129,11 +145,34 @@ class AnthropicLLMService(LLMService):
                                                  tool_call_id=tool_use_block.id,
                                                  function_name=tool_use_block.name,
                                                  arguments=json.loads(json_accumulator))
+
+                # Calculate usage. Do this here in its own if statement, because there may be usage data
+                # embedded in messages that we do other processing for, above.
+                if hasattr(event, "usage"):
+                    prompt_tokens += event.usage.input_tokens if hasattr(
+                        event.usage, "input_tokens") else 0
+                    completion_tokens += event.usage.output_tokens if hasattr(
+                        event.usage, "output_tokens") else 0
+                elif hasattr(event, "message") and hasattr(event.message, "usage"):
+                    prompt_tokens += event.message.usage.input_tokens if hasattr(
+                        event.message.usage, "input_tokens") else 0
+                    completion_tokens += event.message.usage.output_tokens if hasattr(
+                        event.message.usage, "output_tokens") else 0
+
+        except CancelledError as e:
+            # If we're interrupted, we won't get a complete usage report. So set our flag to use the
+            # token estimate. The reraise the exception so all the processors running in this task
+            # also get cancelled.
+            use_completion_tokens_estimate = True
+            raise
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
+            await self._report_usage_metrics(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens if not use_completion_tokens_estimate else completion_tokens_estimate)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -160,6 +199,20 @@ class AnthropicLLMService(LLMService):
 
     async def request_image_frame(self, user_id: str, *, text_content: str = None):
         await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content), FrameDirection.UPSTREAM)
+
+    def _estimate_tokens(self, text: str) -> int:
+        return int(len(re.split(r'[^\w]+', text)) * 1.3)
+
+    async def _report_usage_metrics(self, prompt_tokens: int, completion_tokens: int):
+        if prompt_tokens or completion_tokens:
+            tokens = {
+                "processor": self.name,
+                "model": self._model,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens
+            }
+            await self.start_llm_usage_metrics(tokens)
 
 
 class AnthropicLLMContext(OpenAILLMContext):
