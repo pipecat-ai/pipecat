@@ -171,6 +171,28 @@ class RTVIBotReady(BaseModel):
     type: Literal["bot-ready"] = "bot-ready"
     data: RTVIBotReadyData
 
+    
+class RTVILLMFunctionCallMessageData(BaseModel):
+    function_name: str
+    tool_call_id: str
+    args: dict
+    
+    
+class RTVILLMFunctionCallMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["llm-function-call"] = "llm-function-call"
+    data: RTVILLMFunctionCallMessageData
+
+
+class RTVILLMFunctionCallStartMessageData(BaseModel):
+        function_name: str
+        
+    
+class RTVILLMFunctionCallStartMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["llm-function-call-start"] = "llm-function-call-start"
+    data: RTVILLMFunctionCallStartMessageData
+
 
 class RTVITranscriptionMessageData(BaseModel):
     text: str
@@ -239,6 +261,18 @@ class RTVIProcessor(FrameProcessor):
         else:
             await self._internal_push_frame(frame, direction)
 
+    async def handle_function_call(self, llm, function_name, tool_call_id, args):
+        fn = RTVILLMFunctionCallMessageData(function_name=function_name, tool_call_id=tool_call_id, args=args)
+        message = RTVILLMFunctionCallMessage(data=fn)
+        frame = TransportMessageFrame(message=message.model_dump())
+        await self.push_frame(frame)
+    
+    async def handle_function_call_start(self, llm, function_name):
+        fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
+        message = RTVILLMFunctionCallStartMessage(data=fn)
+        frame = TransportMessageFrame(message=message.model_dump())
+        await self.push_frame(frame)
+        
     async def cleanup(self):
         if self._pipeline:
             await self._pipeline.cleanup()

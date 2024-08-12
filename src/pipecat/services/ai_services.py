@@ -161,7 +161,7 @@ class LLMService(AIService):
     async def call_start_function(self, function_name: str):
         if function_name in self._start_callbacks.keys():
             await self._start_callbacks[function_name](self)
-        elif None in self._callbacks.keys():
+        elif None in self._start_callbacks.keys():
             return await self._start_callbacks[None](self, function_name)
 
 

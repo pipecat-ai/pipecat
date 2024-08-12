@@ -90,6 +90,7 @@ class BaseOpenAILLMService(LLMService):
             self,
             context: OpenAILLMContext,
             messages: List[ChatCompletionMessageParam]) -> AsyncStream[ChatCompletionChunk]:
+        print(f"!!! in here, messages is {messages}")
         chunks = await self._client.chat.completions.create(
             model=self._model,
             stream=True,
