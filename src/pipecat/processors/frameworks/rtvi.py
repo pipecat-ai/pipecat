@@ -15,6 +15,8 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
     SystemFrame,
     TranscriptionFrame,
     TransportMessageFrame,
@@ -382,6 +384,12 @@ class RTVIProcessor(FrameProcessor):
             await self._update_service_config(service_config)
 
     async def _handle_update_config(self, request_id: str, data: RTVIConfig):
+        # NOTE(aleix): The bot might be talking while we receive a new
+        # config. Let's interrupt it for now and update the config. Another
+        # solution is to wait until the bot stops speaking and then apply the
+        # config, but this definitely is more complicated to achieve.
+        await self.push_frame(StartInterruptionFrame())
+        await self.push_frame(StopInterruptionFrame())
         await self._update_config(data)
         await self._handle_get_config(request_id)
 
