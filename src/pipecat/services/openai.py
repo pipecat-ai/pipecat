@@ -362,7 +362,6 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
         super().__init__(context=context)
     
     async def push_messages_frame(self):
-        print(f"!!! this is the openai push messages frame, and i'm pushing {self._context}, messages in that context are {self._context.messages}, self messages is {self._messages}")
         frame = OpenAILLMContextFrame(self._context)
         await self.push_frame(frame)
     
@@ -434,7 +433,6 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                 self._context.add_message({"role": "assistant", "content": aggregation})
     
             if run_llm:
-                print(f"!!! openai push_aggregation run_llm, my self._messages is {self._messages}, context is {self._context}")
 
                 await self._user_context_aggregator.push_messages_frame()
     

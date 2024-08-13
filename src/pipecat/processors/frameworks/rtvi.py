@@ -379,7 +379,6 @@ class RTVIProcessor(FrameProcessor):
                     action = RTVIActionRun.model_validate(message.data)
                     await self._handle_action(message.id, action)
                 case "llm-function-call-result":
-                    print(f"!!! Got a function call result message!!!!, {message.data}")
                     data = RTVILLMFunctionCallResultData.model_validate(message.data)
                     await self._handle_function_call_result(data)
                     
@@ -431,13 +430,11 @@ class RTVIProcessor(FrameProcessor):
         await self._handle_get_config(request_id)
     
     async def _handle_function_call_result(self, data):
-        print(f"!!! in handler, data is {data}")
         frame = FunctionCallResultFrame(
         function_name=data.function_name,
         tool_call_id=data.tool_call_id,
         arguments=data.arguments,
         result=data.result)
-        print(f"!!! pushing frame: {frame}")
         await self.push_frame(frame)
 
     async def _handle_action(self, request_id: str, data: RTVIActionRun):

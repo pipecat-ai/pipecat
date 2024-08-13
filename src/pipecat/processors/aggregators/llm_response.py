@@ -146,7 +146,6 @@ class LLMResponseAggregator(FrameProcessor):
             await self.push_messages_frame()
         elif isinstance(frame, LLMSetToolsFrame):
             await self.push_frame(frame)
-            self._reset()
             await self._set_tools(frame.tools)
         else:
             await self.push_frame(frame, direction)
@@ -156,7 +155,6 @@ class LLMResponseAggregator(FrameProcessor):
             
     # TODO-CB: Types
     def set_messages(self, messages):
-        print(f"!!! llm_response set_messages to {messages}")
         self._messages.clear()
         self._messages.extend(messages)
 
@@ -169,7 +167,6 @@ class LLMResponseAggregator(FrameProcessor):
             self._aggregation = ""
 
             frame = LLMMessagesFrame(self._messages)
-            print(f"!!! top level push_aggregation, my self._messages is {self._messages}")
             await self.push_frame(frame)
 
     def _reset(self):
