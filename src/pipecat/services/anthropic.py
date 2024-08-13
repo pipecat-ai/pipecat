@@ -71,8 +71,9 @@ class AnthropicLLMService(LLMService):
             *,
             api_key: str,
             model: str = "claude-3-5-sonnet-20240620",
-            max_tokens: int = 4096):
-        super().__init__()
+            max_tokens: int = 4096,
+            **kwargs):
+        super().__init__(**kwargs)
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
         self._max_tokens = max_tokens
