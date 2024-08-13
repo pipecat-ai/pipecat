@@ -25,11 +25,14 @@ from pipecat.frames.frames import (
     TTSVoiceUpdateFrame,
     TextFrame,
     VisionImageRawFrame,
+    FunctionCallResultFrame
 )
 from pipecat.processors.async_frame_processor import AsyncFrameProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.utils import exp_smoothing
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+
 import re
 
 
@@ -115,27 +118,51 @@ class LLMService(AIService):
         self._start_callbacks = {}
 
     # TODO-CB: callback function type
-    def register_function(self, function_name: str, callback, start_callback=None):
+    def register_function(self, function_name: str | None, callback, start_callback=None):
+        # Registering a function with the function_name set to None will run that callback
+        # for all functions
         self._callbacks[function_name] = callback
+        # QUESTION FOR CB: maybe this isn't needed anymore?
         if start_callback:
             self._start_callbacks[function_name] = start_callback
 
-    def unregister_function(self, function_name: str):
+    def unregister_function(self, function_name: str | None):
         del self._callbacks[function_name]
         if self._start_callbacks[function_name]:
             del self._start_callbacks[function_name]
 
     def has_function(self, function_name: str):
+        if None in self._callbacks.keys():
+            return True
         return function_name in self._callbacks.keys()
 
-    async def call_function(self, function_name: str, args):
+    async def call_function(
+            self,
+            *,
+            context: OpenAILLMContext,
+            tool_call_id: str,
+            function_name: str,
+            arguments: str) -> None:
+        f = None
         if function_name in self._callbacks.keys():
-            return await self._callbacks[function_name](self, args)
-        return None
+            f = self._callbacks[function_name]
+        elif None in self._callbacks.keys():
+            f = self._callbacks[None]
+        else:
+            return None
+        await context.call_function(
+            f,
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+            llm=self)
 
+    # QUESTION FOR CB: maybe this isn't needed anymore?
     async def call_start_function(self, function_name: str):
         if function_name in self._start_callbacks.keys():
             await self._start_callbacks[function_name](self)
+        elif None in self._start_callbacks.keys():
+            return await self._start_callbacks[None](function_name)
 
 
 class TTSService(AIService):
@@ -151,12 +178,12 @@ class TTSService(AIService):
         self._push_text_frames: bool = push_text_frames
         self._current_sentence: str = ""
 
-    @abstractmethod
+    @ abstractmethod
     async def set_voice(self, voice: str):
         pass
 
     # Converts the text to audio.
-    @abstractmethod
+    @ abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         pass
 
@@ -242,7 +269,7 @@ class STTService(AIService):
         self._smoothing_factor = 0.2
         self._prev_volume = 0
 
-    @abstractmethod
+    @ abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Returns transcript as a string"""
         pass
@@ -308,7 +335,7 @@ class ImageGenService(AIService):
         super().__init__(**kwargs)
 
     # Renders the image. Returns an Image object.
-    @abstractmethod
+    @ abstractmethod
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         pass
 
@@ -331,7 +358,7 @@ class VisionService(AIService):
         super().__init__(**kwargs)
         self._describe_text = None
 
-    @abstractmethod
+    @ abstractmethod
     async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
         pass
 
