@@ -16,10 +16,7 @@ class FrameLogger(FrameProcessor):
         super().__init__()
         self._prefix = prefix
         self._color = color
-        if ignored_frame_types:
-            self._ignored_frame_types = tuple(ignored_frame_types)
-        else:
-            self._ignored_frame_types = None
+        self._ignored_frame_types = tuple(ignored_frame_types) if ignored_frame_types else None
         
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

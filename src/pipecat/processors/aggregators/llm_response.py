@@ -140,7 +140,7 @@ class LLMResponseAggregator(FrameProcessor):
             # await self.push_frame(frame)
             # We can now reset this one.
             self._reset()
-            self.set_messages(frame.messages)
+            self._set_messages(frame.messages)
             # messages_frame = LLMMessagesFrame(self._messages)
             # await self.push_frame(messages_frame)
             await self.push_messages_frame()
@@ -154,7 +154,7 @@ class LLMResponseAggregator(FrameProcessor):
             await self._push_aggregation()
             
     # TODO-CB: Types
-    def set_messages(self, messages):
+    def _set_messages(self, messages):
         self._messages.clear()
         self._messages.extend(messages)
 
@@ -270,7 +270,7 @@ class LLMContextAggregator(LLMResponseAggregator):
         self._context.tools = tools
         
     # TODO-CB: Types
-    def set_messages(self, messages):
+    def _set_messages(self, messages):
         self._messages.clear()
         self._messages.extend(messages)
 
