@@ -110,7 +110,7 @@ class AnthropicLLMService(LLMService):
 
             await self.stop_ttfb_metrics()
 
-            # Tool use
+            # Function calling
             tool_use_block = None
             json_accumulator = ''
 
@@ -423,7 +423,6 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         try:
             if self._function_call_result:
                 frame = self._function_call_result
-                # TODO-khk: This was _tool_use_frame, which didn't show up anywhere else?
                 self._function_call_result = None
                 self._context.add_message({
                     "role": "assistant",
@@ -450,7 +449,6 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                             }
                     ]
                 })
-                self._function_call_result = None
                 run_llm = True
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
