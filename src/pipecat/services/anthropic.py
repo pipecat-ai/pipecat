@@ -423,7 +423,8 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         try:
             if self._function_call_result:
                 frame = self._function_call_result
-                self._tool_use_frame = None
+                # TODO-khk: This was _tool_use_frame, which didn't show up anywhere else?
+                self._function_call_result = None
                 self._context.add_message({
                     "role": "assistant",
                     "content": [
@@ -445,7 +446,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                             {
                                 "type": "tool_result",
                                 "tool_use_id": frame.tool_call_id,
-                                "content": frame.result
+                                "content": json.dumps(frame.result)
                             }
                     ]
                 })

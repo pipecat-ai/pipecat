@@ -62,7 +62,7 @@ async def main():
         )
 
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            api_key=os.getenv("OPENAI_API_KEY"),
             model="claude-3-5-sonnet-20240620"
         )
         llm.register_function("get_weather", get_weather)
