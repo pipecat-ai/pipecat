@@ -728,7 +728,7 @@ class DailyTransport(BaseTransport):
             room_url: str,
             token: str | None,
             bot_name: str,
-            params: DailyParams,
+            params: DailyParams = DailyParams(),
             input_name: str | None = None,
             output_name: str | None = None,
             loop: asyncio.AbstractEventLoop | None = None):
