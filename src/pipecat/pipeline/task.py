@@ -108,7 +108,7 @@ class PipelineTask:
         )
         await self._source.process_frame(start_frame, FrameDirection.DOWNSTREAM)
 
-        if self._params.send_initial_empty_metrics:
+        if self._params.enable_metrics and self._params.send_initial_empty_metrics:
             await self._source.process_frame(self._initial_metrics_frame(), FrameDirection.DOWNSTREAM)
 
         running = True
