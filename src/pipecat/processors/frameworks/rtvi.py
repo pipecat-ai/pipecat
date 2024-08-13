@@ -23,8 +23,10 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     UserStoppedSpeakingFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transports.base_transport import BaseTransport
 
 from loguru import logger
+
 
 RTVI_PROTOCOL_VERSION = "0.1"
 
@@ -241,19 +243,34 @@ class RTVIUserStoppedSpeakingMessage(BaseModel):
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
 
 
+class RTVIProcessorParams(BaseModel):
+    send_bot_ready: bool = True
+
+
 class RTVIProcessor(FrameProcessor):
 
-    def __init__(self, config: RTVIConfig):
+    def __init__(self,
+                 *,
+                 transport: BaseTransport,
+                 config: RTVIConfig = RTVIConfig(config=[]),
+                 params: RTVIProcessorParams = RTVIProcessorParams()):
         super().__init__()
         self._config = config
+        self._params = params
 
         self._pipeline: FrameProcessor | None = None
+        self._pipeline_started = False
+        self._transport_joined = False
 
         self._registered_actions: Dict[str, RTVIAction] = {}
         self._registered_services: Dict[str, RTVIService] = {}
 
         self._frame_handler_task = self.get_event_loop().create_task(self._frame_handler())
         self._frame_queue = asyncio.Queue()
+
+        # TODO(aleix): This is very Daily specific. There should be a generic
+        # way to do this.
+        transport.add_event_handler("on_joined", self._transport_on_joined)
 
     def register_action(self, action: RTVIAction):
         id = self._action_id(action.service, action.action)
@@ -334,8 +351,9 @@ class RTVIProcessor(FrameProcessor):
             await self._pipeline.cleanup()
 
     async def _start(self, frame: StartFrame):
+        self._pipeline_started = True
         await self._update_config(self._config)
-        await self._send_bot_ready()
+        await self._maybe_send_bot_ready()
 
     async def _stop(self, frame: EndFrame):
         await self._frame_handler_task
@@ -503,7 +521,17 @@ class RTVIProcessor(FrameProcessor):
         frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
         await self.push_frame(frame)
 
+    async def _transport_on_joined(self, transport, participant):
+        self._transport_joined = True
+
+    async def _maybe_send_bot_ready(self):
+        if self._pipeline_started and self._transport_joined:
+            await self._send_bot_ready()
+
     async def _send_bot_ready(self):
+        if not self._params.send_bot_ready:
+            return
+
         message = RTVIBotReady(
             data=RTVIBotReadyData(
                 version=RTVI_PROTOCOL_VERSION,
