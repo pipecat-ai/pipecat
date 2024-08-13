@@ -8,7 +8,6 @@ import aiohttp
 import base64
 import io
 import json
-from anthropic.types import tool_use_block
 import httpx
 from dataclasses import dataclass
 
@@ -25,7 +24,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMModelUpdateFrame,
-    MetricsFrame,
     TextFrame,
     URLImageRawFrame,
     VisionImageRawFrame,
@@ -48,12 +46,7 @@ from pipecat.services.ai_services import (
 
 try:
     from openai import AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient, BadRequestError
-    from openai.types.chat import (
-        ChatCompletionChunk,
-        ChatCompletionFunctionMessageParam,
-        ChatCompletionMessageParam,
-        ChatCompletionToolParam
-    )
+    from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -63,7 +56,6 @@ except ModuleNotFoundError as e:
 
 class OpenAIUnhandledFunctionException(Exception):
     pass
-
 
 
 class BaseOpenAILLMService(LLMService):
@@ -93,8 +85,6 @@ class BaseOpenAILLMService(LLMService):
 
     def can_generate_metrics(self) -> bool:
         return True
-        
-
 
     async def get_chat_completions(
             self,
@@ -207,7 +197,6 @@ class BaseOpenAILLMService(LLMService):
             function_name=function_name,
             arguments=arguments
         )
-        
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -232,23 +221,25 @@ class BaseOpenAILLMService(LLMService):
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
 
+
 @dataclass
 class OpenAIContextAggregatorPair:
     _user: 'OpenAIUserContextAggregator'
     _assistant: 'OpenAIAssistantContextAggregator'
-    
+
     def user(self) -> str:
         return self._user
-        
+
     def assistant(self) -> str:
         return self._assistant
+
 
 class OpenAILLMService(BaseOpenAILLMService):
 
     def __init__(self, *, model: str = "gpt-4o", **kwargs):
         super().__init__(model=model, **kwargs)
 
-    @ staticmethod
+    @staticmethod
     def create_context_aggregator(context: OpenAILLMContext) -> OpenAIContextAggregatorPair:
         user = OpenAIUserContextAggregator(context)
         assistant = OpenAIAssistantContextAggregator(user)
@@ -256,6 +247,8 @@ class OpenAILLMService(BaseOpenAILLMService):
             _user=user,
             _assistant=assistant
         )
+
+
 class OpenAIImageGenService(ImageGenService):
 
     def __init__(
@@ -357,14 +350,15 @@ class OpenAITTSService(TTSService):
         except BadRequestError as e:
             logger.exception(f"{self} error generating TTS: {e}")
 
+
 class OpenAIUserContextAggregator(LLMUserContextAggregator):
     def __init__(self, context: OpenAILLMContext):
         super().__init__(context=context)
-    
+
     async def push_messages_frame(self):
         frame = OpenAILLMContextFrame(self._context)
         await self.push_frame(frame)
-    
+
 
 class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
     def __init__(self, user_context_aggregator: OpenAIUserContextAggregator):
@@ -372,7 +366,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         self._user_context_aggregator = user_context_aggregator
         self._function_call_in_progress = None
         self._function_call_result = None
-        
+
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
         # See note above about not calling push_frame() here.
@@ -393,19 +387,18 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                 self._function_call_in_progress = None
                 self._function_call_result = None
 
-    
     def add_message(self, message):
         self._user_context_aggregator.add_message(message)
-    
+
     async def _push_aggregation(self):
         if not (self._aggregation or self._function_call_result):
             return
-    
+
         run_llm = False
-    
+
         aggregation = self._aggregation
         self._aggregation = ""
-    
+
         try:
             if self._function_call_result:
                 frame = self._function_call_result
@@ -431,10 +424,10 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                 run_llm = True
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
-    
+
             if run_llm:
 
                 await self._user_context_aggregator.push_messages_frame()
-    
+
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
