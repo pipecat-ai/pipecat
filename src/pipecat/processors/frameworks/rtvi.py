@@ -28,7 +28,8 @@ from loguru import logger
 
 RTVI_PROTOCOL_VERSION = "0.1"
 
-ActionResult = Union[bool,int,float,str,list,dict]
+ActionResult = Union[bool, int, float, str, list, dict]
+
 
 class RTVIServiceOption(BaseModel):
     name: str
@@ -64,7 +65,8 @@ class RTVIAction(BaseModel):
     action: str
     arguments: List[RTVIActionArgument] = []
     result: Literal["bool", "number", "string", "array", "object"]
-    handler: Callable[["RTVIProcessor", str, Dict[str, Any]], Awaitable[ActionResult]] = Field(exclude=True)
+    handler: Callable[["RTVIProcessor", str, Dict[str, Any]],
+                      Awaitable[ActionResult]] = Field(exclude=True)
     _arguments_dict: Dict[str, RTVIActionArgument] = PrivateAttr(default={})
 
     def model_post_init(self, __context: Any) -> None:

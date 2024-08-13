@@ -793,7 +793,7 @@ class DailyTransport(BaseTransport):
     # DailyTransport
     #
 
-    @ property
+    @property
     def participant_id(self) -> str:
         return self._client.participant_id
 
