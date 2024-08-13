@@ -15,6 +15,7 @@ from typing import AsyncGenerator
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.frames.frames import (
     CancelFrame,
+    ErrorFrame,
     Frame,
     AudioRawFrame,
     StartInterruptionFrame,
@@ -173,6 +174,12 @@ class CartesiaTTSService(TTSService):
                         num_channels=1
                     )
                     await self.push_frame(frame)
+                elif msg["type"] == "error":
+                    logger.error(f"{self} error: {msg}")
+                    await self.stop_all_metrics()
+                    await self.push_frame(ErrorFrame(f'{self} error: {msg["error"]}'))
+                else:
+                    logger.error(f"Cartesia error, unknown message type: {msg}")
         except asyncio.CancelledError:
             pass
         except Exception as e:

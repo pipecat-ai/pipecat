@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TransportMessageFrame,
     UserStartedSpeakingFrame,
+    FunctionCallResultFrame,
     UserStoppedSpeakingFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -176,7 +177,6 @@ class RTVIActionResponse(BaseModel):
     id: str
     data: RTVIActionResponseData
 
-
 class RTVIBotReadyData(BaseModel):
     version: str
     config: List[RTVIServiceConfig]
@@ -186,6 +186,34 @@ class RTVIBotReady(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
     type: Literal["bot-ready"] = "bot-ready"
     data: RTVIBotReadyData
+
+    
+class RTVILLMFunctionCallMessageData(BaseModel):
+    function_name: str
+    tool_call_id: str
+    args: dict
+    
+    
+class RTVILLMFunctionCallMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["llm-function-call"] = "llm-function-call"
+    data: RTVILLMFunctionCallMessageData
+
+
+class RTVILLMFunctionCallStartMessageData(BaseModel):
+        function_name: str
+        
+    
+class RTVILLMFunctionCallStartMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["llm-function-call-start"] = "llm-function-call-start"
+    data: RTVILLMFunctionCallStartMessageData
+
+class RTVILLMFunctionCallResultData(BaseModel):
+    function_name: str
+    tool_call_id: str
+    arguments: dict
+    result: dict
 
 
 class RTVITranscriptionMessageData(BaseModel):
@@ -232,6 +260,7 @@ class RTVIProcessor(FrameProcessor):
     def register_service(self, service: RTVIService):
         self._registered_services[service.name] = service
 
+
     async def interrupt_bot(self):
         await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
 
@@ -273,6 +302,18 @@ class RTVIProcessor(FrameProcessor):
         else:
             await self.push_frame(frame, direction)
 
+    async def handle_function_call(self, function_name, tool_call_id, arguments, context, result_callback):
+        fn = RTVILLMFunctionCallMessageData(function_name=function_name, tool_call_id=tool_call_id, args=arguments)
+        message = RTVILLMFunctionCallMessage(data=fn)
+        frame = TransportMessageFrame(message=message.model_dump())
+        await self.push_frame(frame)
+    
+    async def handle_function_call_start(self, function_name):
+        fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
+        message = RTVILLMFunctionCallStartMessage(data=fn)
+        frame = TransportMessageFrame(message=message.model_dump())
+        await self.push_frame(frame)
+        
     async def cleanup(self):
         if self._pipeline:
             await self._pipeline.cleanup()
@@ -362,6 +403,10 @@ class RTVIProcessor(FrameProcessor):
                 case "action":
                     action = RTVIActionRun.model_validate(message.data)
                     await self._handle_action(message.id, action)
+                case "llm-function-call-result":
+                    data = RTVILLMFunctionCallResultData.model_validate(message.data)
+                    await self._handle_function_call_result(data)
+                    
                 case _:
                     await self._send_error_response(message.id, f"Unsupported type {message.type}")
 
@@ -419,6 +464,14 @@ class RTVIProcessor(FrameProcessor):
         await self.interrupt_bot()
         await self._update_config(data)
         await self._handle_get_config(request_id)
+    
+    async def _handle_function_call_result(self, data):
+        frame = FunctionCallResultFrame(
+        function_name=data.function_name,
+        tool_call_id=data.tool_call_id,
+        arguments=data.arguments,
+        result=data.result)
+        await self.push_frame(frame)
 
     async def _handle_action(self, request_id: str, data: RTVIActionRun):
         action_id = self._action_id(data.service, data.action)

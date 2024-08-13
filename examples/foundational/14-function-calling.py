@@ -36,11 +36,11 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def start_fetch_weather(llm):
-    await llm.push_frame(TextFrame("Let me think."))
+async def start_fetch_weather(llm, function_name):
+    await llm.push_frame(TextFrame("Let me check on that."))
 
 
-async def fetch_weather_from_api(llm, args):
+async def fetch_weather_from_api(llm, function_name, args):
     return {"conditions": "nice", "temperature": "75"}
 
 
@@ -69,8 +69,11 @@ async def main():
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o")
+        # Register a function_name of None to get all functions
+        # sent to the same callback with an additional function_name parameter.
         llm.register_function(
-            "get_current_weather",
+            #"get_current_weather",
+            None,
             fetch_weather_from_api,
             start_callback=start_fetch_weather)
 

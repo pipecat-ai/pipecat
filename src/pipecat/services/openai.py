@@ -8,7 +8,9 @@ import aiohttp
 import base64
 import io
 import json
+from anthropic.types import tool_use_block
 import httpx
+from dataclasses import dataclass
 
 from typing import AsyncGenerator, List, Literal
 
@@ -26,8 +28,13 @@ from pipecat.frames.frames import (
     MetricsFrame,
     TextFrame,
     URLImageRawFrame,
-    VisionImageRawFrame
+    VisionImageRawFrame,
+    FunctionCallResultFrame,
+    FunctionCallInProgressFrame,
+    StartInterruptionFrame
 )
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
+
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame
@@ -58,6 +65,7 @@ class OpenAIUnhandledFunctionException(Exception):
     pass
 
 
+
 class BaseOpenAILLMService(LLMService):
     """This is the base for all services that use the AsyncOpenAI client.
 
@@ -85,6 +93,8 @@ class BaseOpenAILLMService(LLMService):
 
     def can_generate_metrics(self) -> bool:
         return True
+        
+
 
     async def get_chat_completions(
             self,
@@ -191,44 +201,13 @@ class BaseOpenAILLMService(LLMService):
             arguments
     ):
         arguments = json.loads(arguments)
-        result = await self.call_function(function_name, arguments)
-        arguments = json.dumps(arguments)
-        if isinstance(result, (str, dict)):
-            # Handle it in "full magic mode"
-            tool_call = ChatCompletionFunctionMessageParam({
-                "role": "assistant",
-                "tool_calls": [
-                    {
-                        "id": tool_call_id,
-                        "function": {
-                            "arguments": arguments,
-                            "name": function_name
-                        },
-                        "type": "function"
-                    }
-                ]
-
-            })
-            context.add_message(tool_call)
-            if isinstance(result, dict):
-                result = json.dumps(result)
-            tool_result = ChatCompletionToolParam({
-                "tool_call_id": tool_call_id,
-                "role": "tool",
-                "content": result
-            })
-            context.add_message(tool_result)
-            # re-prompt to get a human answer
-            await self._process_context(context)
-        elif isinstance(result, list):
-            # reduced magic
-            for msg in result:
-                context.add_message(msg)
-            await self._process_context(context)
-        elif isinstance(result, type(None)):
-            pass
-        else:
-            raise TypeError(f"Unknown return type from function callback: {type(result)}")
+        await self.call_function(
+            context=context,
+            tool_call_id=tool_call_id,
+            function_name=function_name,
+            arguments=arguments
+        )
+        
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -253,13 +232,30 @@ class BaseOpenAILLMService(LLMService):
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
 
+@dataclass
+class OpenAIContextAggregatorPair:
+    _user: 'OpenAIUserContextAggregator'
+    _assistant: 'OpenAIAssistantContextAggregator'
+    
+    def user(self) -> str:
+        return self._user
+        
+    def assistant(self) -> str:
+        return self._assistant
 
 class OpenAILLMService(BaseOpenAILLMService):
 
     def __init__(self, *, model: str = "gpt-4o", **kwargs):
         super().__init__(model=model, **kwargs)
 
-
+    @ staticmethod
+    def create_context_aggregator(context: OpenAILLMContext) -> OpenAIContextAggregatorPair:
+        user = OpenAIUserContextAggregator(context)
+        assistant = OpenAIAssistantContextAggregator(user)
+        return OpenAIContextAggregatorPair(
+            _user=user,
+            _assistant=assistant
+        )
 class OpenAIImageGenService(ImageGenService):
 
     def __init__(
@@ -360,3 +356,85 @@ class OpenAITTSService(TTSService):
                         yield frame
         except BadRequestError as e:
             logger.exception(f"{self} error generating TTS: {e}")
+
+class OpenAIUserContextAggregator(LLMUserContextAggregator):
+    def __init__(self, context: OpenAILLMContext):
+        super().__init__(context=context)
+    
+    async def push_messages_frame(self):
+        frame = OpenAILLMContextFrame(self._context)
+        await self.push_frame(frame)
+    
+
+class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
+    def __init__(self, user_context_aggregator: OpenAIUserContextAggregator):
+        super().__init__(context=user_context_aggregator._context)
+        self._user_context_aggregator = user_context_aggregator
+        self._function_call_in_progress = None
+        self._function_call_result = None
+        
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        # See note above about not calling push_frame() here.
+        if isinstance(frame, StartInterruptionFrame):
+            self._function_call_in_progress = None
+            self._function_call_finished = None
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            self._function_call_in_progress = frame
+        elif isinstance(frame, FunctionCallResultFrame):
+            if self._function_call_in_progress and self._function_call_in_progress.tool_call_id == frame.tool_call_id:
+                self._function_call_in_progress = None
+                self._function_call_result = frame
+                # TODO-CB: Kwin wants us to refactor this out of here but I REFUSE
+                await self._push_aggregation()
+            else:
+                logger.warning(
+                    f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id")
+                self._function_call_in_progress = None
+                self._function_call_result = None
+
+    
+    def add_message(self, message):
+        self._user_context_aggregator.add_message(message)
+    
+    async def _push_aggregation(self):
+        if not (self._aggregation or self._function_call_result):
+            return
+    
+        run_llm = False
+    
+        aggregation = self._aggregation
+        self._aggregation = ""
+    
+        try:
+            if self._function_call_result:
+                frame = self._function_call_result
+                self._context.add_message({
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": frame.tool_call_id,
+                            "function": {
+                                "name": frame.function_name,
+                                "arguments": json.dumps(frame.arguments)
+                            },
+                            "type": "function"
+                        }
+                    ]
+                })
+                self._context.add_message({
+                    "role": "tool",
+                    "content": json.dumps(frame.result),
+                    "tool_call_id": frame.tool_call_id
+                })
+                self._function_call_result = None
+                run_llm = True
+            else:
+                self._context.add_message({"role": "assistant", "content": aggregation})
+    
+            if run_llm:
+
+                await self._user_context_aggregator.push_messages_frame()
+    
+        except Exception as e:
+            logger.error(f"Error processing frame: {e}")
