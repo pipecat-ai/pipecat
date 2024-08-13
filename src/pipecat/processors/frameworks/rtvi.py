@@ -10,13 +10,12 @@ from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Unio
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
-    StartInterruptionFrame,
-    StopInterruptionFrame,
     SystemFrame,
     TranscriptionFrame,
     TransportMessageFrame,
@@ -233,6 +232,9 @@ class RTVIProcessor(FrameProcessor):
     def register_service(self, service: RTVIService):
         self._registered_services[service.name] = service
 
+    async def interrupt_bot(self):
+        await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         if isinstance(frame, SystemFrame):
             await super().push_frame(frame, direction)
@@ -414,8 +416,7 @@ class RTVIProcessor(FrameProcessor):
         # config. Let's interrupt it for now and update the config. Another
         # solution is to wait until the bot stops speaking and then apply the
         # config, but this definitely is more complicated to achieve.
-        await self.push_frame(StartInterruptionFrame())
-        await self.push_frame(StopInterruptionFrame())
+        await self.interrupt_bot()
         await self._update_config(data)
         await self._handle_get_config(request_id)
 
