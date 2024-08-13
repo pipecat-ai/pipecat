@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Unio
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -27,7 +28,8 @@ from loguru import logger
 
 RTVI_PROTOCOL_VERSION = "0.1"
 
-ActionResult = Union[bool,int,float,str,list,dict]
+ActionResult = Union[bool, int, float, str, list, dict]
+
 
 class RTVIServiceOption(BaseModel):
     name: str
@@ -62,7 +64,9 @@ class RTVIAction(BaseModel):
     service: str
     action: str
     arguments: List[RTVIActionArgument] = []
-    handler: Callable[["RTVIProcessor", str, Dict[str, Any]], Awaitable[ActionResult]] = Field(exclude=True)
+    result: Literal["bool", "number", "string", "array", "object"]
+    handler: Callable[["RTVIProcessor", str, Dict[str, Any]],
+                      Awaitable[ActionResult]] = Field(exclude=True)
     _arguments_dict: Dict[str, RTVIActionArgument] = PrivateAttr(default={})
 
     def model_post_init(self, __context: Any) -> None:
@@ -143,6 +147,17 @@ class RTVIDescribeConfig(BaseModel):
     type: Literal["config-available"] = "config-available"
     id: str
     data: RTVIDescribeConfigData
+
+
+class RTVIDescribeActionsData(BaseModel):
+    actions: List[RTVIAction]
+
+
+class RTVIDescribeActions(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["actions-available"] = "actions-available"
+    id: str
+    data: RTVIDescribeActionsData
 
 
 class RTVIConfigResponse(BaseModel):
@@ -245,6 +260,16 @@ class RTVIProcessor(FrameProcessor):
     def register_service(self, service: RTVIService):
         self._registered_services[service.name] = service
 
+
+    async def interrupt_bot(self):
+        await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        if isinstance(frame, SystemFrame):
+            await super().push_frame(frame, direction)
+        else:
+            await self._internal_push_frame(frame, direction)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -258,15 +283,24 @@ class RTVIProcessor(FrameProcessor):
         # Control frames
         elif isinstance(frame, StartFrame):
             await self._start(frame)
-            await self._internal_push_frame(frame, direction)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.
-            await self._internal_push_frame(frame, direction)
+            await self.push_frame(frame, direction)
             await self._stop(frame)
+        elif isinstance(frame, UserStartedSpeakingFrame) or isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_interruptions(frame)
+            await self.push_frame(frame, direction)
+        # Data frames
+        elif isinstance(frame, TransportMessageFrame):
+            await self._handle_message(frame)
+        elif isinstance(frame, TranscriptionFrame) or isinstance(frame, InterimTranscriptionFrame):
+            await self._handle_transcriptions(frame)
+            await self.push_frame(frame, direction)
         # Other frames
         else:
-            await self._internal_push_frame(frame, direction)
+            await self.push_frame(frame, direction)
 
     async def handle_function_call(self, function_name, tool_call_id, arguments, context, result_callback):
         fn = RTVILLMFunctionCallMessageData(function_name=function_name, tool_call_id=tool_call_id, args=arguments)
@@ -306,22 +340,11 @@ class RTVIProcessor(FrameProcessor):
         while running:
             try:
                 (frame, direction) = await self._frame_queue.get()
-                await self._handle_frame(frame, direction)
+                await super().push_frame(frame, direction)
                 self._frame_queue.task_done()
                 running = not isinstance(frame, EndFrame)
             except asyncio.CancelledError:
                 break
-
-    async def _handle_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, TransportMessageFrame):
-            await self._handle_message(frame)
-        else:
-            await self.push_frame(frame, direction)
-
-        if isinstance(frame, TranscriptionFrame) or isinstance(frame, InterimTranscriptionFrame):
-            await self._handle_transcriptions(frame)
-        elif isinstance(frame, UserStartedSpeakingFrame) or isinstance(frame, UserStoppedSpeakingFrame):
-            await self._handle_interruptions(frame)
 
     async def _handle_transcriptions(self, frame: Frame):
         # TODO(aleix): Once we add support for using custom pipelines, the STTs will
@@ -368,6 +391,8 @@ class RTVIProcessor(FrameProcessor):
 
         try:
             match message.type:
+                case "describe-actions":
+                    await self._handle_describe_actions(message.id)
                 case "describe-config":
                     await self._handle_describe_config(message.id)
                 case "get-config":
@@ -395,6 +420,12 @@ class RTVIProcessor(FrameProcessor):
     async def _handle_describe_config(self, request_id: str):
         services = list(self._registered_services.values())
         message = RTVIDescribeConfig(id=request_id, data=RTVIDescribeConfigData(config=services))
+        frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+        await self.push_frame(frame)
+
+    async def _handle_describe_actions(self, request_id: str):
+        actions = list(self._registered_actions.values())
+        message = RTVIDescribeActions(id=request_id, data=RTVIDescribeActionsData(actions=actions))
         frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
         await self.push_frame(frame)
 
@@ -426,6 +457,11 @@ class RTVIProcessor(FrameProcessor):
             await self._update_service_config(service_config)
 
     async def _handle_update_config(self, request_id: str, data: RTVIConfig):
+        # NOTE(aleix): The bot might be talking while we receive a new
+        # config. Let's interrupt it for now and update the config. Another
+        # solution is to wait until the bot stops speaking and then apply the
+        # config, but this definitely is more complicated to achieve.
+        await self.interrupt_bot()
         await self._update_config(data)
         await self._handle_get_config(request_id)
     
