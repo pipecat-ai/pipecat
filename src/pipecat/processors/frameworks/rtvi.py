@@ -177,6 +177,7 @@ class RTVIActionResponse(BaseModel):
     id: str
     data: RTVIActionResponseData
 
+
 class RTVIBotReadyData(BaseModel):
     version: str
     config: List[RTVIServiceConfig]
@@ -187,13 +188,13 @@ class RTVIBotReady(BaseModel):
     type: Literal["bot-ready"] = "bot-ready"
     data: RTVIBotReadyData
 
-    
+
 class RTVILLMFunctionCallMessageData(BaseModel):
     function_name: str
     tool_call_id: str
     args: dict
-    
-    
+
+
 class RTVILLMFunctionCallMessage(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
     type: Literal["llm-function-call"] = "llm-function-call"
@@ -201,13 +202,14 @@ class RTVILLMFunctionCallMessage(BaseModel):
 
 
 class RTVILLMFunctionCallStartMessageData(BaseModel):
-        function_name: str
-        
-    
+    function_name: str
+
+
 class RTVILLMFunctionCallStartMessage(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
     type: Literal["llm-function-call-start"] = "llm-function-call-start"
     data: RTVILLMFunctionCallStartMessageData
+
 
 class RTVILLMFunctionCallResultData(BaseModel):
     function_name: str
@@ -260,9 +262,34 @@ class RTVIProcessor(FrameProcessor):
     def register_service(self, service: RTVIService):
         self._registered_services[service.name] = service
 
-
     async def interrupt_bot(self):
         await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+
+    async def send_error(self, error: str):
+        message = RTVIError(data=RTVIErrorData(message=error))
+        frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+        await self.push_frame(frame)
+
+    async def handle_function_call(
+            self,
+            function_name: str,
+            tool_call_id: str,
+            arguments: dict,
+            context,
+            result_callback):
+        fn = RTVILLMFunctionCallMessageData(
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            args=arguments)
+        message = RTVILLMFunctionCallMessage(data=fn)
+        frame = TransportMessageFrame(message=message.model_dump())
+        await self.push_frame(frame)
+
+    async def handle_function_call_start(self, function_name: str):
+        fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
+        message = RTVILLMFunctionCallStartMessage(data=fn)
+        frame = TransportMessageFrame(message=message.model_dump())
+        await self.push_frame(frame)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         if isinstance(frame, SystemFrame):
@@ -302,18 +329,6 @@ class RTVIProcessor(FrameProcessor):
         else:
             await self.push_frame(frame, direction)
 
-    async def handle_function_call(self, function_name, tool_call_id, arguments, context, result_callback):
-        fn = RTVILLMFunctionCallMessageData(function_name=function_name, tool_call_id=tool_call_id, args=arguments)
-        message = RTVILLMFunctionCallMessage(data=fn)
-        frame = TransportMessageFrame(message=message.model_dump())
-        await self.push_frame(frame)
-    
-    async def handle_function_call_start(self, function_name):
-        fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
-        message = RTVILLMFunctionCallStartMessage(data=fn)
-        frame = TransportMessageFrame(message=message.model_dump())
-        await self.push_frame(frame)
-        
     async def cleanup(self):
         if self._pipeline:
             await self._pipeline.cleanup()
@@ -385,7 +400,7 @@ class RTVIProcessor(FrameProcessor):
         try:
             message = RTVIMessage.model_validate(frame.message)
         except ValidationError as e:
-            await self._send_error(f"Invalid incoming message: {e}")
+            await self.send_error(f"Invalid incoming message: {e}")
             logger.warning(f"Invalid incoming  message: {e}")
             return
 
@@ -406,7 +421,7 @@ class RTVIProcessor(FrameProcessor):
                 case "llm-function-call-result":
                     data = RTVILLMFunctionCallResultData.model_validate(message.data)
                     await self._handle_function_call_result(data)
-                    
+
                 case _:
                     await self._send_error_response(message.id, f"Unsupported type {message.type}")
 
@@ -464,13 +479,13 @@ class RTVIProcessor(FrameProcessor):
         await self.interrupt_bot()
         await self._update_config(data)
         await self._handle_get_config(request_id)
-    
+
     async def _handle_function_call_result(self, data):
         frame = FunctionCallResultFrame(
-        function_name=data.function_name,
-        tool_call_id=data.tool_call_id,
-        arguments=data.arguments,
-        result=data.result)
+            function_name=data.function_name,
+            tool_call_id=data.tool_call_id,
+            arguments=data.arguments,
+            result=data.result)
         await self.push_frame(frame)
 
     async def _handle_action(self, request_id: str, data: RTVIActionRun):
@@ -493,11 +508,6 @@ class RTVIProcessor(FrameProcessor):
             data=RTVIBotReadyData(
                 version=RTVI_PROTOCOL_VERSION,
                 config=self._config.config))
-        frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
-        await self.push_frame(frame)
-
-    async def _send_error(self, error: str):
-        message = RTVIError(data=RTVIErrorData(message=error))
         frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
         await self.push_frame(frame)
 
