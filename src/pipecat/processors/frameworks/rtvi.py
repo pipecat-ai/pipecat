@@ -63,6 +63,7 @@ class RTVIAction(BaseModel):
     service: str
     action: str
     arguments: List[RTVIActionArgument] = []
+    result: Literal["bool", "number", "string", "array", "object"]
     handler: Callable[["RTVIProcessor", str, Dict[str, Any]], Awaitable[ActionResult]] = Field(exclude=True)
     _arguments_dict: Dict[str, RTVIActionArgument] = PrivateAttr(default={})
 
@@ -144,6 +145,17 @@ class RTVIDescribeConfig(BaseModel):
     type: Literal["config-available"] = "config-available"
     id: str
     data: RTVIDescribeConfigData
+
+
+class RTVIDescribeActionsData(BaseModel):
+    actions: List[RTVIAction]
+
+
+class RTVIDescribeActions(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["actions-available"] = "actions-available"
+    id: str
+    data: RTVIDescribeActionsData
 
 
 class RTVIConfigResponse(BaseModel):
@@ -334,6 +346,8 @@ class RTVIProcessor(FrameProcessor):
 
         try:
             match message.type:
+                case "describe-actions":
+                    await self._handle_describe_actions(message.id)
                 case "describe-config":
                     await self._handle_describe_config(message.id)
                 case "get-config":
@@ -357,6 +371,12 @@ class RTVIProcessor(FrameProcessor):
     async def _handle_describe_config(self, request_id: str):
         services = list(self._registered_services.values())
         message = RTVIDescribeConfig(id=request_id, data=RTVIDescribeConfigData(config=services))
+        frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
+        await self.push_frame(frame)
+
+    async def _handle_describe_actions(self, request_id: str):
+        actions = list(self._registered_actions.values())
+        message = RTVIDescribeActions(id=request_id, data=RTVIDescribeActionsData(actions=actions))
         frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
         await self.push_frame(frame)
 
