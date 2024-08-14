@@ -265,8 +265,11 @@ class RTVIProcessor(FrameProcessor):
         self._registered_actions: Dict[str, RTVIAction] = {}
         self._registered_services: Dict[str, RTVIService] = {}
 
-        self._frame_handler_task = self.get_event_loop().create_task(self._frame_handler())
-        self._frame_queue = asyncio.Queue()
+        self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
+        self._push_queue = asyncio.Queue()
+
+        self._message_task = self.get_event_loop().create_task(self._message_task_handler())
+        self._message_queue = asyncio.Queue()
 
         # TODO(aleix): This is very Daily specific. There should be a generic
         # way to do this.
@@ -337,11 +340,11 @@ class RTVIProcessor(FrameProcessor):
             await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
         # Data frames
-        elif isinstance(frame, TransportMessageFrame):
-            await self._handle_message(frame)
         elif isinstance(frame, TranscriptionFrame) or isinstance(frame, InterimTranscriptionFrame):
             await self._handle_transcriptions(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, TransportMessageFrame):
+            await self._message_queue.put(frame)
         # Other frames
         else:
             await self.push_frame(frame, direction)
@@ -356,25 +359,31 @@ class RTVIProcessor(FrameProcessor):
         await self._maybe_send_bot_ready()
 
     async def _stop(self, frame: EndFrame):
-        await self._frame_handler_task
+        # We need to cancel the message task handler because that one is not
+        # processing EndFrames.
+        self._message_task.cancel()
+        await self._message_task
+        await self._push_frame_task
 
     async def _cancel(self, frame: CancelFrame):
-        self._frame_handler_task.cancel()
-        await self._frame_handler_task
+        self._message_task.cancel()
+        await self._message_task
+        self._push_frame_task.cancel()
+        await self._push_frame_task
 
     async def _internal_push_frame(
             self,
             frame: Frame | None,
             direction: FrameDirection | None = FrameDirection.DOWNSTREAM):
-        await self._frame_queue.put((frame, direction))
+        await self._push_queue.put((frame, direction))
 
-    async def _frame_handler(self):
+    async def _push_frame_task_handler(self):
         running = True
         while running:
             try:
-                (frame, direction) = await self._frame_queue.get()
+                (frame, direction) = await self._push_queue.get()
                 await super().push_frame(frame, direction)
-                self._frame_queue.task_done()
+                self._push_queue.task_done()
                 running = not isinstance(frame, EndFrame)
             except asyncio.CancelledError:
                 break
@@ -413,6 +422,15 @@ class RTVIProcessor(FrameProcessor):
         if message:
             frame = TransportMessageFrame(message=message.model_dump(exclude_none=True))
             await self.push_frame(frame)
+
+    async def _message_task_handler(self):
+        while True:
+            try:
+                frame = await self._message_queue.get()
+                await self._handle_message(frame)
+                self._message_queue.task_done()
+            except asyncio.CancelledError:
+                break
 
     async def _handle_message(self, frame: TransportMessageFrame):
         try:
@@ -545,4 +563,4 @@ class RTVIProcessor(FrameProcessor):
         await self.push_frame(frame)
 
     def _action_id(self, service: str, action: str) -> str:
-        return f"{service}/{action}"
+        return f"{service}:{action}"
