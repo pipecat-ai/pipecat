@@ -102,13 +102,15 @@ class AnthropicLLMService(LLMService):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
 
-            logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
+            logger.debug(
+                f"Generating chat: {context.system} | {context.get_messages_for_logging()}")
 
             messages = context.messages
 
             await self.start_ttfb_metrics()
 
             response = await self._client.messages.create(
+                system=context.system,
                 messages=messages,
                 tools=context.tools or [],
                 model=self._model,
@@ -234,12 +236,12 @@ class AnthropicLLMContext(OpenAILLMContext):
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
         *,
-        system: str | None = None
+        system: List | None = None
     ):
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self._user_image_request_context = {}
 
-        self.system_message = system
+        self.system = system
 
     @classmethod
     def from_openai_context(cls, openai_context: OpenAILLMContext):
@@ -248,18 +250,7 @@ class AnthropicLLMContext(OpenAILLMContext):
             tools=openai_context.tools,
             tool_choice=openai_context.tool_choice,
         )
-        # See if we should pull the system message out of our context.messages list. (For
-        # compatibility with Open AI messages format.)
-        if self.messages and self.messages[0]["role"] == "system":
-            if len(self.messages) == 1:
-                # If we have only have a system message in the list, all we can really do
-                # without introducing too much magic is change the role to "user".
-                self.messages[0]["role"] = "user"
-            else:
-                # If we have more than one message, we'll pull the system message out of the
-                # list.
-                self.system_message = self.messages[0]["content"]
-                self.messages.pop(0)
+        self._restructure_from_openai_messages()
         return self
 
     @classmethod
@@ -275,6 +266,10 @@ class AnthropicLLMContext(OpenAILLMContext):
             image=frame.image,
             text=frame.text)
         return context
+
+    def set_messages(self, messages: List):
+        self._messages[:] = messages
+        self._restructure_from_openai_messages()
 
     def add_image_frame_message(
             self, *, format: str, size: tuple[int, int], image: bytes, text: str = None):
@@ -315,6 +310,20 @@ class AnthropicLLMContext(OpenAILLMContext):
                 self.messages.append(message)
         except Exception as e:
             logger.error(f"Error adding message: {e}")
+
+    def _restructure_from_openai_messages(self):
+        # See if we should pull the system message out of our context.messages list. (For
+        # compatibility with Open AI messages format.)
+        if self.messages and self.messages[0]["role"] == "system":
+            if len(self.messages) == 1:
+                # If we have only have a system message in the list, all we can really do
+                # without introducing too much magic is change the role to "user".
+                self.messages[0]["role"] = "user"
+            else:
+                # If we have more than one message, we'll pull the system message out of the
+                # list.
+                self.system = self.messages[0]["content"]
+                self.messages.pop(0)
 
     def get_messages_for_logging(self) -> str:
         msgs = []
