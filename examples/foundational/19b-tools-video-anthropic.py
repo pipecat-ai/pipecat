@@ -77,7 +77,8 @@ async def main():
 
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY"),
-            model="claude-3-5-sonnet-20240620"
+            model="claude-3-5-sonnet-20240620",
+            enable_prompt_caching_beta=True
         )
         llm.register_function("get_weather", get_weather)
         llm.register_function("get_image", get_image)
@@ -136,10 +137,20 @@ indicate you should use the get_image tool are:
 If you need to use a tool, simply use the tool. Do not tell the user the tool you are using. Be brief and concise.
         """
 
-        messages = [{"role": "system",
-                     "content": system_prompt},
-                    {"role": "user",
-                     "content": "Start the conversation by introducing yourself."}]
+        messages = [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                    }
+                ]
+            },
+            {
+                "role": "user",
+                "content": "Start the conversation by introducing yourself."
+            }]
 
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
