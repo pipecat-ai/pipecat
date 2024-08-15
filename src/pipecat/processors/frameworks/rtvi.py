@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.frames.frames import (
     BotInterruptionFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -243,6 +245,16 @@ class RTVIUserStoppedSpeakingMessage(BaseModel):
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
 
 
+class RTVIBotStartedSpeakingMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["bot-started-speaking"] = "bot-started-speaking"
+
+
+class RTVIBotStoppedSpeakingMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["bot-stopped-speaking"] = "bot-stopped-speaking"
+
+
 class RTVIProcessorParams(BaseModel):
     send_bot_ready: bool = True
 
@@ -336,6 +348,9 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, UserStartedSpeakingFrame) or isinstance(frame, UserStoppedSpeakingFrame):
             await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStartedSpeakingFrame) or isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_speaking(frame)
+            await self.push_frame(frame, direction)
         # Data frames
         elif isinstance(frame, TranscriptionFrame) or isinstance(frame, InterimTranscriptionFrame):
             await self._handle_transcriptions(frame)
@@ -420,6 +435,16 @@ class RTVIProcessor(FrameProcessor):
             message = RTVIUserStartedSpeakingMessage()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             message = RTVIUserStoppedSpeakingMessage()
+
+        if message:
+            await self._push_transport_message(message)
+
+    async def _handle_bot_speaking(self, frame: Frame):
+        message = None
+        if isinstance(frame, BotStartedSpeakingFrame):
+            message = RTVIBotStartedSpeakingMessage()
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            message = RTVIBotStoppedSpeakingMessage()
 
         if message:
             await self._push_transport_message(message)
