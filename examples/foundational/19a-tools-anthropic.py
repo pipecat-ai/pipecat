@@ -62,7 +62,7 @@ async def main():
         )
 
         llm = AnthropicLLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
             model="claude-3-5-sonnet-20240620"
         )
         llm.register_function("get_weather", get_weather)
@@ -86,10 +86,12 @@ async def main():
 
         # todo: test with very short initial user message
 
-        messages = [{"role": "system",
-                     "content": "You are a helpful assistant who can report the weather in any location in the universe. Respond concisely. Your response will be turned into speech so use only simple words and punctuation."},
-                    {"role": "user",
-                     "content": " Start the conversation by introducing yourself."}]
+        # messages = [{"role": "system",
+        #              "content": "You are a helpful assistant who can report the weather in any location in the universe. Respond concisely. Your response will be turned into speech so use only simple words and punctuation."},
+        #             {"role": "user",
+        #              "content": " Start the conversation by introducing yourself."}]
+
+        messages = [{"role": "user", "content": "Say 'hello' to start the conversation."}]
 
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
@@ -109,7 +111,7 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
 
