@@ -205,10 +205,13 @@ class AnthropicLLMService(LLMService):
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
+            comp_tokens = completion_tokens if not use_completion_tokens_estimate else completion_tokens_estimate
             await self._report_usage_metrics(
                 prompt_tokens=prompt_tokens,
-                completion_tokens=(completion_tokens if not use_completion_tokens_estimate
-                                   else completion_tokens_estimate))
+                completion_tokens=comp_tokens,
+                cache_creation_input_tokens=cache_creation_input_tokens,
+                cache_read_input_tokens=cache_read_input_tokens
+            )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -240,13 +243,20 @@ class AnthropicLLMService(LLMService):
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r'[^\w]+', text)) * 1.3)
 
-    async def _report_usage_metrics(self, prompt_tokens: int, completion_tokens: int):
-        if prompt_tokens or completion_tokens:
+    async def _report_usage_metrics(
+            self,
+            prompt_tokens: int,
+            completion_tokens: int,
+            cache_creation_input_tokens: int,
+            cache_read_input_tokens: int):
+        if prompt_tokens or completion_tokens or cache_creation_input_tokens or cache_read_input_tokens:
             tokens = {
                 "processor": self.name,
                 "model": self._model,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
+                "cache_creation_input_tokens": cache_creation_input_tokens,
+                "cache_read_input_tokens": cache_read_input_tokens,
                 "total_tokens": prompt_tokens + completion_tokens
             }
             await self.start_llm_usage_metrics(tokens)
