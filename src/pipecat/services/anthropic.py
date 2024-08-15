@@ -110,7 +110,7 @@ class AnthropicLLMService(LLMService):
             await self.start_ttfb_metrics()
 
             response = await self._client.messages.create(
-                system=context.system,
+                system=context.system or [],
                 messages=messages,
                 tools=context.tools or [],
                 model=self._model,
@@ -255,7 +255,9 @@ class AnthropicLLMContext(OpenAILLMContext):
 
     @classmethod
     def from_messages(cls, messages: List[dict]) -> "AnthropicLLMContext":
-        return cls(messages=messages)
+        self = cls(messages=messages)
+        self._restructure_from_openai_messages()
+        return self
 
     @classmethod
     def from_image_frame(cls, frame: VisionImageRawFrame) -> "AnthropicLLMContext":

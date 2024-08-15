@@ -137,7 +137,8 @@ If you need to use a tool, simply use the tool. Do not tell the user the tool yo
         """
 
         messages = [{"role": "system",
-                     "content": system_prompt,
+                     "content": system_prompt},
+                    {"role": "user",
                      "content": "Start the conversation by introducing yourself."}]
 
         context = OpenAILLMContext(messages, tools)
@@ -161,7 +162,7 @@ If you need to use a tool, simply use the tool. Do not tell the user the tool yo
             transport.capture_participant_transcription(video_participant_id)
             transport.capture_participant_video(video_participant_id, framerate=0)
             # Kick off the conversation.
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
         await runner.run(task)
