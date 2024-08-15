@@ -336,10 +336,6 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
         if isinstance(context, OpenAILLMContext):
             self._context = AnthropicLLMContext.from_openai_context(context)
 
-    async def push_messages_frame(self):
-        frame = OpenAILLMContextFrame(self._context)
-        await self.push_frame(frame)
-
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
         # Our parent method has already called push_frame(). So we can't interrupt the
@@ -415,7 +411,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                     size=frame.user_image_raw_frame.size,
                     image=frame.user_image_raw_frame.image,
                     text=frame.text)
-                await self._user_context_aggregator.push_messages_frame()
+                await self._user_context_aggregator.push_context_frame()
             except Exception as e:
                 logger.error(f"Error processing AnthropicImageMessageFrame: {e}")
 
@@ -465,7 +461,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
             if run_llm:
-                await self._user_context_aggregator.push_messages_frame()
+                await self._user_context_aggregator.push_context_frame()
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")

@@ -44,10 +44,10 @@ class OpenAILLMContext:
         tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN,
         tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN
     ):
-        self.messages: List[ChatCompletionMessageParam] = messages if messages else [
+        self._messages: List[ChatCompletionMessageParam] = messages if messages else [
         ]
-        self.tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
-        self.tools: List[ChatCompletionToolParam] | NotGiven = tools
+        self._tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
+        self._tools: List[ChatCompletionToolParam] | NotGiven = tools
 
     @staticmethod
     def from_messages(messages: List[dict]) -> "OpenAILLMContext":
@@ -84,26 +84,43 @@ class OpenAILLMContext:
         })
         return context
 
+    @property
+    def messages(self) -> List[ChatCompletionMessageParam]:
+        return self._messages
+
+    @property
+    def tools(self) -> List[ChatCompletionToolParam] | NotGiven:
+        return self._tools
+
+    @property
+    def tool_choice(self) -> ChatCompletionToolChoiceOptionParam | NotGiven:
+        return self._tool_choice
+
     def add_message(self, message: ChatCompletionMessageParam):
-        self.messages.append(message)
+        self._messages.append(message)
+
+    def add_messages(self, messages: List[ChatCompletionMessageParam]):
+        self._messages.extend(messages)
+
+    def set_messages(self, messages: List[ChatCompletionMessageParam]):
+        self._messages[:] = messages
 
     def get_messages(self) -> List[ChatCompletionMessageParam]:
-        return self.messages
+        return self._messages
 
     def get_messages_json(self) -> str:
-        return json.dumps(self.messages, cls=CustomEncoder)
+        return json.dumps(self._messages, cls=CustomEncoder)
 
     def set_tool_choice(
         self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven
     ):
-        self.tool_choice = tool_choice
+        self._tool_choice = tool_choice
 
     def set_tools(self, tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN):
         if tools != NOT_GIVEN and len(tools) == 0:
             tools = NOT_GIVEN
+        self._tools = tools
 
-        self.tools = tools
-    
     async def call_function(
             self,
             f: callable,
