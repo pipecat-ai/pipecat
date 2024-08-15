@@ -498,10 +498,14 @@ class RTVIProcessor(FrameProcessor):
 
     async def _update_service_config(self, config: RTVIServiceConfig):
         service = self._registered_services[config.service]
-        for option in config.options:
-            handler = service._options_dict[option.name].handler
-            await handler(self, service.name, option)
-            self._update_config_option(service.name, option)
+        # Process options in the order they are defined, not in the order they
+        # are sent.
+        for option_def in service.options:
+            for option in config.options:
+                if option_def.name == option.name:
+                    handler = option_def.handler
+                    await handler(self, service.name, option)
+                    self._update_config_option(service.name, option)
 
     async def _update_config(self, data: RTVIConfig):
         for service_config in data.config:
