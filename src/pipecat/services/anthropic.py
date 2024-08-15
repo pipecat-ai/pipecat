@@ -30,8 +30,14 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
-from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame
+)
+from pipecat.processors.aggregators.llm_response import (
+    LLMUserContextAggregator,
+    LLMAssistantContextAggregator
+)
 
 from loguru import logger
 
@@ -40,7 +46,8 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`. Also, set `ANTHROPIC_API_KEY` environment variable.")
+        "In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`. " +
+        "Also, set `ANTHROPIC_API_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
 
 
@@ -81,7 +88,7 @@ class AnthropicLLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    @ staticmethod
+    @staticmethod
     def create_context_aggregator(context: OpenAILLMContext) -> AnthropicContextAggregatorPair:
         user = AnthropicUserContextAggregator(context)
         assistant = AnthropicAssistantContextAggregator(user)
@@ -140,16 +147,17 @@ class AnthropicLLMService(LLMService):
                     if event.content_block.type == "tool_use":
                         tool_use_block = event.content_block
                         json_accumulator = ''
-                elif (event.type == "message_delta" and
-                      hasattr(event.delta, 'stop_reason') and event.delta.stop_reason == 'tool_use'):
+                elif ((event.type == "message_delta" and
+                      hasattr(event.delta, 'stop_reason')
+                      and event.delta.stop_reason == 'tool_use')):
                     if tool_use_block:
                         await self.call_function(context=context,
                                                  tool_call_id=tool_use_block.id,
                                                  function_name=tool_use_block.name,
                                                  arguments=json.loads(json_accumulator))
 
-                # Calculate usage. Do this here in its own if statement, because there may be usage data
-                # embedded in messages that we do other processing for, above.
+                # Calculate usage. Do this here in its own if statement, because there may be usage
+                # data embedded in messages that we do other processing for, above.
                 if hasattr(event, "usage"):
                     prompt_tokens += event.usage.input_tokens if hasattr(
                         event.usage, "input_tokens") else 0
@@ -161,7 +169,7 @@ class AnthropicLLMService(LLMService):
                     completion_tokens += event.message.usage.output_tokens if hasattr(
                         event.message.usage, "output_tokens") else 0
 
-        except CancelledError as e:
+        except CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the
             # token estimate. The reraise the exception so all the processors running in this task
             # also get cancelled.
@@ -174,7 +182,8 @@ class AnthropicLLMService(LLMService):
             await self.push_frame(LLMFullResponseEndFrame())
             await self._report_usage_metrics(
                 prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens if not use_completion_tokens_estimate else completion_tokens_estimate)
+                completion_tokens=(completion_tokens if not use_completion_tokens_estimate
+                                   else completion_tokens_estimate))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -200,7 +209,8 @@ class AnthropicLLMService(LLMService):
             await self._process_context(context)
 
     async def request_image_frame(self, user_id: str, *, text_content: str = None):
-        await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content), FrameDirection.UPSTREAM)
+        await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content),
+                              FrameDirection.UPSTREAM)
 
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r'[^\w]+', text)) * 1.3)
@@ -231,7 +241,7 @@ class AnthropicLLMContext(OpenAILLMContext):
 
         self.system_message = system
 
-    @ classmethod
+    @classmethod
     def from_openai_context(cls, openai_context: OpenAILLMContext):
         self = cls(
             messages=openai_context.messages,
@@ -252,11 +262,11 @@ class AnthropicLLMContext(OpenAILLMContext):
                 self.messages.pop(0)
         return self
 
-    @ classmethod
+    @classmethod
     def from_messages(cls, messages: List[dict]) -> "AnthropicLLMContext":
         return cls(messages=messages)
 
-    @ classmethod
+    @classmethod
     def from_image_frame(cls, frame: VisionImageRawFrame) -> "AnthropicLLMContext":
         context = cls()
         context.add_image_frame_message(
@@ -389,12 +399,13 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._function_call_in_progress = frame
         elif isinstance(frame, FunctionCallResultFrame):
-            if self._function_call_in_progress and self._function_call_in_progress.tool_call_id == frame.tool_call_id:
+            if (self._function_call_in_progress and self._function_call_in_progress.tool_call_id ==
+                    frame.tool_call_id):
                 self._function_call_in_progress = None
                 self._function_call_result = frame
             else:
                 logger.warning(
-                    f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id")
+                    "FunctionCallResultFrame tool_call_id != InProgressFrame tool_call_id")
                 self._function_call_in_progress = None
                 self._function_call_result = None
         elif isinstance(frame, AnthropicImageMessageFrame):
