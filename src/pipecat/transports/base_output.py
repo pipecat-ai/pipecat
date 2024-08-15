@@ -151,6 +151,8 @@ class BaseOutputTransport(FrameProcessor):
             await self._handle_audio(frame)
         elif isinstance(frame, ImageRawFrame) or isinstance(frame, SpriteFrame):
             await self._handle_image(frame)
+        elif isinstance(frame, TransportMessageFrame) and frame.urgent:
+            await self.send_message(frame)
         else:
             await self._sink_queue.put(frame)
 
