@@ -198,6 +198,7 @@ class TTSSpeakFrame(DataFrame):
 @dataclass
 class TransportMessageFrame(DataFrame):
     message: Any
+    urgent: bool = False
 
     def __str__(self):
         return f"{self.name}(message: {self.message})"
