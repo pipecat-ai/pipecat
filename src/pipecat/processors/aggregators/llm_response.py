@@ -152,7 +152,7 @@ class LLMResponseAggregator(FrameProcessor):
 
         if send_aggregation:
             await self._push_aggregation()
-            
+
     # TODO-CB: Types
     def _set_messages(self, messages):
         self._messages.clear()
@@ -261,19 +261,21 @@ class LLMContextAggregator(LLMResponseAggregator):
         self._context = context
         super().__init__(**kwargs)
         # TODO-CB: thanks, I hate it
+        # NOTE-KHK: I think this is only necessary because _set_messages()
+        # doesn't access the context directly to set messages. There may
+        # be corner cases where we don't have a context when we call
+        # _set_messages(). But this might just be historical baggage.
         self._messages = context.messages
-    
-        
+
     async def _set_tools(self, tools: List):
         # We push the frame downstream so the assistant aggregator gets
         # updated as well.
         self._context.tools = tools
-        
+
     # TODO-CB: Types
     def _set_messages(self, messages):
         self._messages.clear()
         self._messages.extend(messages)
-
 
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:

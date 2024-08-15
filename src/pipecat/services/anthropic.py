@@ -248,18 +248,7 @@ class AnthropicLLMContext(OpenAILLMContext):
             tools=openai_context.tools,
             tool_choice=openai_context.tool_choice,
         )
-        # See if we should pull the system message out of our context.messages list. (For
-        # compatibility with Open AI messages format.)
-        if self.messages and self.messages[0]["role"] == "system":
-            if len(self.messages) == 1:
-                # If we have only have a system message in the list, all we can really do
-                # without introducing too much magic is change the role to "user".
-                self.messages[0]["role"] = "user"
-            else:
-                # If we have more than one message, we'll pull the system message out of the
-                # list.
-                self.system_message = self.messages[0]["content"]
-                self.messages.pop(0)
+        self._restructure_from_openai_messages()
         return self
 
     @classmethod
@@ -275,6 +264,20 @@ class AnthropicLLMContext(OpenAILLMContext):
             image=frame.image,
             text=frame.text)
         return context
+
+    def _restructure_from_openai_messages(self):
+        # See if we should pull the system message out of our context.messages list. (For
+        # compatibility with Open AI messages format.)
+        if self.messages and self.messages[0]["role"] == "system":
+            if len(self.messages) == 1:
+                # If we have only have a system message in the list, all we can really do
+                # without introducing too much magic is change the role to "user".
+                self.messages[0]["role"] = "user"
+            else:
+                # If we have more than one message, we'll pull the system message out of the
+                # list.
+                self.system_message = self.messages[0]["content"]
+                self.messages.pop(0)
 
     def add_image_frame_message(
             self, *, format: str, size: tuple[int, int], image: bytes, text: str = None):
@@ -335,6 +338,12 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
         if isinstance(context, OpenAILLMContext):
             self._context = AnthropicLLMContext.from_openai_context(context)
+            # see comment in LLMContextAggregator:__init__() about self._messages
+            self._messages = self._context.messages
+
+    def _set_messages(self, messages):
+        super()._set_messages(messages)
+        self._context._restructure_from_openai_messages()
 
     async def push_messages_frame(self):
         frame = OpenAILLMContextFrame(self._context)
@@ -372,6 +381,7 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
                 await self.push_frame(frame)
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
+
 
 #
 # Claude returns a text content block along with a tool use content block. This works quite nicely
