@@ -9,7 +9,7 @@ import aiohttp
 from typing import AsyncGenerator, Literal
 from pydantic import BaseModel
 
-from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, MetricsFrame
+from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, TTSStartedFrame, TTSStoppedFrame
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -70,8 +70,10 @@ class ElevenLabsTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
+            await self.push_frame(TTSStartedFrame())
             async for chunk in r.content:
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
                     frame = AudioRawFrame(chunk, 16000, 1)
                     yield frame
+            await self.push_frame(TTSStoppedFrame())

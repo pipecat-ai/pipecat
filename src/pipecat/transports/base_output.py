@@ -56,6 +56,11 @@ class BaseOutputTransport(FrameProcessor):
 
         self._stopped_event = asyncio.Event()
 
+        # Indicates if the bot is currently speaking. This is useful when we
+        # have an interruption since all the queued messages will be thrown
+        # away and we would lose the TTSStoppedFrame.
+        self._bot_speaking = False
+
         # Create sink frame task. This is the task that will actually write
         # audio or video frames. We write audio/video in a task so we can keep
         # generating frames upstream while, for example, the audio is playing.
@@ -169,6 +174,9 @@ class BaseOutputTransport(FrameProcessor):
             self._push_frame_task.cancel()
             await self._push_frame_task
             self._create_push_task()
+            # Let's send a bot stopped speaking if we have to.
+            if self._bot_speaking:
+                await self._bot_stopped_speaking()
 
     async def _handle_audio(self, frame: AudioRawFrame):
         if not self._params.audio_out_enabled:
@@ -214,10 +222,10 @@ class BaseOutputTransport(FrameProcessor):
                 elif isinstance(frame, TransportMessageFrame):
                     await self.send_message(frame)
                 elif isinstance(frame, TTSStartedFrame):
-                    await self._internal_push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+                    await self._bot_started_speaking()
                     await self._internal_push_frame(frame)
                 elif isinstance(frame, TTSStoppedFrame):
-                    await self._internal_push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+                    await self._bot_stopped_speaking()
                     await self._internal_push_frame(frame)
                 else:
                     await self._internal_push_frame(frame)
@@ -229,6 +237,14 @@ class BaseOutputTransport(FrameProcessor):
                 break
             except Exception as e:
                 logger.exception(f"{self} error processing sink queue: {e}")
+
+    async def _bot_started_speaking(self):
+        self._bot_speaking = True
+        await self._internal_push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+
+    async def _bot_stopped_speaking(self):
+        self._bot_speaking = False
+        await self._internal_push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
 
     #
     # Push frames task
