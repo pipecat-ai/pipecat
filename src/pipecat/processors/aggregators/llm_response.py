@@ -82,10 +82,6 @@ class LLMResponseAggregator(FrameProcessor):
     #
     # and T2 would be dropped.
 
-    async def _set_tools(self, tools: List):
-        # noop in the base class
-        pass
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -129,34 +125,16 @@ class LLMResponseAggregator(FrameProcessor):
             self._reset()
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMMessagesAppendFrame):
-            self._messages.extend(frame.messages)
-            messages_frame = LLMMessagesFrame(self._messages)
-            await self.push_frame(messages_frame)
+            self._add_messages(frame.messages)
         elif isinstance(frame, LLMMessagesUpdateFrame):
-            # We push the frame downstream so the assistant aggregator gets
-            # updated as well.
-            # TODO-CB: Now we're replacing the contents of the array so we
-            # don't need to push the frame here
-            # await self.push_frame(frame)
-            # We can now reset this one.
-            self._reset()
             self._set_messages(frame.messages)
-            # messages_frame = LLMMessagesFrame(self._messages)
-            # await self.push_frame(messages_frame)
-            await self.push_messages_frame()
         elif isinstance(frame, LLMSetToolsFrame):
-            await self.push_frame(frame)
-            await self._set_tools(frame.tools)
+            self._set_tools(frame.tools)
         else:
             await self.push_frame(frame, direction)
 
         if send_aggregation:
             await self._push_aggregation()
-            
-    # TODO-CB: Types
-    def _set_messages(self, messages):
-        self._messages.clear()
-        self._messages.extend(messages)
 
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:
@@ -168,6 +146,19 @@ class LLMResponseAggregator(FrameProcessor):
 
             frame = LLMMessagesFrame(self._messages)
             await self.push_frame(frame)
+
+    # TODO-CB: Types
+    def _add_messages(self, messages):
+        self._messages.extend(messages)
+
+    def _set_messages(self, messages):
+        self._reset()
+        self._messages.clear()
+        self._messages.extend(messages)
+
+    def _set_tools(self, tools):
+        # noop in the base class
+        pass
 
     def _reset(self):
         self._aggregation = ""
@@ -257,23 +248,29 @@ class LLMFullResponseAggregator(FrameProcessor):
 
 class LLMContextAggregator(LLMResponseAggregator):
     def __init__(self, *, context: OpenAILLMContext, **kwargs):
-
-        self._context = context
         super().__init__(**kwargs)
-        # TODO-CB: thanks, I hate it
-        self._messages = context.messages
-    
-        
-    async def _set_tools(self, tools: List):
-        # We push the frame downstream so the assistant aggregator gets
-        # updated as well.
-        self._context.tools = tools
-        
-    # TODO-CB: Types
-    def _set_messages(self, messages):
-        self._messages.clear()
-        self._messages.extend(messages)
+        self._context = context
 
+    @property
+    def context(self):
+        return self._context
+
+    def get_context_frame(self) -> OpenAILLMContextFrame:
+        return OpenAILLMContextFrame(context=self._context)
+
+    async def push_context_frame(self):
+        frame = self.get_context_frame()
+        await self.push_frame(frame)
+
+    # TODO-CB: Types
+    def _add_messages(self, messages):
+        self._context.add_messages(messages)
+
+    def _set_messages(self, messages):
+        self._context.set_messages(messages)
+
+    def _set_tools(self, tools: List):
+        self._context.set_tools(tools)
 
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:

@@ -355,10 +355,6 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
     def __init__(self, context: OpenAILLMContext):
         super().__init__(context=context)
 
-    async def push_messages_frame(self):
-        frame = OpenAILLMContextFrame(self._context)
-        await self.push_frame(frame)
-
 
 class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
     def __init__(self, user_context_aggregator: OpenAIUserContextAggregator):
@@ -426,8 +422,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
             if run_llm:
-
-                await self._user_context_aggregator.push_messages_frame()
+                await self._user_context_aggregator.push_context_frame()
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")

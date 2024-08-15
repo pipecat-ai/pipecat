@@ -177,7 +177,7 @@ class CartesiaTTSService(TTSService):
                 elif msg["type"] == "error":
                     logger.error(f"{self} error: {msg}")
                     await self.stop_all_metrics()
-                    await self.push_frame(ErrorFrame(f'{self} error: {msg["error"]}'))
+                    await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
                 else:
                     logger.error(f"Cartesia error, unknown message type: {msg}")
         except asyncio.CancelledError:
