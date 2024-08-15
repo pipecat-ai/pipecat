@@ -49,10 +49,10 @@ class TogetherContextAggregatorPair:
     _user: 'TogetherUserContextAggregator'
     _assistant: 'TogetherAssistantContextAggregator'
 
-    def user(self) -> str:
+    def user(self) -> 'TogetherUserContextAggregator':
         return self._user
 
-    def assistant(self) -> str:
+    def assistant(self) -> 'TogetherAssistantContextAggregator':
         return self._assistant
 
 
@@ -75,7 +75,7 @@ class TogetherLLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    @ staticmethod
+    @staticmethod
     def create_context_aggregator(context: OpenAILLMContext) -> TogetherContextAggregatorPair:
         user = TogetherUserContextAggregator(context)
         assistant = TogetherAssistantContextAggregator(user)
@@ -191,14 +191,14 @@ class TogetherLLMContext(OpenAILLMContext):
     ):
         super().__init__(messages=messages)
 
-    @ classmethod
+    @classmethod
     def from_openai_context(cls, openai_context: OpenAILLMContext):
         self = cls(
             messages=openai_context.messages,
         )
         return self
 
-    @ classmethod
+    @classmethod
     def from_messages(cls, messages: List[dict]) -> "TogetherLLMContext":
         return cls(messages=messages)
 

@@ -16,6 +16,7 @@ import re
 
 from pipecat.frames.frames import (
     Frame,
+    LLMEnablePromptCachingFrame,
     LLMModelUpdateFrame,
     TextFrame,
     VisionImageRawFrame,
@@ -62,10 +63,10 @@ class AnthropicContextAggregatorPair:
     _user: 'AnthropicUserContextAggregator'
     _assistant: 'AnthropicAssistantContextAggregator'
 
-    def user(self) -> str:
+    def user(self) -> 'AnthropicUserContextAggregator':
         return self._user
 
-    def assistant(self) -> str:
+    def assistant(self) -> 'AnthropicAssistantContextAggregator':
         return self._assistant
 
 
@@ -227,6 +228,9 @@ class AnthropicLLMService(LLMService):
         elif isinstance(frame, LLMModelUpdateFrame):
             logger.debug(f"Switching LLM model to: [{frame.model}]")
             self._model = frame.model
+        elif isinstance(frame, LLMEnablePromptCachingFrame):
+            logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
+            self._enable_prompt_caching_beta = frame.enable
         else:
             await self.push_frame(frame, direction)
 
