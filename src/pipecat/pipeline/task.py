@@ -10,7 +10,14 @@ from typing import AsyncIterable, Iterable
 
 from pydantic import BaseModel
 
-from pipecat.frames.frames import CancelFrame, EndFrame, ErrorFrame, Frame, MetricsFrame, StartFrame, StopTaskFrame
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    ErrorFrame,
+    Frame,
+    MetricsFrame,
+    StartFrame,
+    StopTaskFrame)
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
@@ -37,9 +44,17 @@ class Source(FrameProcessor):
 
         match direction:
             case FrameDirection.UPSTREAM:
-                await self._up_queue.put(frame)
+                await self._handle_upstream_frame(frame)
             case FrameDirection.DOWNSTREAM:
                 await self.push_frame(frame, direction)
+
+    async def _handle_upstream_frame(self, frame: Frame):
+        if isinstance(frame, ErrorFrame):
+            logger.error(f"Error running app: {frame.error}")
+            # Cancel all tasks downstream.
+            await self.push_frame(CancelFrame())
+            # Tell the task we should stop.
+            await self._up_queue.put(StopTaskFrame())
 
 
 class PipelineTask:
@@ -70,7 +85,7 @@ class PipelineTask:
         # Make sure everything is cleaned up downstream. This is sent
         # out-of-band from the main streaming task which is what we want since
         # we want to cancel right away.
-        await self._source.process_frame(CancelFrame(), FrameDirection.DOWNSTREAM)
+        await self._source.push_frame(CancelFrame())
         self._process_down_task.cancel()
         self._process_up_task.cancel()
         await self._process_down_task
@@ -134,9 +149,8 @@ class PipelineTask:
         while True:
             try:
                 frame = await self._up_queue.get()
-                if isinstance(frame, ErrorFrame):
-                    logger.error(f"Error running app: {frame.error}")
-                    await self.queue_frame(CancelFrame())
+                if isinstance(frame, StopTaskFrame):
+                    await self.queue_frame(StopTaskFrame())
                 self._up_queue.task_done()
             except asyncio.CancelledError:
                 break
