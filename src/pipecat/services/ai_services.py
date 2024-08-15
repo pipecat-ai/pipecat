@@ -20,12 +20,9 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     TTSSpeakFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
     TTSVoiceUpdateFrame,
     TextFrame,
-    VisionImageRawFrame,
-    FunctionCallResultFrame
+    VisionImageRawFrame
 )
 from pipecat.processors.async_frame_processor import AsyncFrameProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -178,12 +175,12 @@ class TTSService(AIService):
         self._push_text_frames: bool = push_text_frames
         self._current_sentence: str = ""
 
-    @ abstractmethod
+    @abstractmethod
     async def set_voice(self, voice: str):
         pass
 
     # Converts the text to audio.
-    @ abstractmethod
+    @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         pass
 
@@ -212,11 +209,9 @@ class TTSService(AIService):
         if not text:
             return
 
-        await self.push_frame(TTSStartedFrame())
         await self.start_processing_metrics()
         await self.process_generator(self.run_tts(text))
         await self.stop_processing_metrics()
-        await self.push_frame(TTSStoppedFrame())
         if self._push_text_frames:
             # We send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
@@ -269,7 +264,7 @@ class STTService(AIService):
         self._smoothing_factor = 0.2
         self._prev_volume = 0
 
-    @ abstractmethod
+    @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Returns transcript as a string"""
         pass
@@ -335,7 +330,7 @@ class ImageGenService(AIService):
         super().__init__(**kwargs)
 
     # Renders the image. Returns an Image object.
-    @ abstractmethod
+    @abstractmethod
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         pass
 
@@ -358,7 +353,7 @@ class VisionService(AIService):
         super().__init__(**kwargs)
         self._describe_text = None
 
-    @ abstractmethod
+    @abstractmethod
     async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
         pass
 

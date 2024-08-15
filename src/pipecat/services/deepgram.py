@@ -15,9 +15,10 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    MetricsFrame,
     StartFrame,
     SystemFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     TranscriptionFrame)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncAIService, TTSService
@@ -96,10 +97,12 @@ class DeepgramTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
+                await self.push_frame(TTSStartedFrame())
                 async for data in r.content:
                     await self.stop_ttfb_metrics()
                     frame = AudioRawFrame(audio=data, sample_rate=self._sample_rate, num_channels=1)
                     yield frame
+                await self.push_frame(TTSStoppedFrame())
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
 

@@ -24,6 +24,8 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMModelUpdateFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     TextFrame,
     URLImageRawFrame,
     VisionImageRawFrame,
@@ -342,11 +344,13 @@ class OpenAITTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
+                await self.push_frame(TTSStartedFrame())
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
                         frame = AudioRawFrame(chunk, 24_000, 1)
                         yield frame
+                await self.push_frame(TTSStoppedFrame())
         except BadRequestError as e:
             logger.exception(f"{self} error generating TTS: {e}")
 
