@@ -187,6 +187,13 @@ class LLMSetToolsFrame(DataFrame):
 
 
 @dataclass
+class LLMEnablePromptCachingFrame(DataFrame):
+    """A frame to enable/disable prompt caching in certain LLMs.
+    """
+    enable: bool
+
+
+@dataclass
 class TTSSpeakFrame(DataFrame):
     """A frame that contains a text that should be spoken by the TTS in the
     pipeline (if any).

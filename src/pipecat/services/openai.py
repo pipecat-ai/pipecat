@@ -229,10 +229,10 @@ class OpenAIContextAggregatorPair:
     _user: 'OpenAIUserContextAggregator'
     _assistant: 'OpenAIAssistantContextAggregator'
 
-    def user(self) -> str:
+    def user(self) -> 'OpenAIUserContextAggregator':
         return self._user
 
-    def assistant(self) -> str:
+    def assistant(self) -> 'OpenAIAssistantContextAggregator':
         return self._assistant
 
 
