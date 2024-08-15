@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -332,6 +333,9 @@ class RTVIProcessor(FrameProcessor):
         # Specific system frames
         if isinstance(frame, CancelFrame):
             await self._cancel(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, ErrorFrame):
+            await self.send_error(frame.error)
             await self.push_frame(frame, direction)
         # All other system frames
         elif isinstance(frame, SystemFrame):
