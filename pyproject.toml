@@ -20,13 +20,12 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "aiohttp~=3.9.5",
+    "aiohttp~=3.10.3",
     "numpy~=1.26.4",
-    "loguru~=0.7.0",
-    "Pillow~=10.3.0",
-    "protobuf~=4.25.3",
+    "loguru~=0.7.2",
+    "Pillow~=10.4.0",
+    "protobuf~=4.25.4",
     "pyloudnorm~=0.1.1",
-    "typing-extensions~=4.12.1",
 ]
 
 [project.urls]
@@ -35,24 +34,24 @@ Website = "https://pipecat.ai"
 
 [project.optional-dependencies]
 anthropic = [ "anthropic~=0.34.0" ]
-azure = [ "azure-cognitiveservices-speech~=1.38.0" ]
+azure = [ "azure-cognitiveservices-speech~=1.40.0" ]
 cartesia = [ "websockets~=12.0" ]
 daily = [ "daily-python~=0.10.1" ]
-deepgram = [ "deepgram-sdk~=3.2.7" ]
-examples = [ "python-dotenv~=1.0.0", "flask~=3.0.3", "flask_cors~=4.0.1" ]
+deepgram = [ "deepgram-sdk~=3.5.0" ]
+examples = [ "python-dotenv~=1.0.1", "flask~=3.0.3", "flask_cors~=4.0.1" ]
 fal = [ "fal-client~=0.4.1" ]
 gladia = [ "websockets~=12.0" ]
-google = [ "google-generativeai~=0.7.1" ]
-fireworks = [ "openai~=1.35.0" ]
-langchain = [ "langchain~=0.2.10", "langchain-community~=0.2.9", "langchain-openai~=0.1.17" ]
-local = [ "pyaudio~=0.2.0" ]
-moondream = [ "einops~=0.8.0", "timm~=0.9.16", "transformers~=4.40.2" ]
-openai = [ "openai~=1.35.0" ]
-openpipe = [ "openpipe~=4.18.0" ]
+google = [ "google-generativeai~=0.7.2" ]
+fireworks = [ "openai~=1.37.2" ]
+langchain = [ "langchain~=0.2.14", "langchain-community~=0.2.12", "langchain-openai~=0.1.20" ]
+local = [ "pyaudio~=0.2.14" ]
+moondream = [ "einops~=0.8.0", "timm~=1.0.8", "transformers~=4.44.0" ]
+openai = [ "openai~=1.37.2" ]
+openpipe = [ "openpipe~=4.24.0" ]
 playht = [ "pyht~=0.0.28" ]
 silero = [ "silero-vad~=5.1" ]
 together = [ "together~=1.2.7" ]
-websocket = [ "websockets~=12.0", "fastapi~=0.111.0" ]
+websocket = [ "websockets~=12.0", "fastapi~=0.112.1" ]
 whisper = [ "faster-whisper~=1.0.3" ]
 xtts = [ "resampy~=0.4.3" ]
 
