@@ -158,8 +158,8 @@ class DailyTransportClient(EventHandler):
             loop: asyncio.AbstractEventLoop):
         super().__init__()
 
-        if not self._daily_initialized:
-            self._daily_initialized = True
+        if not DailyTransportClient._daily_initialized:
+            DailyTransportClient._daily_initialized = True
             Daily.init()
 
         self._room_url: str = room_url
@@ -182,24 +182,39 @@ class DailyTransportClient(EventHandler):
 
         self._client: CallClient = CallClient(event_handler=self)
 
-        self._camera: VirtualCameraDevice = Daily.create_camera_device(
-            "camera",
-            width=self._params.camera_out_width,
-            height=self._params.camera_out_height,
-            color_format=self._params.camera_out_color_format)
+        self._camera: VirtualCameraDevice | None = None
+        if self._params.camera_out_enabled:
+            self._camera = Daily.create_camera_device(
+                self._camera_name(),
+                width=self._params.camera_out_width,
+                height=self._params.camera_out_height,
+                color_format=self._params.camera_out_color_format)
 
-        self._mic: VirtualMicrophoneDevice = Daily.create_microphone_device(
-            "mic",
-            sample_rate=self._params.audio_out_sample_rate,
-            channels=self._params.audio_out_channels,
-            non_blocking=True)
+        self._mic: VirtualMicrophoneDevice | None = None
+        if self._params.audio_out_enabled:
+            self._mic = Daily.create_microphone_device(
+                self._mic_name(),
+                sample_rate=self._params.audio_out_sample_rate,
+                channels=self._params.audio_out_channels,
+                non_blocking=True)
 
-        self._speaker: VirtualSpeakerDevice = Daily.create_speaker_device(
-            "speaker",
-            sample_rate=self._params.audio_in_sample_rate,
-            channels=self._params.audio_in_channels,
-            non_blocking=True)
-        Daily.select_speaker_device("speaker")
+        self._speaker: VirtualSpeakerDevice | None = None
+        if self._params.audio_in_enabled or self._params.vad_enabled:
+            self._speaker = Daily.create_speaker_device(
+                self._speaker_name(),
+                sample_rate=self._params.audio_in_sample_rate,
+                channels=self._params.audio_in_channels,
+                non_blocking=True)
+            Daily.select_speaker_device(self._speaker_name())
+
+    def _camera_name(self):
+        return f"camera-{self}"
+
+    def _mic_name(self):
+        return f"mic-{self}"
+
+    def _speaker_name(self):
+        return f"speaker-{self}"
 
     @property
     def participant_id(self) -> str:
@@ -224,6 +239,9 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def read_next_audio_frame(self) -> AudioRawFrame | None:
+        if not self._speaker:
+            return None
+
         sample_rate = self._params.audio_in_sample_rate
         num_channels = self._params.audio_in_channels
         num_frames = int(sample_rate / 100) * 2  # 20ms of audio
@@ -242,11 +260,17 @@ class DailyTransportClient(EventHandler):
             return None
 
     async def write_raw_audio_frames(self, frames: bytes):
+        if not self._mic:
+            return None
+
         future = self._loop.create_future()
         self._mic.write_frames(frames, completion=completion_callback(future))
         await future
 
     async def write_frame_to_camera(self, frame: ImageRawFrame):
+        if not self._camera:
+            return None
+
         self._camera.write_frame(frame.image)
 
     async def join(self):
@@ -315,13 +339,13 @@ class DailyTransportClient(EventHandler):
                     "camera": {
                         "isEnabled": self._params.camera_out_enabled,
                         "settings": {
-                            "deviceId": "camera",
+                            "deviceId": self._camera_name(),
                         },
                     },
                     "microphone": {
                         "isEnabled": self._params.audio_out_enabled,
                         "settings": {
-                            "deviceId": "mic",
+                            "deviceId": self._mic_name(),
                             "customConstraints": {
                                 "autoGainControl": {"exact": False},
                                 "echoCancellation": {"exact": False},
