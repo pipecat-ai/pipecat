@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Any, List, Mapping, Tuple
+from typing import Any, List, Mapping, Tuple, Optional
 
 from dataclasses import dataclass, field
 
@@ -178,6 +178,22 @@ class LLMMessagesUpdateFrame(DataFrame):
 
 
 @dataclass
+class LLMSetToolsFrame(DataFrame):
+    """A frame containing a list of tools for an LLM to use for function calling.
+    The specific format depends on the LLM being used, but it should typically
+    contain JSON Schema objects.
+    """
+    tools: List[dict]
+
+
+@dataclass
+class LLMEnablePromptCachingFrame(DataFrame):
+    """A frame to enable/disable prompt caching in certain LLMs.
+    """
+    enable: bool
+
+
+@dataclass
 class TTSSpeakFrame(DataFrame):
     """A frame that contains a text that should be spoken by the TTS in the
     pipeline (if any).
@@ -189,6 +205,7 @@ class TTSSpeakFrame(DataFrame):
 @dataclass
 class TransportMessageFrame(DataFrame):
     message: Any
+    urgent: bool = False
 
     def __str__(self):
         return f"{self.name}(message: {self.message})"
@@ -222,7 +239,7 @@ class CancelFrame(SystemFrame):
 class ErrorFrame(SystemFrame):
     """This is used notify upstream that an error has occurred downstream the
     pipeline."""
-    error: str | None
+    error: str
 
     def __str__(self):
         return f"{self.name}(error: {self.error})"
@@ -230,9 +247,9 @@ class ErrorFrame(SystemFrame):
 
 @dataclass
 class StopTaskFrame(SystemFrame):
-    """Indicates that a pipeline task should be stopped. This should inform the
-    pipeline processors that they should stop pushing frames but that they
-    should be kept in a running state.
+    """Indicates that a pipeline task should be stopped but that the pipeline
+    processors should be kept in a running state. This is normally queued from
+    the pipeline task.
 
     """
     pass
@@ -389,6 +406,7 @@ class TTSStoppedFrame(ControlFrame):
 class UserImageRequestFrame(ControlFrame):
     """A frame user to request an image from the given user."""
     user_id: str
+    context: Optional[any]
 
     def __str__(self):
         return f"{self.name}, user: {self.user_id}"
@@ -406,3 +424,22 @@ class TTSVoiceUpdateFrame(ControlFrame):
     """A control frame containing a request to update to a new TTS voice.
     """
     voice: str
+
+
+@dataclass
+class FunctionCallInProgressFrame(SystemFrame):
+    """A frame signaling that a function call is in progress.
+    """
+    function_name: str
+    tool_call_id: str
+    arguments: str
+
+
+@dataclass
+class FunctionCallResultFrame(DataFrame):
+    """A frame containing the result of an LLM function (tool) call.
+    """
+    function_name: str
+    tool_call_id: str
+    arguments: str
+    result: any
