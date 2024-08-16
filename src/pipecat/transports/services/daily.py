@@ -534,6 +534,7 @@ class DailyInputTransport(BaseInputTransport):
         self._client = client
 
         self._video_renderers = {}
+        self._audio_in_task = None
 
         self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
         if params.vad_enabled and not params.vad_analyzer:
@@ -557,7 +558,7 @@ class DailyInputTransport(BaseInputTransport):
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_in_task.cancel()
             await self._audio_in_task
 
@@ -567,7 +568,7 @@ class DailyInputTransport(BaseInputTransport):
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_in_task.cancel()
             await self._audio_in_task
 
@@ -728,7 +729,7 @@ class DailyTransport(BaseTransport):
             room_url: str,
             token: str | None,
             bot_name: str,
-            params: DailyParams,
+            params: DailyParams = DailyParams(),
             input_name: str | None = None,
             output_name: str | None = None,
             loop: asyncio.AbstractEventLoop | None = None):
@@ -793,7 +794,7 @@ class DailyTransport(BaseTransport):
     # DailyTransport
     #
 
-    @ property
+    @property
     def participant_id(self) -> str:
         return self._client.participant_id
 

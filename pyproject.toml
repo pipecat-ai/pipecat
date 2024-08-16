@@ -34,7 +34,7 @@ Source = "https://github.com/pipecat-ai/pipecat"
 Website = "https://pipecat.ai"
 
 [project.optional-dependencies]
-anthropic = [ "anthropic~=0.28.1" ]
+anthropic = [ "anthropic~=0.34.0" ]
 azure = [ "azure-cognitiveservices-speech~=1.38.0" ]
 cartesia = [ "websockets~=12.0" ]
 daily = [ "daily-python~=0.10.1" ]
@@ -51,6 +51,7 @@ openai = [ "openai~=1.35.0" ]
 openpipe = [ "openpipe~=4.18.0" ]
 playht = [ "pyht~=0.0.28" ]
 silero = [ "silero-vad~=5.1" ]
+together = [ "together~=1.2.7" ]
 websocket = [ "websockets~=12.0", "fastapi~=0.111.0" ]
 whisper = [ "faster-whisper~=1.0.3" ]
 xtts = [ "resampy~=0.4.3" ]

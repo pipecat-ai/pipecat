@@ -15,13 +15,15 @@ from typing import AsyncGenerator
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.frames.frames import (
     CancelFrame,
+    ErrorFrame,
     Frame,
     AudioRawFrame,
     StartInterruptionFrame,
     StartFrame,
     EndFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     TextFrame,
-    MetricsFrame,
     LLMFullResponseEndFrame
 )
 from pipecat.services.ai_services import TTSService
@@ -153,6 +155,7 @@ class CartesiaTTSService(TTSService):
                     continue
                 if msg["type"] == "done":
                     await self.stop_ttfb_metrics()
+                    await self.push_frame(TTSStoppedFrame())
                     # Unset _context_id but not the _context_id_start_timestamp
                     # because we are likely still playing out audio and need the
                     # timestamp to set send context frames.
@@ -173,6 +176,13 @@ class CartesiaTTSService(TTSService):
                         num_channels=1
                     )
                     await self.push_frame(frame)
+                elif msg["type"] == "error":
+                    logger.error(f"{self} error: {msg}")
+                    await self.push_frame(TTSStoppedFrame())
+                    await self.stop_all_metrics()
+                    await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                else:
+                    logger.error(f"Cartesia error, unknown message type: {msg}")
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -207,6 +217,7 @@ class CartesiaTTSService(TTSService):
                 await self._connect()
 
             if not self._context_id:
+                await self.push_frame(TTSStartedFrame())
                 await self.start_ttfb_metrics()
                 self._context_id = str(uuid.uuid4())
 
@@ -227,7 +238,8 @@ class CartesiaTTSService(TTSService):
                 await self._websocket.send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.exception(f"{self} error sending message: {e}")
+                logger.error(f"{self} error sending message: {e}")
+                await self.push_frame(TTSStoppedFrame())
                 await self._disconnect()
                 await self._connect()
                 return
