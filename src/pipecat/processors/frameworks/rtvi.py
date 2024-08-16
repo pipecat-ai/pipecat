@@ -273,7 +273,7 @@ class RTVIProcessor(FrameProcessor):
 
         self._pipeline: FrameProcessor | None = None
         self._pipeline_started = False
-        self._transport_joined = False
+        self._first_participant_joined = False
 
         self._registered_actions: Dict[str, RTVIAction] = {}
         self._registered_services: Dict[str, RTVIService] = {}
@@ -286,7 +286,9 @@ class RTVIProcessor(FrameProcessor):
 
         # TODO(aleix): This is very Daily specific. There should be a generic
         # way to do this.
-        transport.add_event_handler("on_joined", self._transport_on_joined)
+        transport.add_event_handler(
+            "on_first_participant_joined",
+            self._on_first_participant_joined)
 
     def register_action(self, action: RTVIAction):
         id = self._action_id(action.service, action.action)
@@ -565,11 +567,12 @@ class RTVIProcessor(FrameProcessor):
         message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
         await self._push_transport_message(message)
 
-    async def _transport_on_joined(self, transport, participant):
-        self._transport_joined = True
+    async def _on_first_participant_joined(self, transport, participant):
+        self._first_participant_joined = True
+        await self._maybe_send_bot_ready()
 
     async def _maybe_send_bot_ready(self):
-        if self._pipeline_started and self._transport_joined:
+        if self._pipeline_started and self._first_participant_joined:
             await self._send_bot_ready()
 
     async def _send_bot_ready(self):
