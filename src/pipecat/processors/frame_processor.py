@@ -9,7 +9,13 @@ import time
 
 from enum import Enum
 
-from pipecat.frames.frames import ErrorFrame, Frame, MetricsFrame, StartFrame, StartInterruptionFrame, UserStoppedSpeakingFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    MetricsFrame,
+    StartFrame,
+    StartInterruptionFrame,
+    UserStoppedSpeakingFrame)
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
