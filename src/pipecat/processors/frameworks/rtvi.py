@@ -134,7 +134,7 @@ class RTVIErrorResponse(BaseModel):
 
 
 class RTVIErrorData(BaseModel):
-    message: str
+    error: str
     fatal: bool
 
 
