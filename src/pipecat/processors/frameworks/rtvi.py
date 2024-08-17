@@ -135,6 +135,7 @@ class RTVIErrorResponse(BaseModel):
 
 class RTVIErrorData(BaseModel):
     message: str
+    fatal: bool
 
 
 class RTVIError(BaseModel):
@@ -300,8 +301,8 @@ class RTVIProcessor(FrameProcessor):
     async def interrupt_bot(self):
         await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
 
-    async def send_error(self, error: str):
-        message = RTVIError(data=RTVIErrorData(message=error))
+    async def send_error(self, frame: ErrorFrame):
+        message = RTVIError(data=RTVIErrorData(message=frame.error, fatal=frame.fatal))
         await self._push_transport_message(message)
 
     async def handle_function_call(
@@ -337,7 +338,7 @@ class RTVIProcessor(FrameProcessor):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, ErrorFrame):
-            await self.send_error(frame.error)
+            await self.send_error(frame)
             await self.push_frame(frame, direction)
         # All other system frames
         elif isinstance(frame, SystemFrame):
