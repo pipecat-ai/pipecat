@@ -238,11 +238,24 @@ class CancelFrame(SystemFrame):
 @dataclass
 class ErrorFrame(SystemFrame):
     """This is used notify upstream that an error has occurred downstream the
-    pipeline."""
+    pipeline. A fatal error indicates the error is unrecoverable and that the
+    bot should exit.
+
+    """
     error: str
+    fatal: bool = False
 
     def __str__(self):
-        return f"{self.name}(error: {self.error})"
+        return f"{self.name}(error: {self.error}, fatal: {self.fatal})"
+
+
+@dataclass
+class FatalErrorFrame(ErrorFrame):
+    """This is used notify upstream that an unrecoverable error has occurred and
+    that the bot should exit.
+
+    """
+    fatal: bool = field(default=True, init=False)
 
 
 @dataclass

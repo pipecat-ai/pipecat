@@ -50,11 +50,12 @@ class Source(FrameProcessor):
 
     async def _handle_upstream_frame(self, frame: Frame):
         if isinstance(frame, ErrorFrame):
-            logger.error(f"Error running app: {frame.error}")
-            # Cancel all tasks downstream.
-            await self.push_frame(CancelFrame())
-            # Tell the task we should stop.
-            await self._up_queue.put(StopTaskFrame())
+            logger.error(f"Error running app: {frame}")
+            if frame.fatal:
+                # Cancel all tasks downstream.
+                await self.push_frame(CancelFrame())
+                # Tell the task we should stop.
+                await self._up_queue.put(StopTaskFrame())
 
 
 class PipelineTask:
