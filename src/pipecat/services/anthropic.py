@@ -322,6 +322,7 @@ class AnthropicLLMContext(OpenAILLMContext):
         buffer = io.BytesIO()
         Image.frombytes(format, size, image).save(buffer, format="JPEG")
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
         # Anthropic docs say that the image should be the first content block in the message.
         content = [{"type": "image",
                     "source": {
@@ -457,6 +458,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         self._user_context_aggregator = user_context_aggregator
         self._function_call_in_progress = None
         self._function_call_result = None
+        self._pending_image_frame_message = None
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
@@ -477,15 +479,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                 self._function_call_in_progress = None
                 self._function_call_result = None
         elif isinstance(frame, AnthropicImageMessageFrame):
-            try:
-                self._context.add_image_frame_message(
-                    format=frame.user_image_raw_frame.format,
-                    size=frame.user_image_raw_frame.size,
-                    image=frame.user_image_raw_frame.image,
-                    text=frame.text)
-                await self._user_context_aggregator.push_context_frame()
-            except Exception as e:
-                logger.error(f"Error processing AnthropicImageMessageFrame: {e}")
+            self._pending_image_frame_message = frame
 
     def add_message(self, message):
         self._user_context_aggregator.add_message(message)
@@ -531,6 +525,16 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                 run_llm = True
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
+
+            if self._pending_image_frame_message:
+                frame = self._pending_image_frame_message
+                self._pending_image_frame_message = None
+                self._context.add_image_frame_message(
+                    format=frame.user_image_raw_frame.format,
+                    size=frame.user_image_raw_frame.size,
+                    image=frame.user_image_raw_frame.image,
+                    text=frame.text)
+                run_llm = True
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
