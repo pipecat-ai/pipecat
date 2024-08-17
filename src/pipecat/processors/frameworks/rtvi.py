@@ -123,7 +123,7 @@ class RTVIMessage(BaseModel):
 
 
 class RTVIErrorResponseData(BaseModel):
-    error: Optional[str] = None
+    error: str
 
 
 class RTVIErrorResponse(BaseModel):
