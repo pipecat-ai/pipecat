@@ -456,3 +456,11 @@ class FunctionCallResultFrame(DataFrame):
     tool_call_id: str
     arguments: str
     result: any
+
+
+@dataclass
+class VADParamsUpdateFrame(ControlFrame):
+    """A control frame containing a request to update VAD params. Intended
+    to be pushed upstream from RTVI processor.
+    """
+    params: dict
