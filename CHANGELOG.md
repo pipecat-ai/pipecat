@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ErrorFrame` has now a `fatal` field to indicate the bot should exit if a
+  fatal error is pushed upstream (false by default). A new `FatalErrorFrame`
+  that sets this flag to true has been added.
+
+- `AnthropicLLMService` now supports function calling and initial support for
+  prompt caching.
+  (see https://www.anthropic.com/news/prompt-caching)
+
 - `ElevenLabsTTSService` can now specify ElevenLabs input parameters such as
   `output_format`.
 
@@ -17,12 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added new `on_participant_updated` event to `DailyTransport`.
 
-- Added `DailyRESTHelper.delete_room_by_name()`.
+- Added `DailyRESTHelper.delete_room_by_name()` and
+  `DailyRESTHelper.delete_room_by_url()`.
 
-- Added LLM and TTS usage metrics. Those will be enabled by when
-  `enable_usage_metrics` is True.
+- Added LLM and TTS usage metrics. Those are enabled when
+  `PipelineParams.enable_usage_metrics` is True.
 
-- `AudioRawFrame`s are not pushed downstream from the base output
+- `AudioRawFrame`s are now pushed downstream from the base output
   transport. This allows capturing the exact words the bot says by adding an STT
   service at the end of the pipeline.
 
@@ -41,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Support RTVI message protocol 0.1. This includes new messages, support for
+  messages responses, support for actions, configuration, webhooks and a bunch
+  of new cool stuff.
+  (see https://docs.rtvi.ai/)
+
+- `SileroVAD` dependency is now imported via pip's `silero-vad` package.
+
 - `ElevenLabsTTSService` now uses `eleven_turbo_v2_5` model by default.
 
 - `BotSpeakingFrame` is now a control frame.
@@ -52,7 +68,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed and issue with `DailyRESTHelper.create_room()` expirations which would
+- `TTSStartFrame` and `TTSStopFrame` are now sent when TTS really starts and
+  stops. This allows for knowing when the bot starts and stops speaking even
+  with asynchronous services (like Cartesia).
+
+- Fixed `AzureSTTService` transcription frame timestamps.
+
+- Fixed an issue with `DailyRESTHelper.create_room()` expirations which would
   cause this function to stop working after the initial expiration elapsed.
 
 - Improved `EndFrame` and `CancelFrame` handling. `EndFrame` should end things
@@ -72,6 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   incoming frames to not cancel tasks and be processed properly.
 
 ### Other
+
+- Added examples `foundational/19a-tools-anthropic.py`,
+  `foundational/19b-tools-video-anthropic.py` and
+  `foundational/19a-tools-togetherai.py`.
 
 - Added examples `foundational/18-gstreamer-filesrc.py` and
   `foundational/18a-gstreamer-videotestsrc.py` that show how to use
