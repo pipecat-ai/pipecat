@@ -481,9 +481,6 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         elif isinstance(frame, AnthropicImageMessageFrame):
             self._pending_image_frame_message = frame
 
-    def add_message(self, message):
-        self._user_context_aggregator.add_message(message)
-
     async def _push_aggregation(self):
         if not self._aggregation:
             return

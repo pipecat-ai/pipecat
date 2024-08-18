@@ -137,11 +137,11 @@ class LLMService(AIService):
             llm=self)
 
     # QUESTION FOR CB: maybe this isn't needed anymore?
-    async def call_start_function(self, function_name: str):
+    async def call_start_function(self, context: OpenAILLMContext, function_name: str):
         if function_name in self._start_callbacks.keys():
-            await self._start_callbacks[function_name](self)
+            await self._start_callbacks[function_name](self, context, function_name)
         elif None in self._start_callbacks.keys():
-            return await self._start_callbacks[None](function_name)
+            return await self._start_callbacks[None](self, context, function_name)
 
 
 class TTSService(AIService):

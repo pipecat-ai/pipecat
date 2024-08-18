@@ -9,18 +9,16 @@ import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.services.cartesia import CartesiaTTSService
 
-from pipecat.services.anthropic import AnthropicLLMService, AnthropicUserContextAggregator, AnthropicAssistantContextAggregator
+from pipecat.services.anthropic import AnthropicLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 from runner import configure
@@ -34,7 +32,7 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def get_weather(function_name, tool_call_id, arguments, context, result_callback):
+async def get_weather(function_name, tool_call_id, arguments, llm, context, result_callback):
     location = arguments["location"]
     await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
@@ -98,7 +96,7 @@ async def main():
 
         pipeline = Pipeline([
             transport.input(),               # Transport user input
-            context_aggregator.user(),       # User speech to text
+            context_aggregator.user(),       # User spoken responses
             llm,                             # LLM
             tts,                             # TTS
             transport.output(),              # Transport bot output

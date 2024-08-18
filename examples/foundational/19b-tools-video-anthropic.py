@@ -32,21 +32,16 @@ load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
-# logger.add(sys.stderr, level="TRACE")
 
 video_participant_id = None
 
-# globally declare llm so that we can access it in the get_image function
-llm = None
 
-
-async def get_weather(function_name, tool_call_id, arguments, context, result_callback):
+async def get_weather(function_name, tool_call_id, arguments, llm, context, result_callback):
     location = arguments["location"]
     await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
-async def get_image(function_name, tool_call_id, arguments, context, result_callback):
-    global llm
+async def get_image(function_name, tool_call_id, arguments, llm, context, result_callback):
     question = arguments["question"]
     await llm.request_image_frame(user_id=video_participant_id, text_content=question)
 
