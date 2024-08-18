@@ -6,6 +6,8 @@ from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+
+from src.pipecat.processors.frameworks.twilio import TwilioProcessor
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator
@@ -40,6 +42,8 @@ async def run_bot(websocket_client, stream_sid):
             )
         )
 
+        twilio_processor = TwilioProcessor(websocket_client, stream_sid)
+
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o")
@@ -64,6 +68,7 @@ async def run_bot(websocket_client, stream_sid):
 
         pipeline = Pipeline([
             transport.input(),   # Websocket input from client
+            twilio_processor,    # Handle twilio interruption
             stt,                 # Speech-To-Text
             tma_in,              # User responses
             llm,                 # LLM
