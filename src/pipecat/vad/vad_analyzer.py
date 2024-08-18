@@ -11,6 +11,8 @@ from pydantic.main import BaseModel
 
 from pipecat.utils.audio import calculate_audio_volume, exp_smoothing
 
+from loguru import logger
+
 
 class VADState(Enum):
     QUIET = 1
@@ -31,17 +33,8 @@ class VADAnalyzer:
     def __init__(self, *, sample_rate: int, num_channels: int, params: VADParams):
         self._sample_rate = sample_rate
         self._num_channels = num_channels
-        self._params = params
-        self._vad_frames = self.num_frames_required()
-        self._vad_frames_num_bytes = self._vad_frames * num_channels * 2
 
-        vad_frames_per_sec = self._vad_frames / self._sample_rate
-
-        self._vad_start_frames = round(self._params.start_secs / vad_frames_per_sec)
-        self._vad_stop_frames = round(self._params.stop_secs / vad_frames_per_sec)
-        self._vad_starting_count = 0
-        self._vad_stopping_count = 0
-        self._vad_state: VADState = VADState.QUIET
+        self._set_params(params)
 
         self._vad_buffer = b""
 
@@ -53,6 +46,10 @@ class VADAnalyzer:
     def sample_rate(self):
         return self._sample_rate
 
+    @property
+    def num_channels(self):
+        return self._num_channels
+
     @abstractmethod
     def num_frames_required(self) -> int:
         pass
@@ -60,6 +57,20 @@ class VADAnalyzer:
     @abstractmethod
     def voice_confidence(self, buffer) -> float:
         pass
+
+    def _set_params(self, params: VADParams):
+        logger.debug(f"Setting VAD params to: {params}")
+        self._params = params
+        self._vad_frames = self.num_frames_required()
+        self._vad_frames_num_bytes = self._vad_frames * self._num_channels * 2
+
+        vad_frames_per_sec = self._vad_frames / self._sample_rate
+
+        self._vad_start_frames = round(self._params.start_secs / vad_frames_per_sec)
+        self._vad_stop_frames = round(self._params.stop_secs / vad_frames_per_sec)
+        self._vad_starting_count = 0
+        self._vad_stopping_count = 0
+        self._vad_state: VADState = VADState.QUIET
 
     def _get_smoothed_volume(self, audio: bytes) -> float:
         volume = calculate_audio_volume(audio, self._sample_rate)
