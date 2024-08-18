@@ -146,20 +146,20 @@ source venv/bin/activate
 From the root of this repo, run the following:
 
 ```shell
-pip install -r dev-requirements.txt -r {env}-requirements.txt
+pip install -r dev-requirements.txt
 python -m build
 ```
 
-This builds the package. To use the package locally (eg to run sample files), run
+This builds the package. To use the package locally (e.g. to run sample files), run
 
 ```shell
-pip install --editable .
+pip install --editable ".[option,...]"
 ```
 
 If you want to use this package from another directory, you can run:
 
 ```shell
-pip install path_to_this_repo
+pip install "path_to_this_repo[option,...]"
 ```
 
 ### Running tests
