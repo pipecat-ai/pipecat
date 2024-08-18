@@ -4,25 +4,33 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from dataclasses import dataclass
 import io
 import json
 
-from typing import List
+from dataclasses import dataclass
+
+from typing import Any, Awaitable, Callable, List
 
 from PIL import Image
 
 from pipecat.frames.frames import Frame, VisionImageRawFrame, FunctionCallInProgressFrame, FunctionCallResultFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
+from loguru import logger
 
-from openai._types import NOT_GIVEN, NotGiven
+try:
+    from openai._types import NOT_GIVEN, NotGiven
 
-from openai.types.chat import (
-    ChatCompletionToolParam,
-    ChatCompletionToolChoiceOptionParam,
-    ChatCompletionMessageParam
-)
+    from openai.types.chat import (
+        ChatCompletionToolParam,
+        ChatCompletionToolChoiceOptionParam,
+        ChatCompletionMessageParam
+    )
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable.")
+    raise Exception(f"Missing module: {e}")
 
 # JSON custom encoder to handle bytes arrays so that we can log contexts
 # with images to the console.
@@ -121,14 +129,20 @@ class OpenAILLMContext:
             tools = NOT_GIVEN
         self._tools = tools
 
-    async def call_function(
-            self,
-            f: callable,
-            *,
-            function_name: str,
-            tool_call_id: str,
-            arguments: str,
-            llm: FrameProcessor) -> None:
+    async def call_function(self,
+                            f: Callable[[str,
+                                         str,
+                                         Any,
+                                         FrameProcessor,
+                                         'OpenAILLMContext',
+                                         Callable[[Any],
+                                                  Awaitable[None]]],
+                                        Awaitable[None]],
+                            *,
+                            function_name: str,
+                            tool_call_id: str,
+                            arguments: str,
+                            llm: FrameProcessor) -> None:
 
         # Push a SystemFrame downstream. This frame will let our assistant context aggregator
         # know that we are in the middle of a function call. Some contexts/aggregators may
@@ -146,8 +160,7 @@ class OpenAILLMContext:
                 tool_call_id=tool_call_id,
                 arguments=arguments,
                 result=result))
-        await f(function_name=function_name, tool_call_id=tool_call_id, arguments=arguments,
-                context=self, result_callback=function_call_result_callback)
+        await f(function_name, tool_call_id, arguments, llm, self, function_call_result_callback)
 
 
 @dataclass

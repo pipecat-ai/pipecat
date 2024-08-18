@@ -167,7 +167,7 @@ class BaseOpenAILLMService(LLMService):
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
                     tool_call_id = tool_call.id
-                    await self.call_start_function(function_name)
+                    await self.call_start_function(context, function_name)
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
@@ -386,9 +386,6 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id")
                 self._function_call_in_progress = None
                 self._function_call_result = None
-
-    def add_message(self, message):
-        self._user_context_aggregator.add_message(message)
 
     async def _push_aggregation(self):
         if not (self._aggregation or self._function_call_result):
