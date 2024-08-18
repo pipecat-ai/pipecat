@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
     TTSVoiceUpdateFrame,
     TextFrame,
+    UserImageRequestFrame,
     VisionImageRawFrame
 )
 from pipecat.processors.async_frame_processor import AsyncFrameProcessor
@@ -142,6 +143,10 @@ class LLMService(AIService):
             await self._start_callbacks[function_name](self, context, function_name)
         elif None in self._start_callbacks.keys():
             return await self._start_callbacks[None](self, context, function_name)
+
+    async def request_image_frame(self, user_id: str, *, text_content: str | None = None):
+        await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content),
+                              FrameDirection.UPSTREAM)
 
 
 class TTSService(AIService):

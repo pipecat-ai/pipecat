@@ -240,10 +240,6 @@ class AnthropicLLMService(LLMService):
         if context:
             await self._process_context(context)
 
-    async def request_image_frame(self, user_id: str, *, text_content: str = None):
-        await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content),
-                              FrameDirection.UPSTREAM)
-
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r'[^\w]+', text)) * 1.3)
 
