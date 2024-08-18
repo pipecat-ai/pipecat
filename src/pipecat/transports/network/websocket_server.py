@@ -120,7 +120,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
         self._websocket: websockets.WebSocketServerProtocol | None = None
 
-        self._audio_buffer = bytes()
+        self._websocket_audio_buffer = bytes()
 
     async def set_client_connection(self, websocket: websockets.WebSocketServerProtocol | None):
         if self._websocket:
@@ -132,10 +132,10 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         if not self._websocket:
             return
 
-        self._audio_buffer += frames
-        while len(self._audio_buffer) >= self._params.audio_frame_size:
+        self._websocket_audio_buffer += frames
+        while len(self._websocket_audio_buffer) >= self._params.audio_frame_size:
             frame = AudioRawFrame(
-                audio=self._audio_buffer[:self._params.audio_frame_size],
+                audio=self._websocket_audio_buffer[:self._params.audio_frame_size],
                 sample_rate=self._params.audio_out_sample_rate,
                 num_channels=self._params.audio_out_channels
             )
@@ -159,7 +159,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             if proto:
                 await self._websocket.send(proto)
 
-            self._audio_buffer = self._audio_buffer[self._params.audio_frame_size:]
+            self._websocket_audio_buffer = self._websocket_audio_buffer[self._params.audio_frame_size:]
 
 
 class WebsocketServerTransport(BaseTransport):
