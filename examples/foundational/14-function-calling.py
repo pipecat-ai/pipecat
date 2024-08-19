@@ -14,7 +14,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.logger import FrameLogger
-from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
@@ -56,10 +56,9 @@ async def main():
             )
         )
 
-        tts = ElevenLabsTTSService(
-            aiohttp_session=session,
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        tts = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
         llm = OpenAILLMService(
