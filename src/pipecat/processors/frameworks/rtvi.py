@@ -323,9 +323,9 @@ class RTVIProcessor(FrameProcessor):
 
     async def handle_function_call_start(
             self,
+            function_name: str,
             llm: FrameProcessor,
-            context: OpenAILLMContext,
-            function_name: str):
+            context: OpenAILLMContext):
         fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
         message = RTVILLMFunctionCallStartMessage(data=fn)
         await self._push_transport_message(message, exclude_none=False)
