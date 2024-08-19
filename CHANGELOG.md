@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- VAD parameters can now be dynamicallt updated using the
+  `VADParamsUpdateFrame`.
+
 - `ErrorFrame` has now a `fatal` field to indicate the bot should exit if a
   fatal error is pushed upstream (false by default). A new `FatalErrorFrame`
   that sets this flag to true has been added.
