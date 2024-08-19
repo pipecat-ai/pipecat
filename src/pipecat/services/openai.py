@@ -399,26 +399,27 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         try:
             if self._function_call_result:
                 frame = self._function_call_result
-                self._context.add_message({
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": frame.tool_call_id,
-                            "function": {
-                                "name": frame.function_name,
-                                "arguments": json.dumps(frame.arguments)
-                            },
-                            "type": "function"
-                        }
-                    ]
-                })
-                self._context.add_message({
-                    "role": "tool",
-                    "content": json.dumps(frame.result),
-                    "tool_call_id": frame.tool_call_id
-                })
                 self._function_call_result = None
-                run_llm = True
+                if frame.result:
+                    self._context.add_message({
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": frame.tool_call_id,
+                                "function": {
+                                    "name": frame.function_name,
+                                    "arguments": json.dumps(frame.arguments)
+                                },
+                                "type": "function"
+                            }
+                        ]
+                    })
+                    self._context.add_message({
+                        "role": "tool",
+                        "content": json.dumps(frame.result),
+                        "tool_call_id": frame.tool_call_id
+                    })
+                    run_llm = True
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
