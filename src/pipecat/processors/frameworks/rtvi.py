@@ -380,7 +380,6 @@ class RTVIProcessor(FrameProcessor):
 
     async def _start(self, frame: StartFrame):
         self._pipeline_started = True
-        await self._update_config(self._config)
         await self._maybe_send_bot_ready()
 
     async def _stop(self, frame: EndFrame):
@@ -581,6 +580,7 @@ class RTVIProcessor(FrameProcessor):
     async def _maybe_send_bot_ready(self):
         if self._pipeline_started and self._first_participant_joined:
             await self._send_bot_ready()
+            await self._update_config(self._config)
 
     async def _send_bot_ready(self):
         if not self._params.send_bot_ready:
