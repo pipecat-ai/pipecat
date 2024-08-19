@@ -34,7 +34,7 @@ class VADAnalyzer:
         self._sample_rate = sample_rate
         self._num_channels = num_channels
 
-        self._set_params(params)
+        self.set_params(params)
 
         self._vad_buffer = b""
 
@@ -58,7 +58,7 @@ class VADAnalyzer:
     def voice_confidence(self, buffer) -> float:
         pass
 
-    def _set_params(self, params: VADParams):
+    def set_params(self, params: VADParams):
         logger.debug(f"Setting VAD params to: {params}")
         self._params = params
         self._vad_frames = self.num_frames_required()
