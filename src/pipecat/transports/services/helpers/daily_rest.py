@@ -83,7 +83,7 @@ class DailyRESTHelper:
         async with self.aiohttp_session.post(f"{self.daily_api_url}/rooms", headers=headers, json=json) as r:
             if r.status != 200:
                 text = await r.text()
-                raise Exception(f"Unable to create room: {text}")
+                raise Exception(f"Unable to create room (status: {r.status}): {text}")
 
             data = await r.json()
 
@@ -118,7 +118,7 @@ class DailyRESTHelper:
         async with self.aiohttp_session.post(f"{self.daily_api_url}/meeting-tokens", headers=headers, json=json) as r:
             if r.status != 200:
                 text = await r.text()
-                raise Exception(f"Failed to create meeting token: {r.status} {text}")
+                raise Exception(f"Failed to create meeting token (status: {r.status}): {text}")
 
             data = await r.json()
 
@@ -132,7 +132,8 @@ class DailyRESTHelper:
         headers = {"Authorization": f"Bearer {self.daily_api_key}"}
         async with self.aiohttp_session.delete(f"{self.daily_api_url}/rooms/{room_name}", headers=headers) as r:
             if r.status != 200 and r.status != 404:
-                raise Exception(f"Failed to delete room: {room_name}")
+                text = await r.text()
+                raise Exception(f"Failed to delete room [{room_name}] (status: {r.status}): {text}")
 
         return True
 
