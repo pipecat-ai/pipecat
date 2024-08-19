@@ -107,7 +107,7 @@ class BaseInputTransport(FrameProcessor):
             vad_analyzer = self.vad_analyzer()
             if not vad_analyzer:
                 pass
-            vad_analyzer._set_params(frame.params)
+            vad_analyzer.set_params(frame.params)
         # Other frames
         else:
             await self._internal_push_frame(frame, direction)
