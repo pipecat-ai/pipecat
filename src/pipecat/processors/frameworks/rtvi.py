@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame)
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.transports.base_transport import BaseTransport
 
 from loguru import logger
 
@@ -193,6 +192,7 @@ class RTVIBotReadyData(BaseModel):
 class RTVIBotReady(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
     type: Literal["bot-ready"] = "bot-ready"
+    id: str
     data: RTVIBotReadyData
 
 
@@ -266,7 +266,6 @@ class RTVIProcessor(FrameProcessor):
 
     def __init__(self,
                  *,
-                 transport: BaseTransport,
                  config: RTVIConfig = RTVIConfig(config=[]),
                  params: RTVIProcessorParams = RTVIProcessorParams()):
         super().__init__()
@@ -275,7 +274,9 @@ class RTVIProcessor(FrameProcessor):
 
         self._pipeline: FrameProcessor | None = None
         self._pipeline_started = False
-        self._first_participant_joined = False
+
+        self._client_ready_id = ""
+        self._client_ready_received = False
 
         self._registered_actions: Dict[str, RTVIAction] = {}
         self._registered_services: Dict[str, RTVIService] = {}
@@ -285,12 +286,6 @@ class RTVIProcessor(FrameProcessor):
 
         self._message_task = self.get_event_loop().create_task(self._message_task_handler())
         self._message_queue = asyncio.Queue()
-
-        # TODO(aleix): This is very Daily specific. There should be a generic
-        # way to do this.
-        transport.add_event_handler(
-            "on_first_participant_joined",
-            self._on_first_participant_joined)
 
     def register_action(self, action: RTVIAction):
         id = self._action_id(action.service, action.action)
@@ -480,6 +475,8 @@ class RTVIProcessor(FrameProcessor):
 
         try:
             match message.type:
+                case "client-ready":
+                    await self._handle_client_ready(message.id)
                 case "describe-actions":
                     await self._handle_describe_actions(message.id)
                 case "describe-config":
@@ -505,6 +502,11 @@ class RTVIProcessor(FrameProcessor):
         except Exception as e:
             await self._send_error_response(message.id, f"Exception processing message: {e}")
             logger.warning(f"Exception processing message: {e}")
+
+    async def _handle_client_ready(self, request_id: str):
+        self._client_ready_received = True
+        self._client_ready_id = request_id
+        await self._maybe_send_bot_ready()
 
     async def _handle_describe_config(self, request_id: str):
         services = list(self._registered_services.values())
@@ -573,12 +575,8 @@ class RTVIProcessor(FrameProcessor):
         message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
         await self._push_transport_message(message)
 
-    async def _on_first_participant_joined(self, transport, participant):
-        self._first_participant_joined = True
-        await self._maybe_send_bot_ready()
-
     async def _maybe_send_bot_ready(self):
-        if self._pipeline_started and self._first_participant_joined:
+        if self._pipeline_started and self._client_ready_received:
             await self._send_bot_ready()
             await self._update_config(self._config)
 
@@ -587,6 +585,7 @@ class RTVIProcessor(FrameProcessor):
             return
 
         message = RTVIBotReady(
+            id=self._client_ready_id,
             data=RTVIBotReadyData(
                 version=RTVI_PROTOCOL_VERSION,
                 config=self._config.config))
