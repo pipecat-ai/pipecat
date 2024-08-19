@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
     TTSVoiceUpdateFrame,
     TextFrame,
+    UserImageRequestFrame,
     VisionImageRawFrame
 )
 from pipecat.processors.async_frame_processor import AsyncFrameProcessor
@@ -137,11 +138,15 @@ class LLMService(AIService):
             llm=self)
 
     # QUESTION FOR CB: maybe this isn't needed anymore?
-    async def call_start_function(self, function_name: str):
+    async def call_start_function(self, context: OpenAILLMContext, function_name: str):
         if function_name in self._start_callbacks.keys():
-            await self._start_callbacks[function_name](self)
+            await self._start_callbacks[function_name](function_name, self, context)
         elif None in self._start_callbacks.keys():
-            return await self._start_callbacks[None](function_name)
+            return await self._start_callbacks[None](function_name, self, context)
+
+    async def request_image_frame(self, user_id: str, *, text_content: str | None = None):
+        await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content),
+                              FrameDirection.UPSTREAM)
 
 
 class TTSService(AIService):
