@@ -17,7 +17,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator,
 )
-from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openpipe import OpenPipeLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
@@ -50,10 +50,9 @@ async def main():
             )
         )
 
-        tts = ElevenLabsTTSService(
-            aiohttp_session=session,
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        tts = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
         timestamp = int(time.time())

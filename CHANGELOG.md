@@ -98,6 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Most examples now use Cartesia.
+
 - Added examples `foundational/19a-tools-anthropic.py`,
   `foundational/19b-tools-video-anthropic.py` and
   `foundational/19a-tools-togetherai.py`.

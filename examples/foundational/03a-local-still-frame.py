@@ -56,7 +56,7 @@ async def main():
         runner = PipelineRunner()
 
         async def run_tk():
-            while runner.is_active():
+            while not task.has_finished():
                 tk_root.update()
                 tk_root.update_idletasks()
                 await asyncio.sleep(0.1)
