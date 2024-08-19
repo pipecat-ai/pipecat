@@ -275,8 +275,8 @@ class RTVIProcessor(FrameProcessor):
         self._pipeline: FrameProcessor | None = None
         self._pipeline_started = False
 
+        self._client_ready = False
         self._client_ready_id = ""
-        self._client_ready_received = False
 
         self._registered_actions: Dict[str, RTVIAction] = {}
         self._registered_services: Dict[str, RTVIService] = {}
@@ -300,6 +300,11 @@ class RTVIProcessor(FrameProcessor):
     async def send_error(self, error: str):
         message = RTVIError(data=RTVIErrorData(error=error, fatal=False))
         await self._push_transport_message(message)
+
+    async def set_client_ready(self):
+        if not self._client_ready:
+            self._client_ready = True
+            await self._maybe_send_bot_ready()
 
     async def handle_function_call(
             self,
@@ -504,7 +509,7 @@ class RTVIProcessor(FrameProcessor):
             logger.warning(f"Exception processing message: {e}")
 
     async def _handle_client_ready(self, request_id: str):
-        self._client_ready_received = True
+        self._client_ready = True
         self._client_ready_id = request_id
         await self._maybe_send_bot_ready()
 
@@ -576,7 +581,7 @@ class RTVIProcessor(FrameProcessor):
         await self._push_transport_message(message)
 
     async def _maybe_send_bot_ready(self):
-        if self._pipeline_started and self._client_ready_received:
+        if self._pipeline_started and self._client_ready_:
             await self._send_bot_ready()
             await self._update_config(self._config)
 
