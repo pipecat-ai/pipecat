@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     FunctionCallResultFrame,
     UserStoppedSpeakingFrame)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import BaseTransport
 
@@ -310,7 +311,8 @@ class RTVIProcessor(FrameProcessor):
             function_name: str,
             tool_call_id: str,
             arguments: dict,
-            context,
+            llm: FrameProcessor,
+            context: OpenAILLMContext,
             result_callback):
         fn = RTVILLMFunctionCallMessageData(
             function_name=function_name,
@@ -319,7 +321,11 @@ class RTVIProcessor(FrameProcessor):
         message = RTVILLMFunctionCallMessage(data=fn)
         await self._push_transport_message(message, exclude_none=False)
 
-    async def handle_function_call_start(self, function_name: str):
+    async def handle_function_call_start(
+            self,
+            function_name: str,
+            llm: FrameProcessor,
+            context: OpenAILLMContext):
         fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
         message = RTVILLMFunctionCallStartMessage(data=fn)
         await self._push_transport_message(message, exclude_none=False)

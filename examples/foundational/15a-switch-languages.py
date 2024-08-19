@@ -14,10 +14,6 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantContextAggregator,
-    LLMUserContextAggregator
-)
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.services.elevenlabs import ElevenLabsTTSService
@@ -41,10 +37,10 @@ logger.add(sys.stderr, level="DEBUG")
 current_language = "English"
 
 
-async def switch_language(llm, args):
+async def switch_language(function_name, tool_call_id, args, llm, context, result_callback):
     global current_language
     current_language = args["language"]
-    return {"voice": f"Your answers from now on should be in {current_language}."}
+    await result_callback({"voice": f"Your answers from now on should be in {current_language}."})
 
 
 async def english_filter(frame) -> bool:
@@ -117,20 +113,19 @@ async def main():
         ]
 
         context = OpenAILLMContext(messages, tools)
-        tma_in = LLMUserContextAggregator(context)
-        tma_out = LLMAssistantContextAggregator(context)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline([
             transport.input(),   # Transport user input
             stt,                 # STT
-            tma_in,              # User responses
+            context_aggregator.user(),  # User responses
             llm,                 # LLM
             ParallelPipeline(    # TTS (bot will speak the chosen language)
                 [FunctionFilter(english_filter), english_tts],  # English
                 [FunctionFilter(spanish_filter), spanish_tts],  # Spanish
             ),
             transport.output(),  # Transport bot output
-            tma_out              # Assistant spoken responses
+            context_aggregator.assistant()  # Assistant spoken responses
         ])
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))

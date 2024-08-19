@@ -240,10 +240,6 @@ class AnthropicLLMService(LLMService):
         if context:
             await self._process_context(context)
 
-    async def request_image_frame(self, user_id: str, *, text_content: str = None):
-        await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content),
-                              FrameDirection.UPSTREAM)
-
     def _estimate_tokens(self, text: str) -> int:
         return int(len(re.split(r'[^\w]+', text)) * 1.3)
 
@@ -481,9 +477,6 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         elif isinstance(frame, AnthropicImageMessageFrame):
             self._pending_image_frame_message = frame
 
-    def add_message(self, message):
-        self._user_context_aggregator.add_message(message)
-
     async def _push_aggregation(self):
         if not self._aggregation:
             return
@@ -497,32 +490,33 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
             if self._function_call_result:
                 frame = self._function_call_result
                 self._function_call_result = None
-                self._context.add_message({
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": aggregation
-                        },
-                        {
-                            "type": "tool_use",
-                            "id": frame.tool_call_id,
-                            "name": frame.function_name,
-                            "input": frame.arguments
-                        }
-                    ]
-                })
-                self._context.add_message({
-                    "role": "user",
-                    "content": [
+                if frame.result:
+                    self._context.add_message({
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": aggregation
+                            },
+                            {
+                                "type": "tool_use",
+                                "id": frame.tool_call_id,
+                                "name": frame.function_name,
+                                "input": frame.arguments
+                            }
+                        ]
+                    })
+                    self._context.add_message({
+                        "role": "user",
+                        "content": [
                             {
                                 "type": "tool_result",
                                 "tool_use_id": frame.tool_call_id,
                                 "content": json.dumps(frame.result)
                             }
-                    ]
-                })
-                run_llm = True
+                        ]
+                    })
+                    run_llm = True
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 

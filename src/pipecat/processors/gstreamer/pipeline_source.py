@@ -27,7 +27,8 @@ try:
     from gi.repository import Gst, GstApp
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use GStreamer processors, you need to install GStreamer in your system`.")
+    logger.error(
+        "In order to use GStreamer, you need to `pip install pipecat-ai[gstreamer]`. Also, you need to install GStreamer in your system.")
     raise Exception(f"Missing module: {e}")
 
 
