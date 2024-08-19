@@ -490,32 +490,33 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
             if self._function_call_result:
                 frame = self._function_call_result
                 self._function_call_result = None
-                self._context.add_message({
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": aggregation
-                        },
-                        {
-                            "type": "tool_use",
-                            "id": frame.tool_call_id,
-                            "name": frame.function_name,
-                            "input": frame.arguments
-                        }
-                    ]
-                })
-                self._context.add_message({
-                    "role": "user",
-                    "content": [
+                if frame.result:
+                    self._context.add_message({
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": aggregation
+                            },
+                            {
+                                "type": "tool_use",
+                                "id": frame.tool_call_id,
+                                "name": frame.function_name,
+                                "input": frame.arguments
+                            }
+                        ]
+                    })
+                    self._context.add_message({
+                        "role": "user",
+                        "content": [
                             {
                                 "type": "tool_result",
                                 "tool_use_id": frame.tool_call_id,
                                 "content": json.dumps(frame.result)
                             }
-                    ]
-                })
-                run_llm = True
+                        ]
+                    })
+                    run_llm = True
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
