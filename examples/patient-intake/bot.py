@@ -122,7 +122,7 @@ class IntakeProcessor:
             # The user provided an incorrect birthday; ask them to try again
             await result_callback([{"role": "system", "content": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function."}])
 
-    async def start_prescriptions(self, llm, context, function_name):
+    async def start_prescriptions(self, function_name, llm, context):
         print(f"!!! doing start prescriptions")
         # Move on to allergies
         context.set_tools(
@@ -157,7 +157,7 @@ class IntakeProcessor:
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
         print(f"!!! past await process frame in start prescriptions")
 
-    async def start_allergies(self, llm, context, function_name):
+    async def start_allergies(self, function_name, llm, context):
         print("!!! doing start allergies")
         # Move on to conditions
         context.set_tools(
@@ -191,7 +191,7 @@ class IntakeProcessor:
                 "content": "Now ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function."})
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
-    async def start_conditions(self, llm, context, function_name):
+    async def start_conditions(self, function_name, llm, context):
         print("!!! doing start conditions")
         # Move on to visit reasons
         context.set_tools(
@@ -224,7 +224,7 @@ class IntakeProcessor:
                 "content": "Finally, ask the user the reason for their doctor visit today. Once they answer, call the list_visit_reasons function."})
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
-    async def start_visit_reasons(self, llm, context, function_name):
+    async def start_visit_reasons(self, function_name, llm, context):
         print("!!! doing start visit reasons")
         # move to finish call
         context.set_tools([])

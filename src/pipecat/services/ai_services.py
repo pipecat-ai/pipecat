@@ -140,9 +140,9 @@ class LLMService(AIService):
     # QUESTION FOR CB: maybe this isn't needed anymore?
     async def call_start_function(self, context: OpenAILLMContext, function_name: str):
         if function_name in self._start_callbacks.keys():
-            await self._start_callbacks[function_name](self, context, function_name)
+            await self._start_callbacks[function_name](function_name, self, context)
         elif None in self._start_callbacks.keys():
-            return await self._start_callbacks[None](self, context, function_name)
+            return await self._start_callbacks[None](function_name, self, context)
 
     async def request_image_frame(self, user_id: str, *, text_content: str | None = None):
         await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content),

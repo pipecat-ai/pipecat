@@ -32,7 +32,7 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def start_fetch_weather(llm, context, function_name):
+async def start_fetch_weather(function_name, llm, context):
     await llm.push_frame(TextFrame("Let me check on that."))
 
 
