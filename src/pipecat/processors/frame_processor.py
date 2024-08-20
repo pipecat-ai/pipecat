@@ -9,7 +9,13 @@ import time
 
 from enum import Enum
 
-from pipecat.frames.frames import ErrorFrame, Frame, MetricsFrame, StartFrame, StartInterruptionFrame, UserStoppedSpeakingFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    MetricsFrame,
+    StartFrame,
+    StartInterruptionFrame,
+    UserStoppedSpeakingFrame)
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
@@ -61,6 +67,19 @@ class FrameProcessorMetrics:
         self._start_processing_time = 0
         return MetricsFrame(processing=[processing])
 
+    async def start_llm_usage_metrics(self, tokens: dict):
+        logger.debug(
+            f"{self._name} prompt tokens: {tokens['prompt_tokens']}, completion tokens: {tokens['completion_tokens']}")
+        return MetricsFrame(tokens=[tokens])
+
+    async def start_tts_usage_metrics(self, text: str):
+        characters = {
+            "processor": self._name,
+            "value": len(text),
+        }
+        logger.debug(f"{self._name} usage characters: {characters['value']}")
+        return MetricsFrame(characters=[characters])
+
 
 class FrameProcessor:
 
@@ -80,6 +99,7 @@ class FrameProcessor:
         # Properties
         self._allow_interruptions = False
         self._enable_metrics = False
+        self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
 
         # Metrics
@@ -92,6 +112,10 @@ class FrameProcessor:
     @property
     def metrics_enabled(self):
         return self._enable_metrics
+
+    @property
+    def usage_metrics_enabled(self):
+        return self._enable_usage_metrics
 
     @property
     def report_only_initial_ttfb(self):
@@ -120,6 +144,18 @@ class FrameProcessor:
             if frame:
                 await self.push_frame(frame)
 
+    async def start_llm_usage_metrics(self, tokens: dict):
+        if self.can_generate_metrics() and self.usage_metrics_enabled:
+            frame = await self._metrics.start_llm_usage_metrics(tokens)
+            if frame:
+                await self.push_frame(frame)
+
+    async def start_tts_usage_metrics(self, text: str):
+        if self.can_generate_metrics() and self.usage_metrics_enabled:
+            frame = await self._metrics.start_tts_usage_metrics(text)
+            if frame:
+                await self.push_frame(frame)
+
     async def stop_all_metrics(self):
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
@@ -145,6 +181,7 @@ class FrameProcessor:
         if isinstance(frame, StartFrame):
             self._allow_interruptions = frame.allow_interruptions
             self._enable_metrics = frame.enable_metrics
+            self._enable_usage_metrics = frame.enable_usage_metrics
             self._report_only_initial_ttfb = frame.report_only_initial_ttfb
         elif isinstance(frame, StartInterruptionFrame):
             await self.stop_all_metrics()

@@ -15,12 +15,13 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    MetricsFrame,
     StartFrame,
     SystemFrame,
-    TranscriptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,)
+    TTSStartedFrame,
+    TTSStoppedFrame,
+    TranscriptionFrame)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncAIService, TTSService
 from pipecat.utils.time import time_now_iso8601
@@ -73,13 +74,7 @@ class DeepgramTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
+
         base_url = self._base_url
         request_url = f"{base_url}?model={self._voice}&encoding={self._encoding}&container=none&sample_rate={self._sample_rate}"
         headers = {"authorization": f"token {self._api_key}"}
@@ -102,10 +97,14 @@ class DeepgramTTSService(TTSService):
                     yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {response_text})")
                     return
 
+                await self.start_tts_usage_metrics(text)
+
+                await self.push_frame(TTSStartedFrame())
                 async for data in r.content:
                     await self.stop_ttfb_metrics()
                     frame = AudioRawFrame(audio=data, sample_rate=self._sample_rate, num_channels=1)
                     yield frame
+                await self.push_frame(TTSStoppedFrame())
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
 

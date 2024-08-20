@@ -9,7 +9,7 @@
 import asyncio
 
 from enum import Enum
-from typing_extensions import AsyncGenerator
+from typing import AsyncGenerator
 
 import numpy as np
 
