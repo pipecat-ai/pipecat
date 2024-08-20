@@ -49,7 +49,7 @@ Your project may or may not need these, so they're made available as optional re
 
 ## A simple voice agent running locally
 
-Here is a very basic Pipecat bot that greets a user when they join a real-time session. We'll use [Daily](https://daily.co) for real-time media transport, and [ElevenLabs](https://elevenlabs.io/) for text-to-speech.
+Here is a very basic Pipecat bot that greets a user when they join a real-time session. We'll use [Daily](https://daily.co) for real-time media transport, and [Cartesia](https://cartesia.ai/) for text-to-speech.
 
 ```python
 #app.py
@@ -61,7 +61,7 @@ from pipecat.frames.frames import EndFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 async def main():
@@ -73,11 +73,10 @@ async def main():
       bot_name="Bot Name",
       params=DailyParams(audio_out_enabled=True))
 
-    # Use Eleven Labs for Text-to-Speech
-    tts = ElevenLabsTTSService(
-      aiohttp_session=session,
-      api_key=...,
-      voice_id=...,
+    # Use Cartesia for Text-to-Speech
+    tts = CartesiaTTSService(
+        api_key=...,
+        voice_id=...
       )
 
     # Simple pipeline that will process text to speech and output the result
@@ -94,7 +93,7 @@ async def main():
     @transport.event_handler("on_participant_joined")
     async def on_new_participant_joined(transport, participant):
       participant_name = participant["info"]["userName"] or ''
-      # Queue a TextFrame that will get spoken by the TTS service (Eleven Labs)
+      # Queue a TextFrame that will get spoken by the TTS service (Cartesia)
       await task.queue_frames([TextFrame(f"Hello there, {participant_name}!"), EndFrame()])
 
     # Run the pipeline task
