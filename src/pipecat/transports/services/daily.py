@@ -964,3 +964,14 @@ class DailyTransport(BaseTransport):
 
     async def _on_transcription_message(self, participant_id, message):
         await self._call_event_handler("on_transcription_message", participant_id, message)
+        # text = message["text"]
+        # timestamp = message["timestamp"]
+        # is_final = message["rawResponse"]["is_final"]
+        # if is_final:
+        #     frame = TranscriptionFrame(text, participant_id, timestamp)
+        #     logger.debug(f"Transcription (from: {participant_id}): [{text}]")
+        # else:
+        #     frame = InterimTranscriptionFrame(text, participant_id, timestamp)
+
+        # if self._input:
+        #     await self._input.push_transcription_frame(frame)
