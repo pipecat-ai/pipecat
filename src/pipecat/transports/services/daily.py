@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, Optional
 from concurrent.futures import ThreadPoolExecutor
 
+from pydantic import BaseModel, Field
+
 from daily import (
     CallClient,
     Daily,
@@ -19,7 +21,6 @@ from daily import (
     VirtualCameraDevice,
     VirtualMicrophoneDevice,
     VirtualSpeakerDevice)
-from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -82,8 +83,8 @@ class WebRTCVADAnalyzer(VADAnalyzer):
 
 
 class DailyDialinSettings(BaseModel):
-    call_id: str = ""
-    call_domain: str = ""
+    call_id: str = Field(default="", alias="callId")
+    call_domain: str = Field(default="", alias="callDomain")
 
 
 class DailyTranscriptionSettings(BaseModel):
