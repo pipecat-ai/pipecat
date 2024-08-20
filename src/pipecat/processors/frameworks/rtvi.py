@@ -581,7 +581,7 @@ class RTVIProcessor(FrameProcessor):
         await self._push_transport_message(message)
 
     async def _maybe_send_bot_ready(self):
-        if self._pipeline_started and self._client_ready_:
+        if self._pipeline_started and self._client_ready:
             await self._send_bot_ready()
             await self._update_config(self._config)
 
