@@ -125,6 +125,7 @@ class DailyCallbacks(BaseModel):
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_transcription_message: Callable[[Mapping[str, Any]], Awaitable[None]]
 
 
 def completion_callback(future):
@@ -528,11 +529,12 @@ class DailyTransportClient(EventHandler):
         participant_id = ""
         if "participantId" in message:
             participant_id = message["participantId"]
-
-        if participant_id in self._transcription_renderers:
-            callback = self._transcription_renderers[participant_id]
-            self._call_async_callback(callback, participant_id, message)
-
+        self._call_async_callback(self._callbacks.on_transcription_message, participant_id, message)
+        # if participant_id in self._transcription_renderers:
+        #     callback = self._transcription_renderers[participant_id]
+        #     logger.info(callback)
+        #     self._call_async_callback(callback, participant_id, message)
+        
     def on_transcription_error(self, message):
         logger.error(f"Transcription error: {message}")
 
@@ -786,6 +788,7 @@ class DailyTransport(BaseTransport):
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
+            on_transcription_message=self._on_transcription_message
         )
         self._params = params
 
@@ -810,8 +813,7 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
         self._register_event_handler("on_participant_updated")
-
-    #
+        self._register_event_handler('on_transcription_message')
     # BaseTransport
     #
 
@@ -961,19 +963,4 @@ class DailyTransport(BaseTransport):
         await self._call_event_handler("on_first_participant_joined", participant)
 
     async def _on_transcription_message(self, participant_id, message):
-        text = message["text"]
-        timestamp = message["timestamp"]
-        is_final = message["rawResponse"]["is_final"]
-        try:
-            language = message["rawResponse"]["channel"]["alternatives"][0]["languages"][0]
-            language = Language(language)
-        except KeyError:
-            language = None
-        if is_final:
-            frame = TranscriptionFrame(text, participant_id, timestamp, language)
-            logger.debug(f"Transcription (from: {participant_id}): [{text}]")
-        else:
-            frame = InterimTranscriptionFrame(text, participant_id, timestamp, language)
-
-        if self._input:
-            await self._input.push_transcription_frame(frame)
+        await self._call_event_handler("on_transcription_message", participant_id, message)
