@@ -98,6 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Added `studypal` example (from to the Cartesia folks!).
+
 - Most examples now use Cartesia.
 
 - Added examples `foundational/19a-tools-anthropic.py`,

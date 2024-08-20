@@ -1,16 +1,5 @@
-aiohttp==3.9.5
 beautifulsoup4==4.12.2
 PyPDF2==3.0.1
 tiktoken==0.7.0
-pipecat==0.3.0
-pipecat-ai==0.0.39
+pipecat-ai[daily,cartesia,openai,silero]==0.0.39
 python-dotenv==1.0.1
-loguru==0.7.2
-requests==2.32.3
-pydantic==2.8.2
-httpx==0.27.0
-openai==1.27.0
-websockets==12.0
-daily-python==0.10.1
-torch==2.2.2
-torchaudio==2.2.2
