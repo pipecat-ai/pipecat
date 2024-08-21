@@ -171,7 +171,8 @@ class AnthropicLLMService(LLMService):
                         await self.call_function(context=context,
                                                  tool_call_id=tool_use_block.id,
                                                  function_name=tool_use_block.name,
-                                                 arguments=json.loads(json_accumulator))
+                                                 arguments=json.loads(json_accumulator) if json_accumulator else dict()
+                                                 )
 
                 # Calculate usage. Do this here in its own if statement, because there may be usage
                 # data embedded in messages that we do other processing for, above.
