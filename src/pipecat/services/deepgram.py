@@ -18,7 +18,7 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
     BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,)
+    BotStoppedSpeakingFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame)
