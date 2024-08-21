@@ -4,12 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
-
 from typing import AsyncGenerator
+
+import aiohttp
+from loguru import logger
 
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -17,25 +20,21 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     SystemFrame,
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
+    TranscriptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TranscriptionFrame)
+)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncAIService, TTSService
 from pipecat.utils.time import time_now_iso8601
-
-from loguru import logger
-
 
 # See .env.example for Deepgram configuration needed
 try:
     from deepgram import (
         DeepgramClient,
         DeepgramClientOptions,
-        LiveTranscriptionEvents,
         LiveOptions,
+        LiveTranscriptionEvents,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
