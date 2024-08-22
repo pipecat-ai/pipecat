@@ -7,9 +7,18 @@
 import ctypes
 import pickle
 
-from livekit.rtc import AudioFrame
 from pipecat.frames.frames import AudioRawFrame, Frame
 from pipecat.serializers.base_serializer import FrameSerializer
+
+from loguru import logger
+
+try:
+    from livekit.rtc import AudioFrame
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use LiveKit, you need to `pip install pipecat-ai[livekit]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 class LivekitFrameSerializer(FrameSerializer):
