@@ -49,6 +49,10 @@ class LmntTTSService(TTSService):
             **kwargs):
         super().__init__(**kwargs)
 
+        # Let TTSService produce TTSStoppedFrames after a short delay of
+        # no activity.
+        self._push_stop_frames = True
+
         self._api_key = api_key
         self._voice_id = voice_id
         self._output_format = {
