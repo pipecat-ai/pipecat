@@ -44,7 +44,7 @@ class LmntTTSService(TTSService):
             *,
             api_key: str,
             voice_id: str,
-            sample_rate: int = 16000,
+            sample_rate: int = 24000,
             language: str = "en",
             **kwargs):
         super().__init__(**kwargs)
