@@ -9,6 +9,7 @@ from typing import Any, List, Mapping, Optional, Tuple
 from dataclasses import dataclass, field
 
 from pipecat.utils.utils import obj_count, obj_id
+from pipecat.vad.vad_analyzer import VADParams
 
 
 @dataclass
@@ -455,7 +456,7 @@ class FunctionCallResultFrame(DataFrame):
     function_name: str
     tool_call_id: str
     arguments: str
-    result: any
+    result: Any
 
 
 @dataclass
@@ -463,4 +464,4 @@ class VADParamsUpdateFrame(ControlFrame):
     """A control frame containing a request to update VAD params. Intended
     to be pushed upstream from RTVI processor.
     """
-    params: dict
+    params: VADParams
