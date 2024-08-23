@@ -50,12 +50,12 @@ async def configure_with_args(
     daily_rest_helper = DailyRESTHelper(
         daily_api_key=key,
         daily_api_url=os.getenv("DAILY_API_URL", "https://api.daily.co/v1"),
-    )
+        aiohttp_session=aiohttp_session)
 
     # Create a meeting token for the given room with an expiration 1 hour in
     # the future.
     expiry_time: float = 60 * 60
 
-    token = daily_rest_helper.get_token(url, expiry_time)
+    token = await daily_rest_helper.get_token(url, expiry_time)
 
     return (url, token, args)
