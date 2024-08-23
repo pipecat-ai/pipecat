@@ -43,7 +43,7 @@ from pipecat.processors.aggregators.llm_response import (
 from loguru import logger
 
 try:
-    from anthropic import AsyncAnthropic
+    from anthropic import AsyncAnthropic, NOT_GIVEN, NotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -135,7 +135,7 @@ class AnthropicLLMService(LLMService):
 
             response = await api_call(
                 tools=context.tools or [],
-                system=context.system or [],
+                system=context.system,
                 messages=messages,
                 model=self._model,
                 max_tokens=self._max_tokens,
@@ -171,7 +171,8 @@ class AnthropicLLMService(LLMService):
                         await self.call_function(context=context,
                                                  tool_call_id=tool_use_block.id,
                                                  function_name=tool_use_block.name,
-                                                 arguments=json.loads(json_accumulator))
+                                                 arguments=json.loads(json_accumulator) if json_accumulator else dict()
+                                                 )
 
                 # Calculate usage. Do this here in its own if statement, because there may be usage
                 # data embedded in messages that we do other processing for, above.
@@ -269,7 +270,7 @@ class AnthropicLLMContext(OpenAILLMContext):
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
         *,
-        system: List | None = None
+        system: str | NotGiven = NOT_GIVEN
     ):
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self._user_image_request_context = {}

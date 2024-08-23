@@ -239,10 +239,12 @@ class BaseOutputTransport(FrameProcessor):
                 logger.exception(f"{self} error processing sink queue: {e}")
 
     async def _bot_started_speaking(self):
+        logger.debug("Bot started speaking")
         self._bot_speaking = True
         await self._internal_push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
 
     async def _bot_stopped_speaking(self):
+        logger.debug("Bot stopped speaking")
         self._bot_speaking = False
         await self._internal_push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
 
