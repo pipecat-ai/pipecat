@@ -444,6 +444,22 @@ class TTSVoiceUpdateFrame(ControlFrame):
 
 
 @dataclass
+class TTSLanguageUpdateFrame(ControlFrame):
+    """A control frame containing a request to update to a new TTS language.
+    """
+    language: Language
+
+
+@dataclass
+class TTSLanguageVoicesUpdateFrame(ControlFrame):
+    """A control frame containing a mapping between a language and the desired
+    voice for that language.
+
+    """
+    voices: Mapping[Language, str]
+
+
+@dataclass
 class FunctionCallInProgressFrame(SystemFrame):
     """A frame signaling that a function call is in progress.
     """
