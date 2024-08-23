@@ -9,7 +9,7 @@ import io
 import wave
 
 from abc import abstractmethod
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Mapping, Optional
 
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -20,16 +20,20 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
+    TTSLanguageUpdateFrame,
+    TTSLanguageVoicesUpdateFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSVoiceUpdateFrame,
     TextFrame,
+    TranscriptionFrame,
     UserImageRequestFrame,
     VisionImageRawFrame
 )
 from pipecat.processors.async_frame_processor import AsyncFrameProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transcriptions.languages import Language
 from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.utils import exp_smoothing
@@ -177,6 +181,14 @@ class TTSService(AIService):
     async def set_voice(self, voice: str):
         pass
 
+    @abstractmethod
+    async def set_language(self, language: Language):
+        pass
+
+    @abstractmethod
+    async def set_language_voices(self, voices: Mapping[Language, str]):
+        pass
+
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -235,6 +247,10 @@ class TTSService(AIService):
             await self._push_tts_frames(frame.text, False)
         elif isinstance(frame, TTSVoiceUpdateFrame):
             await self.set_voice(frame.voice)
+        elif isinstance(frame, TTSLanguageUpdateFrame):
+            await self.set_language(frame.language)
+        elif isinstance(frame, TTSLanguageVoicesUpdateFrame):
+            await self.set_language_voices(frame.voices)
         else:
             await self.push_frame(frame, direction)
 
