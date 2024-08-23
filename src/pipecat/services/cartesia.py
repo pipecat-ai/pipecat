@@ -10,9 +10,8 @@ import base64
 import asyncio
 import time
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Mapping
 
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.frames.frames import (
     CancelFrame,
     ErrorFrame,
@@ -26,6 +25,8 @@ from pipecat.frames.frames import (
     TextFrame,
     LLMFullResponseEndFrame
 )
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.transcriptions.languages import Language
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -38,6 +39,15 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`. Also, set `CARTESIA_API_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
+
+
+def language_to_cartesia_language(language: Language) -> str | None:
+    match language:
+        case Language.EN:
+            return "en"
+        case Language.ES:
+            return "es"
+    return None
 
 
 class CartesiaTTSService(TTSService):
@@ -79,6 +89,7 @@ class CartesiaTTSService(TTSService):
             "sample_rate": sample_rate,
         }
         self._language = language
+        self._language_voices = {}
 
         self._websocket = None
         self._context_id = None
@@ -93,6 +104,17 @@ class CartesiaTTSService(TTSService):
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
         self._voice_id = voice
+
+    async def set_language(self, language: Language):
+        cartesia_language = language_to_cartesia_language(language)
+        if cartesia_language and language in self._language_voices:
+            logger.debug(f"Switching TTS language to: [{language}]")
+            self._language = cartesia_language
+            await self.set_voice(self._language_voices[language])
+
+    async def set_language_voices(self, voices: Mapping[Language, str]):
+        logger.debug(f"Setting TTS language voices to: {voices}")
+        self._language_voices = voices
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
