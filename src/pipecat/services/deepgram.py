@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncAIService, TTSService
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
 from loguru import logger
@@ -30,16 +31,27 @@ from loguru import logger
 # See .env.example for Deepgram configuration needed
 try:
     from deepgram import (
+        AsyncListenWebSocketClient,
         DeepgramClient,
         DeepgramClientOptions,
         LiveTranscriptionEvents,
         LiveOptions,
+        LiveResultResponse
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
         "In order to use Deepgram, you need to `pip install pipecat-ai[deepgram]`. Also, set `DEEPGRAM_API_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
+
+
+def deepgram_language_to_language(language: str) -> Language | None:
+    match language:
+        case "en":
+            return Language.EN
+        case "es":
+            return Language.ES
+    return None
 
 
 class DeepgramTTSService(TTSService):
@@ -128,7 +140,7 @@ class DeepgramSTTService(AsyncAIService):
 
         self._client = DeepgramClient(
             api_key, config=DeepgramClientOptions(url=url, options={"keepalive": "true"}))
-        self._connection = self._client.listen.asynclive.v("1")
+        self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -157,11 +169,17 @@ class DeepgramSTTService(AsyncAIService):
         await self._connection.finish()
 
     async def _on_message(self, *args, **kwargs):
-        result = kwargs["result"]
+        result: LiveResultResponse = kwargs["result"]
+        if len(result.channel.alternatives) == 0:
+            return
         is_final = result.is_final
         transcript = result.channel.alternatives[0].transcript
+        language = None
+        if result.channel.alternatives[0].languages:
+            language = result.channel.alternatives[0].languages[0]
+            language = deepgram_language_to_language(language)
         if len(transcript) > 0:
             if is_final:
-                await self.queue_frame(TranscriptionFrame(transcript, "", time_now_iso8601()))
+                await self.queue_frame(TranscriptionFrame(transcript, "", time_now_iso8601(), language))
             else:
-                await self.queue_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601()))
+                await self.queue_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language))
