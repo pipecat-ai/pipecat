@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserImageRequestFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -746,6 +747,15 @@ class DailyOutputTransport(BaseOutputTransport):
         await self._client.write_frame_to_camera(frame)
 
 
+def daily_language_to_language(language: str) -> Language | None:
+    match language:
+        case "en":
+            return Language.EN
+        case "es":
+            return Language.ES
+    return None
+
+
 class DailyTransport(BaseTransport):
 
     def __init__(
@@ -950,11 +960,16 @@ class DailyTransport(BaseTransport):
         text = message["text"]
         timestamp = message["timestamp"]
         is_final = message["rawResponse"]["is_final"]
+        try:
+            language = message["rawResponse"]["channel"]["alternatives"][0]["languages"][0]
+            language = daily_language_to_language(language)
+        except KeyError:
+            language = None
         if is_final:
-            frame = TranscriptionFrame(text, participant_id, timestamp)
+            frame = TranscriptionFrame(text, participant_id, timestamp, language)
             logger.debug(f"Transcription (from: {participant_id}): [{text}]")
         else:
-            frame = InterimTranscriptionFrame(text, participant_id, timestamp)
+            frame = InterimTranscriptionFrame(text, participant_id, timestamp, language)
 
         if self._input:
             await self._input.push_transcription_frame(frame)
