@@ -8,6 +8,7 @@ from typing import Any, List, Mapping, Optional, Tuple
 
 from dataclasses import dataclass, field
 
+from pipecat.transcriptions.languages import Language
 from pipecat.utils.utils import obj_count, obj_id
 from pipecat.vad.vad_analyzer import VADParams
 
@@ -131,9 +132,10 @@ class TranscriptionFrame(TextFrame):
     """
     user_id: str
     timestamp: str
+    language: Language | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -142,9 +144,10 @@ class InterimTranscriptionFrame(TextFrame):
     the transport's receive queue when a participant speaks."""
     user_id: str
     timestamp: str
+    language: Language | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
