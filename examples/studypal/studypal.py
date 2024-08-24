@@ -5,7 +5,7 @@ import sys
 import io
 
 from bs4 import BeautifulSoup
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 import tiktoken
 
 from pipecat.frames.frames import LLMMessagesFrame
