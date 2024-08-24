@@ -5,6 +5,12 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added `Groq.py` to use Groq for LLM queries
+
 ## [0.0.41] - 2024-08-22
 
 ### Added
