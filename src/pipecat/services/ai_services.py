@@ -4,11 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import io
 import wave
 
 from abc import abstractmethod
-from asyncio import Task, sleep
 from typing import AsyncGenerator, Optional
 
 from pipecat.frames.frames import (
@@ -169,7 +169,8 @@ class TTSService(AIService):
         self._push_text_frames: bool = push_text_frames
         self._push_stop_frames: bool = push_stop_frames
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
-        self._stop_frame_task: Optional[Task] = None
+        self._stop_frame_task: Optional[asyncio.Task] = None
+        self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
         self._current_sentence: str = ""
 
     @abstractmethod
@@ -240,18 +241,29 @@ class TTSService(AIService):
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         await super().push_frame(frame, direction)
 
-        if isinstance(frame, AudioRawFrame) and self._stop_frame_task is not None:
-            # Reschedule timeout task if it was already running
-            self._stop_frame_task.cancel()
-            self._stop_frame_task = self.get_event_loop().create_task(self._stop_frame_handler())
-        elif isinstance(frame, TTSStartedFrame) and self._push_stop_frames:
-            # Start timeout task if necessary
-            self._stop_frame_task = self.get_event_loop().create_task(self._stop_frame_handler())
+        if self._push_stop_frames and (
+                isinstance(frame, StartInterruptionFrame) or
+                isinstance(frame, TTSStartedFrame) or
+                isinstance(frame, AudioRawFrame)):
+            if self._stop_frame_task is None:
+                event_loop = self.get_event_loop()
+                self._stop_frame_task = event_loop.create_task(self._stop_frame_handler())
+            await self._stop_frame_queue.put(frame)
 
     async def _stop_frame_handler(self):
-        await sleep(self._stop_frame_timeout_s)
-        await self.push_frame(TTSStoppedFrame())
-        self._stop_frame_task = None
+        has_started = False
+        while True:
+            try:
+                frame = await asyncio.wait_for(self._stop_frame_queue.get(),
+                                               self._stop_frame_timeout_s)
+                if isinstance(frame, TTSStartedFrame):
+                    has_started = True
+                elif isinstance(frame, StartInterruptionFrame):
+                    has_started = False
+            except asyncio.TimeoutError:
+                if has_started:
+                    await self.push_frame(TTSStoppedFrame())
+                    has_started = False
 
 
 class STTService(AIService):
