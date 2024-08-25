@@ -5,6 +5,22 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.41] - 2024-08-22
+
+### Added
+
+- Added `LivekitFrameSerializer` audio frame serializer.
+
+### Fixed
+
+- Fix `FastAPIWebsocketOutputTransport` variable name clash with subclass.
+
+- Fix an `AnthropicLLMService` issue with empty arguments in function calling.
+
+### Other
+
+- Fixed `studypal` example errors.
+
 ## [0.0.40] - 2024-08-20
 
 ### Added
