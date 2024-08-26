@@ -306,7 +306,7 @@ class DailyTransportClient(EventHandler):
                 if self._token and self._params.transcription_enabled:
                     await self._start_transcription()
 
-                await self._callbacks.on_joined(data["participants"]["local"])
+                await self._callbacks.on_joined(data)
             else:
                 error_msg = f"Error joining {self._room_url}: {error}"
                 logger.error(error_msg)
@@ -874,8 +874,8 @@ class DailyTransport(BaseTransport):
             self._input.capture_participant_video(
                 participant_id, framerate, video_source, color_format)
 
-    async def _on_joined(self, participant):
-        await self._call_event_handler("on_joined", participant)
+    async def _on_joined(self, data):
+        await self._call_event_handler("on_joined", data)
 
     async def _on_left(self):
         await self._call_event_handler("on_left")
