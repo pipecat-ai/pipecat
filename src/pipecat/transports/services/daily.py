@@ -747,15 +747,6 @@ class DailyOutputTransport(BaseOutputTransport):
         await self._client.write_frame_to_camera(frame)
 
 
-def daily_language_to_language(language: str) -> Language | None:
-    match language:
-        case "en":
-            return Language.EN
-        case "es":
-            return Language.ES
-    return None
-
-
 class DailyTransport(BaseTransport):
 
     def __init__(
@@ -962,7 +953,7 @@ class DailyTransport(BaseTransport):
         is_final = message["rawResponse"]["is_final"]
         try:
             language = message["rawResponse"]["channel"]["alternatives"][0]["languages"][0]
-            language = daily_language_to_language(language)
+            language = Language(language)
         except KeyError:
             language = None
         if is_final:
