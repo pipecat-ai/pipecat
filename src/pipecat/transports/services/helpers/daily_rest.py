@@ -36,6 +36,25 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     sip: Optional[DailyRoomSipParams] = None
     sip_uri: Optional[dict] = None
 
+
+    # additional options for Prebuilt UI and non prebuilt both
+    enable_people_ui: bool = True
+    enable_pip_ui: bool = True
+    enable_emoji_reactions: bool = True
+    enable_hand_raising: bool = True
+    enable_prejoin_ui: bool = True
+    enable_live_captions_ui: bool = True
+    enable_network_ui: bool = True
+    enable_noise_cancellation_ui: bool = True
+    enable_breakout_rooms: bool = True
+    enable_knocking: bool = True
+    enable_screenshare: bool = True
+    enable_video_processing_ui: bool = True
+    enable_chat: bool = True
+    enable_shared_chat_history: bool = True
+    enable_recording: bool = True
+    enable_advanced_chat: bool = True
+
     @property
     def sip_endpoint(self) -> str:
         if not self.sip_uri:
