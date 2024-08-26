@@ -134,9 +134,12 @@ class DeepgramSTTService(STTService):
         self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
 
-    async def set_model(self, model: str):
+    async def set_model(self, model: str, language: Language | None):
         logger.debug(f"Switching STT model to: [{model}]")
         self._live_options.model = model
+        if language:
+            logger.debug(f"Switching STT language to: [{language}]")
+            self._live_options.language = language.value
         await self._disconnect()
         await self._connect()
 

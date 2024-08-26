@@ -310,7 +310,7 @@ class STTService(AIService):
         super().__init__(**kwargs)
 
     @abstractmethod
-    async def set_model(self, model: str):
+    async def set_model(self, model: str, language: Language | None):
         pass
 
     @abstractmethod
@@ -334,7 +334,7 @@ class STTService(AIService):
             # push a TextFrame. We don't really want to push audio frames down.
             await self.process_audio_frame(frame)
         elif isinstance(frame, STTModelUpdateFrame):
-            await self.set_model(frame.model)
+            await self.set_model(frame.model, frame.language)
         elif isinstance(frame, STTLanguageUpdateFrame):
             await self.set_language(frame.language)
         else:
