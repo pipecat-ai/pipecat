@@ -441,8 +441,6 @@ class TTSModelUpdateFrame(ControlFrame):
     """A control frame containing a request to update the TTS model.
     """
     model: str
-    voice: str | None = None
-    language: Language | None = None
 
 
 @dataclass
@@ -459,7 +457,6 @@ class TTSLanguageUpdateFrame(ControlFrame):
 
     """
     language: Language
-    voice: str | None = None
 
 
 @dataclass
@@ -469,7 +466,6 @@ class STTModelUpdateFrame(ControlFrame):
 
     """
     model: str
-    language: Language | None = None
 
 
 @dataclass
