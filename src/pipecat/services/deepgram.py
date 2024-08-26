@@ -139,13 +139,13 @@ class DeepgramSTTService(STTService):
         self._live_options.model = model
         if language:
             logger.debug(f"Switching STT language to: [{language}]")
-            self._live_options.language = language.value
+            self._live_options.language = language
         await self._disconnect()
         await self._connect()
 
     async def set_language(self, language: Language):
         logger.debug(f"Switching STT language to: [{language}]")
-        self._live_options.language = language.value
+        self._live_options.language = language
         await self._disconnect()
         await self._connect()
 
