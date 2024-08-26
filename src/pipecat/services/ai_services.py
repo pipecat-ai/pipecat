@@ -179,7 +179,7 @@ class TTSService(AIService):
         self._current_sentence: str = ""
 
     @abstractmethod
-    async def set_model(self, model: str, voice: str | None, language: Language | None):
+    async def set_model(self, model: str):
         pass
 
     @abstractmethod
@@ -187,7 +187,7 @@ class TTSService(AIService):
         pass
 
     @abstractmethod
-    async def set_language(self, language: Language, voice: str | None):
+    async def set_language(self, language: Language):
         pass
 
     # Converts the text to audio.
@@ -247,11 +247,11 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             await self._push_tts_frames(frame.text, False)
         elif isinstance(frame, TTSModelUpdateFrame):
-            await self.set_model(frame.model, frame.voice, frame.language)
+            await self.set_model(frame.model)
         elif isinstance(frame, TTSVoiceUpdateFrame):
             await self.set_voice(frame.voice)
         elif isinstance(frame, TTSLanguageUpdateFrame):
-            await self.set_language(frame.language, frame.voice)
+            await self.set_language(frame.language)
         else:
             await self.push_frame(frame, direction)
 
@@ -310,7 +310,7 @@ class STTService(AIService):
         super().__init__(**kwargs)
 
     @abstractmethod
-    async def set_model(self, model: str, language: Language | None):
+    async def set_model(self, model: str):
         pass
 
     @abstractmethod
@@ -334,7 +334,7 @@ class STTService(AIService):
             # push a TextFrame. We don't really want to push audio frames down.
             await self.process_audio_frame(frame)
         elif isinstance(frame, STTModelUpdateFrame):
-            await self.set_model(frame.model, frame.language)
+            await self.set_model(frame.model)
         elif isinstance(frame, STTLanguageUpdateFrame):
             await self.set_language(frame.language)
         else:
