@@ -5,6 +5,30 @@ All notable changes to **pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added `TTSModelUpdateFrame`, `TTSLanguageUpdateFrame`, `STTModelUpdateFrame`,
+  and `STTLanguageUpdateFrame` frames to allow you to switch models, language
+  and voices in TTS and STT services.
+
+- Added new `transcriptions.Language` enum.
+
+### Changed
+
+- `DailyTransport.on_joined` event now returns the full session data instead of
+  just the participant.
+
+- `CartesiaTTSService` is now a subclass of `TTSService`.
+
+- `DeepgramSTTService` is now a subclass of `STTService`.
+
+- `WhisperSTTService` is now a subclass of `SegmentedSTTService`. A
+  `SegmentedSTTService` is a `STTService` where the provided audio is given in a
+  big chunk (i.e. from when the user starts speaking until the user stops
+  speaking) instead of a continous stream.
+
 ## [0.0.41] - 2024-08-22
 
 ### Added
