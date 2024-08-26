@@ -123,6 +123,7 @@ class CartesiaTTSService(TTSService):
         cartesia_language = language_to_cartesia_language(language)
         self._language = cartesia_language
         if voice:
+            logger.debug(f"Switching TTS voice to: [{voice}]")
             self._voice_id = voice
 
     async def start(self, frame: StartFrame):

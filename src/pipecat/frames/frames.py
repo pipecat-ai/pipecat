@@ -462,9 +462,12 @@ class TTSLanguageUpdateFrame(ControlFrame):
 
 @dataclass
 class STTModelUpdateFrame(ControlFrame):
-    """A control frame containing a request to update the STT model.
+    """A control frame containing a request to update the STT model and optional
+    language.
+
     """
     model: str
+    language: Language | None = None
 
 
 @dataclass
