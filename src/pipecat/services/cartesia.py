@@ -110,9 +110,16 @@ class CartesiaTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    async def set_model(self, model: str):
+    async def set_model(self, model: str, voice: str | None, language: Language | None):
         logger.debug(f"Switching TTS model to: [{model}]")
         self._model_id = model
+        if language:
+            logger.debug(f"Switching TTS language to: [{language}]")
+            cartesia_language = language_to_cartesia_language(language)
+            self._language = cartesia_language
+        if voice:
+            logger.debug(f"Switching TTS voice to: [{voice}]")
+            self._voice_id = voice
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")

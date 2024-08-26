@@ -179,7 +179,7 @@ class TTSService(AIService):
         self._current_sentence: str = ""
 
     @abstractmethod
-    async def set_model(self, model: str):
+    async def set_model(self, model: str, voice: str | None, language: Language | None):
         pass
 
     @abstractmethod
