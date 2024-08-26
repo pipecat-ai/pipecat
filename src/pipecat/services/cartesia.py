@@ -99,7 +99,6 @@ class CartesiaTTSService(TTSService):
             "sample_rate": sample_rate,
         }
         self._language = language
-        self._language_voices = {}
 
         self._websocket = None
         self._context_id = None
@@ -111,20 +110,20 @@ class CartesiaTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    async def set_model(self, model: str):
+        logger.debug(f"Switching TTS model to: [{model}]")
+        self._model_id = model
+
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
         self._voice_id = voice
 
-    async def set_language(self, language: Language):
+    async def set_language(self, language: Language, voice: str | None):
+        logger.debug(f"Switching TTS language to: [{language}]")
         cartesia_language = language_to_cartesia_language(language)
-        if cartesia_language and language in self._language_voices:
-            logger.debug(f"Switching TTS language to: [{language}]")
-            self._language = cartesia_language
-            await self.set_voice(self._language_voices[language])
-
-    async def set_language_voices(self, voices: Mapping[Language, str]):
-        logger.debug(f"Setting TTS language voices to: {voices}")
-        self._language_voices = voices
+        self._language = cartesia_language
+        if voice:
+            self._voice_id = voice
 
     async def start(self, frame: StartFrame):
         await super().start(frame)

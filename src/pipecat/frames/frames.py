@@ -8,7 +8,7 @@ from typing import Any, List, Mapping, Optional, Tuple
 
 from dataclasses import dataclass, field
 
-from pipecat.transcriptions.languages import Language
+from pipecat.transcriptions.language import Language
 from pipecat.utils.utils import obj_count, obj_id
 from pipecat.vad.vad_analyzer import VADParams
 
@@ -437,6 +437,13 @@ class LLMModelUpdateFrame(ControlFrame):
 
 
 @dataclass
+class TTSModelUpdateFrame(ControlFrame):
+    """A control frame containing a request to update the TTS model.
+    """
+    model: str
+
+
+@dataclass
 class TTSVoiceUpdateFrame(ControlFrame):
     """A control frame containing a request to update to a new TTS voice.
     """
@@ -445,18 +452,26 @@ class TTSVoiceUpdateFrame(ControlFrame):
 
 @dataclass
 class TTSLanguageUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new TTS language.
+    """A control frame containing a request to update to a new TTS language and
+    optional voice.
+
     """
     language: Language
+    voice: str | None = None
 
 
 @dataclass
-class TTSLanguageVoicesUpdateFrame(ControlFrame):
-    """A control frame containing a mapping between a language and the desired
-    voice for that language.
-
+class STTModelUpdateFrame(ControlFrame):
+    """A control frame containing a request to update the STT model.
     """
-    voices: Mapping[Language, str]
+    model: str
+
+
+@dataclass
+class STTLanguageUpdateFrame(ControlFrame):
+    """A control frame containing a request to update to STT language.
+    """
+    language: Language
 
 
 @dataclass
