@@ -247,7 +247,7 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             await self._push_tts_frames(frame.text, False)
         elif isinstance(frame, TTSModelUpdateFrame):
-            await self.set_model(frame.model)
+            await self.set_model(frame.model, frame.voice, frame.language)
         elif isinstance(frame, TTSVoiceUpdateFrame):
             await self.set_voice(frame.voice)
         elif isinstance(frame, TTSLanguageUpdateFrame):
