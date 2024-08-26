@@ -52,7 +52,6 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     enable_video_processing_ui: bool = True
     enable_chat: bool = True
     enable_shared_chat_history: bool = True
-    enable_recording: bool = True
     enable_advanced_chat: bool = True
 
     @property
