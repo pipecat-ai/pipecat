@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.transcriptions.languages import Language
+from pipecat.transcriptions.language import Language
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -43,10 +43,20 @@ except ModuleNotFoundError as e:
 
 def language_to_cartesia_language(language: Language) -> str | None:
     match language:
+        case Language.DE:
+            return "de"
         case Language.EN:
             return "en"
         case Language.ES:
             return "es"
+        case Language.FR:
+            return "fr"
+        case Language.JA:
+            return "ja"
+        case Language.PT:
+            return "pt"
+        case Language.ZH:
+            return "zh"
     return None
 
 
