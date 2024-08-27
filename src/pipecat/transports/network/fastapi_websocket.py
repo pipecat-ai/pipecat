@@ -104,7 +104,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._websocket_audio_buffer += frames
         while len(self._websocket_audio_buffer) >= self._params.audio_frame_size:
             frame = AudioRawFrame(
-                audio=self._websocket_audio_buffer[: self._params.audio_frame_size],
+                audio=self._websocket_audio_buffer[:
+                                                   self._params.audio_frame_size],
                 sample_rate=self._params.audio_out_sample_rate,
                 num_channels=self._params.audio_out_channels,
             )
@@ -130,7 +131,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                 await self._websocket.send_text(payload)
 
             self._websocket_audio_buffer = self._websocket_audio_buffer[
-                self._params.audio_frame_size :
+                self._params.audio_frame_size:
             ]
 
     async def write_websocket_clear_event(self, frame: StartInterruptionFrame):
