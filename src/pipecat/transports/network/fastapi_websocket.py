@@ -12,14 +12,7 @@ import wave
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.frames.frames import (
-    AudioRawFrame,
-    CancelFrame,
-    EndFrame,
-    Frame,
-    StartFrame,
-    StartInterruptionFrame,
-)
+from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, Frame, StartFrame, StartInterruptionFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
@@ -34,8 +27,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use FastAPI websockets, you need to `pip install pipecat-ai[websocket]`."
-    )
+        "In order to use FastAPI websockets, you need to `pip install pipecat-ai[websocket]`.")
     raise Exception(f"Missing module: {e}")
 
 
@@ -51,13 +43,13 @@ class FastAPIWebsocketCallbacks(BaseModel):
 
 
 class FastAPIWebsocketInputTransport(BaseInputTransport):
+
     def __init__(
-        self,
-        websocket: WebSocket,
-        params: FastAPIWebsocketParams,
-        callbacks: FastAPIWebsocketCallbacks,
-        **kwargs,
-    ):
+            self,
+            websocket: WebSocket,
+            params: FastAPIWebsocketParams,
+            callbacks: FastAPIWebsocketCallbacks,
+            **kwargs):
         super().__init__(params, **kwargs)
 
         self._websocket = websocket
@@ -93,6 +85,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
 
 class FastAPIWebsocketOutputTransport(BaseOutputTransport):
+
     def __init__(self, websocket: WebSocket, params: FastAPIWebsocketParams, **kwargs):
         super().__init__(params, **kwargs)
 
@@ -107,7 +100,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                 audio=self._websocket_audio_buffer[:
                                                    self._params.audio_frame_size],
                 sample_rate=self._params.audio_out_sample_rate,
-                num_channels=self._params.audio_out_channels,
+                num_channels=self._params.audio_out_channels
             )
 
             if self._params.add_wav_header:
@@ -122,8 +115,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                 wav_frame = AudioRawFrame(
                     content.read(),
                     sample_rate=frame.sample_rate,
-                    num_channels=frame.num_channels,
-                )
+                    num_channels=frame.num_channels)
                 frame = wav_frame
 
             payload = self._params.serializer.serialize(frame)
@@ -131,8 +123,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                 await self._websocket.send_text(payload)
 
             self._websocket_audio_buffer = self._websocket_audio_buffer[
-                self._params.audio_frame_size:
-            ]
+                self._params.audio_frame_size:]
 
     async def write_websocket_clear_event(self, frame: StartInterruptionFrame):
         payload = self._params.serializer.serialize(frame)
@@ -160,28 +151,26 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
 
 class FastAPIWebsocketTransport(BaseTransport):
+
     def __init__(
-        self,
-        websocket: WebSocket,
-        params: FastAPIWebsocketParams,
-        input_name: str | None = None,
-        output_name: str | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
-    ):
+            self,
+            websocket: WebSocket,
+            params: FastAPIWebsocketParams,
+            input_name: str | None = None,
+            output_name: str | None = None,
+            loop: asyncio.AbstractEventLoop | None = None):
         super().__init__(input_name=input_name, output_name=output_name, loop=loop)
         self._params = params
 
         self._callbacks = FastAPIWebsocketCallbacks(
             on_client_connected=self._on_client_connected,
-            on_client_disconnected=self._on_client_disconnected,
+            on_client_disconnected=self._on_client_disconnected
         )
 
         self._input = FastAPIWebsocketInputTransport(
-            websocket, self._params, self._callbacks, name=self._input_name
-        )
+            websocket, self._params, self._callbacks, name=self._input_name)
         self._output = FastAPIWebsocketOutputTransport(
-            websocket, self._params, name=self._output_name
-        )
+            websocket, self._params, name=self._output_name)
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
