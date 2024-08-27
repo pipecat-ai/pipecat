@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     Frame,
     AudioRawFrame,
     StartFrame,
+    StartInterruptionFrame,
     EndFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -85,6 +86,11 @@ class LmntTTSService(TTSService):
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._disconnect()
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        await super().push_frame(frame, direction)
+        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+            self._started = False
 
     async def _connect(self):
         try:
