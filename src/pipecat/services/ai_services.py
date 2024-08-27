@@ -238,13 +238,20 @@ class TTSService(AIService):
         else:
             await self.push_frame(frame, direction)
 
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        if self._push_stop_frames:
+            self._stop_frame_task = self.get_event_loop().create_task(self._stop_frame_handler())
+
     async def stop(self, frame: EndFrame):
+        await super().stop(frame)
         if self._stop_frame_task:
             self._stop_frame_task.cancel()
             await self._stop_frame_task
             self._stop_frame_task = None
 
     async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
         if self._stop_frame_task:
             self._stop_frame_task.cancel()
             await self._stop_frame_task
@@ -258,9 +265,6 @@ class TTSService(AIService):
                 isinstance(frame, TTSStartedFrame) or
                 isinstance(frame, AudioRawFrame) or
                 isinstance(frame, TTSStoppedFrame)):
-            if self._stop_frame_task is None:
-                event_loop = self.get_event_loop()
-                self._stop_frame_task = event_loop.create_task(self._stop_frame_handler())
             await self._stop_frame_queue.put(frame)
 
     async def _stop_frame_handler(self):
