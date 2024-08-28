@@ -222,7 +222,7 @@ class RTVILLMFunctionCallResultData(BaseModel):
     function_name: str
     tool_call_id: str
     arguments: dict
-    result: dict
+    result: dict | str
 
 
 class RTVITranscriptionMessageData(BaseModel):

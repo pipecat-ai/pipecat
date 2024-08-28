@@ -173,7 +173,7 @@ class TogetherLLMService(LLMService):
             try:
                 arguments = json.loads(args_string)
                 await self.call_function(context=context,
-                                         tool_call_id=uuid.uuid4(),
+                                         tool_call_id=str(uuid.uuid4()),
                                          function_name=function_name,
                                          arguments=arguments)
                 return
@@ -301,7 +301,8 @@ class TogetherAssistantContextAggregator(LLMAssistantContextAggregator):
                 self._function_call_result = None
                 self._context.add_message({
                     "role": "tool",
-                    "content": frame.result
+                    # Together expects the content here to be a string, so stringify it
+                    "content": str(frame.result)
                 })
                 run_llm = True
             else:
