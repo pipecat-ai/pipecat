@@ -7,9 +7,6 @@
 import sys
 from typing import List
 
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame, OpenAILLMContext
-
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
@@ -20,14 +17,19 @@ from pipecat.frames.frames import (
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
     StartInterruptionFrame,
-    TranscriptionFrame,
     TextFrame,
+    TranscriptionFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame)
+    UserStoppedSpeakingFrame,
+)
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class LLMResponseAggregator(FrameProcessor):
-
     def __init__(
         self,
         *,
@@ -37,7 +39,7 @@ class LLMResponseAggregator(FrameProcessor):
         end_frame,
         accumulator_frame: TextFrame,
         interim_accumulator_frame: TextFrame | None = None,
-        handle_interruptions: bool = False
+        handle_interruptions: bool = False,
     ):
         super().__init__()
 
@@ -101,7 +103,9 @@ class LLMResponseAggregator(FrameProcessor):
             # We might have received the end frame but we might still be
             # aggregating (i.e. we have seen interim results but not the final
             # text).
-            self._aggregating = self._seen_interim_results or len(self._aggregation) == 0
+            self._aggregating = (
+                self._seen_interim_results or len(self._aggregation) == 0
+            )
 
             # Send the aggregation if we are not aggregating anymore (i.e. no
             # more interim results received).
@@ -117,10 +121,12 @@ class LLMResponseAggregator(FrameProcessor):
 
             # We just got our final result, so let's reset interim results.
             self._seen_interim_results = False
-        elif self._interim_accumulator_frame and isinstance(frame, self._interim_accumulator_frame):
+        elif self._interim_accumulator_frame and isinstance(
+            frame, self._interim_accumulator_frame
+        ):
             self._seen_interim_results = True
         elif self._handle_interruptions and isinstance(frame, StartInterruptionFrame):
-            await self._push_aggregation()
+            await self._push_aggregation(is_interruption=True)
             # Reset anyways
             self._reset()
             await self.push_frame(frame, direction)
@@ -136,7 +142,7 @@ class LLMResponseAggregator(FrameProcessor):
         if send_aggregation:
             await self._push_aggregation()
 
-    async def _push_aggregation(self):
+    async def _push_aggregation(self, is_interruption=False):
         if len(self._aggregation) > 0:
             self._messages.append({"role": self._role, "content": self._aggregation})
 
@@ -176,7 +182,7 @@ class LLMAssistantResponseAggregator(LLMResponseAggregator):
             start_frame=LLMFullResponseStartFrame,
             end_frame=LLMFullResponseEndFrame,
             accumulator_frame=TextFrame,
-            handle_interruptions=True
+            handle_interruptions=True,
         )
 
 
@@ -188,7 +194,7 @@ class LLMUserResponseAggregator(LLMResponseAggregator):
             start_frame=UserStartedSpeakingFrame,
             end_frame=UserStoppedSpeakingFrame,
             accumulator_frame=TranscriptionFrame,
-            interim_accumulator_frame=InterimTranscriptionFrame
+            interim_accumulator_frame=InterimTranscriptionFrame,
         )
 
 
@@ -272,9 +278,11 @@ class LLMContextAggregator(LLMResponseAggregator):
     def _set_tools(self, tools: List):
         self._context.set_tools(tools)
 
-    async def _push_aggregation(self):
+    async def _push_aggregation(self, is_interruption=False):
         if len(self._aggregation) > 0:
-            self._context.add_message({"role": self._role, "content": self._aggregation})
+            self._context.add_message(
+                {"role": self._role, "content": self._aggregation}
+            )
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
@@ -296,7 +304,7 @@ class LLMAssistantContextAggregator(LLMContextAggregator):
             start_frame=LLMFullResponseStartFrame,
             end_frame=LLMFullResponseEndFrame,
             accumulator_frame=TextFrame,
-            handle_interruptions=True
+            handle_interruptions=True,
         )
 
 
@@ -309,5 +317,5 @@ class LLMUserContextAggregator(LLMContextAggregator):
             start_frame=UserStartedSpeakingFrame,
             end_frame=UserStoppedSpeakingFrame,
             accumulator_frame=TranscriptionFrame,
-            interim_accumulator_frame=InterimTranscriptionFrame
+            interim_accumulator_frame=InterimTranscriptionFrame,
         )
