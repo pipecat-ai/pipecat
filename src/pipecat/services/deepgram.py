@@ -133,7 +133,9 @@ class DeepgramSTTService(AsyncAIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-
+        if not hasattr(self._connection,'_socket'):
+            await self._connection.start(self._live_options)
+            logger.debug(f"{self}: Connected to Deepgram")
         if isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         elif isinstance(frame, AudioRawFrame):
