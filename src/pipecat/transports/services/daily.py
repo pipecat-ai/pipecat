@@ -611,7 +611,7 @@ class DailyInputTransport(BaseInputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, UserImageRequestFrame):
-            self.request_participant_image(frame.user_id)
+            self.request_participant_image(frame.user_id, frame.context)
 
     #
     # Frames
@@ -661,9 +661,10 @@ class DailyInputTransport(BaseInputTransport):
             color_format
         )
 
-    def request_participant_image(self, participant_id: str):
+    def request_participant_image(self, participant_id: str, context: Any = None):
         if participant_id in self._video_renderers:
-            self._video_renderers[participant_id]["render_next_frame"] = True
+            truthy = context if context else True
+            self._video_renderers[participant_id]["render_next_frame"] = truthy
 
     async def _on_participant_video_frame(self, participant_id: str, buffer, size, format):
         render_frame = False
@@ -676,15 +677,16 @@ class DailyInputTransport(BaseInputTransport):
             next_time = prev_time + 1 / framerate
             render_frame = (curr_time - next_time) < 0.1
         elif self._video_renderers[participant_id]["render_next_frame"]:
+            render_frame = self._video_renderers[participant_id]["render_next_frame"]
             self._video_renderers[participant_id]["render_next_frame"] = False
-            render_frame = True
 
         if render_frame:
             frame = UserImageRawFrame(
                 user_id=participant_id,
                 image=buffer,
                 size=size,
-                format=format)
+                format=format,
+                context=None if render_frame is True else render_frame)
             await self._internal_push_frame(frame)
 
         self._video_renderers[participant_id]["timestamp"] = curr_time
