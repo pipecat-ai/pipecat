@@ -4,23 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import json
-import uuid
-import base64
 import asyncio
-import time
 
 from typing import AsyncGenerator
 
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.frames.frames import (
+    AudioRawFrame,
     CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
-    AudioRawFrame,
     StartFrame,
     StartInterruptionFrame,
-    EndFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -95,7 +91,8 @@ class LmntTTSService(TTSService):
     async def _connect(self):
         try:
             self._speech = Speech()
-            self._connection = await self._speech.synthesize_streaming(self._voice_id, format="raw", sample_rate=self._output_format["sample_rate"])
+            self._connection = await self._speech.synthesize_streaming(
+                self._voice_id, format="raw", sample_rate=self._output_format["sample_rate"])
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
         except Exception as e:
             logger.exception(f"{self} initialization error: {e}")

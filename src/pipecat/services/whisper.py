@@ -14,7 +14,7 @@ from typing import AsyncGenerator
 import numpy as np
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
-from pipecat.services.ai_services import STTService
+from pipecat.services.ai_services import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 
 from loguru import logger
@@ -38,7 +38,7 @@ class Model(Enum):
     DISTIL_MEDIUM_EN = "Systran/faster-distil-whisper-medium.en"
 
 
-class WhisperSTTService(STTService):
+class WhisperSTTService(SegmentedSTTService):
     """Class to transcribe audio with a locally-downloaded Whisper model"""
 
     def __init__(self,
@@ -77,6 +77,7 @@ class WhisperSTTService(STTService):
             yield ErrorFrame("Whisper model not available")
             return
 
+        await self.start_processing_metrics()
         await self.start_ttfb_metrics()
 
         # Divide by 32768 because we have signed 16-bit data.
@@ -88,7 +89,9 @@ class WhisperSTTService(STTService):
             if segment.no_speech_prob < self._no_speech_prob:
                 text += f"{segment.text} "
 
+        await self.stop_ttfb_metrics()
+        await self.stop_processing_metrics()
+
         if text:
-            await self.stop_ttfb_metrics()
             logger.debug(f"Transcription: [{text}]")
             yield TranscriptionFrame(text, "", time_now_iso8601())

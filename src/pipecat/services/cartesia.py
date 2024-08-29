@@ -10,9 +10,8 @@ import base64
 import asyncio
 import time
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Mapping
 
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.frames.frames import (
     CancelFrame,
     ErrorFrame,
@@ -26,6 +25,8 @@ from pipecat.frames.frames import (
     TextFrame,
     LLMFullResponseEndFrame
 )
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.transcriptions.language import Language
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -38,6 +39,25 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`. Also, set `CARTESIA_API_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
+
+
+def language_to_cartesia_language(language: Language) -> str | None:
+    match language:
+        case Language.DE:
+            return "de"
+        case Language.EN:
+            return "en"
+        case Language.ES:
+            return "es"
+        case Language.FR:
+            return "fr"
+        case Language.JA:
+            return "ja"
+        case Language.PT:
+            return "pt"
+        case Language.ZH:
+            return "zh"
+    return None
 
 
 class CartesiaTTSService(TTSService):
@@ -90,9 +110,17 @@ class CartesiaTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    async def set_model(self, model: str):
+        logger.debug(f"Switching TTS model to: [{model}]")
+        self._model_id = model
+
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
         self._voice_id = voice
+
+    async def set_language(self, language: Language):
+        logger.debug(f"Switching TTS language to: [{language}]")
+        self._language = language_to_cartesia_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)

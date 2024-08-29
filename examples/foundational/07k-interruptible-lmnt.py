@@ -50,7 +50,7 @@ async def main():
 
         tts = LmntTTSService(
             api_key=os.getenv("LMNT_API_KEY"),
-            voice="morgan"
+            voice_id="morgan"
         )
 
         llm = OpenAILLMService(
