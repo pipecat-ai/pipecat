@@ -8,6 +8,7 @@ from typing import Any, List, Mapping, Optional, Tuple
 
 from dataclasses import dataclass, field
 
+from pipecat.transcriptions.language import Language
 from pipecat.utils.utils import obj_count, obj_id
 from pipecat.vad.vad_analyzer import VADParams
 
@@ -131,9 +132,10 @@ class TranscriptionFrame(TextFrame):
     """
     user_id: str
     timestamp: str
+    language: Language | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -142,9 +144,10 @@ class InterimTranscriptionFrame(TextFrame):
     the transport's receive queue when a participant speaks."""
     user_id: str
     timestamp: str
+    language: Language | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -434,10 +437,42 @@ class LLMModelUpdateFrame(ControlFrame):
 
 
 @dataclass
+class TTSModelUpdateFrame(ControlFrame):
+    """A control frame containing a request to update the TTS model.
+    """
+    model: str
+
+
+@dataclass
 class TTSVoiceUpdateFrame(ControlFrame):
     """A control frame containing a request to update to a new TTS voice.
     """
     voice: str
+
+
+@dataclass
+class TTSLanguageUpdateFrame(ControlFrame):
+    """A control frame containing a request to update to a new TTS language and
+    optional voice.
+
+    """
+    language: Language
+
+
+@dataclass
+class STTModelUpdateFrame(ControlFrame):
+    """A control frame containing a request to update the STT model and optional
+    language.
+
+    """
+    model: str
+
+
+@dataclass
+class STTLanguageUpdateFrame(ControlFrame):
+    """A control frame containing a request to update to STT language.
+    """
+    language: Language
 
 
 @dataclass

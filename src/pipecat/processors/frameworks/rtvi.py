@@ -81,11 +81,6 @@ class RTVIAction(BaseModel):
         return super().model_post_init(__context)
 
 
-#
-# Client -> Pipecat messages.
-#
-
-
 class RTVIServiceOptionConfig(BaseModel):
     name: str
     value: Any
@@ -98,6 +93,16 @@ class RTVIServiceConfig(BaseModel):
 
 class RTVIConfig(BaseModel):
     config: List[RTVIServiceConfig]
+
+
+#
+# Client -> Pipecat messages.
+#
+
+
+class RTVIUpdateConfig(BaseModel):
+    config: List[RTVIServiceConfig]
+    interrupt: bool = False
 
 
 class RTVIActionRunArgument(BaseModel):
@@ -489,8 +494,8 @@ class RTVIProcessor(FrameProcessor):
                 case "get-config":
                     await self._handle_get_config(message.id)
                 case "update-config":
-                    config = RTVIConfig.model_validate(message.data)
-                    await self._handle_update_config(message.id, config)
+                    update_config = RTVIUpdateConfig.model_validate(message.data)
+                    await self._handle_update_config(message.id, update_config)
                 case "action":
                     action = RTVIActionRun.model_validate(message.data)
                     await self._handle_action(message.id, action)
@@ -545,17 +550,14 @@ class RTVIProcessor(FrameProcessor):
             await handler(self, service.name, option)
             self._update_config_option(service.name, option)
 
-    async def _update_config(self, data: RTVIConfig):
+    async def _update_config(self, data: RTVIConfig, interrupt: bool):
+        if interrupt:
+            await self.interrupt_bot()
         for service_config in data.config:
             await self._update_service_config(service_config)
 
-    async def _handle_update_config(self, request_id: str, data: RTVIConfig):
-        # NOTE(aleix): The bot might be talking while we receive a new
-        # config. Let's interrupt it for now and update the config. Another
-        # solution is to wait until the bot stops speaking and then apply the
-        # config, but this definitely is more complicated to achieve.
-        await self.interrupt_bot()
-        await self._update_config(data)
+    async def _handle_update_config(self, request_id: str, data: RTVIUpdateConfig):
+        await self._update_config(RTVIConfig(config=data.config), data.interrupt)
         await self._handle_get_config(request_id)
 
     async def _handle_function_call_result(self, data):
@@ -583,7 +585,7 @@ class RTVIProcessor(FrameProcessor):
     async def _maybe_send_bot_ready(self):
         if self._pipeline_started and self._client_ready:
             await self._send_bot_ready()
-            await self._update_config(self._config)
+            await self._update_config(self._config, False)
 
     async def _send_bot_ready(self):
         if not self._params.send_bot_ready:
