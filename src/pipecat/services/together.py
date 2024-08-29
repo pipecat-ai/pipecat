@@ -181,7 +181,11 @@ class TogetherLLMService(LLMService):
                 # We get here if the LLM returns a function call with invalid JSON arguments. This could happen
                 # because of LLM non-determinism, or maybe more often because of user error in the prompt.
                 # Should we do anything more than log a warning?
-                logger.debug(f"Error parsing function arguments: {error}")
+                logger.debug(
+                    f"Error parsing function arguments: {error} - {function_call_accumulator}")
+
+# Error parsing function arguments: Extra data: line 1 column 23 (char 22)
+# - <function=get_current_weather>{"location": "London"}"</function>
 
 
 class TogetherLLMContext(OpenAILLMContext):
@@ -190,6 +194,7 @@ class TogetherLLMContext(OpenAILLMContext):
         messages: list[dict] | None = None,
     ):
         super().__init__(messages=messages)
+        self._user_image_request_context = {}
 
     @classmethod
     def from_openai_context(cls, openai_context: OpenAILLMContext):
@@ -219,9 +224,17 @@ class TogetherUserContextAggregator(LLMUserContextAggregator):
         if isinstance(context, OpenAILLMContext):
             self._context = TogetherLLMContext.from_openai_context(context)
 
+    def get_messages_frame(self):
+        return OpenAILLMContextFrame(self._context)
+
     async def push_messages_frame(self):
-        frame = OpenAILLMContextFrame(self._context)
-        await self.push_frame(frame)
+        await self.push_frame(self.get_messages_frame())
+
+    def append_image_description_tool_message(self, description):
+        self._context.add_message({
+            "role": "tool",
+            "content": json.dumps({"image_description": description})
+        })
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
@@ -244,6 +257,18 @@ class TogetherUserContextAggregator(LLMUserContextAggregator):
                 else:
                     if frame.user_id in self._context._user_image_request_context:
                         del self._context._user_image_request_context[frame.user_id]
+            elif isinstance(frame, UserImageRawFrame):
+                text = self._context._user_image_request_context.get(frame.user_id) or ""
+                if text:
+                    del self._context._user_image_request_context[frame.user_id]
+                    frame = VisionImageRawFrame(
+                        image=frame.image,
+                        size=frame.size,
+                        format=frame.format,
+                        text=text,
+                    )
+                    await self.push_frame(frame)
+
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
 
