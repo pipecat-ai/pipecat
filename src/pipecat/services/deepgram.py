@@ -145,10 +145,11 @@ class DeepgramSTTService(AsyncAIService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        if await self._connection.start(self._live_options):
-            logger.debug(f"{self}: Connected to Deepgram")
-        else:
-            logger.error(f"{self}: Unable to connect to Deepgram")
+        if not hasattr(self._connection,'_socket'):
+            if await self._connection.start(self._live_options):
+                logger.debug(f"{self}: Connected to Deepgram")
+            else:
+                logger.error(f"{self}: Unable to connect to Deepgram")
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
