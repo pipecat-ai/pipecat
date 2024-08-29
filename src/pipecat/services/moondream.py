@@ -10,7 +10,13 @@ from PIL import Image
 
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import ErrorFrame, Frame, TextFrame, VisionImageRawFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    TextFrame,
+    ImageRawFrame,
+    VisionImageRawFrame,
+    UserImageRawFrame)
 from pipecat.services.ai_services import VisionService
 
 from loguru import logger
@@ -70,23 +76,30 @@ class MoondreamService(VisionService):
 
         logger.debug("Loaded Moondream model")
 
-    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
+    async def run_vision(self, frame: VisionImageRawFrame |
+                         UserImageRawFrame) -> AsyncGenerator[Frame, None]:
         if not self._model:
             logger.error(f"{self} error: Moondream model not available")
             yield ErrorFrame("Moondream model not available")
             return
 
+        question = getattr(frame, "context", None) or getattr(frame, "text", None)
+
         logger.debug(f"Analyzing image: {frame}")
 
-        def get_image_description(frame: VisionImageRawFrame):
+        def get_image_description(frame: ImageRawFrame):
             image = Image.frombytes(frame.format, frame.size, frame.image)
             image_embeds = self._model.encode_image(image)
             description = self._model.answer_question(
                 image_embeds=image_embeds,
-                question=frame.text,
+                question=question,
                 tokenizer=self._tokenizer)
             return description
 
         description = await asyncio.to_thread(get_image_description, frame)
 
-        yield TextFrame(text=description)
+        if isinstance(frame, VisionImageRawFrame):
+            yield TextFrame(text=description)
+        elif isinstance(frame, UserImageRawFrame):
+            frame.description = description
+            yield frame

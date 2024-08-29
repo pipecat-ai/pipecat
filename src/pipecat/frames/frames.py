@@ -94,6 +94,8 @@ class UserImageRawFrame(ImageRawFrame):
 
     """
     user_id: str
+    context: Any = None
+    description: str | None = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, size: {self.size}, format: {self.format})"
@@ -423,7 +425,7 @@ class TTSStoppedFrame(ControlFrame):
 class UserImageRequestFrame(ControlFrame):
     """A frame user to request an image from the given user."""
     user_id: str
-    context: Optional[Any] = None
+    context: Any = None
 
     def __str__(self):
         return f"{self.name}, user: {self.user_id}"

@@ -30,7 +30,8 @@ from pipecat.frames.frames import (
     TTSVoiceUpdateFrame,
     TextFrame,
     UserImageRequestFrame,
-    VisionImageRawFrame
+    VisionImageRawFrame,
+    UserImageRawFrame
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
@@ -414,13 +415,14 @@ class VisionService(AIService):
         self._describe_text = None
 
     @abstractmethod
-    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
+    async def run_vision(self, frame: VisionImageRawFrame |
+                         UserImageRawFrame) -> AsyncGenerator[Frame, None]:
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, VisionImageRawFrame):
+        if isinstance(frame, VisionImageRawFrame) or isinstance(frame, UserImageRawFrame):
             await self.start_processing_metrics()
             await self.process_generator(self.run_vision(frame))
             await self.stop_processing_metrics()
