@@ -18,7 +18,7 @@ from loguru import logger
 class ElevenLabsTTSService(TTSService):
     class InputParams(BaseModel):
         output_format: Literal["pcm_16000", "pcm_22050",
-                               "pcm_24000", "pcm_44100", "mulaw_8000"] = "pcm_16000"
+                               "pcm_24000", "pcm_44100", "ulaw_8000"] = "pcm_16000"
 
     def __init__(
             self,
@@ -36,7 +36,7 @@ class ElevenLabsTTSService(TTSService):
         self._model = model
         self._params = params
         self._aiohttp_session = aiohttp_session
-        self._encoding = "mulaw" if self._params.output_format == "mulaw_8000" else "pcm"
+        self._encoding = "mulaw" if self._params.output_format == "ulaw_8000" else "pcm"
         self._sample_rate = int(self._params.output_format.split("_")[1])
 
     def can_generate_metrics(self) -> bool:
