@@ -47,7 +47,7 @@ from pipecat.services.ai_services import (
 )
 
 try:
-    from openai import AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient, BadRequestError
+    from openai import AsyncOpenAI, AsyncAzureOpenAI, AsyncStream, DefaultAsyncHttpxClient, BadRequestError
     from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -70,10 +70,12 @@ class BaseOpenAILLMService(LLMService):
     calls from the LLM.
     """
 
-    def __init__(self, *, model: str, api_key=None, base_url=None, **kwargs):
+    def __init__(self, *, model: str, api_key=None, base_url=None, temperature: float, **kwargs):
         super().__init__(**kwargs)
         self._model: str = model
-        self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
+        self._temperature: float = temperature
+        self._client = self.create_client(
+            api_key=api_key, base_url=base_url, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(
@@ -96,6 +98,7 @@ class BaseOpenAILLMService(LLMService):
             model=self._model,
             stream=True,
             messages=messages,
+            temperature=self._temperature,
             tools=context.tools,
             tool_choice=context.tool_choice,
             stream_options={"include_usage": True}
@@ -111,11 +114,13 @@ class BaseOpenAILLMService(LLMService):
         # base64 encode any images
         for message in messages:
             if message.get("mime_type") == "image/jpeg":
-                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
+                encoded_image = base64.b64encode(
+                    message["data"].getvalue()).decode("utf-8")
                 text = message["content"]
                 message["content"] = [
                     {"type": "text", "text": text},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}}
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/jpeg;base64,{encoded_image}"}}
                 ]
                 del message["data"]
                 del message["mime_type"]
@@ -238,8 +243,9 @@ class OpenAIContextAggregatorPair:
 
 class OpenAILLMService(BaseOpenAILLMService):
 
-    def __init__(self, *, model: str = "gpt-4o", **kwargs):
-        super().__init__(model=model, **kwargs)
+    def __init__(self, *, model: str = "gpt-4o", api_key=None, base_url=None, temperature: float = 0.0, **kwargs):
+        super().__init__(model=model, api_key=api_key,
+                         base_url=base_url, temperature=temperature, **kwargs)
 
     @staticmethod
     def create_context_aggregator(context: OpenAILLMContext) -> OpenAIContextAggregatorPair:
@@ -249,6 +255,38 @@ class OpenAILLMService(BaseOpenAILLMService):
             _user=user,
             _assistant=assistant
         )
+
+
+class AzureOpenAILLMService(OpenAILLMService):
+    def __init__(self, *, model: str, api_key=None, base_url=None, temperature: float = 0.0, **kwargs):
+        super().__init__(model=model, api_key=api_key,
+                         base_url=base_url, temperature=temperature,  **kwargs)
+
+    def create_client(self, api_key=None, base_url=None, **kwargs):
+        return AsyncAzureOpenAI(
+            api_version="2024-02-01",
+            api_key=api_key,
+            azure_endpoint=base_url,
+            http_client=DefaultAsyncHttpxClient(
+                limits=httpx.Limits(
+                    max_keepalive_connections=100,
+                    max_connections=1000,
+                    keepalive_expiry=None))
+        )
+
+    async def get_chat_completions(
+            self,
+            context: OpenAILLMContext,
+            messages: List[ChatCompletionMessageParam]) -> AsyncStream[ChatCompletionChunk]:
+        chunks = await self._client.chat.completions.create(
+            model=self._model,
+            stream=True,
+            messages=messages,
+            temperature=self._temperature,
+            tools=context.tools,
+            tool_choice=context.tool_choice,
+        )
+        return chunks
 
 
 class OpenAIImageGenService(ImageGenService):
@@ -288,7 +326,8 @@ class OpenAIImageGenService(ImageGenService):
         async with self._aiohttp_session.get(image_url) as response:
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
-            frame = URLImageRawFrame(image_url, image.tobytes(), image.size, image.format)
+            frame = URLImageRawFrame(
+                image_url, image.tobytes(), image.size, image.format)
             yield frame
 
 
@@ -307,7 +346,8 @@ class OpenAITTSService(TTSService):
             self,
             *,
             api_key: str | None = None,
-            voice: Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"] = "alloy",
+            voice: Literal["alloy", "echo", "fable",
+                           "onyx", "nova", "shimmer"] = "alloy",
             model: Literal["tts-1", "tts-1-hd"] = "tts-1",
             **kwargs):
         super().__init__(**kwargs)
@@ -421,7 +461,8 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     })
                     run_llm = True
             else:
-                self._context.add_message({"role": "assistant", "content": aggregation})
+                self._context.add_message(
+                    {"role": "assistant", "content": aggregation})
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
