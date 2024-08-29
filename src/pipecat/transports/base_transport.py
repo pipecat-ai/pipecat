@@ -8,6 +8,7 @@ import asyncio
 import inspect
 
 from abc import ABC, abstractmethod
+from typing_extensions import Literal
 
 from pydantic import ConfigDict
 from pydantic.main import BaseModel
@@ -31,6 +32,7 @@ class TransportParams(BaseModel):
     audio_out_enabled: bool = False
     audio_out_is_live: bool = False
     audio_out_sample_rate: int = 16000
+    audio_out_encoding: Literal["mulaw", "pcm"] = "pcm"
     audio_out_channels: int = 1
     audio_in_enabled: bool = False
     audio_in_sample_rate: int = 16000

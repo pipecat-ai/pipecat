@@ -76,6 +76,6 @@ class TwilioFrameSerializer(FrameSerializer):
                 audio=deserialized_data,
                 num_channels=1,
                 sample_rate=self._params.sample_rate,
-                encoding="linear16"
+                encoding="pcm"
             )
             return audio_frame

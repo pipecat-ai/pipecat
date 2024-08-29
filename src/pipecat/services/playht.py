@@ -28,7 +28,7 @@ except ModuleNotFoundError as e:
 class PlayHTTTSService(TTSService):
 
     def __init__(self, *, api_key: str, user_id: str, voice_url: str, sample_rate: int = 16000,
-                 encoding: Literal["mulaw", "linear16"] = "linear16", **kwargs):
+                 encoding: Literal["mulaw", "pcm"] = "pcm", **kwargs):
         super().__init__(**kwargs)
 
         self._user_id = user_id

@@ -100,7 +100,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
                 audio=self._websocket_audio_buffer[:
                                                    self._params.audio_frame_size],
                 sample_rate=self._params.audio_out_sample_rate,
-                num_channels=self._params.audio_out_channels
+                num_channels=self._params.audio_out_channels,
+                encoding=self._params.audio_out_encoding
             )
 
             if self._params.add_wav_header:
