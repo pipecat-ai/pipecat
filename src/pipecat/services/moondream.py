@@ -48,7 +48,7 @@ class MoondreamService(VisionService):
         self,
             *,
         model="vikhyatk/moondream2",
-        revision="2024-04-02",
+        revision="2024-08-26",
         use_cpu=False
     ):
         super().__init__()
