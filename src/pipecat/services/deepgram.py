@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+from typing_extensions import Literal
 import aiohttp
 
 from typing import AsyncGenerator
@@ -100,7 +101,10 @@ class DeepgramTTSService(TTSService):
                 await self.push_frame(TTSStartedFrame())
                 async for data in r.content:
                     await self.stop_ttfb_metrics()
-                    frame = AudioRawFrame(audio=data, sample_rate=self._sample_rate, num_channels=1)
+                    frame = AudioRawFrame(
+                        audio=data, sample_rate=self._sample_rate, num_channels=1,
+                        encoding="mulaw" if self._encoding == "mulaw" else "pcm"
+                    )
                     yield frame
                 await self.push_frame(TTSStoppedFrame())
         except Exception as e:
@@ -129,7 +133,8 @@ class DeepgramSTTService(AsyncAIService):
         self._client = DeepgramClient(
             api_key, config=DeepgramClientOptions(url=url, options={"keepalive": "true"}))
         self._connection = self._client.listen.asynclive.v("1")
-        self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
+        self._connection.on(
+            LiveTranscriptionEvents.Transcript, self._on_message)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

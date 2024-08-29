@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, List, Literal, Mapping, Optional, Tuple
 
 from dataclasses import dataclass, field
 
@@ -39,6 +39,7 @@ class AudioRawFrame(DataFrame):
     audio: bytes
     sample_rate: int
     num_channels: int
+    encoding: Literal["pcm", "mulaw"] = "pcm"
 
     def __post_init__(self):
         super().__post_init__()

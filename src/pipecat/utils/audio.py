@@ -39,14 +39,20 @@ def ulaw_to_pcm(ulaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
     in_pcm_bytes = audioop.ulaw2lin(ulaw_bytes, 2)
 
     # Resample
-    out_pcm_bytes = audioop.ratecv(in_pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
+    out_pcm_bytes = audioop.ratecv(
+        in_pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
 
     return out_pcm_bytes
 
 
+def change_audio_frame_rate(audio: bytes, in_sample_rate: int, out_sample_rate: int) -> bytes:
+    return audioop.ratecv(audio, 2, 1, in_sample_rate, out_sample_rate, None)[0]
+
+
 def pcm_to_ulaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
     # Resample
-    in_pcm_bytes = audioop.ratecv(pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
+    in_pcm_bytes = change_audio_frame_rate(
+        pcm_bytes, in_sample_rate, out_sample_rate)
 
     # Convert PCM to μ-law
     ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)

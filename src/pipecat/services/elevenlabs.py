@@ -17,7 +17,8 @@ from loguru import logger
 
 class ElevenLabsTTSService(TTSService):
     class InputParams(BaseModel):
-        output_format: Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"] = "pcm_16000"
+        output_format: Literal["pcm_16000", "pcm_22050",
+                               "pcm_24000", "pcm_44100", "mulaw_8000"] = "pcm_16000"
 
     def __init__(
             self,
@@ -35,6 +36,8 @@ class ElevenLabsTTSService(TTSService):
         self._model = model
         self._params = params
         self._aiohttp_session = aiohttp_session
+        self._encoding = "mulaw" if self._params.output_format == "mulaw_8000" else "pcm"
+        self._sample_rate = int(self._params.output_format.split("_")[1])
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -64,7 +67,8 @@ class ElevenLabsTTSService(TTSService):
         async with self._aiohttp_session.post(url, json=payload, headers=headers, params=querystring) as r:
             if r.status != 200:
                 text = await r.text()
-                logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
+                logger.error(
+                    f"{self} error getting audio (status: {r.status}, error: {text})")
                 yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
                 return
 
@@ -74,6 +78,7 @@ class ElevenLabsTTSService(TTSService):
             async for chunk in r.content:
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
-                    frame = AudioRawFrame(chunk, 16000, 1)
+                    frame = AudioRawFrame(
+                        chunk, self._sample_rate, 1, encoding=self._encoding)
                     yield frame
             await self.push_frame(TTSStoppedFrame())
