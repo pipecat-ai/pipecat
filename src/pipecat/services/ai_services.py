@@ -9,7 +9,7 @@ import io
 import wave
 
 from abc import abstractmethod
-from typing import AsyncGenerator, Mapping, Optional
+from typing import AsyncGenerator, Optional
 
 from pipecat.frames.frames import (
     AudioRawFrame,

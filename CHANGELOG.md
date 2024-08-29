@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `LmntTTSService` text-to-speech service.
+  (see https://www.lmnt.com/)
+
 - Added `TTSModelUpdateFrame`, `TTSLanguageUpdateFrame`, `STTModelUpdateFrame`,
   and `STTLanguageUpdateFrame` frames to allow you to switch models, language
   and voices in TTS and STT services.
