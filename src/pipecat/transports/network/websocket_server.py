@@ -98,9 +98,9 @@ class WebsocketServerInputTransport(BaseInputTransport):
                 continue
 
             if isinstance(frame, AudioRawFrame):
-                await self.push_audio_frame(frame)
+                await self.queue_audio_frame(frame)
             else:
-                await self._internal_push_frame(frame)
+                await self.push_frame(frame)
 
         # Notify disconnection
         await self._callbacks.on_client_disconnected(websocket)
