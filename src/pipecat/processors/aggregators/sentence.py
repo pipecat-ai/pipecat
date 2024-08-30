@@ -4,10 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import re
-
 from pipecat.frames.frames import EndFrame, Frame, InterimTranscriptionFrame, TextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.string import match_endofsentence
 
 
 class SentenceAggregator(FrameProcessor):
@@ -40,12 +39,10 @@ class SentenceAggregator(FrameProcessor):
             return
 
         if isinstance(frame, TextFrame):
-            m = re.search("(.*[?.!])(.*)", frame.text)
-            if m:
-                await self.push_frame(TextFrame(self._aggregation + m.group(1)))
-                self._aggregation = m.group(2)
-            else:
-                self._aggregation += frame.text
+            self._aggregation += frame.text
+            if match_endofsentence(self._aggregation):
+                await self.push_frame(TextFrame(self._aggregation))
+                self._aggregation = ""
         elif isinstance(frame, EndFrame):
             if self._aggregation:
                 await self.push_frame(TextFrame(self._aggregation))

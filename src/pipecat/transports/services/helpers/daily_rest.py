@@ -70,8 +70,12 @@ class DailyRESTHelper:
         self.daily_api_url = daily_api_url
         self.aiohttp_session = aiohttp_session
 
-    def _get_name_from_url(self, room_url: str) -> str:
+    def get_name_from_url(self, room_url: str) -> str:
         return urlparse(room_url).path[1:]
+
+    async def get_room_from_url(self, room_url: str) -> DailyRoomObject:
+        room_name = self.get_name_from_url(room_url)
+        return await self._get_room_from_name(room_name)
 
     async def create_room(self, params: DailyRoomParams) -> DailyRoomObject:
         headers = {"Authorization": f"Bearer {self.daily_api_key}"}
@@ -79,7 +83,7 @@ class DailyRESTHelper:
         async with self.aiohttp_session.post(f"{self.daily_api_url}/rooms", headers=headers, json=json) as r:
             if r.status != 200:
                 text = await r.text()
-                raise Exception(f"Unable to create room: {text}")
+                raise Exception(f"Unable to create room (status: {r.status}): {text}")
 
             data = await r.json()
 
@@ -89,6 +93,49 @@ class DailyRESTHelper:
             raise Exception(f"Invalid response: {e}")
 
         return room
+
+    async def get_token(
+            self,
+            room_url: str,
+            expiry_time: float = 60 * 60,
+            owner: bool = True) -> str:
+        if not room_url:
+            raise Exception(
+                "No Daily room specified. You must specify a Daily room in order a token to be generated.")
+
+        expiration: float = time.time() + expiry_time
+
+        room_name = self.get_name_from_url(room_url)
+
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        json = {
+            "properties": {
+                "room_name": room_name,
+                "is_owner": owner,
+                "exp": expiration
+            }
+        }
+        async with self.aiohttp_session.post(f"{self.daily_api_url}/meeting-tokens", headers=headers, json=json) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Failed to create meeting token (status: {r.status}): {text}")
+
+            data = await r.json()
+
+        return data["token"]
+
+    async def delete_room_by_url(self, room_url: str) -> bool:
+        room_name = self.get_name_from_url(room_url)
+        return await self.delete_room_by_name(room_name)
+
+    async def delete_room_by_name(self, room_name: str) -> bool:
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        async with self.aiohttp_session.delete(f"{self.daily_api_url}/rooms/{room_name}", headers=headers) as r:
+            if r.status != 200 and r.status != 404:
+                text = await r.text()
+                raise Exception(f"Failed to delete room [{room_name}] (status: {r.status}): {text}")
+
+        return True
 
     async def _get_room_from_name(self, room_name: str) -> DailyRoomObject:
         headers = {"Authorization": f"Bearer {self.daily_api_key}"}
@@ -104,47 +151,3 @@ class DailyRESTHelper:
             raise Exception(f"Invalid response: {e}")
 
         return room
-
-    async def get_room_from_url(self, room_url: str,) -> DailyRoomObject:
-        room_name = self._get_name_from_url(room_url)
-        return await self._get_room_from_name(room_name)
-
-    async def get_token(
-            self,
-            room_url: str,
-            expiry_time: float = 60 * 60,
-            owner: bool = True) -> str:
-        if not room_url:
-            raise Exception(
-                "No Daily room specified. You must specify a Daily room in order a token to be generated.")
-
-        expiration: float = time.time() + expiry_time
-
-        room_name = self._get_name_from_url(room_url)
-
-        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
-        json = {
-            "properties": {
-                "room_name": room_name,
-                "is_owner": owner,
-                "exp": expiration
-            }
-        }
-        async with self.aiohttp_session.post(f"{self.daily_api_url}/meeting-tokens", headers=headers, json=json) as r:
-            if r.status != 200:
-                text = await r.text()
-                raise Exception(f"Failed to create meeting token: {r.status} {text}")
-
-            data = await r.json()
-
-        return data["token"]
-
-    async def delete_room_by_name(self, room_name: str) -> bool:
-        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
-        async with self.aiohttp_session.delete(f"{self.daily_api_url}/rooms/{room_name}", headers=headers) as r:
-            if r.status != 200 and r.status != 404:
-                raise Exception(f"Failed to delete room: {room_name}")
-
-            data = await r.json()
-
-        return True

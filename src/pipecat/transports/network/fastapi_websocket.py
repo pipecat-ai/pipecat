@@ -91,13 +91,13 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
         self._websocket = websocket
         self._params = params
-        self._audio_buffer = bytes()
+        self._websocket_audio_buffer = bytes()
 
     async def write_raw_audio_frames(self, frames: bytes):
-        self._audio_buffer += frames
-        while len(self._audio_buffer) >= self._params.audio_frame_size:
+        self._websocket_audio_buffer += frames
+        while len(self._websocket_audio_buffer) >= self._params.audio_frame_size:
             frame = AudioRawFrame(
-                audio=self._audio_buffer[:self._params.audio_frame_size],
+                audio=self._websocket_audio_buffer[:self._params.audio_frame_size],
                 sample_rate=self._params.audio_out_sample_rate,
                 num_channels=self._params.audio_out_channels
             )
@@ -121,7 +121,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             if payload and self._websocket.client_state == WebSocketState.CONNECTED:
                 await self._websocket.send_text(payload)
 
-            self._audio_buffer = self._audio_buffer[self._params.audio_frame_size:]
+            self._websocket_audio_buffer = self._websocket_audio_buffer[self._params.audio_frame_size:]
 
 
 class FastAPIWebsocketTransport(BaseTransport):

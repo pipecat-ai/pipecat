@@ -9,7 +9,7 @@ import struct
 
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import AudioRawFrame, Frame, MetricsFrame
+from pipecat.frames.frames import AudioRawFrame, Frame, TTSStartedFrame, TTSStoppedFrame
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -62,6 +62,7 @@ class PlayHTTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
+            await self.push_frame(TTSStartedFrame())
             async for chunk in playht_gen:
                 # skip the RIFF header.
                 if in_header:
@@ -81,5 +82,6 @@ class PlayHTTTSService(TTSService):
                         await self.stop_ttfb_metrics()
                         frame = AudioRawFrame(chunk, 16000, 1)
                         yield frame
+            await self.push_frame(TTSStoppedFrame())
         except Exception as e:
             logger.exception(f"{self} error generating TTS: {e}")

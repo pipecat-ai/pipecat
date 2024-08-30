@@ -10,20 +10,23 @@ import base64
 import asyncio
 import time
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Mapping
 
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.frames.frames import (
     CancelFrame,
+    ErrorFrame,
     Frame,
     AudioRawFrame,
     StartInterruptionFrame,
     StartFrame,
     EndFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     TextFrame,
-    MetricsFrame,
     LLMFullResponseEndFrame
 )
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.transcriptions.language import Language
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -36,6 +39,25 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`. Also, set `CARTESIA_API_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
+
+
+def language_to_cartesia_language(language: Language) -> str | None:
+    match language:
+        case Language.DE:
+            return "de"
+        case Language.EN:
+            return "en"
+        case Language.ES:
+            return "es"
+        case Language.FR:
+            return "fr"
+        case Language.JA:
+            return "ja"
+        case Language.PT:
+            return "pt"
+        case Language.ZH:
+            return "zh"
+    return None
 
 
 class CartesiaTTSService(TTSService):
@@ -88,9 +110,17 @@ class CartesiaTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    async def set_model(self, model: str):
+        logger.debug(f"Switching TTS model to: [{model}]")
+        self._model_id = model
+
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
         self._voice_id = voice
+
+    async def set_language(self, language: Language):
+        logger.debug(f"Switching TTS language to: [{language}]")
+        self._language = language_to_cartesia_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -153,6 +183,7 @@ class CartesiaTTSService(TTSService):
                     continue
                 if msg["type"] == "done":
                     await self.stop_ttfb_metrics()
+                    await self.push_frame(TTSStoppedFrame())
                     # Unset _context_id but not the _context_id_start_timestamp
                     # because we are likely still playing out audio and need the
                     # timestamp to set send context frames.
@@ -173,6 +204,13 @@ class CartesiaTTSService(TTSService):
                         num_channels=1
                     )
                     await self.push_frame(frame)
+                elif msg["type"] == "error":
+                    logger.error(f"{self} error: {msg}")
+                    await self.push_frame(TTSStoppedFrame())
+                    await self.stop_all_metrics()
+                    await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                else:
+                    logger.error(f"Cartesia error, unknown message type: {msg}")
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -207,6 +245,7 @@ class CartesiaTTSService(TTSService):
                 await self._connect()
 
             if not self._context_id:
+                await self.push_frame(TTSStartedFrame())
                 await self.start_ttfb_metrics()
                 self._context_id = str(uuid.uuid4())
 
@@ -227,7 +266,8 @@ class CartesiaTTSService(TTSService):
                 await self._websocket.send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
-                logger.exception(f"{self} error sending message: {e}")
+                logger.error(f"{self} error sending message: {e}")
+                await self.push_frame(TTSStoppedFrame())
                 await self._disconnect()
                 await self._connect()
                 return

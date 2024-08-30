@@ -20,7 +20,8 @@ from pipecat.frames.frames import (
     StopInterruptionFrame,
     SystemFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame)
+    UserStoppedSpeakingFrame,
+    VADParamsUpdateFrame)
 from pipecat.transports.base_transport import TransportParams
 from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
 
@@ -102,6 +103,10 @@ class BaseInputTransport(FrameProcessor):
             # finish and the task finishes when EndFrame is processed.
             await self._internal_push_frame(frame, direction)
             await self.stop(frame)
+        elif isinstance(frame, VADParamsUpdateFrame):
+            vad_analyzer = self.vad_analyzer()
+            if vad_analyzer:
+                vad_analyzer.set_params(frame.params)
         # Other frames
         else:
             await self._internal_push_frame(frame, direction)

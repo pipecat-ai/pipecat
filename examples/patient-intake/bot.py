@@ -10,24 +10,14 @@ import os
 import sys
 import wave
 
-from typing import List
-
-from openai._types import NotGiven, NOT_GIVEN
-
-from openai.types.chat import (
-    ChatCompletionToolParam,
-)
-
 from pipecat.frames.frames import AudioRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 from pipecat.processors.logger import FrameLogger
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMContextFrame, OpenAILLMService
-from pipecat.services.ai_services import AIService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -64,20 +54,11 @@ for file in sound_files:
 
 
 class IntakeProcessor:
-    def __init__(
-        self,
-        context: OpenAILLMContext,
-        llm: AIService,
-        tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN,
-        *args,
-        **kwargs,
-    ):
-        super().__init__(*args, **kwargs)
-        self._context: OpenAILLMContext = context
-        self._llm = llm
+
+    def __init__(self, context: OpenAILLMContext):
         print(f"Initializing context from IntakeProcessor")
-        self._context.add_message({"role": "system", "content": "You are Jessica, an agent for a company called Tri-County Health Services. Your job is to collect important information from the user before their doctor visit. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor. Don't make assumptions about what values to plug into functions. Ask for clarification if a user response is ambiguous. Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday, including the year. When they answer with their birthday, call the verify_birthday function."})
-        self._context.set_tools([
+        context.add_message({"role": "system", "content": "You are Jessica, an agent for a company called Tri-County Health Services. Your job is to collect important information from the user before their doctor visit. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor. Don't make assumptions about what values to plug into functions. Ask for clarification if a user response is ambiguous. Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday, including the year. When they answer with their birthday, call the verify_birthday function."})
+        context.set_tools([
             {
                 "type": "function",
                 "function": {
@@ -93,18 +74,17 @@ class IntakeProcessor:
                     },
                 },
             }])
-        # Create an allowlist of functions that the LLM can call
-        self._functions = [
-            "verify_birthday",
-            "list_prescriptions",
-            "list_allergies",
-            "list_conditions",
-            "list_visit_reasons",
-        ]
 
-    async def verify_birthday(self, llm, args):
+    async def verify_birthday(
+            self,
+            function_name,
+            tool_call_id,
+            args,
+            llm,
+            context,
+            result_callback):
         if args["birthday"] == "1983-01-01":
-            self._context.set_tools(
+            context.set_tools(
                 [
                     {
                         "type": "function",
@@ -134,18 +114,18 @@ class IntakeProcessor:
                         },
                     }])
             # It's a bit weird to push this to the LLM, but it gets it into the pipeline
-            await llm.push_frame(sounds["ding2.wav"], FrameDirection.DOWNSTREAM)
+            # await llm.push_frame(sounds["ding2.wav"], FrameDirection.DOWNSTREAM)
             # We don't need the function call in the context, so just return a new
             # system message and let the framework re-prompt
-            return [{"role": "system", "content": "Next, thank the user for confirming their identity, then ask the user to list their current prescriptions. Each prescription needs to have a medication name and a dosage. Do not call the list_prescriptions function with any unknown dosages."}]
+            await result_callback([{"role": "system", "content": "Next, thank the user for confirming their identity, then ask the user to list their current prescriptions. Each prescription needs to have a medication name and a dosage. Do not call the list_prescriptions function with any unknown dosages."}])
         else:
             # The user provided an incorrect birthday; ask them to try again
-            return [{"role": "system", "content": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function."}]
+            await result_callback([{"role": "system", "content": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function."}])
 
-    async def start_prescriptions(self, llm):
+    async def start_prescriptions(self, function_name, llm, context):
         print(f"!!! doing start prescriptions")
         # Move on to allergies
-        self._context.set_tools(
+        context.set_tools(
             [
                 {
                     "type": "function",
@@ -169,18 +149,18 @@ class IntakeProcessor:
                         },
                     },
                 }])
-        self._context.add_message(
+        context.add_message(
             {
                 "role": "system",
                 "content": "Next, ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function."})
         print(f"!!! about to await llm process frame in start prescrpitions")
-        await llm.process_frame(OpenAILLMContextFrame(self._context), FrameDirection.DOWNSTREAM)
+        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
         print(f"!!! past await process frame in start prescriptions")
 
-    async def start_allergies(self, llm):
+    async def start_allergies(self, function_name, llm, context):
         print("!!! doing start allergies")
         # Move on to conditions
-        self._context.set_tools(
+        context.set_tools(
             [
                 {
                     "type": "function",
@@ -205,16 +185,16 @@ class IntakeProcessor:
                     },
                 },
             ])
-        self._context.add_message(
+        context.add_message(
             {
                 "role": "system",
                 "content": "Now ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function."})
-        await llm.process_frame(OpenAILLMContextFrame(self._context), FrameDirection.DOWNSTREAM)
+        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
-    async def start_conditions(self, llm):
+    async def start_conditions(self, function_name, llm, context):
         print("!!! doing start conditions")
         # Move on to visit reasons
-        self._context.set_tools(
+        context.set_tools(
             [
                 {
                     "type": "function",
@@ -238,23 +218,25 @@ class IntakeProcessor:
                         },
                     },
                 }])
-        self._context.add_message(
-            {"role": "system", "content": "Finally, ask the user the reason for their doctor visit today. Once they answer, call the list_visit_reasons function."})
-        await llm.process_frame(OpenAILLMContextFrame(self._context), FrameDirection.DOWNSTREAM)
+        context.add_message(
+            {
+                "role": "system",
+                "content": "Finally, ask the user the reason for their doctor visit today. Once they answer, call the list_visit_reasons function."})
+        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
-    async def start_visit_reasons(self, llm):
+    async def start_visit_reasons(self, function_name, llm, context):
         print("!!! doing start visit reasons")
         # move to finish call
-        self._context.set_tools([])
-        self._context.add_message({"role": "system",
-                                   "content": "Now, thank the user and end the conversation."})
-        await llm.process_frame(OpenAILLMContextFrame(self._context), FrameDirection.DOWNSTREAM)
+        context.set_tools([])
+        context.add_message({"role": "system",
+                             "content": "Now, thank the user and end the conversation."})
+        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
-    async def save_data(self, llm, args):
+    async def save_data(self, function_name, tool_call_id, args, llm, context, result_callback):
         logger.info(f"!!! Saving data: {args}")
         # Since this is supposed to be "async", returning None from the callback
         # will prevent adding anything to context or re-prompting
-        return None
+        await result_callback(None)
 
 
 async def main():
@@ -281,20 +263,15 @@ async def main():
             )
         )
 
-        tts = ElevenLabsTTSService(
-            aiohttp_session=session,
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            #
-            # English
-            #
-            voice_id="pNInz6obpgDQGcFmaJgB",
-
-            #
-            # Spanish
-            #
-            # model="eleven_multilingual_v2",
-            # voice_id="gD1IexrzCvsXPHUuT0s3",
+        tts = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
+
+        # tts = CartesiaTTSService(
+        #     api_key=os.getenv("CARTESIA_API_KEY"),
+        #     voice_id="846d6cb0-2301-48b6-9683-48f5618ea2f6",  # Spanish-speaking Lady
+        # )
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
@@ -302,10 +279,9 @@ async def main():
 
         messages = []
         context = OpenAILLMContext(messages=messages)
-        user_context = LLMUserContextAggregator(context)
-        assistant_context = LLMAssistantContextAggregator(context)
+        context_aggregator = llm.create_context_aggregator(context)
 
-        intake = IntakeProcessor(context, llm)
+        intake = IntakeProcessor(context)
         llm.register_function("verify_birthday", intake.verify_birthday)
         llm.register_function(
             "list_prescriptions",
@@ -328,12 +304,12 @@ async def main():
 
         pipeline = Pipeline([
             transport.input(),   # Transport input
-            user_context,        # User responses
+            context_aggregator.user(),  # User responses
             llm,                 # LLM
             fl,                  # Frame logger
             tts,                 # TTS
             transport.output(),  # Transport output
-            assistant_context,   # Assistant responses
+            context_aggregator.assistant(),  # Assistant responses
         ])
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=False))

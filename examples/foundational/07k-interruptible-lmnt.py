@@ -12,16 +12,15 @@ import sys
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator
-)
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.deepgram import DeepgramSTTService
+    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+from pipecat.services.lmnt import LmntTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.network.websocket_server import WebsocketServerParams, WebsocketServerTransport
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
+
+from runner import configure
 
 from loguru import logger
 
@@ -34,26 +33,29 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        transport = WebsocketServerTransport(
-            params=WebsocketServerParams(
+        (room_url, token) = await configure(session)
+
+        transport = DailyTransport(
+            room_url,
+            token,
+            "Respond bot",
+            DailyParams(
                 audio_out_enabled=True,
-                add_wav_header=True,
+                audio_out_sample_rate=24000,
+                transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True
+                vad_analyzer=SileroVADAnalyzer()
             )
+        )
+
+        tts = LmntTTSService(
+            api_key=os.getenv("LMNT_API_KEY"),
+            voice_id="morgan"
         )
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o")
-
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
-        )
 
         messages = [
             {
@@ -66,19 +68,19 @@ async def main():
         tma_out = LLMAssistantResponseAggregator(messages)
 
         pipeline = Pipeline([
-            transport.input(),   # Websocket input from client
-            stt,                 # Speech-To-Text
+            transport.input(),   # Transport user input
             tma_in,              # User responses
             llm,                 # LLM
-            tts,                 # Text-To-Speech
-            transport.output(),  # Websocket output to client
-            tma_out              # LLM responses
+            tts,                 # TTS
+            transport.output(),  # Transport bot output
+            tma_out              # Assistant spoken responses
         ])
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             messages.append(
                 {"role": "system", "content": "Please introduce yourself to the user."})
@@ -87,6 +89,7 @@ async def main():
         runner = PipelineRunner()
 
         await runner.run(task)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

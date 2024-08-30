@@ -7,7 +7,6 @@
 import aiohttp
 import asyncio
 import io
-import time
 
 from PIL import Image
 from typing import AsyncGenerator
@@ -18,14 +17,16 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    MetricsFrame,
     StartFrame,
     SystemFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     TranscriptionFrame,
     URLImageRawFrame)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncAIService, TTSService, ImageGenService
 from pipecat.services.openai import BaseOpenAILLMService
+from pipecat.utils.time import time_now_iso8601
 
 from loguru import logger
 
@@ -106,8 +107,10 @@ class AzureTTSService(TTSService):
         if result.reason == ResultReason.SynthesizingAudioCompleted:
             await self.start_tts_usage_metrics(text)
             await self.stop_ttfb_metrics()
+            await self.push_frame(TTSStartedFrame())
             # Azure always sends a 44-byte header. Strip it off.
             yield AudioRawFrame(audio=result.audio_data[44:], sample_rate=16000, num_channels=1)
+            await self.push_frame(TTSStoppedFrame())
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details
             logger.warning(f"Speech synthesis canceled: {cancellation_details.reason}")
@@ -164,7 +167,7 @@ class AzureSTTService(AsyncAIService):
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
-            frame = TranscriptionFrame(event.result.text, "", int(time.time_ns() / 1000000))
+            frame = TranscriptionFrame(event.result.text, "", time_now_iso8601())
             asyncio.run_coroutine_threadsafe(self.queue_frame(frame), self.get_event_loop())
 
 

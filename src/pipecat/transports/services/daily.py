@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserImageRequestFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -158,8 +159,8 @@ class DailyTransportClient(EventHandler):
             loop: asyncio.AbstractEventLoop):
         super().__init__()
 
-        if not self._daily_initialized:
-            self._daily_initialized = True
+        if not DailyTransportClient._daily_initialized:
+            DailyTransportClient._daily_initialized = True
             Daily.init()
 
         self._room_url: str = room_url
@@ -182,24 +183,39 @@ class DailyTransportClient(EventHandler):
 
         self._client: CallClient = CallClient(event_handler=self)
 
-        self._camera: VirtualCameraDevice = Daily.create_camera_device(
-            "camera",
-            width=self._params.camera_out_width,
-            height=self._params.camera_out_height,
-            color_format=self._params.camera_out_color_format)
+        self._camera: VirtualCameraDevice | None = None
+        if self._params.camera_out_enabled:
+            self._camera = Daily.create_camera_device(
+                self._camera_name(),
+                width=self._params.camera_out_width,
+                height=self._params.camera_out_height,
+                color_format=self._params.camera_out_color_format)
 
-        self._mic: VirtualMicrophoneDevice = Daily.create_microphone_device(
-            "mic",
-            sample_rate=self._params.audio_out_sample_rate,
-            channels=self._params.audio_out_channels,
-            non_blocking=True)
+        self._mic: VirtualMicrophoneDevice | None = None
+        if self._params.audio_out_enabled:
+            self._mic = Daily.create_microphone_device(
+                self._mic_name(),
+                sample_rate=self._params.audio_out_sample_rate,
+                channels=self._params.audio_out_channels,
+                non_blocking=True)
 
-        self._speaker: VirtualSpeakerDevice = Daily.create_speaker_device(
-            "speaker",
-            sample_rate=self._params.audio_in_sample_rate,
-            channels=self._params.audio_in_channels,
-            non_blocking=True)
-        Daily.select_speaker_device("speaker")
+        self._speaker: VirtualSpeakerDevice | None = None
+        if self._params.audio_in_enabled or self._params.vad_enabled:
+            self._speaker = Daily.create_speaker_device(
+                self._speaker_name(),
+                sample_rate=self._params.audio_in_sample_rate,
+                channels=self._params.audio_in_channels,
+                non_blocking=True)
+            Daily.select_speaker_device(self._speaker_name())
+
+    def _camera_name(self):
+        return f"camera-{self}"
+
+    def _mic_name(self):
+        return f"mic-{self}"
+
+    def _speaker_name(self):
+        return f"speaker-{self}"
 
     @property
     def participant_id(self) -> str:
@@ -224,6 +240,9 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def read_next_audio_frame(self) -> AudioRawFrame | None:
+        if not self._speaker:
+            return None
+
         sample_rate = self._params.audio_in_sample_rate
         num_channels = self._params.audio_in_channels
         num_frames = int(sample_rate / 100) * 2  # 20ms of audio
@@ -242,11 +261,17 @@ class DailyTransportClient(EventHandler):
             return None
 
     async def write_raw_audio_frames(self, frames: bytes):
+        if not self._mic:
+            return None
+
         future = self._loop.create_future()
         self._mic.write_frames(frames, completion=completion_callback(future))
         await future
 
     async def write_frame_to_camera(self, frame: ImageRawFrame):
+        if not self._camera:
+            return None
+
         self._camera.write_frame(frame.image)
 
     async def join(self):
@@ -281,7 +306,7 @@ class DailyTransportClient(EventHandler):
                 if self._token and self._params.transcription_enabled:
                     await self._start_transcription()
 
-                await self._callbacks.on_joined(data["participants"]["local"])
+                await self._callbacks.on_joined(data)
             else:
                 error_msg = f"Error joining {self._room_url}: {error}"
                 logger.error(error_msg)
@@ -315,13 +340,13 @@ class DailyTransportClient(EventHandler):
                     "camera": {
                         "isEnabled": self._params.camera_out_enabled,
                         "settings": {
-                            "deviceId": "camera",
+                            "deviceId": self._camera_name(),
                         },
                     },
                     "microphone": {
                         "isEnabled": self._params.audio_out_enabled,
                         "settings": {
-                            "deviceId": "mic",
+                            "deviceId": self._mic_name(),
                             "customConstraints": {
                                 "autoGainControl": {"exact": False},
                                 "echoCancellation": {"exact": False},
@@ -534,6 +559,7 @@ class DailyInputTransport(BaseInputTransport):
         self._client = client
 
         self._video_renderers = {}
+        self._audio_in_task = None
 
         self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
         if params.vad_enabled and not params.vad_analyzer:
@@ -557,7 +583,7 @@ class DailyInputTransport(BaseInputTransport):
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_in_task.cancel()
             await self._audio_in_task
 
@@ -567,7 +593,7 @@ class DailyInputTransport(BaseInputTransport):
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_in_task.cancel()
             await self._audio_in_task
 
@@ -728,7 +754,7 @@ class DailyTransport(BaseTransport):
             room_url: str,
             token: str | None,
             bot_name: str,
-            params: DailyParams,
+            params: DailyParams = DailyParams(),
             input_name: str | None = None,
             output_name: str | None = None,
             loop: asyncio.AbstractEventLoop | None = None):
@@ -793,7 +819,7 @@ class DailyTransport(BaseTransport):
     # DailyTransport
     #
 
-    @ property
+    @property
     def participant_id(self) -> str:
         return self._client.participant_id
 
@@ -839,8 +865,8 @@ class DailyTransport(BaseTransport):
             self._input.capture_participant_video(
                 participant_id, framerate, video_source, color_format)
 
-    async def _on_joined(self, participant):
-        await self._call_event_handler("on_joined", participant)
+    async def _on_joined(self, data):
+        await self._call_event_handler("on_joined", data)
 
     async def _on_left(self):
         await self._call_event_handler("on_left")
@@ -925,11 +951,16 @@ class DailyTransport(BaseTransport):
         text = message["text"]
         timestamp = message["timestamp"]
         is_final = message["rawResponse"]["is_final"]
+        try:
+            language = message["rawResponse"]["channel"]["alternatives"][0]["languages"][0]
+            language = Language(language)
+        except KeyError:
+            language = None
         if is_final:
-            frame = TranscriptionFrame(text, participant_id, timestamp)
+            frame = TranscriptionFrame(text, participant_id, timestamp, language)
             logger.debug(f"Transcription (from: {participant_id}): [{text}]")
         else:
-            frame = InterimTranscriptionFrame(text, participant_id, timestamp)
+            frame = InterimTranscriptionFrame(text, participant_id, timestamp, language)
 
         if self._input:
             await self._input.push_transcription_frame(frame)

@@ -13,7 +13,6 @@ from dataclasses import dataclass
 
 from pipecat.frames.frames import (
     AppFrame,
-    EndFrame,
     Frame,
     ImageRawFrame,
     LLMFullResponseStartFrame,
@@ -151,8 +150,6 @@ async def main():
             ]
             frames.append(MonthFrame(month=month))
             frames.append(LLMMessagesFrame(messages))
-
-        frames.append(EndFrame())
 
         runner = PipelineRunner()
 

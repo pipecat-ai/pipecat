@@ -8,7 +8,13 @@ import aiohttp
 
 from typing import Any, AsyncGenerator, Dict
 
-from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, MetricsFrame, StartFrame
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    ErrorFrame,
+    Frame,
+    StartFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame)
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -99,8 +105,9 @@ class XTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            buffer = bytearray()
+            await self.push_frame(TTSStartedFrame())
 
+            buffer = bytearray()
             async for chunk in r.content.iter_chunked(1024):
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
@@ -131,3 +138,5 @@ class XTTSService(TTSService):
                 resampled_audio_bytes = resampled_audio.astype(np.int16).tobytes()
                 frame = AudioRawFrame(resampled_audio_bytes, 16000, 1)
                 yield frame
+
+            await self.push_frame(TTSStoppedFrame())
