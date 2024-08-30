@@ -134,8 +134,8 @@ class BaseOutputTransport(FrameProcessor):
         # queue.
         #
         if isinstance(frame, CancelFrame):
-            await self.push_frame(frame, direction)
             await self.cancel(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_interruptions(frame)
