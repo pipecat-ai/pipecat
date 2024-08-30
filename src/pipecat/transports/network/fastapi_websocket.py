@@ -12,7 +12,7 @@ import wave
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, Frame, StartFrame, StartInterruptionFrame, UserStartedSpeakingFrame
+from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, Frame, StartFrame, UserStartedSpeakingFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
