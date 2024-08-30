@@ -136,25 +136,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         if payload and self._websocket.client_state == WebSocketState.CONNECTED:
             await self._websocket.send_text(payload)
 
-    async def _handle_interruptions(self, frame: Frame):
-        if not self.interruptions_allowed:
-            return
-
-        if isinstance(frame, StartInterruptionFrame):
-            # Stop sink task.
-            self._sink_task.cancel()
-            await self._sink_task
-            self._create_sink_task()
-            # write clear frame if serializer supports it.
-            await self.write_websocket_clear_event(frame)
-            # Stop push task.
-            self._push_frame_task.cancel()
-            await self._push_frame_task
-            self._create_push_task()
-            # Let's send a bot stopped speaking if we have to.
-            if self._bot_speaking:
-                await self._bot_stopped_speaking()
-
 
 class FastAPIWebsocketTransport(BaseTransport):
 
