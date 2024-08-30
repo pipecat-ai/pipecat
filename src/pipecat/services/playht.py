@@ -55,7 +55,7 @@ class PlayHTTTSService(TTSService):
 
         try:
             b = bytearray()
-            in_header = True
+            in_header = False if self._encoding == "mulaw" else True
 
             await self.start_ttfb_metrics()
 
