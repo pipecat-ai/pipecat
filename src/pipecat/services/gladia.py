@@ -7,20 +7,17 @@
 import base64
 import json
 
-from typing import Optional
+from typing import AsyncGenerator, Optional
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
-    SystemFrame,
     TranscriptionFrame)
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AsyncAIService
+from pipecat.services.ai_services import STTService
 from pipecat.utils.time import time_now_iso8601
 
 from loguru import logger
@@ -35,7 +32,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class GladiaSTTService(AsyncAIService):
+class GladiaSTTService(STTService):
     class InputParams(BaseModel):
         sample_rate: Optional[int] = 16000
         language: Optional[str] = "english"
@@ -57,16 +54,6 @@ class GladiaSTTService(AsyncAIService):
         self._params = params
         self._confidence = confidence
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, SystemFrame):
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, AudioRawFrame):
-            await self._send_audio(frame)
-        else:
-            await self.queue_frame(frame, direction)
-
     async def start(self, frame: StartFrame):
         await super().start(frame)
         self._websocket = await websockets.connect(self._url)
@@ -81,6 +68,12 @@ class GladiaSTTService(AsyncAIService):
         await super().cancel(frame)
         await self._websocket.close()
 
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        await self.start_processing_metrics()
+        await self._send_audio(audio)
+        await self.stop_processing_metrics()
+        yield None
+
     async def _setup_gladia(self):
         configuration = {
             "x_gladia_key": self._api_key,
@@ -92,9 +85,9 @@ class GladiaSTTService(AsyncAIService):
 
         await self._websocket.send(json.dumps(configuration))
 
-    async def _send_audio(self, frame: AudioRawFrame):
+    async def _send_audio(self, audio: bytes):
         message = {
-            'frames': base64.b64encode(frame.audio).decode("utf-8")
+            'frames': base64.b64encode(audio).decode("utf-8")
         }
         await self._websocket.send(json.dumps(message))
 
@@ -113,6 +106,6 @@ class GladiaSTTService(AsyncAIService):
                 transcript = utterance["transcription"]
                 if confidence >= self._confidence:
                     if type == "final":
-                        await self.queue_frame(TranscriptionFrame(transcript, "", time_now_iso8601()))
+                        await self.push_frame(TranscriptionFrame(transcript, "", time_now_iso8601()))
                     else:
-                        await self.queue_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601()))
+                        await self.push_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601()))

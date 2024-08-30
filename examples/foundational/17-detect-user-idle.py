@@ -70,7 +70,7 @@ async def main():
         async def user_idle_callback(user_idle: UserIdleProcessor):
             messages.append(
                 {"role": "system", "content": "Ask the user if they are still there and try to prompt for some input, but be short."})
-            await user_idle.queue_frame(LLMMessagesFrame(messages))
+            await user_idle.push_frame(LLMMessagesFrame(messages))
 
         user_idle = UserIdleProcessor(callback=user_idle_callback, timeout=5.0)
 

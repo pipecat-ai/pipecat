@@ -619,11 +619,11 @@ class DailyInputTransport(BaseInputTransport):
     #
 
     async def push_transcription_frame(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
-        await self._internal_push_frame(frame)
+        await self.push_frame(frame)
 
     async def push_app_message(self, message: Any, sender: str):
         frame = DailyTransportMessageFrame(message=message, participant_id=sender)
-        await self._internal_push_frame(frame)
+        await self.push_frame(frame)
 
     #
     # Audio in
@@ -686,7 +686,7 @@ class DailyInputTransport(BaseInputTransport):
                 image=buffer,
                 size=size,
                 format=format)
-            await self._internal_push_frame(frame)
+            await self.push_frame(frame)
 
         self._video_renderers[participant_id]["timestamp"] = curr_time
 
