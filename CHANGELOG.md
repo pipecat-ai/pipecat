@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `MoondreamService` revision to `2024-08-26`.
+
 - `CartesiaTTSService` and `ElevenLabsTTSService` now add presentation
   timestamps to their text output. This allows the output transport to push the
   text frames downstream at almost the same time the words are spoken. We say
