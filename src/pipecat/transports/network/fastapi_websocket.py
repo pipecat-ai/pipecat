@@ -12,7 +12,7 @@ import wave
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, Frame, StartFrame, UserStartedSpeakingFrame
+from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, Frame, StartFrame, StartInterruptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
@@ -96,7 +96,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, StartInterruptionFrame):
             await self._write_frame(frame)
 
     async def write_raw_audio_frames(self, frames: bytes):

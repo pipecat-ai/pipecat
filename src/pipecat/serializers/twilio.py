@@ -9,7 +9,7 @@ import json
 
 from pydantic import BaseModel
 
-from pipecat.frames.frames import AudioRawFrame, Frame, UserStartedSpeakingFrame
+from pipecat.frames.frames import AudioRawFrame, Frame, StartInterruptionFrame
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.utils.audio import ulaw_to_pcm, pcm_to_ulaw
 
@@ -44,7 +44,7 @@ class TwilioFrameSerializer(FrameSerializer):
 
             return json.dumps(answer)
 
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, StartInterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
 
