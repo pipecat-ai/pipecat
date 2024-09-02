@@ -43,6 +43,8 @@ def ulaw_to_pcm(ulaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
 
     return out_pcm_bytes
 
+def change_audio_frame_rate(audio: bytes, in_sample_rate: int, out_sample_rate: int) -> bytes:
+    return audioop.ratecv(audio, 2, 1, in_sample_rate, out_sample_rate, None)[0]
 
 def pcm_to_ulaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
     # Resample

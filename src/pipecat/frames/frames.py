@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Tuple, Literal
 
 from dataclasses import dataclass, field
 
@@ -500,3 +500,9 @@ class VADParamsUpdateFrame(ControlFrame):
     to be pushed upstream from RTVI processor.
     """
     params: VADParams
+
+@dataclass
+class MarkFrame(SystemFrame):
+    passed_name: str
+    seq_number: int | None = None
+    type: Literal["request", "response"] = "request"
