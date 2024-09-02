@@ -43,6 +43,10 @@ class ElevenLabsTTSService(TTSService):
         logger.debug(f"Switching TTS voice to: [{voice}]")
         self._voice_id = voice
 
+    async def set_model(self, model: str):
+        logger.debug(f"Switching TTS model to: [{model}]")
+        self._model = model
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
