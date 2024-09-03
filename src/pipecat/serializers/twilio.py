@@ -31,7 +31,6 @@ class TwilioFrameSerializer(FrameSerializer):
     def serialize(self, frame: Frame) -> str | bytes | None:
         if isinstance(frame, AudioRawFrame):
             data = frame.audio
-
             if frame.encoding == "mulaw":
                 if frame.sample_rate != self._params.twilio_sample_rate:
                     serialized_data = change_audio_frame_rate(
