@@ -4,12 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import aiohttp
 import base64
 import io
 import json
 import httpx
 from dataclasses import dataclass
+from collections import defaultdict
 
 from typing import AsyncGenerator, List, Literal
 
@@ -73,7 +75,8 @@ class BaseOpenAILLMService(LLMService):
     def __init__(self, *, model: str, api_key=None, base_url=None, **kwargs):
         super().__init__(**kwargs)
         self._model: str = model
-        self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
+        self._client = self.create_client(
+            api_key=api_key, base_url=base_url, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(
@@ -111,11 +114,13 @@ class BaseOpenAILLMService(LLMService):
         # base64 encode any images
         for message in messages:
             if message.get("mime_type") == "image/jpeg":
-                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
+                encoded_image = base64.b64encode(
+                    message["data"].getvalue()).decode("utf-8")
                 text = message["content"]
                 message["content"] = [
                     {"type": "text", "text": text},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}}
+                    {"type": "image_url", "image_url": {
+                        "url": f"data:image/jpeg;base64,{encoded_image}"}}
                 ]
                 del message["data"]
                 del message["mime_type"]
@@ -125,9 +130,10 @@ class BaseOpenAILLMService(LLMService):
         return chunks
 
     async def _process_context(self, context: OpenAILLMContext):
-        function_name = ""
-        arguments = ""
-        tool_call_id = ""
+
+        tool_call_dict = defaultdict(lambda: dict(
+            function_name="", arguments="", tool_call_id="")
+        )
 
         await self.start_ttfb_metrics()
 
@@ -165,12 +171,12 @@ class BaseOpenAILLMService(LLMService):
 
                 tool_call = chunk.choices[0].delta.tool_calls[0]
                 if tool_call.function and tool_call.function.name:
-                    function_name += tool_call.function.name
-                    tool_call_id = tool_call.id
-                    await self.call_start_function(context, function_name)
+                    tool_call_dict[tool_call.index]["function_name"] += tool_call.function.name
+                    tool_call_dict[tool_call.index]["tool_call_id"] = tool_call.id
+                    await self.call_start_function(context, tool_call_dict[tool_call.index]["function_name"])
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments
-                    arguments += tool_call.function.arguments
+                    tool_call_dict[tool_call.index]["arguments"] += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
                 await self.push_frame(TextFrame(chunk.choices[0].delta.content))
 
@@ -178,12 +184,20 @@ class BaseOpenAILLMService(LLMService):
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
-        if function_name and arguments:
-            if self.has_function(function_name):
-                await self._handle_function_call(context, tool_call_id, function_name, arguments)
-            else:
-                raise OpenAIUnhandledFunctionException(
-                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
+        tool_call_future = []
+        for tool_call_index, tool_call_value in tool_call_dict.items():
+            function_name = tool_call_value["function_name"]
+            arguments = tool_call_value["arguments"]
+            tool_call_id = tool_call_value["tool_call_id"]
+            if function_name and arguments:
+                if self.has_function(function_name):
+                    tool_call_future.append(self._handle_function_call(
+                        context, tool_call_id, function_name, arguments))
+                else:
+                    raise OpenAIUnhandledFunctionException(
+                        f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
+        if tool_call_future:
+            await asyncio.gather(*tool_call_future)
 
     async def _handle_function_call(
             self,
@@ -288,7 +302,8 @@ class OpenAIImageGenService(ImageGenService):
         async with self._aiohttp_session.get(image_url) as response:
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
-            frame = URLImageRawFrame(image_url, image.tobytes(), image.size, image.format)
+            frame = URLImageRawFrame(
+                image_url, image.tobytes(), image.size, image.format)
             yield frame
 
 
@@ -307,7 +322,8 @@ class OpenAITTSService(TTSService):
             self,
             *,
             api_key: str | None = None,
-            voice: Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"] = "alloy",
+            voice: Literal["alloy", "echo", "fable",
+                           "onyx", "nova", "shimmer"] = "alloy",
             model: Literal["tts-1", "tts-1-hd"] = "tts-1",
             **kwargs):
         super().__init__(**kwargs)
@@ -421,7 +437,8 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     })
                     run_llm = True
             else:
-                self._context.add_message({"role": "assistant", "content": aggregation})
+                self._context.add_message(
+                    {"role": "assistant", "content": aggregation})
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
