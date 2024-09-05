@@ -60,7 +60,6 @@ async def main(room_url, token=None):
         )
 
         tts_service = ElevenLabsTTSService(
-            aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         )
