@@ -10,7 +10,7 @@ import base64
 import asyncio
 import time
 
-from typing import AsyncGenerator, Mapping
+from typing import AsyncGenerator
 
 from pipecat.frames.frames import (
     CancelFrame,
