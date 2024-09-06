@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Interruptions support has been added to `TwilioFrameSerializer` when using
+  `FastAPIWebsocketTransport`.
+
 - Added new `LmntTTSService` text-to-speech service.
   (see https://www.lmnt.com/)
 
@@ -31,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SegmentedSTTService` is a `STTService` where the provided audio is given in a
   big chunk (i.e. from when the user starts speaking until the user stops
   speaking) instead of a continous stream.
+
+### Fixed
+
+- `StartFrame` should be the first frame every processor receives to avoid
+  situations where things are not initialized (because initialization happens on
+  `StartFrame`) and other frames come in resulting in undesired behavior.
+
+### Performance
+
+- `obj_id()` and `obj_count()` now use `itertools.count` avoiding the need of
+  `threading.Lock`.
 
 ## [0.0.41] - 2024-08-22
 
