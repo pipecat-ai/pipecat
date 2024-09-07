@@ -43,6 +43,17 @@ async def get_current_weather(
     await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
+async def save_checkpoint(
+        function_name,
+        tool_call_id,
+        arguments,
+        llm,
+        context,
+        result_callback):
+    logger.debug("IN save_checkpoint")
+    await result_callback({"status": "success"})
+
+
 async def main():
     async with aiohttp.ClientSession() as session:
         (room_url, token) = await configure(session)
@@ -69,7 +80,9 @@ async def main():
             model=os.getenv("TOGETHER_MODEL"),
         )
         llm.register_function("get_current_weather", get_current_weather)
+        llm.register_function("save_checkpoint", save_checkpoint)
 
+        # standard function call that's in all the LLM docs!
         weatherTool = {
             "name": "get_current_weather",
             "description": "Get the current weather in a given location",
@@ -85,11 +98,25 @@ async def main():
             },
         }
 
+        # a function to test function calls with no arguments
+        saveCheckpoint = {
+            "name": "save_checkpoint",
+            "description": "Save the current state of the conversation",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        }
+
         system_prompt = f"""\
 You have access to the following functions:
 
 Use the function '{weatherTool["name"]}' to '{weatherTool["description"]}':
 {json.dumps(weatherTool)}
+
+Use the function '{saveCheckpoint["name"]}' to '{saveCheckpoint["description"]}':
+{json.dumps(saveCheckpoint)}
 
 If you choose to call a function ONLY reply in the following format with no prefix or suffix:
 

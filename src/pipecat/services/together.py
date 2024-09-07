@@ -18,8 +18,6 @@ from pipecat.frames.frames import (
     Frame,
     LLMModelUpdateFrame,
     TextFrame,
-    VisionImageRawFrame,
-    UserImageRequestFrame,
     UserImageRawFrame,
     LLMMessagesFrame,
     LLMFullResponseStartFrame,
@@ -100,8 +98,12 @@ class TogetherLLMService(LLMService):
                 stream=True,
             )
 
-            # Function calling
             got_first_chunk = False
+
+            # Function calling. We should be able to prompt Llama 3.1 to always return either plain
+            # text or a function call. However, occasionally we see a function call after plain text.
+            # Try to account for that.
+            most_recent_chunk_was_function_call_start_char = False  # function call start char is '<'
             accumulating_function_call = False
             function_call_accumulator = ""
 
@@ -131,10 +133,24 @@ class TogetherLLMService(LLMService):
                     if accumulating_function_call:
                         function_call_accumulator += chunk.choices[0].delta.content
                     else:
-                        await self.push_frame(TextFrame(chunk.choices[0].delta.content))
+                        text = chunk.choices[0].delta.content
+                        if most_recent_chunk_was_function_call_start_char:
+                            most_recent_chunk_was_function_call_start_char = False
+                            if text == "function":
+                                accumulating_function_call = True
+                                function_call_accumulator = "<function"
+                            else:
+                                await self.push_frame("<" + TextFrame(chunk.choices[0].delta.content))
+                        elif text == '<':
+                            most_recent_chunk_was_function_call_start_char = True
+                        else:
+                            await self.push_frame(TextFrame(chunk.choices[0].delta.content))
 
-                if chunk.choices[0].finish_reason == 'eos' and accumulating_function_call:
-                    await self._extract_function_call(context, function_call_accumulator)
+                if chunk.choices[0].finish_reason:
+                    if accumulating_function_call:
+                        await self._extract_function_call(context, function_call_accumulator)
+                    elif most_recent_chunk_was_function_call_start_char:
+                        await self.push_frame(TextFrame("<"))
 
         except CancelledError as e:
             # todo: implement token counting estimates for use when the user interrupts a long generation
@@ -164,14 +180,27 @@ class TogetherLLMService(LLMService):
             await self._process_context(context)
 
     async def _extract_function_call(self, context, function_call_accumulator):
+        # logger.debug(f"Extracting function call: {function_call_accumulator}")
         context.add_message({"role": "assistant", "content": function_call_accumulator})
 
-        function_regex = r"<function=(\w+)>(.*?)</function>"
+        # Function format regex. Llama 3.1 sometimes adds an extra " or space just before the
+        # </function> tag. This regexp just ignores the extra characters if they are there. (That's
+        # the [\s"]? part of the regex.) Occasionally the </function> close tag is also missing.
+        function_regex = r'<function=(\w+)>(.*?)<\/function>|<function=(\w+)>(.*)'
         match = re.search(function_regex, function_call_accumulator)
         if match:
-            function_name, args_string = match.groups()
+            function_name = ""
+            args_string = ""
+            if match.group(1):  # Case with closing tag
+                function_name = match.group(1)
+                args_string = match.group(2)
+            else:  # Case without closing tag
+                function_name = match.group(3)
+                args_string = match.group(4)
+
             try:
-                arguments = json.loads(args_string)
+                args_string = re.sub(r'[\s"]+$', '', args_string)
+                arguments = json.loads(args_string) if args_string else ""
                 await self.call_function(context=context,
                                          tool_call_id=str(uuid.uuid4()),
                                          function_name=function_name,
@@ -181,7 +210,8 @@ class TogetherLLMService(LLMService):
                 # We get here if the LLM returns a function call with invalid JSON arguments. This could happen
                 # because of LLM non-determinism, or maybe more often because of user error in the prompt.
                 # Should we do anything more than log a warning?
-                logger.debug(f"Error parsing function arguments: {error}")
+                logger.debug(
+                    f"Error parsing function arguments: {error} - {function_call_accumulator}")
 
 
 class TogetherLLMContext(OpenAILLMContext):
@@ -219,9 +249,17 @@ class TogetherUserContextAggregator(LLMUserContextAggregator):
         if isinstance(context, OpenAILLMContext):
             self._context = TogetherLLMContext.from_openai_context(context)
 
+    def get_messages_frame(self):
+        return OpenAILLMContextFrame(self._context)
+
     async def push_messages_frame(self):
-        frame = OpenAILLMContextFrame(self._context)
-        await self.push_frame(frame)
+        await self.push_frame(self.get_messages_frame())
+
+    def append_image_description_tool_message(self, description):
+        self._context.add_message({
+            "role": "tool",
+            "content": json.dumps({"image_description": description})
+        })
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
@@ -230,31 +268,12 @@ class TogetherUserContextAggregator(LLMUserContextAggregator):
         # to talk through (tagging @aleix). At some point we might need to refactor these
         # context aggregators.
         try:
-            if isinstance(frame, UserImageRequestFrame):
-                # The LLM sends a UserImageRequestFrame upstream. Cache any context provided with
-                # that frame so we can use it when we assemble the image message in the assistant
-                # context aggregator.
-                if (frame.context):
-                    if isinstance(frame.context, str):
-                        self._context._user_image_request_context[frame.user_id] = frame.context
-                    else:
-                        logger.error(
-                            f"Unexpected UserImageRequestFrame context type: {type(frame.context)}")
-                        del self._context._user_image_request_context[frame.user_id]
-                else:
-                    if frame.user_id in self._context._user_image_request_context:
-                        del self._context._user_image_request_context[frame.user_id]
+            if isinstance(frame, UserImageRawFrame):
+                if frame.description:
+                    self.append_image_description_tool_message(frame.description)
+                    await self.push_messages_frame()
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
-
-#
-# Claude returns a text content block along with a tool use content block. This works quite nicely
-# with streaming. We get the text first, so we can start streaming it right away. Then we get the
-# tool_use block. While the text is streaming to TTS and the transport, we can run the tool call.
-#
-# But Claude is verbose. It would be nice to come up with prompt language that suppresses Claude's
-# chattiness about it's tool thinking.
-#
 
 
 class TogetherAssistantContextAggregator(LLMAssistantContextAggregator):
