@@ -162,7 +162,7 @@ class TTSService(AIService):
             self,
             *,
             aggregate_sentences: bool = True,
-            # if True, subclass is responsible for pushing TextFrames and LLMFullResponseEndFrames
+            # if False, subclass is responsible for pushing TextFrames and LLMFullResponseEndFrames
             push_text_frames: bool = True,
             # if True, TTSService will push TTSStoppedFrames, otherwise subclass must do it
             push_stop_frames: bool = False,
@@ -202,6 +202,16 @@ class TTSService(AIService):
         self._current_sentence = ""
         await self.push_frame(frame, direction)
 
+    async def _handle_response_end_frames(self, frame: Frame, direction: FrameDirection):
+        sentence = self._current_sentence
+        self._current_sentence = ""
+        await self._push_tts_frames(sentence)
+        if isinstance(frame, LLMFullResponseEndFrame):
+            if self._push_text_frames:
+                await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
+
     async def _process_text_frame(self, frame: TextFrame):
         text: str | None = None
         if not self._aggregate_sentences:
@@ -236,14 +246,7 @@ class TTSService(AIService):
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame, direction)
         elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
-            sentence = self._current_sentence
-            self._current_sentence = ""
-            await self._push_tts_frames(sentence)
-            if isinstance(frame, LLMFullResponseEndFrame):
-                if self._push_text_frames:
-                    await self.push_frame(frame, direction)
-            else:
-                await self.push_frame(frame, direction)
+            await self._handle_response_end_frames(frame, direction)
         elif isinstance(frame, TTSSpeakFrame):
             await self._push_tts_frames(frame.text, False)
         elif isinstance(frame, TTSModelUpdateFrame):

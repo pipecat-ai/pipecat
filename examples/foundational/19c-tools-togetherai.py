@@ -117,8 +117,8 @@ Reminder:
             context_aggregator.user(),       # User speech to text
             llm,                             # LLM
             tts,                             # TTS
-            transport.output(),              # Transport bot output
             context_aggregator.assistant(),  # Assistant spoken responses and tool context
+            transport.output(),              # Transport bot output
         ])
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))

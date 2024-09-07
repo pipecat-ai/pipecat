@@ -102,6 +102,8 @@ class CartesiaTTSService(TTSService):
 
         self._websocket = None
         self._context_id = None
+        self._context_sentence_accumulator = ""
+        self._context_received_timestamps = False
         self._context_id_start_timestamp = None
         self._timestamped_words_buffer = []
         self._receive_task = None
@@ -169,11 +171,37 @@ class CartesiaTTSService(TTSService):
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
+        await self._send_no_more_inputs_message()
         self._context_id = None
         self._context_id_start_timestamp = None
         self._timestamped_words_buffer = []
         await self.stop_all_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
+
+    async def _handle_response_end_frames(self, frame: Frame, direction: FrameDirection):
+        await super()._handle_response_end_frames(frame, direction)
+        await self._send_no_more_inputs_message()
+
+    async def _send_no_more_inputs_message(self):
+        # tell the Cartesia server we're done with this context. We will receive a 'done' message
+        # as soon as speech and timestamp messages have all been sent to us. If we don't send this,
+        # we won't get a done message until the 5-second context timeout elapses. (The Cartesia Python SDK
+        # encapsulates this as a `no_more_inputs()` message.)
+        if self._websocket and self._context_id:
+            try:
+                await self._websocket.send(json.dumps({
+                    "model_id": self._model_id,
+                    "transcript": "",
+                    "output_format": self._output_format,
+                    "voice": {
+                        "mode": "id",
+                        "id": self._voice_id
+                    },
+                    "context_id": self._context_id,
+                    "continue": False,
+                }))
+            except Exception as e:
+                logger.error(f"{self} error sending message: {e}")
 
     async def _receive_task_handler(self):
         try:
@@ -182,15 +210,29 @@ class CartesiaTTSService(TTSService):
                 if not msg or msg["context_id"] != self._context_id:
                     continue
                 if msg["type"] == "done":
+                    # logger.debug(f"DONE: {msg}")
                     await self.stop_ttfb_metrics()
                     await self.push_frame(TTSStoppedFrame())
-                    # Unset _context_id but not the _context_id_start_timestamp
-                    # because we are likely still playing out audio and need the
-                    # timestamp to set send context frames.
-                    self._context_id = None
-                    self._timestamped_words_buffer.append(("LLMFullResponseEndFrame", 0))
+                    if self._context_received_timestamps:
+                        # Unset _context_id but not the _context_id_start_timestamp
+                        # because we are likely still playing out audio and need the
+                        # timestamp to set send context frames.
+                        self._context_id = None
+                        self._timestamped_words_buffer.append(("LLMFullResponseEndFrame", 0))
+                    else:
+                        # No timetimestamps received for this context. Either a pathalogical case (like '2 + 2 = 4')
+                        # or this language/model doesn't support timestamps. For now,let's just manually
+                        # push a TextFrame, which is perhaps the best we can do for the pathological case.
+                        # Note that this isn't sufficient to properly implement context aggregation for
+                        # a Cartesia language/model that doesn't support timestamps.
+                        self._context_id = None
+                        self._context_id_start_timestamp = None
+                        await self.push_frame(TextFrame(self._context_sentence_accumulator))
+                        await self.push_frame(LLMFullResponseEndFrame())
+
                 elif msg["type"] == "timestamps":
                     # logger.debug(f"TIMESTAMPS: {msg}")
+                    self._context_received_timestamps = True
                     self._timestamped_words_buffer.extend(
                         list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["end"]))
                     )
@@ -231,12 +273,20 @@ class CartesiaTTSService(TTSService):
                     if word == "LLMFullResponseEndFrame" and timestamp == 0:
                         await self.push_frame(LLMFullResponseEndFrame())
                         continue
+                    # logger.debug(f"WORD: '{word}' {timestamp}")
                     await self.push_frame(TextFrame(word))
         except asyncio.CancelledError:
             pass
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
 
+    # Note that our implementation here of run_tts() does not yield frames. This is because we use a single
+    # websocket connection and "context_id" for each LLM response (not just for each sentence). We do not
+    # have any way of mapping audio chunks that we read from the websocket back to individual run_tts() calls.
+    # So we don't yield frames. We push the audio frames directly from the _receive_task_handler above. This
+    # has two ramifications: the Cartesia processing time metrics are not correct, and we don't have a way to
+    # pace the sending of text frames through the pipeline for Cartesia languages/models that don't support
+    # timestamps.
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
@@ -248,6 +298,10 @@ class CartesiaTTSService(TTSService):
                 await self.push_frame(TTSStartedFrame())
                 await self.start_ttfb_metrics()
                 self._context_id = str(uuid.uuid4())
+                self._context_received_timestamps = False
+                self._context_sentence_accumulator = ""
+
+            self._context_sentence_accumulator += text
 
             msg = {
                 "transcript": text + " ",
