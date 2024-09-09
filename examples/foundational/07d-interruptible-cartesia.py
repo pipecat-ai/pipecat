@@ -52,7 +52,9 @@ async def main():
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
-            sample_rate=44100,
+            params=CartesiaTTSService.InputParams(
+                sample_rate=44100,
+            ),
         )
 
         llm = OpenAILLMService(
