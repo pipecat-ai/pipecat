@@ -10,7 +10,8 @@ import base64
 import asyncio
 import time
 
-from typing import AsyncGenerator, Mapping
+from typing import AsyncGenerator, Optional
+from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -61,6 +62,14 @@ def language_to_cartesia_language(language: Language) -> str | None:
 
 
 class CartesiaTTSService(TTSService):
+    class InputParams(BaseModel):
+        model_id: Optional[str] = "sonic-english"
+        encoding: Optional[str] = "pcm_s16le"
+        sample_rate: Optional[int] = 16000
+        container: Optional[str] = "raw"
+        language: Optional[str] = "en"
+        speed: Optional[str] = None
+        emotion: Optional[list[str]] = []
 
     def __init__(
             self,
@@ -69,10 +78,7 @@ class CartesiaTTSService(TTSService):
             voice_id: str,
             cartesia_version: str = "2024-06-10",
             url: str = "wss://api.cartesia.ai/tts/websocket",
-            model_id: str = "sonic-english",
-            encoding: str = "pcm_s16le",
-            sample_rate: int = 16000,
-            language: str = "en",
+            params: InputParams = InputParams(),
             **kwargs):
         super().__init__(**kwargs)
 
@@ -92,13 +98,15 @@ class CartesiaTTSService(TTSService):
         self._cartesia_version = cartesia_version
         self._url = url
         self._voice_id = voice_id
-        self._model_id = model_id
+        self._model_id = params.model_id
         self._output_format = {
-            "container": "raw",
-            "encoding": encoding,
-            "sample_rate": sample_rate,
+            "container": params.container,
+            "encoding": params.encoding,
+            "sample_rate": params.sample_rate,
         }
-        self._language = language
+        self._language = params.language
+        self._speed = params.speed
+        self._emotion = params.emotion
 
         self._websocket = None
         self._context_id = None
@@ -249,15 +257,24 @@ class CartesiaTTSService(TTSService):
                 await self.start_ttfb_metrics()
                 self._context_id = str(uuid.uuid4())
 
+            voice_config = {
+                "mode": "id",
+                "id": self._voice_id
+            }
+
+            if self._speed or self._emotion:
+                voice_config["__experimental_controls"] = {}
+                if self._speed:
+                    voice_config["__experimental_controls"]["speed"] = self._speed
+                if self._emotion:
+                    voice_config["__experimental_controls"]["emotion"] = self._emotion
+
             msg = {
                 "transcript": text + " ",
                 "continue": True,
                 "context_id": self._context_id,
                 "model_id": self._model_id,
-                "voice": {
-                    "mode": "id",
-                    "id": self._voice_id
-                },
+                "voice": voice_config,
                 "output_format": self._output_format,
                 "language": self._language,
                 "add_timestamps": True,
