@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `DailyTransport` now supports setting the audio bitrate to improve audio
+  quality through the `DailyParams.audio_out_bitrate` parameter. The new
+  default is 96kbps.
+
+- `DailyTransport` now uses the number of audio output channels (1 or 2) to set
+  mono or stereo audio when needed.
+
 - Interruptions support has been added to `TwilioFrameSerializer` when using
   `FastAPIWebsocketTransport`.
 
