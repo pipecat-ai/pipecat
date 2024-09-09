@@ -366,6 +366,12 @@ class DailyTransportClient(EventHandler):
                                 }
                             },
                         }
+                    },
+                    "microphone": {
+                        "sendSettings": {
+                            "channelConfig": "stereo" if self._params.audio_out_channels == 2 else "mono",
+                            "bitrate": self._params.audio_out_bitrate,
+                        }
                     }
                 },
             })
