@@ -63,7 +63,7 @@ class AzureLLMService(BaseOpenAILLMService):
         self._api_version = api_version
         super().__init__(api_key=api_key, model=model)
 
-    def create_client(self, api_key=None, base_url=None, **kwargs):
+    def create_client(self, api_key: str | None = None, base_url: str | None = None, **kwargs):
         return AsyncAzureOpenAI(
             api_key=api_key,
             azure_endpoint=self._endpoint,

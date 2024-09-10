@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     AudioRawFrame,
     ErrorFrame,
     Frame,
+    LLMBaseUrlUpdateFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -70,12 +71,20 @@ class BaseOpenAILLMService(LLMService):
     calls from the LLM.
     """
 
-    def __init__(self, *, model: str, api_key=None, base_url=None, **kwargs):
+    def __init__(
+            self,
+            *,
+            model: str,
+            api_key: str | None = None,
+            base_url: str | None = None,
+            **kwargs):
         super().__init__(**kwargs)
         self._model: str = model
+        self._api_key: str | None = api_key
+        self._kwargs = kwargs
         self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
 
-    def create_client(self, api_key=None, base_url=None, **kwargs):
+    def create_client(self, api_key: str | None = None, base_url: str | None = None, **kwargs):
         return AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -210,6 +219,9 @@ class BaseOpenAILLMService(LLMService):
             context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
+        elif isinstance(frame, LLMBaseUrlUpdateFrame):
+            logger.debug(f"Switching LLM base URL to [{frame.base_url}]")
+            self._client = self.create_client(self._api_key, frame.base_url, **self._kwargs)
         elif isinstance(frame, LLMModelUpdateFrame):
             logger.debug(f"Switching LLM model to: [{frame.model}]")
             self._model = frame.model

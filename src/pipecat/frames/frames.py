@@ -430,6 +430,13 @@ class UserImageRequestFrame(ControlFrame):
 
 
 @dataclass
+class LLMBaseUrlUpdateFrame(ControlFrame):
+    """A control frame containing a request to update to a new LLM base URL.
+    """
+    base_url: str
+
+
+@dataclass
 class LLMModelUpdateFrame(ControlFrame):
     """A control frame containing a request to update to a new LLM model.
     """

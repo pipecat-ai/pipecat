@@ -42,7 +42,7 @@ class OpenPipeLLMService(BaseOpenAILLMService):
             **kwargs)
         self._tags = tags
 
-    def create_client(self, api_key=None, base_url=None, **kwargs):
+    def create_client(self, api_key: str | None = None, base_url: str | None = None, **kwargs):
         openpipe_api_key = kwargs.get("openpipe_api_key") or ""
         openpipe_base_url = kwargs.get("openpipe_base_url") or ""
         client = OpenPipeAI(
