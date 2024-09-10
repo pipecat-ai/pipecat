@@ -36,6 +36,7 @@ Website = "https://pipecat.ai"
 [project.optional-dependencies]
 anthropic = [ "anthropic~=0.34.0" ]
 azure = [ "azure-cognitiveservices-speech~=1.40.0" ]
+canonical = [ "aiofiles~=24.1.0" ]
 cartesia = [ "websockets~=12.0" ]
 daily = [ "daily-python~=0.10.1" ]
 deepgram = [ "deepgram-sdk~=3.5.0" ]

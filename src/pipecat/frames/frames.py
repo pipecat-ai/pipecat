@@ -4,9 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Any, List, Mapping, Optional, Tuple
-
+import time
 from dataclasses import dataclass, field
+from typing import Any, List, Mapping, Optional, Tuple
 
 from pipecat.transcriptions.language import Language
 from pipecat.utils.utils import obj_count, obj_id
@@ -222,6 +222,16 @@ class TransportMessageFrame(DataFrame):
 @dataclass
 class AppFrame(Frame):
     pass
+
+
+@dataclass
+class UserAudioFrame(AudioRawFrame):
+    """
+    Indicates user audio in the pipeline.
+    """
+
+    def __init__(self, frame: AudioRawFrame):
+        super().__init__(frame.audio, frame.sample_rate, frame.num_channels)
 
 #
 # System frames
