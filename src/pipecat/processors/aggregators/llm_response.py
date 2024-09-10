@@ -318,3 +318,130 @@ class LLMUserContextAggregator(LLMContextAggregator):
             accumulator_frame=TranscriptionFrame,
             interim_accumulator_frame=InterimTranscriptionFrame,
         )
+        # CUSTOM CODE: this variable remembers if we prompted the LLM
+        self.sent_aggregation_after_last_interruption = False
+
+    # Relevant functions:
+    # LLMContextAggregator.async def _push_aggregation(self)
+    # and
+    # def LLMResponseAggregator._reset(self):
+
+    # The original pipecat implementation is in:
+    # LLMResponseAggregator.process_frame
+
+    # Use cases implemented:
+    #
+    # S: Start, E: End, T: Transcription, I: Interim, X: Text
+    #
+    #        S E -> None
+    #      S T E -> T
+    #    S I T E -> T
+    #    S I E T -> T
+    #  S I E I T -> T
+    #      S E T -> T
+    #    S E I T -> T
+    #
+    #    S I E T1 I T2 -> T1
+    #
+    # and T2 would be dropped.
+
+    # We have:
+    # S = UserStartedSpeakingFrame,
+    # E = UserStoppedSpeakingFrame,
+    # T = TranscriptionFrame,
+    # I = InterimTranscriptionFrame
+
+    # Cases we want to handle:
+    #  - Make sure we never delete some aggregation as it is something said by the user
+    #   - Solves case: S T1 I E S T2 E where we lose T1
+    #  - Solve case: S T E Bot T (without E S) as the VAD is not activated (yeah case)
+    #  - Solve case: S E T1 T2 where T2 is lost. (variation from above)
+    #  For the last case we also send StartInterruptionFrame for making sure that the reprompt of the LLM does not make weird repeating messages.
+
+    # So the cases would be:
+    #    S E             -> None
+    #    S T E           -> T
+    #    S I T E         -> T
+    #    S I E T         -> T
+    #    S I E I T       -> T
+    #    S E T           -> T
+    #    S E I T         -> T
+    #    S T1 I E S T2 E -> (T1 T2)
+    #    S I E T1 I T2   -> T1 Interruption T2
+    #    S T1 E T2       -> T1 Interruption T2
+    #    S E T1 B T2     -> T1 Bot Interruption T2
+    #    S E T1 T2       -> T1 Interruption T2
+    # see the tests at test_LLM_user_context_aggregator
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await FrameProcessor.process_frame(self, frame, direction)
+
+        send_aggregation = False
+
+        if isinstance(frame, self._start_frame):
+            # CUSTOM CODE: dont _aggregation = ""
+            # self._aggregation = ""
+            self._aggregating = True
+            self._seen_start_frame = True
+            self._seen_end_frame = False
+            # CUSTOM CODE: _seen_interim_results should be updated by interimframe and accumulator frame only
+            # self._seen_interim_results = False
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, self._end_frame):
+            self._seen_end_frame = True
+            self._seen_start_frame = False
+
+            # We might have received the end frame but we might still be
+            # aggregating (i.e. we have seen interim results but not the final
+            # text).
+            self._aggregating = self._seen_interim_results or len(self._aggregation) == 0
+
+            # Send the aggregation if we are not aggregating anymore (i.e. no
+            # more interim results received).
+            send_aggregation = not self._aggregating
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, self._accumulator_frame):
+            # CUSTOM CODE: send interruption without VAD
+            if self.sent_aggregation_after_last_interruption:
+                await self.push_frame(StartInterruptionFrame())
+                self.sent_aggregation_after_last_interruption = False
+
+            # CUSTOM CODE: do not require _aggregating so we do not lose frames
+            self._aggregation += f" {frame.text}" if self._aggregation else frame.text
+            # We have recevied a complete sentence, so if we have seen the
+            # end frame and we were still aggregating, it means we should
+            # send the aggregation.
+            # CUSTOM CODE: important thing is not see start frame and not end frame (so user is still speaking)
+            send_aggregation = not self._seen_start_frame
+            # We just got our final result, so let's reset interim results.
+            self._seen_interim_results = False
+        elif self._interim_accumulator_frame and isinstance(frame, self._interim_accumulator_frame):
+            # CUSTOM CODE: send interruption without VAD
+            if self.sent_aggregation_after_last_interruption:
+                await self.push_frame(StartInterruptionFrame())
+                self.sent_aggregation_after_last_interruption = False
+            self._seen_interim_results = True
+        elif self._handle_interruptions and isinstance(frame, StartInterruptionFrame):
+            # CUSTOM CODE: manage new interruptions
+            self.sent_aggregation_after_last_interruption = False
+            await self._push_aggregation()
+            # Reset anyways
+            self._reset()
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            self._messages.extend(frame.messages)
+            messages_frame = LLMMessagesFrame(self._messages)
+            await self.push_frame(messages_frame)
+        elif isinstance(frame, LLMMessagesUpdateFrame):
+            # We push the frame downstream so the assistant aggregator gets
+            # updated as well.
+            await self.push_frame(frame)
+            # We can now reset this one.
+            self._reset()
+            self._messages = frame.messages
+            messages_frame = LLMMessagesFrame(self._messages)
+            await self.push_frame(messages_frame)
+        else:
+            await self.push_frame(frame, direction)
+
+        if send_aggregation:
+            await self._push_aggregation()
