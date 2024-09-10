@@ -109,7 +109,7 @@ class LLMResponseAggregator(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, self._accumulator_frame):
             if self._aggregating:
-                self._aggregation += f" {frame.text}"
+                self._aggregation += f" {frame.text}" if self._aggregation else frame.text
                 # We have recevied a complete sentence, so if we have seen the
                 # end frame and we were still aggregating, it means we should
                 # send the aggregation.
