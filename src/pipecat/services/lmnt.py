@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.ai_services import TTSService
+from pipecat.services.ai_services import AsyncTTSService
 
 from loguru import logger
 
@@ -34,7 +34,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class LmntTTSService(TTSService):
+class LmntTTSService(AsyncTTSService):
 
     def __init__(
             self,
@@ -44,11 +44,9 @@ class LmntTTSService(TTSService):
             sample_rate: int = 24000,
             language: str = "en",
             **kwargs):
-        super().__init__(**kwargs)
-
         # Let TTSService produce TTSStoppedFrames after a short delay of
         # no activity.
-        self._push_stop_frames = True
+        super().__init__(push_stop_frames=True, **kwargs)
 
         self._api_key = api_key
         self._voice_id = voice_id
