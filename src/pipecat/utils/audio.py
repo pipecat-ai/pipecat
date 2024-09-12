@@ -34,21 +34,21 @@ def exp_smoothing(value: float, prev_value: float, factor: float) -> float:
     return prev_value + factor * (value - prev_value)
 
 
-def ulaw_8000_to_pcm_16000(ulaw_8000_bytes):
+def ulaw_to_pcm(ulaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
     # Convert μ-law to PCM
-    pcm_8000_bytes = audioop.ulaw2lin(ulaw_8000_bytes, 2)
+    in_pcm_bytes = audioop.ulaw2lin(ulaw_bytes, 2)
 
-    # Resample from 8000 Hz to 16000 Hz
-    pcm_16000_bytes = audioop.ratecv(pcm_8000_bytes, 2, 1, 8000, 16000, None)[0]
+    # Resample
+    out_pcm_bytes = audioop.ratecv(in_pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
 
-    return pcm_16000_bytes
+    return out_pcm_bytes
 
 
-def pcm_16000_to_ulaw_8000(pcm_16000_bytes):
-    # Resample from 16000 Hz to 8000 Hz
-    pcm_8000_bytes = audioop.ratecv(pcm_16000_bytes, 2, 1, 16000, 8000, None)[0]
+def pcm_to_ulaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
+    # Resample
+    in_pcm_bytes = audioop.ratecv(pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
 
     # Convert PCM to μ-law
-    ulaw_8000_bytes = audioop.lin2ulaw(pcm_8000_bytes, 2)
+    ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)
 
-    return ulaw_8000_bytes
+    return ulaw_bytes

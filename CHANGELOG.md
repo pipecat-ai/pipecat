@@ -9,7 +9,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `AudioRawFrame`s are not pushed downstream from the base output
+- `DailyTransport` now supports setting the audio bitrate to improve audio
+  quality through the `DailyParams.audio_out_bitrate` parameter. The new
+  default is 96kbps.
+
+- `DailyTransport` now uses the number of audio output channels (1 or 2) to set
+  mono or stereo audio when needed.
+
+- Interruptions support has been added to `TwilioFrameSerializer` when using
+  `FastAPIWebsocketTransport`.
+
+- Added new `LmntTTSService` text-to-speech service.
+  (see https://www.lmnt.com/)
+
+- Added `TTSModelUpdateFrame`, `TTSLanguageUpdateFrame`, `STTModelUpdateFrame`,
+  and `STTLanguageUpdateFrame` frames to allow you to switch models, language
+  and voices in TTS and STT services.
+
+- Added new `transcriptions.Language` enum.
+
+### Changed
+
+- `DailyTransport.on_joined` event now returns the full session data instead of
+  just the participant.
+
+- `CartesiaTTSService` is now a subclass of `TTSService`.
+
+- `DeepgramSTTService` is now a subclass of `STTService`.
+
+- `WhisperSTTService` is now a subclass of `SegmentedSTTService`. A
+  `SegmentedSTTService` is a `STTService` where the provided audio is given in a
+  big chunk (i.e. from when the user starts speaking until the user stops
+  speaking) instead of a continous stream.
+
+### Fixed
+
+- `StartFrame` should be the first frame every processor receives to avoid
+  situations where things are not initialized (because initialization happens on
+  `StartFrame`) and other frames come in resulting in undesired behavior.
+
+### Performance
+
+- `obj_id()` and `obj_count()` now use `itertools.count` avoiding the need of
+  `threading.Lock`.
+
+## [0.0.41] - 2024-08-22
+
+### Added
+
+- Added `LivekitFrameSerializer` audio frame serializer.
+
+### Fixed
+
+- Fix `FastAPIWebsocketOutputTransport` variable name clash with subclass.
+
+- Fix an `AnthropicLLMService` issue with empty arguments in function calling.
+
+### Other
+
+- Fixed `studypal` example errors.
+
+## [0.0.40] - 2024-08-20
+
+### Added
+
+- VAD parameters can now be dynamicallt updated using the
+  `VADParamsUpdateFrame`.
+
+- `ErrorFrame` has now a `fatal` field to indicate the bot should exit if a
+  fatal error is pushed upstream (false by default). A new `FatalErrorFrame`
+  that sets this flag to true has been added.
+
+- `AnthropicLLMService` now supports function calling and initial support for
+  prompt caching.
+  (see https://www.anthropic.com/news/prompt-caching)
+
+- `ElevenLabsTTSService` can now specify ElevenLabs input parameters such as
+  `output_format`.
+
+- `TwilioFrameSerializer` can now specify Twilio's and Pipecat's desired sample
+  rates to use.
+
+- Added new `on_participant_updated` event to `DailyTransport`.
+
+- Added `DailyRESTHelper.delete_room_by_name()` and
+  `DailyRESTHelper.delete_room_by_url()`.
+
+- Added LLM and TTS usage metrics. Those are enabled when
+  `PipelineParams.enable_usage_metrics` is True.
+
+- `AudioRawFrame`s are now pushed downstream from the base output
   transport. This allows capturing the exact words the bot says by adding an STT
   service at the end of the pipeline.
 
@@ -28,6 +117,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Support RTVI message protocol 0.1. This includes new messages, support for
+  messages responses, support for actions, configuration, webhooks and a bunch
+  of new cool stuff.
+  (see https://docs.rtvi.ai/)
+
+- `SileroVAD` dependency is now imported via pip's `silero-vad` package.
+
+- `ElevenLabsTTSService` now uses `eleven_turbo_v2_5` model by default.
+
 - `BotSpeakingFrame` is now a control frame.
 
 - `StartFrame` is now a control frame similar to `EndFrame`.
@@ -36,6 +134,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sample rate.
 
 ### Fixed
+
+- `TTSStartFrame` and `TTSStopFrame` are now sent when TTS really starts and
+  stops. This allows for knowing when the bot starts and stops speaking even
+  with asynchronous services (like Cartesia).
+
+- Fixed `AzureSTTService` transcription frame timestamps.
+
+- Fixed an issue with `DailyRESTHelper.create_room()` expirations which would
+  cause this function to stop working after the initial expiration elapsed.
 
 - Improved `EndFrame` and `CancelFrame` handling. `EndFrame` should end things
   gracefully while a `CancelFrame` should cancel all running tasks as soon as
@@ -54,6 +161,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   incoming frames to not cancel tasks and be processed properly.
 
 ### Other
+
+- Added `studypal` example (from to the Cartesia folks!).
+
+- Most examples now use Cartesia.
+
+- Added examples `foundational/19a-tools-anthropic.py`,
+  `foundational/19b-tools-video-anthropic.py` and
+  `foundational/19a-tools-togetherai.py`.
 
 - Added examples `foundational/18-gstreamer-filesrc.py` and
   `foundational/18a-gstreamer-videotestsrc.py` that show how to use

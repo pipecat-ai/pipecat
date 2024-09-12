@@ -4,35 +4,63 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
+from typing import AsyncGenerator, Literal
+from pydantic import BaseModel
 
-from typing import AsyncGenerator
-
-from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, MetricsFrame
+from pipecat.frames.frames import AudioRawFrame, Frame, TTSStartedFrame, TTSStoppedFrame
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
 
+# See .env.example for ElevenLabs configuration needed
+try:
+    from elevenlabs.client import AsyncElevenLabs
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`. Also, set `ELEVENLABS_API_KEY` environment variable.")
+    raise Exception(f"Missing module: {e}")
+
+
+def sample_rate_from_output_format(output_format: str) -> int:
+    match output_format:
+        case "pcm_16000":
+            return 16000
+        case "pcm_22050":
+            return 22050
+        case "pcm_24000":
+            return 24000
+        case "pcm_44100":
+            return 44100
+    return 16000
+
 
 class ElevenLabsTTSService(TTSService):
+    class InputParams(BaseModel):
+        output_format: Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"] = "pcm_16000"
 
     def __init__(
             self,
             *,
             api_key: str,
             voice_id: str,
-            aiohttp_session: aiohttp.ClientSession,
-            model: str = "eleven_turbo_v2",
+            model: str = "eleven_turbo_v2_5",
+            params: InputParams = InputParams(),
             **kwargs):
         super().__init__(**kwargs)
 
-        self._api_key = api_key
         self._voice_id = voice_id
         self._model = model
-        self._aiohttp_session = aiohttp_session
+        self._params = params
+        self._client = AsyncElevenLabs(api_key=api_key)
+        self._sample_rate = sample_rate_from_output_format(params.output_format)
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    async def set_model(self, model: str):
+        logger.debug(f"Switching TTS model to: [{model}]")
+        self._model = model
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
@@ -40,37 +68,26 @@ class ElevenLabsTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{self._voice_id}/stream"
 
-        payload = {"text": text, "model_id": self._model}
-
-        querystring = {
-            "output_format": "pcm_16000",
-            "optimize_streaming_latency": 2}
-
-        headers = {
-            "xi-api-key": self._api_key,
-            "Content-Type": "application/json",
-        }
-
+        await self.start_tts_usage_metrics(text)
         await self.start_ttfb_metrics()
 
-        async with self._aiohttp_session.post(url, json=payload, headers=headers, params=querystring) as r:
-            if r.status != 200:
-                text = await r.text()
-                logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
-                yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
-                return
+        results = await self._client.generate(
+            text=text,
+            voice=self._voice_id,
+            model=self._model,
+            output_format=self._params.output_format
+        )
 
-            async for chunk in r.content:
-                if len(chunk) > 0:
-                    await self.stop_ttfb_metrics()
-                    frame = AudioRawFrame(chunk, 16000, 1)
-                    yield frame
+        tts_started = False
+        async for audio in results:
+            # This is so we send TTSStartedFrame when we have the first audio
+            # bytes.
+            if not tts_started:
+                await self.push_frame(TTSStartedFrame())
+                tts_started = True
+            await self.stop_ttfb_metrics()
+            frame = AudioRawFrame(audio, self._sample_rate, 1)
+            yield frame
+
+        await self.push_frame(TTSStoppedFrame())

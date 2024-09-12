@@ -27,7 +27,8 @@ try:
     from gi.repository import Gst, GstApp
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use GStreamer processors, you need to install GStreamer in your system`.")
+    logger.error(
+        "In order to use GStreamer, you need to `pip install pipecat-ai[gstreamer]`. Also, you need to install GStreamer in your system.")
     raise Exception(f"Missing module: {e}")
 
 
@@ -77,8 +78,10 @@ class GStreamerPipelineSource(FrameProcessor):
             await self.push_frame(frame, direction)
         # Control frames
         elif isinstance(frame, StartFrame):
-            await self._start(frame)
+            # Push StartFrame before start(), because we want StartFrame to be
+            # processed by every processor before any other frame is processed.
             await self._internal_push_frame(frame, direction)
+            await self._start(frame)
         elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.

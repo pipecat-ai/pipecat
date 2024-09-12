@@ -8,7 +8,13 @@ import aiohttp
 
 from typing import Any, AsyncGenerator, Dict
 
-from pipecat.frames.frames import AudioRawFrame, ErrorFrame, Frame, MetricsFrame, StartFrame
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    ErrorFrame,
+    Frame,
+    StartFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame)
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -70,13 +76,7 @@ class XTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
-        if self.can_generate_metrics() and self.metrics_enabled:
-            characters = {
-                "processor": self.name,
-                "value": len(text),
-            }
-            logger.debug(f"{self.name} Characters: {characters['value']}")
-            await self.push_frame(MetricsFrame(characters=[characters]))
+
         if not self._studio_speakers:
             logger.error(f"{self} no studio speakers available")
             return
@@ -103,8 +103,11 @@ class XTTSService(TTSService):
                 yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
                 return
 
-            buffer = bytearray()
+            await self.start_tts_usage_metrics(text)
 
+            await self.push_frame(TTSStartedFrame())
+
+            buffer = bytearray()
             async for chunk in r.content.iter_chunked(1024):
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
@@ -135,3 +138,5 @@ class XTTSService(TTSService):
                 resampled_audio_bytes = resampled_audio.astype(np.int16).tobytes()
                 frame = AudioRawFrame(resampled_audio_bytes, 16000, 1)
                 yield frame
+
+            await self.push_frame(TTSStoppedFrame())

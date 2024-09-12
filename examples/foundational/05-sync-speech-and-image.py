@@ -13,7 +13,6 @@ from dataclasses import dataclass
 
 from pipecat.frames.frames import (
     AppFrame,
-    EndFrame,
     Frame,
     ImageRawFrame,
     LLMFullResponseStartFrame,
@@ -90,7 +89,6 @@ async def main():
         )
 
         tts = ElevenLabsTTSService(
-            aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         )
@@ -151,8 +149,6 @@ async def main():
             ]
             frames.append(MonthFrame(month=month))
             frames.append(LLMMessagesFrame(messages))
-
-        frames.append(EndFrame())
 
         runner = PipelineRunner()
 

@@ -4,11 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import io
 import wave
 
 from abc import abstractmethod
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -17,37 +18,27 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
+    STTLanguageUpdateFrame,
+    STTModelUpdateFrame,
     StartFrame,
     StartInterruptionFrame,
+    TTSLanguageUpdateFrame,
+    TTSModelUpdateFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSVoiceUpdateFrame,
     TextFrame,
-    VisionImageRawFrame,
+    UserImageRequestFrame,
+    VisionImageRawFrame
 )
 from pipecat.processors.async_frame_processor import AsyncFrameProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transcriptions.language import Language
 from pipecat.utils.audio import calculate_audio_volume
+from pipecat.utils.string import match_endofsentence
 from pipecat.utils.utils import exp_smoothing
-import re
-
-
-ENDOFSENTENCE_PATTERN_STR = r"""
-    (?<![A-Z])       # Negative lookbehind: not preceded by an uppercase letter (e.g., "U.S.A.")
-    (?<!\d)          # Negative lookbehind: not preceded by a digit (e.g., "1. Let's start")
-    (?<!\d\s[ap])    # Negative lookbehind: not preceded by time (e.g., "3:00 a.m.")
-    (?<!Mr|Ms|Dr)    # Negative lookbehind: not preceded by Mr, Ms, Dr (combined bc. length is the same)
-    (?<!Mrs)         # Negative lookbehind: not preceded by "Mrs"
-    (?<!Prof)        # Negative lookbehind: not preceded by "Prof"
-    [\.\?\!:]        # Match a period, question mark, exclamation point, or colon
-    $                # End of string
-"""
-ENDOFSENTENCE_PATTERN = re.compile(ENDOFSENTENCE_PATTERN_STR, re.VERBOSE)
-
-
-def match_endofsentence(text: str) -> bool:
-    return ENDOFSENTENCE_PATTERN.search(text.rstrip()) is not None
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 
 
 class AIService(FrameProcessor):
@@ -115,27 +106,55 @@ class LLMService(AIService):
         self._start_callbacks = {}
 
     # TODO-CB: callback function type
-    def register_function(self, function_name: str, callback, start_callback=None):
+    def register_function(self, function_name: str | None, callback, start_callback=None):
+        # Registering a function with the function_name set to None will run that callback
+        # for all functions
         self._callbacks[function_name] = callback
+        # QUESTION FOR CB: maybe this isn't needed anymore?
         if start_callback:
             self._start_callbacks[function_name] = start_callback
 
-    def unregister_function(self, function_name: str):
+    def unregister_function(self, function_name: str | None):
         del self._callbacks[function_name]
         if self._start_callbacks[function_name]:
             del self._start_callbacks[function_name]
 
     def has_function(self, function_name: str):
+        if None in self._callbacks.keys():
+            return True
         return function_name in self._callbacks.keys()
 
-    async def call_function(self, function_name: str, args):
+    async def call_function(
+            self,
+            *,
+            context: OpenAILLMContext,
+            tool_call_id: str,
+            function_name: str,
+            arguments: str) -> None:
+        f = None
         if function_name in self._callbacks.keys():
-            return await self._callbacks[function_name](self, args)
-        return None
+            f = self._callbacks[function_name]
+        elif None in self._callbacks.keys():
+            f = self._callbacks[None]
+        else:
+            return None
+        await context.call_function(
+            f,
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+            llm=self)
 
-    async def call_start_function(self, function_name: str):
+    # QUESTION FOR CB: maybe this isn't needed anymore?
+    async def call_start_function(self, context: OpenAILLMContext, function_name: str):
         if function_name in self._start_callbacks.keys():
-            await self._start_callbacks[function_name](self)
+            await self._start_callbacks[function_name](function_name, self, context)
+        elif None in self._start_callbacks.keys():
+            return await self._start_callbacks[None](function_name, self, context)
+
+    async def request_image_frame(self, user_id: str, *, text_content: str | None = None):
+        await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content),
+                              FrameDirection.UPSTREAM)
 
 
 class TTSService(AIService):
@@ -145,14 +164,30 @@ class TTSService(AIService):
             aggregate_sentences: bool = True,
             # if True, subclass is responsible for pushing TextFrames and LLMFullResponseEndFrames
             push_text_frames: bool = True,
+            # if True, TTSService will push TTSStoppedFrames, otherwise subclass must do it
+            push_stop_frames: bool = False,
+            # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
+            stop_frame_timeout_s: float = 0.8,
             **kwargs):
         super().__init__(**kwargs)
         self._aggregate_sentences: bool = aggregate_sentences
         self._push_text_frames: bool = push_text_frames
+        self._push_stop_frames: bool = push_stop_frames
+        self._stop_frame_timeout_s: float = stop_frame_timeout_s
+        self._stop_frame_task: Optional[asyncio.Task] = None
+        self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
         self._current_sentence: str = ""
 
     @abstractmethod
+    async def set_model(self, model: str):
+        pass
+
+    @abstractmethod
     async def set_voice(self, voice: str):
+        pass
+
+    @abstractmethod
+    async def set_language(self, language: Language):
         pass
 
     # Converts the text to audio.
@@ -185,11 +220,9 @@ class TTSService(AIService):
         if not text:
             return
 
-        await self.push_frame(TTSStartedFrame())
         await self.start_processing_metrics()
         await self.process_generator(self.run_tts(text))
         await self.stop_processing_metrics()
-        await self.push_frame(TTSStoppedFrame())
         if self._push_text_frames:
             # We send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
@@ -213,14 +246,106 @@ class TTSService(AIService):
                 await self.push_frame(frame, direction)
         elif isinstance(frame, TTSSpeakFrame):
             await self._push_tts_frames(frame.text, False)
+        elif isinstance(frame, TTSModelUpdateFrame):
+            await self.set_model(frame.model)
         elif isinstance(frame, TTSVoiceUpdateFrame):
             await self.set_voice(frame.voice)
+        elif isinstance(frame, TTSLanguageUpdateFrame):
+            await self.set_language(frame.language)
         else:
             await self.push_frame(frame, direction)
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        if self._push_stop_frames:
+            self._stop_frame_task = self.get_event_loop().create_task(self._stop_frame_handler())
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        if self._stop_frame_task:
+            self._stop_frame_task.cancel()
+            await self._stop_frame_task
+            self._stop_frame_task = None
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        if self._stop_frame_task:
+            self._stop_frame_task.cancel()
+            await self._stop_frame_task
+            self._stop_frame_task = None
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        await super().push_frame(frame, direction)
+
+        if self._push_stop_frames and (
+                isinstance(frame, StartInterruptionFrame) or
+                isinstance(frame, TTSStartedFrame) or
+                isinstance(frame, AudioRawFrame) or
+                isinstance(frame, TTSStoppedFrame)):
+            await self._stop_frame_queue.put(frame)
+
+    async def _stop_frame_handler(self):
+        try:
+            has_started = False
+            while True:
+                try:
+                    frame = await asyncio.wait_for(self._stop_frame_queue.get(),
+                                                   self._stop_frame_timeout_s)
+                    if isinstance(frame, TTSStartedFrame):
+                        has_started = True
+                    elif isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+                        has_started = False
+                except asyncio.TimeoutError:
+                    if has_started:
+                        await self.push_frame(TTSStoppedFrame())
+                        has_started = False
+        except asyncio.CancelledError:
+            pass
 
 
 class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    @abstractmethod
+    async def set_model(self, model: str):
+        pass
+
+    @abstractmethod
+    async def set_language(self, language: Language):
+        pass
+
+    @abstractmethod
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Returns transcript as a string"""
+        pass
+
+    async def process_audio_frame(self, frame: AudioRawFrame):
+        await self.process_generator(self.run_stt(frame.audio))
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Processes a frame of audio data, either buffering or transcribing it."""
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, AudioRawFrame):
+            # In this service we accumulate audio internally and at the end we
+            # push a TextFrame. We don't really want to push audio frames down.
+            await self.process_audio_frame(frame)
+        elif isinstance(frame, STTModelUpdateFrame):
+            await self.set_model(frame.model)
+        elif isinstance(frame, STTLanguageUpdateFrame):
+            await self.set_language(frame.language)
+        else:
+            await self.push_frame(frame, direction)
+
+
+class SegmentedSTTService(STTService):
+    """SegmentedSTTService is an STTService that will detect speech and will run
+    speech-to-text on speech segments only, instead of a continous stream.
+
+    """
 
     def __init__(self,
                  *,
@@ -242,24 +367,7 @@ class STTService(AIService):
         self._smoothing_factor = 0.2
         self._prev_volume = 0
 
-    @abstractmethod
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Returns transcript as a string"""
-        pass
-
-    def _new_wave(self):
-        content = io.BytesIO()
-        ww = wave.open(content, "wb")
-        ww.setsampwidth(2)
-        ww.setnchannels(self._num_channels)
-        ww.setframerate(self._sample_rate)
-        return (content, ww)
-
-    def _get_smoothed_volume(self, frame: AudioRawFrame) -> float:
-        volume = calculate_audio_volume(frame.audio, frame.sample_rate)
-        return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
-
-    async def _append_audio(self, frame: AudioRawFrame):
+    async def process_audio_frame(self, frame: AudioRawFrame):
         # Try to filter out empty background noise
         volume = self._get_smoothed_volume(frame)
         if volume >= self._min_volume:
@@ -279,9 +387,7 @@ class STTService(AIService):
             self._silence_num_frames = 0
             self._wave.close()
             self._content.seek(0)
-            await self.start_processing_metrics()
             await self.process_generator(self.run_stt(self._content.read()))
-            await self.stop_processing_metrics()
             (self._content, self._wave) = self._new_wave()
 
     async def stop(self, frame: EndFrame):
@@ -290,16 +396,17 @@ class STTService(AIService):
     async def cancel(self, frame: CancelFrame):
         self._wave.close()
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Processes a frame of audio data, either buffering or transcribing it."""
-        await super().process_frame(frame, direction)
+    def _new_wave(self):
+        content = io.BytesIO()
+        ww = wave.open(content, "wb")
+        ww.setsampwidth(2)
+        ww.setnchannels(self._num_channels)
+        ww.setframerate(self._sample_rate)
+        return (content, ww)
 
-        if isinstance(frame, AudioRawFrame):
-            # In this service we accumulate audio internally and at the end we
-            # push a TextFrame. We don't really want to push audio frames down.
-            await self._append_audio(frame)
-        else:
-            await self.push_frame(frame, direction)
+    def _get_smoothed_volume(self, frame: AudioRawFrame) -> float:
+        volume = calculate_audio_volume(frame.audio, frame.sample_rate)
+        return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
 
 
 class ImageGenService(AIService):
