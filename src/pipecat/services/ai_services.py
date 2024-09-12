@@ -6,10 +6,11 @@
 
 import asyncio
 import io
+import time
 import wave
 
 from abc import abstractmethod
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional, Tuple
 
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -37,8 +38,11 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.string import match_endofsentence
+from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.utils import exp_smoothing
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+
+from loguru import logger
 
 
 class AIService(FrameProcessor):
@@ -301,6 +305,74 @@ class TTSService(AIService):
                         has_started = False
         except asyncio.CancelledError:
             pass
+
+
+class AsyncTTSService(TTSService):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    @abstractmethod
+    async def flush_audio(self):
+        pass
+
+
+class AsyncWordTTSService(AsyncTTSService):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._start_word_timestamp = None
+        self._words_queue = asyncio.Queue()
+        self._words_task = self.get_event_loop().create_task(self._words_task_handler())
+
+    def init_word_timestamps(self):
+        if not self._start_word_timestamp:
+            self._start_word_timestamp = self.get_clock().get_time()
+
+    def reset_word_timestamps(self):
+        self._start_word_timestamp = None
+        self._word_timestamps = []
+
+    async def add_word_timestamps(self, word_times: List[Tuple[str, float]]):
+        for (word, timestamp) in word_times:
+            await self._words_queue.put((word, seconds_to_nanoseconds(timestamp)))
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self._stop_words_task()
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self._stop_words_task()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
+            await self.flush_audio()
+
+    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+        await super()._handle_interruption(frame, direction)
+        self.reset_word_timestamps()
+
+    async def _stop_words_task(self):
+        if self._words_task:
+            self._words_task.cancel()
+            await self._words_task
+
+    async def _words_task_handler(self):
+        while True:
+            try:
+                (word, timestamp) = await self._words_queue.get()
+                if word == "LLMFullResponseEndFrame" and timestamp == 0:
+                    await self.push_frame(LLMFullResponseEndFrame())
+                else:
+                    frame = TextFrame(word)
+                    frame.pts = self._start_word_timestamp + timestamp
+                    await self.push_frame(frame)
+                self._words_queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.exception(f"{self} exception: {e}")
 
 
 class STTService(AIService):
