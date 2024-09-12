@@ -8,19 +8,27 @@ from typing import Any, List, Mapping, Optional, Tuple
 
 from dataclasses import dataclass, field
 
+from pipecat.clocks.base_clock import BaseClock
 from pipecat.transcriptions.language import Language
+from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 from pipecat.vad.vad_analyzer import VADParams
+
+
+def format_pts(pts: int | None):
+    return nanoseconds_to_str(pts) if pts else None
 
 
 @dataclass
 class Frame:
     id: int = field(init=False)
     name: str = field(init=False)
+    pts: Optional[int] = field(init=False)
 
     def __post_init__(self):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
+        self.pts: Optional[int] = None
 
     def __str__(self):
         return self.name
@@ -46,7 +54,14 @@ class AudioRawFrame(DataFrame):
         self.num_frames = int(len(self.audio) / (self.num_channels * 2))
 
     def __str__(self):
-        return f"{self.name}(size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
+        pts = format_pts(self.pts)
+        return f"{
+            self.name}(pts: {pts}, size: {
+            len(
+                self.audio)}, frames: {
+                self.num_frames}, sample_rate: {
+                    self.sample_rate}, channels: {
+                        self.num_channels})"
 
 
 @dataclass
@@ -60,7 +75,8 @@ class ImageRawFrame(DataFrame):
     format: str | None
 
     def __str__(self):
-        return f"{self.name}(size: {self.size}, format: {self.format})"
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, size: {self.size}, format: {self.format})"
 
 
 @dataclass
@@ -72,7 +88,8 @@ class URLImageRawFrame(ImageRawFrame):
     url: str | None
 
     def __str__(self):
-        return f"{self.name}(url: {self.url}, size: {self.size}, format: {self.format})"
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, url: {self.url}, size: {self.size}, format: {self.format})"
 
 
 @dataclass
@@ -84,7 +101,12 @@ class VisionImageRawFrame(ImageRawFrame):
     text: str | None
 
     def __str__(self):
-        return f"{self.name}(text: {self.text}, size: {self.size}, format: {self.format})"
+        pts = format_pts(self.pts)
+        return f"{
+            self.name}(pts: {pts}, text: {
+            self.text}, size: {
+            self.size}, format: {
+                self.format})"
 
 
 @dataclass
@@ -96,7 +118,12 @@ class UserImageRawFrame(ImageRawFrame):
     user_id: str
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, size: {self.size}, format: {self.format})"
+        pts = format_pts(self.pts)
+        return f"{
+            self.name}(pts: {pts}, user: {
+            self.user_id}, size: {
+            self.size}, format: {
+                self.format})"
 
 
 @dataclass
@@ -109,7 +136,8 @@ class SpriteFrame(Frame):
     images: List[ImageRawFrame]
 
     def __str__(self):
-        return f"{self.name}(size: {len(self.images)})"
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, size: {len(self.images)})"
 
 
 @dataclass
@@ -121,7 +149,8 @@ class TextFrame(DataFrame):
     text: str
 
     def __str__(self):
-        return f"{self.name}(text: {self.text})"
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, text: {self.text})"
 
 
 @dataclass
@@ -135,7 +164,12 @@ class TranscriptionFrame(TextFrame):
     language: Language | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
+        return f"{
+            self.name}(user: {
+            self.user_id}, text: {
+            self.text}, language: {
+                self.language}, timestamp: {
+                    self.timestamp})"
 
 
 @dataclass
@@ -147,7 +181,12 @@ class InterimTranscriptionFrame(TextFrame):
     language: Language | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
+        return f"{
+            self.name}(user: {
+            self.user_id}, text: {
+                self.text}, language: {
+                    self.language}, timestamp: {
+                        self.timestamp})"
 
 
 @dataclass
@@ -326,6 +365,7 @@ class ControlFrame(Frame):
 @dataclass
 class StartFrame(ControlFrame):
     """This is the first frame that should be pushed down a pipeline."""
+    clock: BaseClock
     allow_interruptions: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
