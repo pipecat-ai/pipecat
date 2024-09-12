@@ -74,8 +74,8 @@ async def main():
             tma_in,              # User responses
             llm,                 # LLM
             tts,                 # TTS
-            tma_out,             # Goes before the transport because cartesia has word-level timestamps!
             transport.output(),  # Transport bot output
+            tma_out              # Assistant spoken responses
         ])
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
