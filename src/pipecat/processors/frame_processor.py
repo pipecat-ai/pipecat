@@ -9,6 +9,7 @@ import time
 
 from enum import Enum
 
+from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -69,7 +70,10 @@ class FrameProcessorMetrics:
 
     async def start_llm_usage_metrics(self, tokens: dict):
         logger.debug(
-            f"{self._name} prompt tokens: {tokens['prompt_tokens']}, completion tokens: {tokens['completion_tokens']}")
+            f"{
+                self._name} prompt tokens: {
+                tokens['prompt_tokens']}, completion tokens: {
+                tokens['completion_tokens']}")
         return MetricsFrame(tokens=[tokens])
 
     async def start_tts_usage_metrics(self, text: str):
@@ -95,6 +99,9 @@ class FrameProcessor:
         self._prev: "FrameProcessor" | None = None
         self._next: "FrameProcessor" | None = None
         self._loop: asyncio.AbstractEventLoop = loop or asyncio.get_running_loop()
+
+        # Clock
+        self._clock: BaseClock | None = None
 
         # Properties
         self._allow_interruptions = False
@@ -177,8 +184,12 @@ class FrameProcessor:
     def get_parent(self) -> "FrameProcessor":
         return self._parent
 
+    def get_clock(self) -> BaseClock:
+        return self._clock
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
+            self._clock = frame.clock
             self._allow_interruptions = frame.allow_interruptions
             self._enable_metrics = frame.enable_metrics
             self._enable_usage_metrics = frame.enable_usage_metrics
