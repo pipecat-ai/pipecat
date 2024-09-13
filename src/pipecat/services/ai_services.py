@@ -6,7 +6,6 @@
 
 import asyncio
 import io
-import time
 import wave
 
 from abc import abstractmethod
@@ -171,7 +170,7 @@ class TTSService(AIService):
             # if True, TTSService will push TTSStoppedFrames, otherwise subclass must do it
             push_stop_frames: bool = False,
             # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
-            stop_frame_timeout_s: float = 0.8,
+            stop_frame_timeout_s: float = 1.0,
             **kwargs):
         super().__init__(**kwargs)
         self._aggregate_sentences: bool = aggregate_sentences
@@ -319,16 +318,16 @@ class AsyncTTSService(TTSService):
 class AsyncWordTTSService(AsyncTTSService):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._start_word_timestamp = None
+        self._initial_word_timestamp = -1
         self._words_queue = asyncio.Queue()
         self._words_task = self.get_event_loop().create_task(self._words_task_handler())
 
-    def init_word_timestamps(self):
-        if not self._start_word_timestamp:
-            self._start_word_timestamp = self.get_clock().get_time()
+    def start_word_timestamps(self):
+        if self._initial_word_timestamp == -1:
+            self._initial_word_timestamp = self.get_clock().get_time()
 
     def reset_word_timestamps(self):
-        self._start_word_timestamp = None
+        self._initial_word_timestamp = -1
         self._word_timestamps = []
 
     async def add_word_timestamps(self, word_times: List[Tuple[str, float]]):
@@ -366,7 +365,7 @@ class AsyncWordTTSService(AsyncTTSService):
                     await self.push_frame(LLMFullResponseEndFrame())
                 else:
                     frame = TextFrame(word)
-                    frame.pts = self._start_word_timestamp + timestamp
+                    frame.pts = self._initial_word_timestamp + timestamp
                     await self.push_frame(frame)
                 self._words_queue.task_done()
             except asyncio.CancelledError:
