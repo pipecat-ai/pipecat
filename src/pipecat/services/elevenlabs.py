@@ -51,22 +51,17 @@ def sample_rate_from_output_format(output_format: str) -> int:
 def calculate_word_times(
         alignment_info: Mapping[str, Any], cumulative_time: float
 ) -> List[Tuple[str, float]]:
-    end_times = [
-        s + d for s,
-        d in zip(
-            alignment_info["charStartTimesMs"],
-            alignment_info["charDurationsMs"])]
-    zipped_end_times = list(zip(alignment_info["chars"], end_times))
+    zipped_times = list(zip(alignment_info["chars"], alignment_info["charStartTimesMs"]))
 
     words = "".join(alignment_info["chars"]).split(" ")
 
-    # Calculate end time for each word. We do this by finding a space character
+    # Calculate start time for each word. We do this by finding a space character
     # and using the previous word time, also taking into account there might not
     # be a space at the end.
     times = []
-    for (i, (a, b)) in enumerate(zipped_end_times):
-        if a == " " or i == len(zipped_end_times) - 1:
-            t = cumulative_time + (zipped_end_times[i - 1][1] / 1000.0)
+    for (i, (a, b)) in enumerate(zipped_times):
+        if a == " " or i == len(zipped_times) - 1:
+            t = cumulative_time + (zipped_times[i - 1][1] / 1000.0)
             times.append(t)
 
     word_times = list(zip(words, times))

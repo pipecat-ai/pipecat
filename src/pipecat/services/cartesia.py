@@ -177,7 +177,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                     await self.add_word_timestamps([("LLMFullResponseEndFrame", 0)])
                 elif msg["type"] == "timestamps":
                     await self.add_word_timestamps(
-                        list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["end"]))
+                        list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
                     )
                 elif msg["type"] == "chunk":
                     await self.stop_ttfb_metrics()
