@@ -58,8 +58,6 @@ def calculate_word_times(
             alignment_info["charDurationsMs"])]
     zipped_end_times = list(zip(alignment_info["chars"], end_times))
 
-    # Get the start time of every character that appears after a space and
-    # match this to the word
     words = "".join(alignment_info["chars"]).split(" ")
 
     # Calculate end time for each word. We do this by finding a space character
@@ -169,8 +167,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
             voice_id = self._voice_id
             model = self._model
             output_format = self._params.output_format
-            url = f"{
-                self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}"
+            url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}"
             self._websocket = await websockets.connect(url)
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
             self._keepalive_task = self.get_event_loop().create_task(self._keepalive_task_handler())

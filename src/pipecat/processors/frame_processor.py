@@ -70,10 +70,7 @@ class FrameProcessorMetrics:
 
     async def start_llm_usage_metrics(self, tokens: dict):
         logger.debug(
-            f"{
-                self._name} prompt tokens: {
-                tokens['prompt_tokens']}, completion tokens: {
-                tokens['completion_tokens']}")
+            f"{self._name} prompt tokens: {tokens['prompt_tokens']}, completion tokens: {tokens['completion_tokens']}")
         return MetricsFrame(tokens=[tokens])
 
     async def start_tts_usage_metrics(self, text: str):
