@@ -181,7 +181,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                     )
                 elif msg["type"] == "chunk":
                     await self.stop_ttfb_metrics()
-                    self.init_word_timestamps()
+                    self.start_word_timestamps()
                     frame = AudioRawFrame(
                         audio=base64.b64decode(msg["data"]),
                         sample_rate=self._output_format["sample_rate"],

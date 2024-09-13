@@ -60,6 +60,8 @@ class LmntTTSService(AsyncTTSService):
         self._speech = None
         self._connection = None
         self._receive_task = None
+        # Indicates if we have sent TTSStartedFrame. It will reset to False when
+        # there's an interruption or TTSStoppedFrame.
         self._started = False
 
     def can_generate_metrics(self) -> bool:
