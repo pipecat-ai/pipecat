@@ -53,7 +53,8 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     enable_chat: bool = True
     enable_shared_chat_history: bool = True
     enable_advanced_chat: bool = True
-
+    enable_recording: str = 'cloud'
+    
     @property
     def sip_endpoint(self) -> str:
         if not self.sip_uri:
