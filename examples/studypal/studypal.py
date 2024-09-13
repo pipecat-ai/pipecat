@@ -147,8 +147,8 @@ Your task is to help the user understand and learn from this article in 2 senten
             tma_in,
             llm,
             tts,
-            tma_out,
             transport.output(),
+            tma_out,
         ])
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
