@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A clock can now be specified to `PipelineTask` (defaults to
+  `SystemClock`). This clock will be passed to each frame processor via the
+  `StartFrame`.
+
+- Added pipeline clocks. A pipeline clock is used by the output transport to
+  know when a frame needs to be presented. For that, all frames now have an
+  optional `pts` field (prensentation timestamp). There's currently just one
+  clock implementation `SystemClock` and the `pts` field is currently only used
+  for `TextFrame`s (audio and image frames will be next).
+
 - `DailyTransport` now supports setting the audio bitrate to improve audio
   quality through the `DailyParams.audio_out_bitrate` parameter. The new
   default is 96kbps.
@@ -29,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added new `transcriptions.Language` enum.
 
 ### Changed
+
+- `CartesiaTTSService` and `ElevenLabsTTSService` now add presentation
+  timestamps to their text output. This allows the output transport to push the
+  text frames downstream at almost the same time the words are spoken. We say
+  "almost" because currently the audio frames don't have presentation timestamp
+  but they should be played at roughly the same time.
 
 - `DailyTransport.on_joined` event now returns the full session data instead of
   just the participant.

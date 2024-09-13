@@ -8,6 +8,7 @@
 import asyncio
 import itertools
 import time
+import sys
 
 from PIL import Image
 from typing import List
@@ -30,10 +31,13 @@ from pipecat.frames.frames import (
     SystemFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TextFrame,
     TransportMessageFrame)
 from pipecat.transports.base_transport import TransportParams
 
 from loguru import logger
+
+from pipecat.utils.time import nanoseconds_to_seconds
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -64,7 +68,7 @@ class BaseOutputTransport(FrameProcessor):
         # Create sink frame task. This is the task that will actually write
         # audio or video frames. We write audio/video in a task so we can keep
         # generating frames upstream while, for example, the audio is playing.
-        self._create_sink_task()
+        self._create_sink_tasks()
 
         # Create push frame task. This is the task that will push frames in
         # order. We also guarantee that all frames are pushed in the same task.
@@ -149,6 +153,7 @@ class BaseOutputTransport(FrameProcessor):
             await self._sink_queue.put(frame)
             await self.start(frame)
         elif isinstance(frame, EndFrame):
+            await self._sink_clock_queue.put((sys.maxsize, frame.id, frame))
             await self._sink_queue.put(frame)
             await self.stop(frame)
         # Other frames.
@@ -158,6 +163,9 @@ class BaseOutputTransport(FrameProcessor):
             await self._handle_image(frame)
         elif isinstance(frame, TransportMessageFrame) and frame.urgent:
             await self.send_message(frame)
+        # TODO(aleix): Images and audio should support presentation timestamps.
+        elif frame.pts:
+            await self._sink_clock_queue.put((frame.pts, frame.id, frame))
         else:
             await self._sink_queue.put(frame)
 
@@ -166,10 +174,14 @@ class BaseOutputTransport(FrameProcessor):
             return
 
         if isinstance(frame, StartInterruptionFrame):
-            # Stop sink task.
+            # Stop sink tasks.
             self._sink_task.cancel()
             await self._sink_task
-            self._create_sink_task()
+            # Stop sink clock tasks.
+            self._sink_clock_task.cancel()
+            await self._sink_clock_task
+            # Create sink tasks.
+            self._create_sink_tasks()
             # Stop push task.
             self._push_frame_task.cancel()
             await self._push_frame_task
@@ -201,42 +213,82 @@ class BaseOutputTransport(FrameProcessor):
         else:
             await self._sink_queue.put(frame)
 
-    def _create_sink_task(self):
+    #
+    # Sink tasks
+    #
+
+    def _create_sink_tasks(self):
         loop = self.get_event_loop()
         self._sink_queue = asyncio.Queue()
         self._sink_task = loop.create_task(self._sink_task_handler())
+        self._sink_clock_queue = asyncio.PriorityQueue()
+        self._sink_clock_task = loop.create_task(self._sink_clock_task_handler())
+
+    async def _sink_frame_handler(self, frame: Frame):
+        if isinstance(frame, AudioRawFrame):
+            await self.write_raw_audio_frames(frame.audio)
+            await self._internal_push_frame(frame)
+            await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+        elif isinstance(frame, ImageRawFrame):
+            await self._set_camera_image(frame)
+        elif isinstance(frame, SpriteFrame):
+            await self._set_camera_images(frame.images)
+        elif isinstance(frame, TransportMessageFrame):
+            await self.send_message(frame)
+        elif isinstance(frame, TTSStartedFrame):
+            await self._bot_started_speaking()
+            await self._internal_push_frame(frame)
+        elif isinstance(frame, TTSStoppedFrame):
+            await self._bot_stopped_speaking()
+            await self._internal_push_frame(frame)
+        else:
+            await self._internal_push_frame(frame)
 
     async def _sink_task_handler(self):
         running = True
         while running:
             try:
                 frame = await self._sink_queue.get()
-                if isinstance(frame, AudioRawFrame):
-                    await self.write_raw_audio_frames(frame.audio)
-                    await self._internal_push_frame(frame)
-                    await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
-                elif isinstance(frame, ImageRawFrame):
-                    await self._set_camera_image(frame)
-                elif isinstance(frame, SpriteFrame):
-                    await self._set_camera_images(frame.images)
-                elif isinstance(frame, TransportMessageFrame):
-                    await self.send_message(frame)
-                elif isinstance(frame, TTSStartedFrame):
-                    await self._bot_started_speaking()
-                    await self._internal_push_frame(frame)
-                elif isinstance(frame, TTSStoppedFrame):
-                    await self._bot_stopped_speaking()
-                    await self._internal_push_frame(frame)
-                else:
-                    await self._internal_push_frame(frame)
-
+                await self._sink_frame_handler(frame)
                 running = not isinstance(frame, EndFrame)
-
                 self._sink_queue.task_done()
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.exception(f"{self} error processing sink queue: {e}")
+
+    async def _sink_clock_frame_handler(self, frame: Frame):
+        # TODO(aleix): For now we just process TextFrame. But we should process
+        # audio and video as well.
+        if isinstance(frame, TextFrame):
+            await self._internal_push_frame(frame)
+
+    async def _sink_clock_task_handler(self):
+        running = True
+        while running:
+            try:
+                timestamp, _, frame = await self._sink_clock_queue.get()
+
+                # If we hit an EndFrame, we cna finish right away.
+                running = not isinstance(frame, EndFrame)
+
+                # If we have a frame we check it's presentation timestamp. If it
+                # has already passed we process it, otherwise we wait until it's
+                # time to process it.
+                if running:
+                    current_time = self.get_clock().get_time()
+                    if timestamp <= current_time:
+                        await self._sink_clock_frame_handler(frame)
+                    else:
+                        wait_time = nanoseconds_to_seconds(timestamp - current_time)
+                        await asyncio.sleep(wait_time)
+                        await self._sink_frame_handler(frame)
+
+                self._sink_clock_queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.exception(f"{self} error processing sink clock queue: {e}")
 
     async def _bot_started_speaking(self):
         logger.debug("Bot started speaking")
