@@ -12,8 +12,8 @@ import wave
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, StartFrame
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, Frame, StartFrame, StartInterruptionFrame
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -93,11 +93,18 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._params = params
         self._websocket_audio_buffer = bytes()
 
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartInterruptionFrame):
+            await self._write_frame(frame)
+
     async def write_raw_audio_frames(self, frames: bytes):
         self._websocket_audio_buffer += frames
         while len(self._websocket_audio_buffer) >= self._params.audio_frame_size:
             frame = AudioRawFrame(
-                audio=self._websocket_audio_buffer[:self._params.audio_frame_size],
+                audio=self._websocket_audio_buffer[:
+                                                   self._params.audio_frame_size],
                 sample_rate=self._params.audio_out_sample_rate,
                 num_channels=self._params.audio_out_channels
             )
@@ -121,7 +128,13 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             if payload and self._websocket.client_state == WebSocketState.CONNECTED:
                 await self._websocket.send_text(payload)
 
-            self._websocket_audio_buffer = self._websocket_audio_buffer[self._params.audio_frame_size:]
+            self._websocket_audio_buffer = self._websocket_audio_buffer[
+                self._params.audio_frame_size:]
+
+    async def _write_frame(self, frame: Frame):
+        payload = self._params.serializer.serialize(frame)
+        if payload and self._websocket.client_state == WebSocketState.CONNECTED:
+            await self._websocket.send_text(payload)
 
 
 class FastAPIWebsocketTransport(BaseTransport):
