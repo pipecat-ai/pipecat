@@ -55,13 +55,7 @@ class AudioRawFrame(DataFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{
-            self.name}(pts: {pts}, size: {
-            len(
-                self.audio)}, frames: {
-                self.num_frames}, sample_rate: {
-                    self.sample_rate}, channels: {
-                        self.num_channels})"
+        return f"{self.name}(pts: {pts}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
 
 
 @dataclass
@@ -102,11 +96,7 @@ class VisionImageRawFrame(ImageRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{
-            self.name}(pts: {pts}, text: {
-            self.text}, size: {
-            self.size}, format: {
-                self.format})"
+        return f"{self.name}(pts: {pts}, text: {self.text}, size: {self.size}, format: {self.format})"
 
 
 @dataclass
@@ -119,11 +109,7 @@ class UserImageRawFrame(ImageRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{
-            self.name}(pts: {pts}, user: {
-            self.user_id}, size: {
-            self.size}, format: {
-                self.format})"
+        return f"{self.name}(pts: {pts}, user: {self.user_id}, size: {self.size}, format: {self.format})"
 
 
 @dataclass
@@ -164,12 +150,7 @@ class TranscriptionFrame(TextFrame):
     language: Language | None = None
 
     def __str__(self):
-        return f"{
-            self.name}(user: {
-            self.user_id}, text: {
-            self.text}, language: {
-                self.language}, timestamp: {
-                    self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -181,12 +162,7 @@ class InterimTranscriptionFrame(TextFrame):
     language: Language | None = None
 
     def __str__(self):
-        return f"{
-            self.name}(user: {
-            self.user_id}, text: {
-                self.text}, language: {
-                    self.language}, timestamp: {
-                        self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
