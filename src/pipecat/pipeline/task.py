@@ -10,6 +10,8 @@ from typing import AsyncIterable, Iterable
 
 from pydantic import BaseModel
 
+from pipecat.clocks.base_clock import BaseClock
+from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -60,11 +62,16 @@ class Source(FrameProcessor):
 
 class PipelineTask:
 
-    def __init__(self, pipeline: BasePipeline, params: PipelineParams = PipelineParams()):
+    def __init__(
+            self,
+            pipeline: BasePipeline,
+            params: PipelineParams = PipelineParams(),
+            clock: BaseClock = SystemClock()):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
 
         self._pipeline = pipeline
+        self._clock = clock
         self._params = params
         self._finished = False
 
@@ -116,11 +123,14 @@ class PipelineTask:
         return MetricsFrame(ttfb=ttfb, processing=processing)
 
     async def _process_down_queue(self):
+        self._clock.start()
+
         start_frame = StartFrame(
             allow_interruptions=self._params.allow_interruptions,
             enable_metrics=self._params.enable_metrics,
             enable_usage_metrics=self._params.enable_metrics,
-            report_only_initial_ttfb=self._params.report_only_initial_ttfb
+            report_only_initial_ttfb=self._params.report_only_initial_ttfb,
+            clock=self._clock
         )
         await self._source.process_frame(start_frame, FrameDirection.DOWNSTREAM)
 

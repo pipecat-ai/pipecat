@@ -1,5 +1,4 @@
 import asyncio
-import aiohttp
 import os
 import sys
 import argparse
@@ -29,75 +28,74 @@ daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
 async def main(room_url: str, token: str, callId: str, callDomain: str):
-    async with aiohttp.ClientSession() as session:
-        # diallin_settings are only needed if Daily's SIP URI is used
-        # If you are handling this via Twilio, Telnyx, set this to None
-        # and handle call-forwarding when on_dialin_ready fires.
-        diallin_settings = DailyDialinSettings(
-            call_id=callId,
-            call_domain=callDomain
+    # diallin_settings are only needed if Daily's SIP URI is used
+    # If you are handling this via Twilio, Telnyx, set this to None
+    # and handle call-forwarding when on_dialin_ready fires.
+    diallin_settings = DailyDialinSettings(
+        call_id=callId,
+        call_domain=callDomain
+    )
+
+    transport = DailyTransport(
+        room_url,
+        token,
+        "Chatbot",
+        DailyParams(
+            api_url=daily_api_url,
+            api_key=daily_api_key,
+            dialin_settings=diallin_settings,
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            camera_out_enabled=False,
+            vad_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+            transcription_enabled=True,
         )
+    )
 
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Chatbot",
-            DailyParams(
-                api_url=daily_api_url,
-                api_key=daily_api_key,
-                dialin_settings=diallin_settings,
-                audio_in_enabled=True,
-                audio_out_enabled=True,
-                camera_out_enabled=False,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-                transcription_enabled=True,
-            )
-        )
+    tts = ElevenLabsTTSService(
+        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+        voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
+    )
 
-        tts = ElevenLabsTTSService(
-            aiohttp_session=session,
-            api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
-        )
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model="gpt-4o"
+    )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+    messages = [
+        {
+            "role": "system",
+            "content": "You are Chatbot, a friendly, helpful robot. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by saying 'Oh, hello! Who dares dial me at this hour?!'.",
+        },
+    ]
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are Chatbot, a friendly, helpful robot. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by saying 'Oh, hello! Who dares dial me at this hour?!'.",
-            },
-        ]
+    tma_in = LLMUserResponseAggregator(messages)
+    tma_out = LLMAssistantResponseAggregator(messages)
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+    pipeline = Pipeline([
+        transport.input(),
+        tma_in,
+        llm,
+        tts,
+        transport.output(),
+        tma_out,
+    ])
 
-        pipeline = Pipeline([
-            transport.input(),
-            tma_in,
-            llm,
-            tts,
-            transport.output(),
-            tma_out,
-        ])
+    task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+    @transport.event_handler("on_first_participant_joined")
+    async def on_first_participant_joined(transport, participant):
+        transport.capture_participant_transcription(participant["id"])
+        await task.queue_frames([LLMMessagesFrame(messages)])
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
-            await task.queue_frames([LLMMessagesFrame(messages)])
+    @transport.event_handler("on_participant_left")
+    async def on_participant_left(transport, participant, reason):
+        await task.queue_frame(EndFrame())
 
-        @transport.event_handler("on_participant_left")
-        async def on_participant_left(transport, participant, reason):
-            await task.queue_frame(EndFrame())
+    runner = PipelineRunner()
 
-        runner = PipelineRunner()
-
-        await runner.run(task)
+    await runner.run(task)
 
 
 if __name__ == "__main__":
