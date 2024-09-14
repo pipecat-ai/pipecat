@@ -102,6 +102,10 @@ class CartesiaTTSService(AsyncWordTTSService):
         self._context_id = None
         self._receive_task = None
 
+        # Initialize default values for speed and emotion controls
+        self._speed = "normal"  # default speed
+        self._emotion = []  # default to no emotion
+
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -200,8 +204,19 @@ class CartesiaTTSService(AsyncWordTTSService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
 
+        # Method to set speed and emotion externally
+    def set_voice_controls(self, speed: str = "normal", emotion: list[str] = None):
+        """
+        Set the voice controls for TTS (speed and emotion).
+        """
+        self._speed = speed
+        self._emotion = emotion or []
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        """
+        Generate TTS using the configured speed and emotion settings.
+        """
+        logger.debug(f"Generating TTS: [{text}], Speed: [{self._speed}], Emotion: [{self._emotion}]")
 
         try:
             if not self._websocket:
@@ -211,6 +226,12 @@ class CartesiaTTSService(AsyncWordTTSService):
                 await self.push_frame(TTSStartedFrame())
                 await self.start_ttfb_metrics()
                 self._context_id = str(uuid.uuid4())
+
+            # Define the voice control parameters using stored instance variables
+            voice_controls = {
+                "speed": self._speed,
+                "emotion": self._emotion
+            }
 
             msg = {
                 "transcript": text + " ",
@@ -224,7 +245,9 @@ class CartesiaTTSService(AsyncWordTTSService):
                 "output_format": self._output_format,
                 "language": self._language,
                 "add_timestamps": True,
+                "__experimental_controls": voice_controls  # Add the voice controls
             }
+
             try:
                 await self._websocket.send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
@@ -234,6 +257,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                 await self._disconnect()
                 await self._connect()
                 return
+
             yield None
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
