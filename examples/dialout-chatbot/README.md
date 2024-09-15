@@ -2,22 +2,14 @@
  <img alt="pipecat" width="300px" height="auto" src="image.png">
 </div>
 
-# Dialin example
+# Dialout example
 
-Example project that demonstrates how to add phone number dialin to your Pipecat bots. We include examples for both Daily (`bot_daily.py`) and Twilio (`bot_twilio.py`), depending on who you want to use as a phone vendor.
+Example project that demonstrates how to add phone number dialout to your Pipecat bots. This example is based on the Dialin example, but only covers the Daily use case, not Twilio.
 
 - 🔁 Transport: Daily WebRTC
 - 💬 Speech-to-Text: Deepgram via Daily transport
 - 🤖 LLM: GPT4-o / OpenAI
 - 🔉 Text-to-Speech: ElevenLabs
-
-#### Should I use Daily or Twilio as a vendor?
-
-If you're starting from scratch, using Daily to provision phone numbers alongside Daily as a transport offers some convenience (such as automatic call forwarding.)
-
-If you already have Twilio numbers and workflows that you want to connect to your Pipecat bots, there is some additional configuration required (you'll need to create a `on_dialin_ready` and use the Twilio client to trigger the forward.)
-
-You can read more about this, as well as see respective walkthroughs in our docs.
 
 ## Setup
 
@@ -37,18 +29,10 @@ Run `bot_runner.py` to handle incoming HTTP requests:
 
 Then target the following URL:
 
-`POST /daily_start_bot`
+`POST /outbound_call`
 
 For more configuration options, please consult Daily's API documentation.
 
-
-## Using Twilio numbers
-
-As above, but target the following URL:
-
-`POST /twilio_start_bot`
-
-For more configuration options, please consult Twilio's API documentation.
 
 ## Deployment example
 
