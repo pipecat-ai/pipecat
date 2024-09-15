@@ -124,6 +124,5 @@ if __name__ == "__main__":
     parser.add_argument("-d", type=str, help="Call Domain")
     parser.add_argument("-p", type=str, help="Phone Number")
     config = parser.parse_args()
-    print(f"Config: {config}")
 
     asyncio.run(main(config.u, config.t, config.i, config.d, config.p))
