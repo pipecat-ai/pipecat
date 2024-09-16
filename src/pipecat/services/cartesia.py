@@ -4,23 +4,32 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
-import base64
-import io
 import json
-import time
 import uuid
+import base64
+import asyncio
+import time
+
 from typing import AsyncGenerator
 
-from loguru import logger
-
-from pipecat.frames.frames import (AudioRawFrame, CancelFrame, EndFrame,
-                                   ErrorFrame, Frame, LLMFullResponseEndFrame,
-                                   StartFrame, StartInterruptionFrame,
-                                   TextFrame, TTSStartedFrame, TTSStoppedFrame)
+from pipecat.frames.frames import (
+    CancelFrame,
+    ErrorFrame,
+    Frame,
+    AudioRawFrame,
+    StartInterruptionFrame,
+    StartFrame,
+    EndFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+    TextFrame,
+    LLMFullResponseEndFrame
+)
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AsyncWordTTSService
 from pipecat.transcriptions.language import Language
+from pipecat.services.ai_services import AsyncWordTTSService
+
+from loguru import logger
 
 # See .env.example for Cartesia configuration needed
 try:
