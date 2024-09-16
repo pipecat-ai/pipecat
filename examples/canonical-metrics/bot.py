@@ -20,8 +20,10 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.processors.canonical_metrics_processor import CanonicalMetrics
+from pipecat.processors.audio.audio_buffer_processor import \
+    AudioBufferProcessor
 from pipecat.processors.user_marker_processor import UserMarkerProcessor
+from pipecat.services.canonical import CanonicalMetricsService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -103,7 +105,12 @@ async def main():
         call completion, CanonicalMetrics will send the audio buffer to Canonical for
         analysis. Visit https://voice.canonical.chat to learn more.
         """
-        canonical = CanonicalMetrics(
+        audio_buffer_processor = AudioBufferProcessor()
+        canonical = CanonicalMetricsService(
+            audio_buffer_processor=audio_buffer_processor,
+            aiohttp_session=session,
+            api_key=os.getenv("CANONICAL_API_KEY"),
+            api_url=os.getenv("CANONICAL_API_URL"),
             call_id=str(uuid.uuid4()),
             assistant="pipecat-chatbot",
             assistant_speaks_first=True,
@@ -111,11 +118,12 @@ async def main():
         usermarker = UserMarkerProcessor()
         pipeline = Pipeline([
             transport.input(),  # microphone
-            usermarker,  # used to mark the user's audio in the pipeline
+            usermarker,
             user_response,
             llm,
             tts,
-            canonical,  # captures audio and uploads to Canonical AI for metrics
+            audio_buffer_processor, # captures audio into a buffer
+            canonical,  # uploads audio buffer to Canonical AI for metrics
             transport.output(),
             assistant_response,
         ])
