@@ -92,7 +92,7 @@ class CartesiaTTSService(TTSService):
         self._cartesia_version = cartesia_version
         self._url = url
         self._voice_id = voice_id
-        self._model_id = model_id
+        self._model = model_id
         self._output_format = {
             "container": "raw",
             "encoding": encoding,
@@ -112,7 +112,7 @@ class CartesiaTTSService(TTSService):
 
     async def set_model(self, model: str):
         logger.debug(f"Switching TTS model to: [{model}]")
-        self._model_id = model
+        self._model = model
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
@@ -253,7 +253,7 @@ class CartesiaTTSService(TTSService):
                 "transcript": text + " ",
                 "continue": True,
                 "context_id": self._context_id,
-                "model_id": self._model_id,
+                "model_id": self._model,
                 "voice": {
                     "mode": "id",
                     "id": self._voice_id

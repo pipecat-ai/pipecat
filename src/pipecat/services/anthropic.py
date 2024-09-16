@@ -252,8 +252,6 @@ class AnthropicLLMService(LLMService):
             cache_read_input_tokens: int):
         if prompt_tokens or completion_tokens or cache_creation_input_tokens or cache_read_input_tokens:
             tokens = {
-                "processor": self.name,
-                "model": self._model,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "cache_creation_input_tokens": cache_creation_input_tokens,

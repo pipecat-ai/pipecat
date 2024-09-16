@@ -138,8 +138,6 @@ class BaseOpenAILLMService(LLMService):
         async for chunk in chunk_stream:
             if chunk.usage:
                 tokens = {
-                    "processor": self.name,
-                    "model": self._model,
                     "prompt_tokens": chunk.usage.prompt_tokens,
                     "completion_tokens": chunk.usage.completion_tokens,
                     "total_tokens": chunk.usage.total_tokens
@@ -182,8 +180,8 @@ class BaseOpenAILLMService(LLMService):
             if self.has_function(function_name):
                 await self._handle_function_call(context, tool_call_id, function_name, arguments)
             else:
-                raise OpenAIUnhandledFunctionException(
-                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
+                raise OpenAIUnhandledFunctionException(f"The LLM tried to call a function named '{
+                    function_name}', but there isn't a callback registered for that function.")
 
     async def _handle_function_call(
             self,

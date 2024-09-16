@@ -109,8 +109,6 @@ class TogetherLLMService(LLMService):
                 # logger.debug(f"Together LLM event: {chunk}")
                 if chunk.usage:
                     tokens = {
-                        "processor": self.name,
-                        "model": self._model,
                         "prompt_tokens": chunk.usage.prompt_tokens,
                         "completion_tokens": chunk.usage.completion_tokens,
                         "total_tokens": chunk.usage.total_tokens
