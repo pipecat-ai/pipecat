@@ -8,18 +8,18 @@
 import asyncio
 import io
 import wave
-from typing import Awaitable, Callable
 
-from loguru import logger
+from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.frames.frames import (AudioRawFrame, CancelFrame, EndFrame, Frame,
-                                   StartFrame, StartInterruptionFrame)
+from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, Frame, StartFrame, StartInterruptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+
+from loguru import logger
 
 try:
     from fastapi import WebSocket
