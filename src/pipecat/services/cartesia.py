@@ -4,32 +4,23 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import json
-import uuid
-import base64
 import asyncio
+import base64
+import io
+import json
 import time
-
+import uuid
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import (
-    CancelFrame,
-    ErrorFrame,
-    Frame,
-    AudioRawFrame,
-    StartInterruptionFrame,
-    StartFrame,
-    EndFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
-    TextFrame,
-    LLMFullResponseEndFrame
-)
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.transcriptions.language import Language
-from pipecat.services.ai_services import AsyncWordTTSService
-
 from loguru import logger
+
+from pipecat.frames.frames import (AudioRawFrame, CancelFrame, EndFrame,
+                                   ErrorFrame, Frame, LLMFullResponseEndFrame,
+                                   StartFrame, StartInterruptionFrame,
+                                   TextFrame, TTSStartedFrame, TTSStoppedFrame)
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import AsyncWordTTSService
+from pipecat.transcriptions.language import Language
 
 # See .env.example for Cartesia configuration needed
 try:
@@ -160,6 +151,25 @@ class CartesiaTTSService(AsyncWordTTSService):
         await self.stop_all_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
         self._context_id = None
+
+    async def flush_audio(self):
+        if not self._context_id or not self._websocket:
+            return
+        logger.debug("Flushing audio")
+        msg = {
+                "transcript": "",
+                "continue": False,
+                "context_id": self._context_id,
+                "model_id": self._model_id,
+                "voice": {
+                    "mode": "id",
+                    "id": self._voice_id
+                },
+                "output_format": self._output_format,
+                "language": self._language,
+                "add_timestamps": True,
+            }
+        await self._websocket.send(json.dumps(msg))
 
     async def _receive_task_handler(self):
         try:
