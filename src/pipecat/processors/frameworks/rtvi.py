@@ -8,12 +8,14 @@ import asyncio
 
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
+from dataclasses import dataclass
 
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    DataFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -114,6 +116,12 @@ class RTVIActionRun(BaseModel):
     service: str
     action: str
     arguments: Optional[List[RTVIActionRunArgument]] = None
+
+
+@dataclass
+class RTVIActionFrame(DataFrame):
+    rtvi_action_run: RTVIActionRun
+    message_id: Optional[str] = "webhook"
 
 
 class RTVIMessage(BaseModel):
@@ -377,6 +385,11 @@ class RTVIProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TransportMessageFrame):
             await self._message_queue.put(frame)
+        elif isinstance(frame, RTVIActionFrame):
+            if not frame.message_id:
+                # The response isn't going anywhere anyway
+                frame.message_id = "webhook"
+            await self._handle_action(frame.message_id, frame.rtvi_action_run)
         # Other frames
         else:
             await self.push_frame(frame, direction)
