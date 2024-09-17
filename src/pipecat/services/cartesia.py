@@ -136,24 +136,25 @@ class CartesiaTTSService(AsyncWordTTSService):
             )
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
         except Exception as e:
-            logger.exception(f"{self} initialization error: {e}")
+            logger.error(f"{self} initialization error: {e}")
             self._websocket = None
 
     async def _disconnect(self):
         try:
             await self.stop_all_metrics()
 
-            if self._receive_task:
-                self._receive_task.cancel()
-                await self._receive_task
-                self._receive_task = None
             if self._websocket:
                 await self._websocket.close()
                 self._websocket = None
 
+            if self._receive_task:
+                self._receive_task.cancel()
+                await self._receive_task
+                self._receive_task = None
+
             self._context_id = None
         except Exception as e:
-            logger.exception(f"{self} error closing websocket: {e}")
+            logger.error(f"{self} error closing websocket: {e}")
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
@@ -166,18 +167,18 @@ class CartesiaTTSService(AsyncWordTTSService):
             return
         logger.debug("Flushing audio")
         msg = {
-                "transcript": "",
-                "continue": False,
-                "context_id": self._context_id,
-                "model_id": self._model_id,
-                "voice": {
-                    "mode": "id",
-                    "id": self._voice_id
-                },
-                "output_format": self._output_format,
-                "language": self._language,
-                "add_timestamps": True,
-            }
+            "transcript": "",
+            "continue": False,
+            "context_id": self._context_id,
+            "model_id": self._model_id,
+            "voice": {
+                "mode": "id",
+                "id": self._voice_id
+            },
+            "output_format": self._output_format,
+            "language": self._language,
+            "add_timestamps": True,
+        }
         await self._websocket.send(json.dumps(msg))
 
     async def _receive_task_handler(self):
@@ -217,7 +218,7 @@ class CartesiaTTSService(AsyncWordTTSService):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            logger.error(f"{self} exception: {e}")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -255,4 +256,4 @@ class CartesiaTTSService(AsyncWordTTSService):
                 return
             yield None
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            logger.error(f"{self} exception: {e}")
