@@ -107,7 +107,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
 
         self._api_key = api_key
         self._voice_id = voice_id
-        self._model = model
+        self.set_model_name(model)
         self._url = url
         self._params = params
 
@@ -122,8 +122,8 @@ class ElevenLabsTTSService(AsyncWordTTSService):
         return True
 
     async def set_model(self, model: str):
+        await super().set_model(model)
         logger.debug(f"Switching TTS model to: [{model}]")
-        self._model = model
         await self._disconnect()
         await self._connect()
 
@@ -160,7 +160,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
     async def _connect(self):
         try:
             voice_id = self._voice_id
-            model = self._model
+            model = self.model_name
             output_format = self._params.output_format
             url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}"
             self._websocket = await websockets.connect(url)

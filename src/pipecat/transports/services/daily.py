@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     TransportMessageFrame,
     UserImageRawFrame,
     UserImageRequestFrame)
+from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData, TTFBMetricsData, TTSUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
@@ -731,14 +732,23 @@ class DailyOutputTransport(BaseOutputTransport):
 
     async def send_metrics(self, frame: MetricsFrame):
         metrics = {}
-        if frame.ttfb:
-            metrics["ttfb"] = frame.ttfb
-        if frame.processing:
-            metrics["processing"] = frame.processing
-        if frame.tokens:
-            metrics["tokens"] = frame.tokens
-        if frame.characters:
-            metrics["characters"] = frame.characters
+        for d in frame.data:
+            if isinstance(d, TTFBMetricsData):
+                if "ttfb" not in metrics:
+                    metrics["ttfb"] = []
+                metrics["ttfb"].append(d.model_dump())
+            elif isinstance(d, ProcessingMetricsData):
+                if "processing" not in metrics:
+                    metrics["processing"] = []
+                metrics["processing"].append(d.model_dump())
+            elif isinstance(d, LLMUsageMetricsData):
+                if "tokens" not in metrics:
+                    metrics["tokens"] = []
+                metrics["tokens"].append(d.value.model_dump(exclude_none=True))
+            elif isinstance(d, TTSUsageMetricsData):
+                if "characters" not in metrics:
+                    metrics["characters"] = []
+                metrics["characters"].append(d.model_dump())
 
         message = DailyTransportMessageFrame(message={
             "type": "pipecat-metrics",

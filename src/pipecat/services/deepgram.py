@@ -135,6 +135,7 @@ class DeepgramSTTService(STTService):
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
 
     async def set_model(self, model: str):
+        await super().set_model(model)
         logger.debug(f"Switching STT model to: [{model}]")
         self._live_options.model = model
         await self._disconnect()

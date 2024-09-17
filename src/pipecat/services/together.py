@@ -18,9 +18,7 @@ from pipecat.frames.frames import (
     Frame,
     LLMModelUpdateFrame,
     TextFrame,
-    VisionImageRawFrame,
     UserImageRequestFrame,
-    UserImageRawFrame,
     LLMMessagesFrame,
     LLMFullResponseStartFrame,
     LLMFullResponseEndFrame,
@@ -28,6 +26,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     StartInterruptionFrame
 )
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
@@ -69,7 +68,7 @@ class TogetherLLMService(LLMService):
             **kwargs):
         super().__init__(**kwargs)
         self._client = AsyncTogether(api_key=api_key)
-        self._model = model
+        self.set_model_name(model)
         self._max_tokens = max_tokens
 
     def can_generate_metrics(self) -> bool:
@@ -95,7 +94,7 @@ class TogetherLLMService(LLMService):
 
             stream = await self._client.chat.completions.create(
                 messages=context.messages,
-                model=self._model,
+                model=self.model_name,
                 max_tokens=self._max_tokens,
                 stream=True,
             )
@@ -108,13 +107,11 @@ class TogetherLLMService(LLMService):
             async for chunk in stream:
                 # logger.debug(f"Together LLM event: {chunk}")
                 if chunk.usage:
-                    tokens = {
-                        "processor": self.name,
-                        "model": self._model,
-                        "prompt_tokens": chunk.usage.prompt_tokens,
-                        "completion_tokens": chunk.usage.completion_tokens,
-                        "total_tokens": chunk.usage.total_tokens
-                    }
+                    tokens = LLMTokenUsage(
+                        prompt_tokens=chunk.usage.prompt_tokens,
+                        completion_tokens=chunk.usage.completion_tokens,
+                        total_tokens=chunk.usage.total_tokens
+                    )
                     await self.start_llm_usage_metrics(tokens)
 
                 if len(chunk.choices) == 0:
@@ -156,7 +153,7 @@ class TogetherLLMService(LLMService):
             context = TogetherLLMContext.from_messages(frame.messages)
         elif isinstance(frame, LLMModelUpdateFrame):
             logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self._model = frame.model
+            self.set_model_name(frame.model)
         else:
             await self.push_frame(frame, direction)
 

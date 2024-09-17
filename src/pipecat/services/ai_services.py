@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     UserImageRequestFrame,
     VisionImageRawFrame
 )
+from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.utils.audio import calculate_audio_volume
@@ -46,6 +47,15 @@ from loguru import logger
 class AIService(FrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._model_name: str = ""
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    def set_model_name(self, model: str):
+        self._model_name = model
+        self.set_core_metrics_data(MetricsData(processor=self.name, model=self._model_name))
 
     async def start(self, frame: StartFrame):
         pass
@@ -158,7 +168,7 @@ class TTSService(AIService):
 
     @abstractmethod
     async def set_model(self, model: str):
-        pass
+        self.set_model_name(model)
 
     @abstractmethod
     async def set_voice(self, voice: str):
@@ -367,7 +377,7 @@ class STTService(AIService):
 
     @abstractmethod
     async def set_model(self, model: str):
-        pass
+        self.set_model_name(model)
 
     @abstractmethod
     async def set_language(self, language: Language):

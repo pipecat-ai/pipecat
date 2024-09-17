@@ -89,7 +89,7 @@ class CartesiaTTSService(AsyncWordTTSService):
         self._cartesia_version = cartesia_version
         self._url = url
         self._voice_id = voice_id
-        self._model_id = model_id
+        self.set_model_name(model_id)
         self._output_format = {
             "container": "raw",
             "encoding": encoding,
@@ -105,8 +105,8 @@ class CartesiaTTSService(AsyncWordTTSService):
         return True
 
     async def set_model(self, model: str):
+        await super().set_model(model)
         logger.debug(f"Switching TTS model to: [{model}]")
-        self._model_id = model
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
@@ -155,6 +155,11 @@ class CartesiaTTSService(AsyncWordTTSService):
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
+    def _get_websocket(self):
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
@@ -169,7 +174,7 @@ class CartesiaTTSService(AsyncWordTTSService):
             "transcript": "",
             "continue": False,
             "context_id": self._context_id,
-            "model_id": self._model_id,
+            "model_id": self.model_name,
             "voice": {
                 "mode": "id",
                 "id": self._voice_id
@@ -182,7 +187,7 @@ class CartesiaTTSService(AsyncWordTTSService):
 
     async def _receive_task_handler(self):
         try:
-            async for message in self._websocket:
+            async for message in self._get_websocket():
                 msg = json.loads(message)
                 if not msg or msg["context_id"] != self._context_id:
                     continue
@@ -235,7 +240,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                 "transcript": text + " ",
                 "continue": True,
                 "context_id": self._context_id,
-                "model_id": self._model_id,
+                "model_id": self.model_name,
                 "voice": {
                     "mode": "id",
                     "id": self._voice_id
@@ -245,7 +250,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                 "add_timestamps": True,
             }
             try:
-                await self._websocket.send(json.dumps(msg))
+                await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
