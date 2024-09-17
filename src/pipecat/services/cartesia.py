@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
-from pipecat.services.ai_services import TTSService
+from pipecat.services.ai_services import AsyncWordTTSService
 
 from loguru import logger
 
@@ -61,7 +61,7 @@ def language_to_cartesia_language(language: Language) -> str | None:
     return None
 
 
-class CartesiaTTSService(TTSService):
+class CartesiaTTSService(AsyncWordTTSService):
     class InputParams(BaseModel):
         model_id: Optional[str] = "sonic-english"
         encoding: Optional[str] = "pcm_s16le"
@@ -80,19 +80,17 @@ class CartesiaTTSService(TTSService):
             url: str = "wss://api.cartesia.ai/tts/websocket",
             params: InputParams = InputParams(),
             **kwargs):
-        super().__init__(**kwargs)
-
         # Aggregating sentences still gives cleaner-sounding results and fewer
-        # artifacts than streaming one word at a time. On average, waiting for
-        # a full sentence should only "cost" us 15ms or so with GPT-4o or a Llama 3
-        # model, and it's worth it for the better audio quality.
-        self._aggregate_sentences = True
-
-        # we don't want to automatically push LLM response text frames, because the
-        # context aggregators will add them to the LLM context even if we're
-        # interrupted. cartesia gives us word-by-word timestamps. we can use those
-        # to generate text frames ourselves aligned with the playout timing of the audio!
-        self._push_text_frames = False
+        # artifacts than streaming one word at a time. On average, waiting for a
+        # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
+        # 3 model, and it's worth it for the better audio quality.
+        #
+        # We also don't want to automatically push LLM response text frames,
+        # because the context aggregators will add them to the LLM context even
+        # if we're interrupted. Cartesia gives us word-by-word timestamps. We
+        # can use those to generate text frames ourselves aligned with the
+        # playout timing of the audio!
+        super().__init__(aggregate_sentences=True, push_text_frames=False, **kwargs)
 
         self._api_key = api_key
         self._cartesia_version = cartesia_version
@@ -110,10 +108,7 @@ class CartesiaTTSService(TTSService):
 
         self._websocket = None
         self._context_id = None
-        self._context_id_start_timestamp = None
-        self._timestamped_words_buffer = []
         self._receive_task = None
-        self._context_appending_task = None
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -145,43 +140,55 @@ class CartesiaTTSService(TTSService):
     async def _connect(self):
         try:
             self._websocket = await websockets.connect(
-                f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
+                f"{self._url}?api_key={self._api_key}&cartesia_version={
+                    self._cartesia_version}"
             )
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
-            self._context_appending_task = self.get_event_loop().create_task(self._context_appending_task_handler())
         except Exception as e:
-            logger.exception(f"{self} initialization error: {e}")
+            logger.error(f"{self} initialization error: {e}")
             self._websocket = None
 
     async def _disconnect(self):
         try:
             await self.stop_all_metrics()
 
-            if self._context_appending_task:
-                self._context_appending_task.cancel()
-                await self._context_appending_task
-                self._context_appending_task = None
-            if self._receive_task:
-                self._receive_task.cancel()
-                await self._receive_task
-                self._receive_task = None
             if self._websocket:
                 await self._websocket.close()
                 self._websocket = None
 
+            if self._receive_task:
+                self._receive_task.cancel()
+                await self._receive_task
+                self._receive_task = None
+
             self._context_id = None
-            self._context_id_start_timestamp = None
-            self._timestamped_words_buffer = []
         except Exception as e:
-            logger.exception(f"{self} error closing websocket: {e}")
+            logger.error(f"{self} error closing websocket: {e}")
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
-        self._context_id = None
-        self._context_id_start_timestamp = None
-        self._timestamped_words_buffer = []
         await self.stop_all_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
+        self._context_id = None
+
+    async def flush_audio(self):
+        if not self._context_id or not self._websocket:
+            return
+        logger.debug("Flushing audio")
+        msg = {
+            "transcript": "",
+            "continue": False,
+            "context_id": self._context_id,
+            "model_id": self._model_id,
+            "voice": {
+                "mode": "id",
+                "id": self._voice_id
+            },
+            "output_format": self._output_format,
+            "language": self._language,
+            "add_timestamps": True,
+        }
+        await self._websocket.send(json.dumps(msg))
 
     async def _receive_task_handler(self):
         try:
@@ -196,16 +203,15 @@ class CartesiaTTSService(TTSService):
                     # because we are likely still playing out audio and need the
                     # timestamp to set send context frames.
                     self._context_id = None
-                    self._timestamped_words_buffer.append(("LLMFullResponseEndFrame", 0))
+                    await self.add_word_timestamps([("LLMFullResponseEndFrame", 0)])
                 elif msg["type"] == "timestamps":
-                    # logger.debug(f"TIMESTAMPS: {msg}")
-                    self._timestamped_words_buffer.extend(
-                        list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["end"]))
+                    await self.add_word_timestamps(
+                        list(zip(msg["word_timestamps"]["words"],
+                             msg["word_timestamps"]["start"]))
                     )
                 elif msg["type"] == "chunk":
                     await self.stop_ttfb_metrics()
-                    if not self._context_id_start_timestamp:
-                        self._context_id_start_timestamp = time.time()
+                    self.start_word_timestamps()
                     frame = AudioRawFrame(
                         audio=base64.b64decode(msg["data"]),
                         sample_rate=self._output_format["sample_rate"],
@@ -218,32 +224,12 @@ class CartesiaTTSService(TTSService):
                     await self.stop_all_metrics()
                     await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
                 else:
-                    logger.error(f"Cartesia error, unknown message type: {msg}")
+                    logger.error(
+                        f"Cartesia error, unknown message type: {msg}")
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
-
-    async def _context_appending_task_handler(self):
-        try:
-            while True:
-                await asyncio.sleep(0.1)
-                if not self._context_id_start_timestamp:
-                    continue
-                elapsed_seconds = time.time() - self._context_id_start_timestamp
-                # Pop all words from self._timestamped_words_buffer that are
-                # older than the elapsed time and print a message about them to
-                # the console.
-                while self._timestamped_words_buffer and self._timestamped_words_buffer[0][1] <= elapsed_seconds:
-                    word, timestamp = self._timestamped_words_buffer.pop(0)
-                    if word == "LLMFullResponseEndFrame" and timestamp == 0:
-                        await self.push_frame(LLMFullResponseEndFrame())
-                        continue
-                    await self.push_frame(TextFrame(word))
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            logger.error(f"{self} exception: {e}")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -290,4 +276,4 @@ class CartesiaTTSService(TTSService):
                 return
             yield None
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            logger.error(f"{self} exception: {e}")

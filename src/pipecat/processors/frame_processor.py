@@ -9,6 +9,7 @@ import time
 
 from enum import Enum
 
+from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -96,6 +97,9 @@ class FrameProcessor:
         self._next: "FrameProcessor" | None = None
         self._loop: asyncio.AbstractEventLoop = loop or asyncio.get_running_loop()
 
+        # Clock
+        self._clock: BaseClock | None = None
+
         # Properties
         self._allow_interruptions = False
         self._enable_metrics = False
@@ -177,8 +181,12 @@ class FrameProcessor:
     def get_parent(self) -> "FrameProcessor":
         return self._parent
 
+    def get_clock(self) -> BaseClock:
+        return self._clock
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
+            self._clock = frame.clock
             self._allow_interruptions = frame.allow_interruptions
             self._enable_metrics = frame.enable_metrics
             self._enable_usage_metrics = frame.enable_usage_metrics
