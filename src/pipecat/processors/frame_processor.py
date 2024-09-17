@@ -21,6 +21,14 @@ from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
 
+try:
+    import sentry_sdk
+    sentry_available = sentry_sdk.is_initialized()
+    if not sentry_available:
+        logger.debug("Sentry SDK not initialized. Sentry features will be disabled.")
+except ImportError:
+    sentry_available = False
+    logger.debug("Sentry SDK not installed. Sentry features will be disabled.")
 
 class FrameDirection(Enum):
     DOWNSTREAM = 1
@@ -33,17 +41,29 @@ class FrameProcessorMetrics:
         self._start_ttfb_time = 0
         self._start_processing_time = 0
         self._should_report_ttfb = True
+        if sentry_available:
+            self._ttfb_metrics_span = None
+            self._processing_metrics_span = None
 
     async def start_ttfb_metrics(self, report_only_initial_ttfb):
         if self._should_report_ttfb:
             self._start_ttfb_time = time.time()
+            if sentry_available:
+                self._ttfb_metrics_span = sentry_sdk.start_span(
+                    op="ttfb", 
+                    description=f"TTFB for {self._name}",
+                    start_timestamp=self._start_ttfb_time
+                )
             self._should_report_ttfb = not report_only_initial_ttfb
 
     async def stop_ttfb_metrics(self):
         if self._start_ttfb_time == 0:
             return None
 
-        value = time.time() - self._start_ttfb_time
+        stop_time = time.time()
+        value = stop_time - self._start_ttfb_time
+        if sentry_available:
+            self._ttfb_metrics_span.finish(end_timestamp=stop_time)
         logger.debug(f"{self._name} TTFB: {value}")
         ttfb = {
             "processor": self._name,
@@ -54,12 +74,20 @@ class FrameProcessorMetrics:
 
     async def start_processing_metrics(self):
         self._start_processing_time = time.time()
+        if sentry_available:
+            self._processing_metrics_span = sentry_sdk.start_span(
+                op="processing", 
+                description=f"TTFB for {self._name}",
+                start_timestamp=self._start_processing_time
+            )
 
     async def stop_processing_metrics(self):
         if self._start_processing_time == 0:
             return None
-
-        value = time.time() - self._start_processing_time
+        stop_time = time.time()
+        value = stop_time - self._start_processing_time
+        if sentry_available:
+            self._processing_metrics_span.finish(end_timestamp=stop_time)
         logger.debug(f"{self._name} processing time: {value}")
         processing = {
             "processor": self._name,
