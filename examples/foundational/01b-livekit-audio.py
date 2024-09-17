@@ -7,6 +7,7 @@ import aiohttp
 from dotenv import load_dotenv
 from livekit import api  # pip install livekit-api
 from loguru import logger
+
 from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -84,7 +85,7 @@ async def main():
 
         # Register an event handler so we can play the audio when the
         # participant joins.
-        @transport.event_handler("on_participant_joined")
+        @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant_id):
             await task.queue_frame(TextFrame(f"Hello there!"))
 
