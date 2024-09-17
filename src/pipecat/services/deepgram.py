@@ -123,6 +123,7 @@ class DeepgramSTTService(STTService):
                      smart_format=True,
                      punctuate=True,
                      profanity_filter=True,
+                     vad_events=False,
                  ),
                  **kwargs):
         super().__init__(**kwargs)
@@ -133,6 +134,15 @@ class DeepgramSTTService(STTService):
             api_key, config=DeepgramClientOptions(url=url, options={"keepalive": "true"}))
         self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
+        if self.vad_enabled:
+            self._connection.on(LiveTranscriptionEvents.SpeechStarted, self._on_speech_started)
+
+    @property
+    def vad_enabled(self):
+        return self._live_options.vad_events
+    
+    def can_generate_metrics(self) -> bool:
+        return self.vad_enabled
 
     async def set_model(self, model: str):
         logger.debug(f"Switching STT model to: [{model}]")
@@ -159,10 +169,8 @@ class DeepgramSTTService(STTService):
         await self._disconnect()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        await self.start_processing_metrics()
         await self._connection.send(audio)
         yield None
-        await self.stop_processing_metrics()
 
     async def _connect(self):
         if await self._connection.start(self._live_options):
@@ -174,6 +182,10 @@ class DeepgramSTTService(STTService):
         if self._connection.is_connected:
             await self._connection.finish()
             logger.debug(f"{self}: Disconnected from Deepgram")
+    
+    async def _on_speech_started(self, *args, **kwargs):
+        await self.start_ttfb_metrics()
+        await self.start_processing_metrics()
 
     async def _on_message(self, *args, **kwargs):
         result: LiveResultResponse = kwargs["result"]
@@ -186,7 +198,9 @@ class DeepgramSTTService(STTService):
             language = result.channel.alternatives[0].languages[0]
             language = Language(language)
         if len(transcript) > 0:
+            await self.stop_ttfb_metrics()
             if is_final:
                 await self.push_frame(TranscriptionFrame(transcript, "", time_now_iso8601(), language))
+                await self.stop_processing_metrics()
             else:
                 await self.push_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language))
