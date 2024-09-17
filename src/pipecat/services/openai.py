@@ -383,7 +383,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                 await self._push_aggregation()
             else:
                 logger.warning(
-                    f"FunctionCallResultFrame tool_call_id ({frame.tool_call_id}) does not match FunctionCallInProgressFrame tool_call_id ({self._function_call_in_progress.tool_call_id})")
+                    f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id")
                 self._function_call_in_progress = None
                 self._function_call_result = None
 
