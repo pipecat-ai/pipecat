@@ -161,6 +161,25 @@ class CartesiaTTSService(AsyncWordTTSService):
         await self.push_frame(LLMFullResponseEndFrame())
         self._context_id = None
 
+    async def flush_audio(self):
+        if not self._context_id or not self._websocket:
+            return
+        logger.debug("Flushing audio")
+        msg = {
+                "transcript": "",
+                "continue": False,
+                "context_id": self._context_id,
+                "model_id": self._model_id,
+                "voice": {
+                    "mode": "id",
+                    "id": self._voice_id
+                },
+                "output_format": self._output_format,
+                "language": self._language,
+                "add_timestamps": True,
+            }
+        await self._websocket.send(json.dumps(msg))
+
     async def _receive_task_handler(self):
         try:
             async for message in self._websocket:
