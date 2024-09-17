@@ -4,6 +4,9 @@ from typing import Any, Awaitable, Callable, List
 
 import numpy as np
 from loguru import logger
+from pydantic import BaseModel
+from scipy import signal
+
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -18,12 +21,10 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.vad.vad_analyzer import VADAnalyzer
-from pydantic import BaseModel
-from scipy import signal
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 try:
     from livekit import rtc
+    from tenacity import retry, stop_after_attempt, wait_exponential
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use LiveKit, you need to `pip install pipecat-ai[livekit]`.")
