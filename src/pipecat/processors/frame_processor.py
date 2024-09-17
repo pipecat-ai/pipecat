@@ -77,7 +77,7 @@ class FrameProcessorMetrics:
         if sentry_available:
             self._processing_metrics_span = sentry_sdk.start_span(
                 op="processing", 
-                description=f"TTFB for {self._name}",
+                description=f"Processing for {self._name}",
                 start_timestamp=self._start_processing_time
             )
 
