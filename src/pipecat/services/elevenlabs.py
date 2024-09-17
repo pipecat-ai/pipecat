@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame)
-from pipecat.metrics.metrics import TTSUsageMetricsParams
+from pipecat.metrics.metrics import TTSUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncWordTTSService
 
@@ -253,7 +253,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
                     self._cumulative_time = 0
 
                 await self._send_text(text)
-                await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=self._model, value=len(text)))
+                await self.start_tts_usage_metrics(TTSUsageMetricsData(processor=self.name, model=self._model, value=len(text)))
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 await self.push_frame(TTSStoppedFrame())

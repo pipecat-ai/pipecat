@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     StartInterruptionFrame
 )
-from pipecat.metrics.metrics import CacheUsageMetricsParams
+from pipecat.metrics.metrics import CacheUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import (
@@ -252,7 +252,7 @@ class AnthropicLLMService(LLMService):
             cache_creation_input_tokens: int,
             cache_read_input_tokens: int):
         if prompt_tokens or completion_tokens or cache_creation_input_tokens or cache_read_input_tokens:
-            tokens = CacheUsageMetricsParams(
+            tokens = CacheUsageMetricsData(
                 processor=self.name,
                 model=self._model,
                 prompt_tokens=prompt_tokens,

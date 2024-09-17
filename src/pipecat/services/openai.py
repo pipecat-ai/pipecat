@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     StartInterruptionFrame
 )
-from pipecat.metrics.metrics import LLMUsageMetricsParams, TTSUsageMetricsParams
+from pipecat.metrics.metrics import LLMUsageMetricsData, TTSUsageMetricsData
 from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 
 from pipecat.processors.aggregators.openai_llm_context import (
@@ -138,7 +138,7 @@ class BaseOpenAILLMService(LLMService):
 
         async for chunk in chunk_stream:
             if chunk.usage:
-                tokens = LLMUsageMetricsParams(
+                tokens = LLMUsageMetricsData(
                     processor=self.name,
                     model=self._model,
                     prompt_tokens=chunk.usage.prompt_tokens,
@@ -343,7 +343,7 @@ class OpenAITTSService(TTSService):
                     yield ErrorFrame(f"Error getting audio (status: {r.status_code}, error: {error})")
                     return
 
-                await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=self._model, value=len(text)))
+                await self.start_tts_usage_metrics(TTSUsageMetricsData(processor=self.name, model=self._model, value=len(text)))
 
                 await self.push_frame(TTSStartedFrame())
                 async for chunk in r.iter_bytes(8192):

@@ -4,12 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from dataclasses import dataclass, field
 
 from pipecat.clocks.base_clock import BaseClock
-from pipecat.metrics.metrics import LLMUsageMetricsParams, ProcessingMetricsParams, TTFBMetricsParams, TTSUsageMetricsParams
+from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
@@ -343,27 +343,8 @@ class BotInterruptionFrame(SystemFrame):
 class MetricsFrame(SystemFrame):
     """Emitted by processor that can compute metrics like latencies.
     """
-    pass
+    data: List[MetricsData]
 
-
-@dataclass
-class TTFBMetricsFrame(MetricsFrame):
-    ttfb: List[TTFBMetricsParams] | None = None
-
-
-@dataclass
-class ProcessingMetricsFrame(MetricsFrame):
-    processing: List[ProcessingMetricsParams] | None = None
-
-
-@dataclass
-class LLMUsageMetricsFrame(MetricsFrame):
-    tokens: List[LLMUsageMetricsParams] | None = None
-
-
-@dataclass
-class TTSUsageMetricsFrame(MetricsFrame):
-    characters: List[TTSUsageMetricsParams] | None = None
 
 #
 # Control frames

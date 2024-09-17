@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TranscriptionFrame,
     URLImageRawFrame)
-from pipecat.metrics.metrics import TTSUsageMetricsParams
+from pipecat.metrics.metrics import TTSUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncAIService, TTSService, ImageGenService
 from pipecat.services.openai import BaseOpenAILLMService
@@ -106,7 +106,7 @@ class AzureTTSService(TTSService):
         result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, (ssml))
 
         if result.reason == ResultReason.SynthesizingAudioCompleted:
-            await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=None, value=len(text)))
+            await self.start_tts_usage_metrics(TTSUsageMetricsData(processor=self.name, model=None, value=len(text)))
             await self.stop_ttfb_metrics()
             await self.push_frame(TTSStartedFrame())
             # Azure always sends a 44-byte header. Strip it off.

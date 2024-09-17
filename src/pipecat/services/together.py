@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     StartInterruptionFrame
 )
-from pipecat.metrics.metrics import LLMUsageMetricsParams
+from pipecat.metrics.metrics import LLMUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
@@ -107,7 +107,7 @@ class TogetherLLMService(LLMService):
             async for chunk in stream:
                 # logger.debug(f"Together LLM event: {chunk}")
                 if chunk.usage:
-                    tokens = LLMUsageMetricsParams(
+                    tokens = LLMUsageMetricsData(
                         processor=self.name,
                         model=self._model,
                         prompt_tokens=chunk.usage.prompt_tokens,

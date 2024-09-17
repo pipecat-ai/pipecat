@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     LLMFullResponseEndFrame
 )
-from pipecat.metrics.metrics import TTSUsageMetricsParams
+from pipecat.metrics.metrics import TTSUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
 from pipecat.services.ai_services import AsyncWordTTSService
@@ -247,7 +247,7 @@ class CartesiaTTSService(AsyncWordTTSService):
             }
             try:
                 await self._websocket.send(json.dumps(msg))
-                await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=self._model_id, value=len(text)))
+                await self.start_tts_usage_metrics(TTSUsageMetricsData(processor=self.name, model=self._model_id, value=len(text)))
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 await self.push_frame(TTSStoppedFrame())

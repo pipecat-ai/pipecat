@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame)
-from pipecat.metrics.metrics import TTSUsageMetricsParams
+from pipecat.metrics.metrics import TTSUsageMetricsData
 from pipecat.services.ai_services import STTService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -100,7 +100,7 @@ class DeepgramTTSService(TTSService):
                     yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {response_text})")
                     return
 
-                await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=None, value=len(text)))
+                await self.start_tts_usage_metrics(TTSUsageMetricsData(processor=self.name, model=None, value=len(text)))
 
                 await self.push_frame(TTSStartedFrame())
                 async for data in r.content:
