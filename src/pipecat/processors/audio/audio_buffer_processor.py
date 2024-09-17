@@ -27,7 +27,6 @@ class AudioBufferProcessor(FrameProcessor):
         self._sample_rate = None
         self._assistant_audio = False
         self._user_audio = False
-        print(f"ctor::AudioBufferProcessor object memory address: {id(self)}")
 
     def _has_audio(self):
         return (
