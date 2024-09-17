@@ -121,6 +121,14 @@ class CartesiaTTSService(AsyncWordTTSService):
         logger.debug(f"Switching TTS voice to: [{voice}]")
         self._voice_id = voice
 
+    async def set_speed(self, speed: str):
+        logger.debug(f"Switching TTS speed to: [{speed}]")
+        self._speed = speed
+
+    async def set_emotion(self, emotion: list[str]):
+        logger.debug(f"Switching TTS emotion to: [{emotion}]")
+        self._emotion = emotion
+
     async def set_language(self, language: Language):
         logger.debug(f"Switching TTS language to: [{language}]")
         self._language = language_to_cartesia_language(language)
