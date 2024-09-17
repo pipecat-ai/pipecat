@@ -174,12 +174,17 @@ class ElevenLabsTTSService(AsyncWordTTSService):
             }
             await self._websocket.send(json.dumps(msg))
         except Exception as e:
-            logger.exception(f"{self} initialization error: {e}")
+            logger.error(f"{self} initialization error: {e}")
             self._websocket = None
 
     async def _disconnect(self):
         try:
             await self.stop_all_metrics()
+
+            if self._websocket:
+                await self._websocket.send(json.dumps({"text": ""}))
+                await self._websocket.close()
+                self._websocket = None
 
             if self._receive_task:
                 self._receive_task.cancel()
@@ -191,13 +196,9 @@ class ElevenLabsTTSService(AsyncWordTTSService):
                 await self._keepalive_task
                 self._keepalive_task = None
 
-            if self._websocket:
-                await self._websocket.close()
-                self._websocket = None
-
             self._started = False
         except Exception as e:
-            logger.exception(f"{self} error closing websocket: {e}")
+            logger.error(f"{self} error closing websocket: {e}")
 
     async def _receive_task_handler(self):
         try:
@@ -215,11 +216,10 @@ class ElevenLabsTTSService(AsyncWordTTSService):
                     word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
                     await self.add_word_timestamps(word_times)
                     self._cumulative_time = word_times[-1][1]
-
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            logger.error(f"{self} exception: {e}")
 
     async def _keepalive_task_handler(self):
         while True:
@@ -229,7 +229,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.exception(f"{self} exception: {e}")
+                logger.error(f"{self} exception: {e}")
 
     async def _send_text(self, text: str):
         if self._websocket:
@@ -260,4 +260,4 @@ class ElevenLabsTTSService(AsyncWordTTSService):
                 return
             yield None
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            logger.error(f"{self} exception: {e}")
