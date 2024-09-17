@@ -63,7 +63,6 @@ def language_to_cartesia_language(language: Language) -> str | None:
 
 class CartesiaTTSService(AsyncWordTTSService):
     class InputParams(BaseModel):
-        model_id: Optional[str] = "sonic-english"
         encoding: Optional[str] = "pcm_s16le"
         sample_rate: Optional[int] = 16000
         container: Optional[str] = "raw"
@@ -78,6 +77,7 @@ class CartesiaTTSService(AsyncWordTTSService):
             voice_id: str,
             cartesia_version: str = "2024-06-10",
             url: str = "wss://api.cartesia.ai/tts/websocket",
+            model_id: str = "sonic-english",
             params: InputParams = InputParams(),
             **kwargs):
         # Aggregating sentences still gives cleaner-sounding results and fewer
@@ -96,7 +96,7 @@ class CartesiaTTSService(AsyncWordTTSService):
         self._cartesia_version = cartesia_version
         self._url = url
         self._voice_id = voice_id
-        self._model_id = params.model_id
+        self._model_id = model_id
         self._output_format = {
             "container": params.container,
             "encoding": params.encoding,
