@@ -45,6 +45,7 @@ class GoogleLLMService(LLMService):
         super().__init__(**kwargs)
         gai.configure(api_key=api_key)
         self._create_client(model)
+        self._model = model
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -92,7 +93,7 @@ class GoogleLLMService(LLMService):
 
             response = self._client.generate_content(messages, stream=True)
 
-            await self.stop_ttfb_metrics()
+            await self.stop_ttfb_metrics(self._model)
 
             async for chunk in self._async_generator_wrapper(response):
                 try:

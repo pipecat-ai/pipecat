@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame)
+from pipecat.metrics.metrics import TTSUsageMetricsParams
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AsyncWordTTSService
 
@@ -162,7 +163,8 @@ class ElevenLabsTTSService(AsyncWordTTSService):
             voice_id = self._voice_id
             model = self._model
             output_format = self._params.output_format
-            url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}"
+            url = f"{
+                self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}"
             self._websocket = await websockets.connect(url)
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
             self._keepalive_task = self.get_event_loop().create_task(self._keepalive_task_handler())
@@ -205,7 +207,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
             async for message in self._websocket:
                 msg = json.loads(message)
                 if msg.get("audio"):
-                    await self.stop_ttfb_metrics()
+                    await self.stop_ttfb_metrics(self._model)
                     self.start_word_timestamps()
 
                     audio = base64.b64decode(msg["audio"])
@@ -251,7 +253,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
                     self._cumulative_time = 0
 
                 await self._send_text(text)
-                await self.start_tts_usage_metrics(text)
+                await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=self._model, value=len(text)))
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 await self.push_frame(TTSStoppedFrame())

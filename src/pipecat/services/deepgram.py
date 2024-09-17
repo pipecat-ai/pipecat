@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame)
+from pipecat.metrics.metrics import TTSUsageMetricsParams
 from pipecat.services.ai_services import STTService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -75,7 +76,10 @@ class DeepgramTTSService(TTSService):
         logger.debug(f"Generating TTS: [{text}]")
 
         base_url = self._base_url
-        request_url = f"{base_url}?model={self._voice}&encoding={self._encoding}&container=none&sample_rate={self._sample_rate}"
+        request_url = f"{base_url}?model={
+            self._voice}&encoding={
+            self._encoding}&container=none&sample_rate={
+            self._sample_rate}"
         headers = {"authorization": f"token {self._api_key}"}
         body = {"text": text}
 
@@ -96,7 +100,7 @@ class DeepgramTTSService(TTSService):
                     yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {response_text})")
                     return
 
-                await self.start_tts_usage_metrics(text)
+                await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=None, value=len(text)))
 
                 await self.push_frame(TTSStartedFrame())
                 async for data in r.content:
@@ -162,7 +166,7 @@ class DeepgramSTTService(STTService):
         await self.start_processing_metrics()
         await self._connection.send(audio)
         yield None
-        await self.stop_processing_metrics()
+        await self.stop_processing_metrics(self._live_options.model)
 
     async def _connect(self):
         if await self._connection.start(self._live_options):

@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.metrics.metrics import TTSUsageMetricsParams
 from pipecat.services.ai_services import AsyncTTSService
 
 from loguru import logger
@@ -154,7 +155,7 @@ class LmntTTSService(AsyncTTSService):
             try:
                 await self._connection.append_text(text)
                 await self._connection.flush()
-                await self.start_tts_usage_metrics(text)
+                await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=None, value=len(text)))
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 await self.push_frame(TTSStoppedFrame())

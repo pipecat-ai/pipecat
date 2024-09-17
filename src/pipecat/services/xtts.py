@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSStartedFrame,
     TTSStoppedFrame)
+from pipecat.metrics.metrics import TTSUsageMetricsParams
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -103,7 +104,7 @@ class XTTSService(TTSService):
                 yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
                 return
 
-            await self.start_tts_usage_metrics(text)
+            await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=None, value=len(text)))
 
             await self.push_frame(TTSStartedFrame())
 

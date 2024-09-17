@@ -11,6 +11,7 @@ import wave
 from abc import abstractmethod
 from typing import AsyncGenerator, List, Optional, Tuple
 
+from attr import has
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -497,7 +498,7 @@ class ImageGenService(AIService):
             await self.push_frame(frame, direction)
             await self.start_processing_metrics()
             await self.process_generator(self.run_image_gen(frame.text))
-            await self.stop_processing_metrics()
+            await self.stop_processing_metrics(self._model if hasattr(self, "_model") else None)
         else:
             await self.push_frame(frame, direction)
 
@@ -519,6 +520,6 @@ class VisionService(AIService):
         if isinstance(frame, VisionImageRawFrame):
             await self.start_processing_metrics()
             await self.process_generator(self.run_vision(frame))
-            await self.stop_processing_metrics()
+            await self.stop_processing_metrics(self._model if hasattr(self, "_model") else None)
         else:
             await self.push_frame(frame, direction)

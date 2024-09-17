@@ -13,10 +13,15 @@ from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    MetricsFrame,
+    LLMUsageMetricsFrame,
+    ProcessingMetricsFrame,
     StartFrame,
     StartInterruptionFrame,
+    TTFBMetricsFrame,
+    TTSUsageMetricsFrame,
+    TTSUsageMetricsParams,
     UserStoppedSpeakingFrame)
+from pipecat.metrics.metrics import LLMUsageMetricsParams, ProcessingMetricsParams, TTFBMetricsParams, TTSUsageMetricsParams
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
@@ -39,47 +44,37 @@ class FrameProcessorMetrics:
             self._start_ttfb_time = time.time()
             self._should_report_ttfb = not report_only_initial_ttfb
 
-    async def stop_ttfb_metrics(self):
+    async def stop_ttfb_metrics(self, model: str | None = None):
         if self._start_ttfb_time == 0:
             return None
 
         value = time.time() - self._start_ttfb_time
         logger.debug(f"{self._name} TTFB: {value}")
-        ttfb = {
-            "processor": self._name,
-            "value": value
-        }
+        ttfb = TTFBMetricsParams(processor=self._name, value=value, model=model)
         self._start_ttfb_time = 0
-        return MetricsFrame(ttfb=[ttfb])
+        return TTFBMetricsFrame(ttfb=[ttfb])
 
     async def start_processing_metrics(self):
         self._start_processing_time = time.time()
 
-    async def stop_processing_metrics(self):
+    async def stop_processing_metrics(self, model: str | None = None):
         if self._start_processing_time == 0:
             return None
 
         value = time.time() - self._start_processing_time
         logger.debug(f"{self._name} processing time: {value}")
-        processing = {
-            "processor": self._name,
-            "value": value
-        }
+        processing = ProcessingMetricsParams(processor=self._name, value=value, model=model)
         self._start_processing_time = 0
-        return MetricsFrame(processing=[processing])
+        return ProcessingMetricsFrame(processing=[processing])
 
-    async def start_llm_usage_metrics(self, tokens: dict):
-        logger.debug(
-            f"{self._name} prompt tokens: {tokens['prompt_tokens']}, completion tokens: {tokens['completion_tokens']}")
-        return MetricsFrame(tokens=[tokens])
+    async def start_llm_usage_metrics(self, usage_params: LLMUsageMetricsParams):
+        logger.debug(f"{self._name} prompt tokens: {
+            usage_params.prompt_tokens}, completion tokens: {usage_params.completion_tokens}")
+        return LLMUsageMetricsFrame(tokens=[usage_params])
 
-    async def start_tts_usage_metrics(self, text: str):
-        characters = {
-            "processor": self._name,
-            "value": len(text),
-        }
-        logger.debug(f"{self._name} usage characters: {characters['value']}")
-        return MetricsFrame(characters=[characters])
+    async def start_tts_usage_metrics(self, usage_params: TTSUsageMetricsParams):
+        logger.debug(f"{self._name} usage characters: {usage_params.value}")
+        return TTSUsageMetricsFrame(characters=[usage_params])
 
 
 class FrameProcessor:
@@ -132,9 +127,9 @@ class FrameProcessor:
         if self.can_generate_metrics() and self.metrics_enabled:
             await self._metrics.start_ttfb_metrics(self._report_only_initial_ttfb)
 
-    async def stop_ttfb_metrics(self):
+    async def stop_ttfb_metrics(self, model: str | None = None):
         if self.can_generate_metrics() and self.metrics_enabled:
-            frame = await self._metrics.stop_ttfb_metrics()
+            frame = await self._metrics.stop_ttfb_metrics(model)
             if frame:
                 await self.push_frame(frame)
 
@@ -142,27 +137,27 @@ class FrameProcessor:
         if self.can_generate_metrics() and self.metrics_enabled:
             await self._metrics.start_processing_metrics()
 
-    async def stop_processing_metrics(self):
+    async def stop_processing_metrics(self, model: str | None = None):
         if self.can_generate_metrics() and self.metrics_enabled:
-            frame = await self._metrics.stop_processing_metrics()
+            frame = await self._metrics.stop_processing_metrics(model)
             if frame:
                 await self.push_frame(frame)
 
-    async def start_llm_usage_metrics(self, tokens: dict):
+    async def start_llm_usage_metrics(self, usage_params: LLMUsageMetricsParams):
         if self.can_generate_metrics() and self.usage_metrics_enabled:
-            frame = await self._metrics.start_llm_usage_metrics(tokens)
+            frame = await self._metrics.start_llm_usage_metrics(usage_params)
             if frame:
                 await self.push_frame(frame)
 
-    async def start_tts_usage_metrics(self, text: str):
+    async def start_tts_usage_metrics(self, usage_params: TTSUsageMetricsParams):
         if self.can_generate_metrics() and self.usage_metrics_enabled:
-            frame = await self._metrics.start_tts_usage_metrics(text)
+            frame = await self._metrics.start_tts_usage_metrics(usage_params)
             if frame:
                 await self.push_frame(frame)
 
-    async def stop_all_metrics(self):
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
+    async def stop_all_metrics(self, model: str | None = None):
+        await self.stop_ttfb_metrics(model)
+        await self.stop_processing_metrics(model)
 
     async def cleanup(self):
         pass

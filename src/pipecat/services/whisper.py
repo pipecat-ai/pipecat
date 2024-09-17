@@ -60,12 +60,15 @@ class WhisperSTTService(SegmentedSTTService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    def _get_model_name_as_str(self) -> str:
+        return self._model_name.value if isinstance(self._model_name, Enum) else self._model_name
+
     def _load(self):
         """Loads the Whisper model. Note that if this is the first time
         this model is being run, it will take time to download."""
         logger.debug("Loading Whisper model...")
         self._model = WhisperModel(
-            self._model_name.value if isinstance(self._model_name, Enum) else self._model_name,
+            self._get_model_name_as_str(),
             device=self._device,
             compute_type=self._compute_type)
         logger.debug("Loaded Whisper model")
@@ -89,8 +92,8 @@ class WhisperSTTService(SegmentedSTTService):
             if segment.no_speech_prob < self._no_speech_prob:
                 text += f"{segment.text} "
 
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
+        await self.stop_ttfb_metrics(self._get_model_name_as_str())
+        await self.stop_processing_metrics(self._get_model_name_as_str())
 
         if text:
             logger.debug(f"Transcription: [{text}]")

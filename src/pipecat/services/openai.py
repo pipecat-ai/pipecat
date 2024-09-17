@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     StartInterruptionFrame
 )
+from pipecat.metrics.metrics import LLMUsageMetricsParams, TTSUsageMetricsParams
 from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 
 from pipecat.processors.aggregators.openai_llm_context import (
@@ -137,19 +138,19 @@ class BaseOpenAILLMService(LLMService):
 
         async for chunk in chunk_stream:
             if chunk.usage:
-                tokens = {
-                    "processor": self.name,
-                    "model": self._model,
-                    "prompt_tokens": chunk.usage.prompt_tokens,
-                    "completion_tokens": chunk.usage.completion_tokens,
-                    "total_tokens": chunk.usage.total_tokens
-                }
+                tokens = LLMUsageMetricsParams(
+                    processor=self.name,
+                    model=self._model,
+                    prompt_tokens=chunk.usage.prompt_tokens,
+                    completion_tokens=chunk.usage.completion_tokens,
+                    total_tokens=chunk.usage.total_tokens
+                )
                 await self.start_llm_usage_metrics(tokens)
 
             if len(chunk.choices) == 0:
                 continue
 
-            await self.stop_ttfb_metrics()
+            await self.stop_ttfb_metrics(self._model)
 
             if chunk.choices[0].delta.tool_calls:
                 # We're streaming the LLM response to enable the fastest response times.
@@ -182,8 +183,8 @@ class BaseOpenAILLMService(LLMService):
             if self.has_function(function_name):
                 await self._handle_function_call(context, tool_call_id, function_name, arguments)
             else:
-                raise OpenAIUnhandledFunctionException(
-                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
+                raise OpenAIUnhandledFunctionException(f"The LLM tried to call a function named '{
+                    function_name}', but there isn't a callback registered for that function.")
 
     async def _handle_function_call(
             self,
@@ -220,7 +221,7 @@ class BaseOpenAILLMService(LLMService):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
             await self._process_context(context)
-            await self.stop_processing_metrics()
+            await self.stop_processing_metrics(self._model)
             await self.push_frame(LLMFullResponseEndFrame())
 
 
@@ -342,12 +343,12 @@ class OpenAITTSService(TTSService):
                     yield ErrorFrame(f"Error getting audio (status: {r.status_code}, error: {error})")
                     return
 
-                await self.start_tts_usage_metrics(text)
+                await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=self._model, value=len(text)))
 
                 await self.push_frame(TTSStartedFrame())
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
-                        await self.stop_ttfb_metrics()
+                        await self.stop_ttfb_metrics(self._model)
                         frame = AudioRawFrame(chunk, 24_000, 1)
                         yield frame
                 await self.push_frame(TTSStoppedFrame())

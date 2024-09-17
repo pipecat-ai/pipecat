@@ -9,6 +9,7 @@ from typing import Any, List, Mapping, Optional, Tuple
 from dataclasses import dataclass, field
 
 from pipecat.clocks.base_clock import BaseClock
+from pipecat.metrics.metrics import LLMUsageMetricsParams, ProcessingMetricsParams, TTFBMetricsParams, TTSUsageMetricsParams
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
@@ -55,7 +56,8 @@ class AudioRawFrame(DataFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
+        return f"{self.name}(pts: {pts}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {
+            self.sample_rate}, channels: {self.num_channels})"
 
 
 @dataclass
@@ -96,7 +98,11 @@ class VisionImageRawFrame(ImageRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, text: {self.text}, size: {self.size}, format: {self.format})"
+        return f"{
+            self.name}(pts: {pts}, text: {
+            self.text}, size: {
+            self.size}, format: {
+                self.format})"
 
 
 @dataclass
@@ -109,7 +115,11 @@ class UserImageRawFrame(ImageRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, user: {self.user_id}, size: {self.size}, format: {self.format})"
+        return f"{
+            self.name}(pts: {pts}, user: {
+            self.user_id}, size: {
+            self.size}, format: {
+                self.format})"
 
 
 @dataclass
@@ -150,7 +160,12 @@ class TranscriptionFrame(TextFrame):
     language: Language | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
+        return f"{
+            self.name}(user: {
+            self.user_id}, text: {
+            self.text}, language: {
+                self.language}, timestamp: {
+                    self.timestamp})"
 
 
 @dataclass
@@ -162,7 +177,12 @@ class InterimTranscriptionFrame(TextFrame):
     language: Language | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
+        return f"{
+            self.name}(user: {
+            self.user_id}, text: {
+            self.text}, language: {
+                self.language}, timestamp: {
+                    self.timestamp})"
 
 
 @dataclass
@@ -323,10 +343,27 @@ class BotInterruptionFrame(SystemFrame):
 class MetricsFrame(SystemFrame):
     """Emitted by processor that can compute metrics like latencies.
     """
-    ttfb: List[Mapping[str, Any]] | None = None
-    processing: List[Mapping[str, Any]] | None = None
-    tokens: List[Mapping[str, Any]] | None = None
-    characters: List[Mapping[str, Any]] | None = None
+    pass
+
+
+@dataclass
+class TTFBMetricsFrame(MetricsFrame):
+    ttfb: List[TTFBMetricsParams] | None = None
+
+
+@dataclass
+class ProcessingMetricsFrame(MetricsFrame):
+    processing: List[ProcessingMetricsParams] | None = None
+
+
+@dataclass
+class LLMUsageMetricsFrame(MetricsFrame):
+    tokens: List[LLMUsageMetricsParams] | None = None
+
+
+@dataclass
+class TTSUsageMetricsFrame(MetricsFrame):
+    characters: List[TTSUsageMetricsParams] | None = None
 
 #
 # Control frames

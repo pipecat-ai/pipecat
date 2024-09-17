@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     StartInterruptionFrame
 )
+from pipecat.metrics.metrics import CacheUsageMetricsParams
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import (
@@ -141,7 +142,7 @@ class AnthropicLLMService(LLMService):
                 max_tokens=self._max_tokens,
                 stream=True)
 
-            await self.stop_ttfb_metrics()
+            await self.stop_ttfb_metrics(self._model)
 
             # Function calling
             tool_use_block = None
@@ -205,7 +206,7 @@ class AnthropicLLMService(LLMService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
-            await self.stop_processing_metrics()
+            await self.stop_processing_metrics(self._model)
             await self.push_frame(LLMFullResponseEndFrame())
             comp_tokens = completion_tokens if not use_completion_tokens_estimate else completion_tokens_estimate
             await self._report_usage_metrics(
@@ -251,15 +252,15 @@ class AnthropicLLMService(LLMService):
             cache_creation_input_tokens: int,
             cache_read_input_tokens: int):
         if prompt_tokens or completion_tokens or cache_creation_input_tokens or cache_read_input_tokens:
-            tokens = {
-                "processor": self.name,
-                "model": self._model,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "cache_creation_input_tokens": cache_creation_input_tokens,
-                "cache_read_input_tokens": cache_read_input_tokens,
-                "total_tokens": prompt_tokens + completion_tokens
-            }
+            tokens = CacheUsageMetricsParams(
+                processor=self.name,
+                model=self._model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cache_creation_input_tokens=cache_creation_input_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+                total_tokens=prompt_tokens + completion_tokens
+            )
             await self.start_llm_usage_metrics(tokens)
 
 

@@ -18,9 +18,7 @@ from pipecat.frames.frames import (
     Frame,
     LLMModelUpdateFrame,
     TextFrame,
-    VisionImageRawFrame,
     UserImageRequestFrame,
-    UserImageRawFrame,
     LLMMessagesFrame,
     LLMFullResponseStartFrame,
     LLMFullResponseEndFrame,
@@ -28,6 +26,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     StartInterruptionFrame
 )
+from pipecat.metrics.metrics import LLMUsageMetricsParams
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
@@ -108,20 +107,20 @@ class TogetherLLMService(LLMService):
             async for chunk in stream:
                 # logger.debug(f"Together LLM event: {chunk}")
                 if chunk.usage:
-                    tokens = {
-                        "processor": self.name,
-                        "model": self._model,
-                        "prompt_tokens": chunk.usage.prompt_tokens,
-                        "completion_tokens": chunk.usage.completion_tokens,
-                        "total_tokens": chunk.usage.total_tokens
-                    }
+                    tokens = LLMUsageMetricsParams(
+                        processor=self.name,
+                        model=self._model,
+                        prompt_tokens=chunk.usage.prompt_tokens,
+                        completion_tokens=chunk.usage.completion_tokens,
+                        total_tokens=chunk.usage.total_tokens
+                    )
                     await self.start_llm_usage_metrics(tokens)
 
                 if len(chunk.choices) == 0:
                     continue
 
                 if not got_first_chunk:
-                    await self.stop_ttfb_metrics()
+                    await self.stop_ttfb_metrics(self._model)
                     if chunk.choices[0].delta.content:
                         got_first_chunk = True
                         if chunk.choices[0].delta.content[0] == "<":
@@ -143,7 +142,7 @@ class TogetherLLMService(LLMService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
-            await self.stop_processing_metrics()
+            await self.stop_processing_metrics(self._model)
             await self.push_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

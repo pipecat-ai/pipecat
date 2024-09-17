@@ -10,6 +10,7 @@ import struct
 from typing import AsyncGenerator
 
 from pipecat.frames.frames import AudioRawFrame, Frame, TTSStartedFrame, TTSStoppedFrame
+from pipecat.metrics.metrics import TTSUsageMetricsParams
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -60,7 +61,7 @@ class PlayHTTTSService(TTSService):
                 voice_engine="PlayHT2.0-turbo",
                 options=self._options)
 
-            await self.start_tts_usage_metrics(text)
+            await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=None, value=len(text)))
 
             await self.push_frame(TTSStartedFrame())
             async for chunk in playht_gen:

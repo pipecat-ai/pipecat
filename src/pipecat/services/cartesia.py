@@ -22,9 +22,9 @@ from pipecat.frames.frames import (
     EndFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TextFrame,
     LLMFullResponseEndFrame
 )
+from pipecat.metrics.metrics import TTSUsageMetricsParams
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
 from pipecat.services.ai_services import AsyncWordTTSService
@@ -188,7 +188,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                 if not msg or msg["context_id"] != self._context_id:
                     continue
                 if msg["type"] == "done":
-                    await self.stop_ttfb_metrics()
+                    await self.stop_ttfb_metrics(self._model_id)
                     await self.push_frame(TTSStoppedFrame())
                     # Unset _context_id but not the _context_id_start_timestamp
                     # because we are likely still playing out audio and need the
@@ -200,7 +200,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                         list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
                     )
                 elif msg["type"] == "chunk":
-                    await self.stop_ttfb_metrics()
+                    await self.stop_ttfb_metrics(self._model_id)
                     self.start_word_timestamps()
                     frame = AudioRawFrame(
                         audio=base64.b64decode(msg["data"]),
@@ -247,7 +247,7 @@ class CartesiaTTSService(AsyncWordTTSService):
             }
             try:
                 await self._websocket.send(json.dumps(msg))
-                await self.start_tts_usage_metrics(text)
+                await self.start_tts_usage_metrics(TTSUsageMetricsParams(processor=self.name, model=self._model_id, value=len(text)))
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 await self.push_frame(TTSStoppedFrame())
