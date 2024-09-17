@@ -111,7 +111,6 @@ async def main():
         )
 
         tts = ElevenLabsTTSService(
-            aiohttp_session=session,
             api_key=os.getenv("ELEVENLABS_API_KEY"),
             #
             # English

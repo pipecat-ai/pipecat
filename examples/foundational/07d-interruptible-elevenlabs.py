@@ -4,8 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
+import aiohttp
 import os
 import sys
 
@@ -15,11 +15,10 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-
 
 from runner import configure
 
@@ -41,7 +40,6 @@ async def main():
             token,
             "Respond bot",
             DailyParams(
-                audio_out_sample_rate=44100,
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
@@ -49,12 +47,9 @@ async def main():
             )
         )
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
-            params=CartesiaTTSService.InputParams(
-                sample_rate=44100,
-            ),
+        tts = ElevenLabsTTSService(
+            api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
         )
 
         llm = OpenAILLMService(
@@ -76,11 +71,16 @@ async def main():
             tma_in,              # User responses
             llm,                 # LLM
             tts,                 # TTS
-            tma_out,             # Goes before the transport because cartesia has word-level timestamps!
             transport.output(),  # Transport bot output
+            tma_out              # Assistant spoken responses
         ])
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
+        task = PipelineTask(pipeline, PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
+            report_only_initial_ttfb=True,
+        ))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
