@@ -181,7 +181,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
 
     async def _disconnect(self):
         try:
-            await self.stop_all_metrics()
+            await self.stop_all_metrics(self._model)
 
             if self._websocket:
                 await self._websocket.send(json.dumps({"text": ""}))

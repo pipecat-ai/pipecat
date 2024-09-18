@@ -141,7 +141,7 @@ class CartesiaTTSService(AsyncWordTTSService):
 
     async def _disconnect(self):
         try:
-            await self.stop_all_metrics()
+            await self.stop_all_metrics(self._model_id)
 
             if self._websocket:
                 await self._websocket.close()
@@ -158,7 +158,7 @@ class CartesiaTTSService(AsyncWordTTSService):
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
-        await self.stop_all_metrics()
+        await self.stop_all_metrics(self._model_id)
         await self.push_frame(LLMFullResponseEndFrame())
         self._context_id = None
 
@@ -211,7 +211,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                 elif msg["type"] == "error":
                     logger.error(f"{self} error: {msg}")
                     await self.push_frame(TTSStoppedFrame())
-                    await self.stop_all_metrics()
+                    await self.stop_all_metrics(self._model_id)
                     await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
                 else:
                     logger.error(f"Cartesia error, unknown message type: {msg}")

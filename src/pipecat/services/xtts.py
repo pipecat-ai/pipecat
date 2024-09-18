@@ -104,7 +104,7 @@ class XTTSService(TTSService):
                 yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
                 return
 
-            await self.start_tts_usage_metrics(TTSUsageMetricsData(processor=self.name, model=None, value=len(text)))
+            await self.start_tts_usage_metrics(TTSUsageMetricsData(processor=self.name, value=len(text)))
 
             await self.push_frame(TTSStartedFrame())
 

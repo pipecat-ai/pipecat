@@ -155,7 +155,7 @@ class LmntTTSService(AsyncTTSService):
             try:
                 await self._connection.append_text(text)
                 await self._connection.flush()
-                await self.start_tts_usage_metrics(TTSUsageMetricsData(processor=self.name, model=None, value=len(text)))
+                await self.start_tts_usage_metrics(TTSUsageMetricsData(processor=self.name, value=len(text)))
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 await self.push_frame(TTSStoppedFrame())

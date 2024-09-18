@@ -8,12 +8,12 @@ class MetricsData(BaseModel):
 
 class TTFBMetricsData(MetricsData):
     value: float
-    model: Optional[str]
+    model: Optional[str] = None
 
 
 class ProcessingMetricsData(MetricsData):
     value: float
-    model: Optional[str]
+    model: Optional[str] = None
 
 
 class LLMUsageMetricsData(MetricsData):
@@ -30,5 +30,5 @@ class CacheUsageMetricsData(LLMUsageMetricsData):
 
 class TTSUsageMetricsData(MetricsData):
     processor: str
-    model: Optional[str]
+    model: Optional[str] = None
     value: int

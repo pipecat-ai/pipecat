@@ -121,8 +121,8 @@ class PipelineTask:
         processors = self._pipeline.processors_with_metrics()
         data = []
         for p in processors:
-            data.append(TTFBMetricsData(processor=p.name, value=0.0, model=None))
-            data.append(ProcessingMetricsData(processor=p.name, value=0.0, model=None))
+            data.append(TTFBMetricsData(processor=p.name, value=0.0))
+            data.append(ProcessingMetricsData(processor=p.name, value=0.0))
         return MetricsFrame(data=data)
 
     async def _process_down_queue(self):
