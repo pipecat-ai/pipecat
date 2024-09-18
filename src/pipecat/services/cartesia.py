@@ -84,7 +84,7 @@ class CartesiaTTSService(AsyncWordTTSService):
         # if we're interrupted. Cartesia gives us word-by-word timestamps. We
         # can use those to generate text frames ourselves aligned with the
         # playout timing of the audio!
-        super().__init__(aggregate_sentences=True, push_text_frames=False, **kwargs)
+        super().__init__(aggregate_sentences=True, push_text_frames=False, sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._cartesia_version = cartesia_version

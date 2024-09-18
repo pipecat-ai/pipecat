@@ -46,7 +46,7 @@ class LmntTTSService(AsyncTTSService):
             **kwargs):
         # Let TTSService produce TTSStoppedFrames after a short delay of
         # no activity.
-        super().__init__(push_stop_frames=True, **kwargs)
+        super().__init__(push_stop_frames=True, sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._voice_id = voice_id
