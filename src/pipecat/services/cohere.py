@@ -14,8 +14,6 @@ from asyncio import CancelledError
 import re
 import uuid
 
-import cohere
-
 
 from pipecat.frames.frames import (
     Frame,
@@ -140,8 +138,7 @@ class CohereLLMService(LLMService):
                     else:
                         await self.push_frame(TextFrame(chunk.choices[0].delta.content))
 
-                if chunk.choices[0].finish_reason == 'eos' and accumulating_function_call:
-                    await self._extract_function_call(context, function_call_accumulator)
+
 
         except CancelledError as e:
             # todo: implement token counting estimates for use when the user interrupts a long generation
@@ -169,27 +166,6 @@ class CohereLLMService(LLMService):
 
         if context:
             await self._process_context(context)
-
-    async def _extract_function_call(self, context, function_call_accumulator):
-        context.add_message({"role": "assistant", "content": function_call_accumulator})
-
-        function_regex = r"<function=(\w+)>(.*?)</function>"
-        match = re.search(function_regex, function_call_accumulator)
-        if match:
-            function_name, args_string = match.groups()
-            try:
-                arguments = json.loads(args_string)
-                await self.call_function(context=context,
-                                         tool_call_id=str(uuid.uuid4()),
-                                         function_name=function_name,
-                                         arguments=arguments)
-                return
-            except json.JSONDecodeError as error:
-                # We get here if the LLM returns a function call with invalid JSON arguments. This could happen
-                # because of LLM non-determinism, or maybe more often because of user error in the prompt.
-                # Should we do anything more than log a warning?
-                logger.debug(f"Error parsing function arguments: {error}")
-
 
 class CohereLLMContext(OpenAILLMContext):
     def __init__(
@@ -254,14 +230,6 @@ class CohereUserContextAggregator(LLMUserContextAggregator):
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
 
-#
-# Claude returns a text content block along with a tool use content block. This works quite nicely
-# with streaming. We get the text first, so we can start streaming it right away. Then we get the
-# tool_use block. While the text is streaming to TTS and the transport, we can run the tool call.
-#
-# But Claude is verbose. It would be nice to come up with prompt language that suppresses Claude's
-# chattiness about it's tool thinking.
-#
 
 
 class CohereAssistantContextAggregator(LLMAssistantContextAggregator):
