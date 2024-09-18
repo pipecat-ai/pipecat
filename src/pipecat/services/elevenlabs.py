@@ -101,6 +101,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
+            sample_rate=sample_rate_from_output_format(params.output_format),
             **kwargs
         )
 
@@ -109,7 +110,6 @@ class ElevenLabsTTSService(AsyncWordTTSService):
         self._model = model
         self._url = url
         self._params = params
-        self._sample_rate = sample_rate_from_output_format(params.output_format)
 
         # Websocket connection to ElevenLabs.
         self._websocket = None
@@ -209,7 +209,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
                     self.start_word_timestamps()
 
                     audio = base64.b64decode(msg["audio"])
-                    frame = AudioRawFrame(audio, self._sample_rate, 1)
+                    frame = AudioRawFrame(audio, self.sample_rate, 1)
                     await self.push_frame(frame)
 
                 if msg.get("alignment"):

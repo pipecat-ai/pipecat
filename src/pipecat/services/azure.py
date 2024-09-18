@@ -72,13 +72,21 @@ class AzureLLMService(BaseOpenAILLMService):
 
 
 class AzureTTSService(TTSService):
-    def __init__(self, *, api_key: str, region: str, voice="en-US-SaraNeural", **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+            self,
+            *,
+            api_key: str,
+            region: str,
+            voice="en-US-SaraNeural",
+            sample_rate: int = 16000,
+            **kwargs):
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         speech_config = SpeechConfig(subscription=api_key, region=region)
         self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
 
         self._voice = voice
+        self._sample_rate = sample_rate
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -109,7 +117,7 @@ class AzureTTSService(TTSService):
             await self.stop_ttfb_metrics()
             await self.push_frame(TTSStartedFrame())
             # Azure always sends a 44-byte header. Strip it off.
-            yield AudioRawFrame(audio=result.audio_data[44:], sample_rate=16000, num_channels=1)
+            yield AudioRawFrame(audio=result.audio_data[44:], sample_rate=self._sample_rate, num_channels=1)
             await self.push_frame(TTSStoppedFrame())
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details

@@ -11,7 +11,7 @@ import json
 import httpx
 from dataclasses import dataclass
 
-from typing import AsyncGenerator, List, Literal
+from typing import AsyncGenerator, Dict, List, Literal
 
 from loguru import logger
 from PIL import Image
@@ -54,6 +54,17 @@ except ModuleNotFoundError as e:
     logger.error(
         "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable.")
     raise Exception(f"Missing module: {e}")
+
+ValidVoice = Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+
+VALID_VOICES: Dict[str, ValidVoice] = {
+    "alloy": "alloy",
+    "echo": "echo",
+    "fable": "fable",
+    "onyx": "onyx",
+    "nova": "nova",
+    "shimmer": "shimmer",
+}
 
 
 class OpenAIUnhandledFunctionException(Exception):
@@ -182,8 +193,8 @@ class BaseOpenAILLMService(LLMService):
             if self.has_function(function_name):
                 await self._handle_function_call(context, tool_call_id, function_name, arguments)
             else:
-                raise OpenAIUnhandledFunctionException(
-                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
+                raise OpenAIUnhandledFunctionException(f"The LLM tried to call a function named '{
+                    function_name}', but there isn't a callback registered for that function.")
 
     async def _handle_function_call(
             self,
@@ -307,13 +318,15 @@ class OpenAITTSService(TTSService):
             self,
             *,
             api_key: str | None = None,
-            voice: Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"] = "alloy",
+            voice: str = "alloy",
             model: Literal["tts-1", "tts-1-hd"] = "tts-1",
+            sample_rate: int = 24000,
             **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
-        self._voice = voice
+        self._voice: ValidVoice = VALID_VOICES.get(voice, "alloy")
         self._model = model
+        self._sample_rate = sample_rate
 
         self._client = AsyncOpenAI(api_key=api_key)
 
@@ -322,7 +335,11 @@ class OpenAITTSService(TTSService):
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice = voice
+        self._voice = VALID_VOICES.get(voice, self._voice)
+
+    async def set_model(self, model: str):
+        logger.debug(f"Switching TTS model to: [{model}]")
+        self._model = model
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -348,7 +365,7 @@ class OpenAITTSService(TTSService):
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = AudioRawFrame(chunk, 24_000, 1)
+                        frame = AudioRawFrame(chunk, self.sample_rate, 1)
                         yield frame
                 await self.push_frame(TTSStoppedFrame())
         except BadRequestError as e:

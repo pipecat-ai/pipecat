@@ -171,6 +171,7 @@ class TTSService(AIService):
             push_stop_frames: bool = False,
             # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
             stop_frame_timeout_s: float = 1.0,
+            sample_rate: int = 16000,
             **kwargs):
         super().__init__(**kwargs)
         self._aggregate_sentences: bool = aggregate_sentences
@@ -180,6 +181,11 @@ class TTSService(AIService):
         self._stop_frame_task: Optional[asyncio.Task] = None
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
         self._current_sentence: str = ""
+        self._sample_rate: int = sample_rate
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
 
     @abstractmethod
     async def set_model(self, model: str):
