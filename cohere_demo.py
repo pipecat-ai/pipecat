@@ -1,8 +1,9 @@
 import asyncio
-import cohere
 import os
 
-co = cohere.AsyncClient(os.getenv("COHERE_API_KEY", ""))
+from cohere import AsyncClient
+
+co = AsyncClient(os.getenv("COHERE_API_KEY", ""))
 
 
 async def main():

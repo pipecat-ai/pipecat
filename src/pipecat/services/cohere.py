@@ -40,7 +40,7 @@ from loguru import logger
 
 
 try:
-    from cohere import AsyncClientV2
+    from cohere import AsyncClient
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -68,11 +68,14 @@ class CohereLLMService(LLMService):
             self,
             *,
             api_key: str,
-            model: str = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+            model: str = "command-r-plus",
             max_tokens: int = 4096,
             **kwargs):
         super().__init__(**kwargs)
-        self._client = AsyncClientV2(api_key=api_key)
+        self._client = AsyncClient(
+            api_key,
+            model,
+        )
         self._model = model
         self._max_tokens = max_tokens
 
@@ -97,8 +100,8 @@ class CohereLLMService(LLMService):
 
             await self.start_ttfb_metrics()
 
-            stream = await self._client.chat.completions.create(
-                messages=context.messages,
+            stream = await self._client.chat_stream(
+                chat_history=context.messages,
                 model=self._model,
                 max_tokens=self._max_tokens,
                 stream=True,
@@ -110,7 +113,7 @@ class CohereLLMService(LLMService):
             function_call_accumulator = ""
 
             async for chunk in stream:
-                # logger.debug(f"Cohere LLM event: {chunk}")
+                logger.debug(f"Cohere LLM event: {chunk}")
                 if chunk.usage:
                     tokens = {
                         "processor": self.name,
