@@ -24,8 +24,6 @@ from runner import configure
 
 from loguru import logger
 
-from dotenv import load_dotenv
-load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
@@ -66,7 +64,7 @@ async def main():
 
         llm = CohereLLMService(
             api_key=os.getenv("COHERE_API_KEY"),
-            model=os.getenv("TOGETHER_MODEL", "command-r-plus"),
+            model=os.getenv("COHERE_MODEL", "command-r-plus"),
         )
         llm.register_function("get_current_weather", get_current_weather)
 

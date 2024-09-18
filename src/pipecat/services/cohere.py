@@ -71,8 +71,7 @@ class CohereLLMService(LLMService):
             **kwargs):
         super().__init__(**kwargs)
         self._client = AsyncClient(
-            api_key,
-            model,
+            api_key
         )
         self._model = model
         self._max_tokens = max_tokens
@@ -98,11 +97,11 @@ class CohereLLMService(LLMService):
 
             await self.start_ttfb_metrics()
 
-            stream = await self._client.chat_stream(
+            stream = self._client.chat_stream(
                 chat_history=context.messages,
+                message="Hello!",
                 model=self._model,
                 max_tokens=self._max_tokens,
-                stream=True,
             )
 
             # Function calling
@@ -138,8 +137,6 @@ class CohereLLMService(LLMService):
                     else:
                         await self.push_frame(TextFrame(chunk.choices[0].delta.content))
 
-
-
         except CancelledError as e:
             # todo: implement token counting estimates for use when the user interrupts a long generation
             # we do this in the anthropic.py service
@@ -166,6 +163,7 @@ class CohereLLMService(LLMService):
 
         if context:
             await self._process_context(context)
+
 
 class CohereLLMContext(OpenAILLMContext):
     def __init__(
@@ -229,7 +227,6 @@ class CohereUserContextAggregator(LLMUserContextAggregator):
                         del self._context._user_image_request_context[frame.user_id]
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
-
 
 
 class CohereAssistantContextAggregator(LLMAssistantContextAggregator):
