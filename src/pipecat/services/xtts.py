@@ -13,9 +13,11 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     StartFrame,
+    StartInterruptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame)
 from pipecat.metrics.metrics import TTSUsageMetricsData
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -141,3 +143,10 @@ class XTTSService(TTSService):
                 yield frame
 
             await self.push_frame(TTSStoppedFrame())
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics()
+        else:
+            await self.push_frame(frame, direction)

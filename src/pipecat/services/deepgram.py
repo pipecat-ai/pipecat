@@ -16,10 +16,12 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    StartInterruptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame)
 from pipecat.metrics.metrics import TTSUsageMetricsData
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import STTService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -111,6 +113,13 @@ class DeepgramTTSService(TTSService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
 
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics()
+        else:
+            await self.push_frame(frame, direction)
+
 
 class DeepgramSTTService(STTService):
     def __init__(self,
@@ -194,3 +203,10 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(TranscriptionFrame(transcript, "", time_now_iso8601(), language))
             else:
                 await self.push_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language))
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics(self._live_options.model)
+        else:
+            await self.push_frame(frame, direction)

@@ -12,7 +12,8 @@ from PIL import Image
 from pydantic import BaseModel
 from typing import AsyncGenerator, Optional, Union, Dict
 
-from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
+from pipecat.frames.frames import ErrorFrame, Frame, StartInterruptionFrame, TextFrame, URLImageRawFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService
 
 from loguru import logger
@@ -81,3 +82,16 @@ class FalImageGenService(ImageGenService):
                 size=image.size,
                 format=image.format)
             yield frame
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TextFrame):
+            await self.push_frame(frame, direction)
+            await self.start_processing_metrics()
+            await self.process_generator(self.run_image_gen(frame.text))
+            await self.stop_processing_metrics(model=self._model)
+        elif isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics(model=self._model)
+        else:
+            await self.push_frame(frame, direction)

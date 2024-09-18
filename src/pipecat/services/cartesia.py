@@ -257,3 +257,10 @@ class CartesiaTTSService(AsyncWordTTSService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics(model=self._model_id)
+        else:
+            await self.push_frame(frame, direction)

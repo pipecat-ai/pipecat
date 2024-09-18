@@ -236,6 +236,8 @@ class AnthropicLLMService(LLMService):
         elif isinstance(frame, LLMEnablePromptCachingFrame):
             logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
             self._enable_prompt_caching_beta = frame.enable
+        elif isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics(model=self._model)
         else:
             await self.push_frame(frame, direction)
 

@@ -13,7 +13,8 @@ from typing import AsyncGenerator
 
 import numpy as np
 
-from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
+from pipecat.frames.frames import ErrorFrame, Frame, StartInterruptionFrame, TranscriptionFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 
@@ -98,3 +99,10 @@ class WhisperSTTService(SegmentedSTTService):
         if text:
             logger.debug(f"Transcription: [{text}]")
             yield TranscriptionFrame(text, "", time_now_iso8601())
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics(self._get_model_name_as_str())
+        else:
+            await self.push_frame(frame, direction)

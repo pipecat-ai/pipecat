@@ -10,12 +10,13 @@ from typing import List
 
 from pipecat.frames.frames import (
     Frame,
+    LLMFullResponseStartFrame,
+    LLMFullResponseEndFrame,
+    LLMMessagesFrame,
     LLMModelUpdateFrame,
+    StartInterruptionFrame,
     TextFrame,
     VisionImageRawFrame,
-    LLMMessagesFrame,
-    LLMFullResponseStartFrame,
-    LLMFullResponseEndFrame
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
@@ -126,6 +127,8 @@ class GoogleLLMService(LLMService):
         elif isinstance(frame, LLMModelUpdateFrame):
             logger.debug(f"Switching LLM model to: [{frame.model}]")
             self._create_client(frame.model)
+        elif isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics(model=self._model)
         else:
             await self.push_frame(frame, direction)
 

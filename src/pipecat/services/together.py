@@ -156,6 +156,8 @@ class TogetherLLMService(LLMService):
         elif isinstance(frame, LLMModelUpdateFrame):
             logger.debug(f"Switching LLM model to: [{frame.model}]")
             self._model = frame.model
+        elif isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics(model=self._model)
         else:
             await self.push_frame(frame, direction)
 

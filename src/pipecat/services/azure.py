@@ -18,7 +18,9 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     StartFrame,
+    StartInterruptionFrame,
     SystemFrame,
+    TextFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame,
@@ -117,6 +119,14 @@ class AzureTTSService(TTSService):
             logger.warning(f"Speech synthesis canceled: {cancellation_details.reason}")
             if cancellation_details.reason == CancellationReason.Error:
                 logger.error(f"{self} error: {cancellation_details.error_details}")
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics()
+        else:
+            await self.push_frame(frame, direction)
 
 
 class AzureSTTService(AsyncAIService):
@@ -245,3 +255,16 @@ class AzureImageGenServiceREST(ImageGenService):
                     size=image.size,
                     format=image.format)
                 yield frame
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TextFrame):
+            await self.push_frame(frame, direction)
+            await self.start_processing_metrics()
+            await self.process_generator(self.run_image_gen(frame.text))
+            await self.stop_processing_metrics(model=self._model)
+        elif isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics(model=self._model)
+        else:
+            await self.push_frame(frame, direction)

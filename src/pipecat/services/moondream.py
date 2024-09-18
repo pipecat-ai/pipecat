@@ -10,7 +10,8 @@ from PIL import Image
 
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import ErrorFrame, Frame, TextFrame, VisionImageRawFrame
+from pipecat.frames.frames import ErrorFrame, Frame, StartInterruptionFrame, TextFrame, VisionImageRawFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import VisionService
 
 from loguru import logger
@@ -90,3 +91,15 @@ class MoondreamService(VisionService):
         description = await asyncio.to_thread(get_image_description, frame)
 
         yield TextFrame(text=description)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, VisionImageRawFrame):
+            await self.start_processing_metrics()
+            await self.process_generator(self.run_vision(frame))
+            await self.stop_processing_metrics(model=self._model)
+        elif isinstance(frame, StartInterruptionFrame):
+            await self.stop_all_metrics(model=self._model)
+        else:
+            await self.push_frame(frame, direction)

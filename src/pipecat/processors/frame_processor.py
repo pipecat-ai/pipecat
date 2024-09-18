@@ -182,8 +182,6 @@ class FrameProcessor:
             self._enable_metrics = frame.enable_metrics
             self._enable_usage_metrics = frame.enable_usage_metrics
             self._report_only_initial_ttfb = frame.report_only_initial_ttfb
-        elif isinstance(frame, StartInterruptionFrame):
-            await self.stop_all_metrics()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._should_report_ttfb = True
 
