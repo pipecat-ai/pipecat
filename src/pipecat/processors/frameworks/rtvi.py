@@ -337,7 +337,12 @@ class RTVIProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         # Specific system frames
-        if isinstance(frame, CancelFrame):
+        if isinstance(frame, StartFrame):
+            # Push StartFrame before start(), because we want StartFrame to be
+            # processed by every processor before any other frame is processed.
+            await self.push_frame(frame, direction)
+            await self._start(frame)
+        elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, ErrorFrame):
@@ -347,11 +352,6 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames
-        elif isinstance(frame, StartFrame):
-            # Push StartFrame before start(), because we want StartFrame to be
-            # processed by every processor before any other frame is processed.
-            await self.push_frame(frame, direction)
-            await self._start(frame)
         elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.

@@ -249,6 +249,16 @@ class SystemFrame(Frame):
 
 
 @dataclass
+class StartFrame(SystemFrame):
+    """This is the first frame that should be pushed down a pipeline."""
+    clock: BaseClock
+    allow_interruptions: bool = False
+    enable_metrics: bool = False
+    enable_usage_metrics: bool = False
+    report_only_initial_ttfb: bool = False
+
+
+@dataclass
 class CancelFrame(SystemFrame):
     """Indicates that a pipeline needs to stop right away."""
     pass
@@ -336,16 +346,6 @@ class MetricsFrame(SystemFrame):
 @dataclass
 class ControlFrame(Frame):
     pass
-
-
-@dataclass
-class StartFrame(ControlFrame):
-    """This is the first frame that should be pushed down a pipeline."""
-    clock: BaseClock
-    allow_interruptions: bool = False
-    enable_metrics: bool = False
-    enable_usage_metrics: bool = False
-    report_only_initial_ttfb: bool = False
 
 
 @dataclass

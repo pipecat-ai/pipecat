@@ -129,7 +129,12 @@ class BaseOutputTransport(FrameProcessor):
         # immediately. Other frames require order so they are put in the sink
         # queue.
         #
-        if isinstance(frame, CancelFrame):
+        if isinstance(frame, StartFrame):
+            # Push StartFrame before start(), because we want StartFrame to be
+            # processed by every processor before any other frame is processed.
+            await self.push_frame(frame, direction)
+            await self.start(frame)
+        elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
@@ -141,9 +146,6 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames.
-        elif isinstance(frame, StartFrame):
-            await self._sink_queue.put(frame)
-            await self.start(frame)
         elif isinstance(frame, EndFrame):
             await self._sink_clock_queue.put((sys.maxsize, frame.id, frame))
             await self._sink_queue.put(frame)
