@@ -81,6 +81,13 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_out_task = self.get_event_loop().create_task(self._audio_out_task_handler())
 
     async def stop(self, frame: EndFrame):
+        # At this point we have enqueued an EndFrame and we need to wait for
+        # that EndFrame to be processed by the sink tasks. We also need to wait
+        # for these tasks before cancelling the camera and audio tasks below
+        # because they might be still rendering.
+        await self._sink_task
+        await self._sink_clock_task
+
         # Cancel and wait for the camera output task to finish.
         if self._params.camera_out_enabled:
             self._camera_out_task.cancel()
@@ -91,19 +98,23 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_out_task.cancel()
             await self._audio_out_task
 
-        # Wait for the sink task to finish. They will finish when the EndFrame
-        # is actually processed.
-        await self._sink_task
-
     async def cancel(self, frame: CancelFrame):
-        # Cancel all the tasks and wait for them to finish.
+        # Since we are cancelling everything it doesn't matter if we cancel sink
+        # tasks first or not.
+        self._sink_task.cancel()
+        self._sink_clock_task.cancel()
+        await self._sink_task
+        await self._sink_clock_task
 
+        # Cancel and wait for the camera output task to finish.
         if self._params.camera_out_enabled:
             self._camera_out_task.cancel()
             await self._camera_out_task
 
-        self._sink_task.cancel()
-        await self._sink_task
+        # Cancel and wait for the audio output task to finish.
+        if self._params.audio_out_enabled and self._params.audio_out_is_live:
+            self._audio_out_task.cancel()
+            await self._audio_out_task
 
     async def send_message(self, frame: TransportMessageFrame):
         pass
@@ -259,7 +270,7 @@ class BaseOutputTransport(FrameProcessor):
             try:
                 timestamp, _, frame = await self._sink_clock_queue.get()
 
-                # If we hit an EndFrame, we cna finish right away.
+                # If we hit an EndFrame, we can finish right away.
                 running = not isinstance(frame, EndFrame)
 
                 # If we have a frame we check it's presentation timestamp. If it
@@ -327,9 +338,9 @@ class BaseOutputTransport(FrameProcessor):
                 elif self._camera_images:
                     image = next(self._camera_images)
                     await self._draw_image(image)
-                    await asyncio.sleep(1.0 / self._params.camera_out_framerate)
+                    await asyncio.sleep(self._camera_out_frame_duration)
                 else:
-                    await asyncio.sleep(1.0 / self._params.camera_out_framerate)
+                    await asyncio.sleep(self._camera_out_frame_duration)
             except asyncio.CancelledError:
                 break
             except Exception as e:

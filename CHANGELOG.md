@@ -66,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `BaseOutputTransport` issue that would stop audio and video rendering
+  tasks (after receiving and `EndFrame`) before the internal queue was emptied,
+  causing the pipeline to finish prematurely.
+
 - `StartFrame` should be the first frame every processor receives to avoid
   situations where things are not initialized (because initialization happens on
   `StartFrame`) and other frames come in resulting in undesired behavior.
