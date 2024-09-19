@@ -12,17 +12,17 @@ import sys
 import tkinter as tk
 
 from pipecat.frames.frames import AudioRawFrame, Frame, URLImageRawFrame, LLMMessagesFrame, TextFrame
-from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
+from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.tk import TkLocalTransport
+from pipecat.transports.local.tk import TkLocalTransport, TkOutputTransport
 
 from loguru import logger
 
@@ -60,6 +60,7 @@ async def main():
                 def __init__(self):
                     super().__init__()
                     self.audio = bytearray()
+                    self.frame = None
 
                 async def process_frame(self, frame: Frame, direction: FrameDirection):
                     await super().process_frame(frame, direction)
@@ -84,9 +85,10 @@ async def main():
                 api_key=os.getenv("OPENAI_API_KEY"),
                 model="gpt-4o")
 
-            tts = ElevenLabsTTSService(
-                api_key=os.getenv("ELEVENLABS_API_KEY"),
-                voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
+            tts = CartesiaHttpTTSService(
+                api_key=os.getenv("CARTESIA_API_KEY"),
+                voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            )
 
             imagegen = FalImageGenService(
                 params=FalImageGenService.InputParams(
@@ -95,7 +97,7 @@ async def main():
                 aiohttp_session=session,
                 key=os.getenv("FAL_KEY"))
 
-            aggregator = LLMFullResponseAggregator()
+            sentence_aggregator = SentenceAggregator()
 
             description = ImageDescription()
 
@@ -103,12 +105,22 @@ async def main():
 
             image_grabber = ImageGrabber()
 
+            # With `SyncParallelPipeline` we synchronize audio and images by
+            # pushing them basically in order (e.g. I1 A1 A1 A1 I2 A2 A2 A2 A2
+            # I3 A3). To do that, each pipeline runs concurrently and
+            # `SyncParallelPipeline` will wait for the input frame to be
+            # processed.
+            #
+            # Note that `SyncParallelPipeline` requires all processors in it to
+            # be synchronous (which is the default for most processors).
             pipeline = Pipeline([
-                llm,
-                aggregator,
-                description,
-                ParallelPipeline([tts, audio_grabber],
-                                 [imagegen, image_grabber])
+                llm,                     # LLM
+                sentence_aggregator,     # Aggregates LLM output into full sentences
+                description,             # Store sentence
+                SyncParallelPipeline(
+                    [tts, audio_grabber],      # Generate and store audio for the given sentence
+                    [imagegen, image_grabber]  # Generate and storeimage for the given sentence
+                )
             ])
 
             task = PipelineTask(pipeline)

@@ -49,12 +49,12 @@ class Sink(FrameProcessor):
                 await self._down_queue.put(frame)
 
 
-class ParallelTask(BasePipeline):
+class SyncParallelPipeline(BasePipeline):
     def __init__(self, *args):
         super().__init__()
 
         if len(args) == 0:
-            raise Exception(f"ParallelTask needs at least one argument")
+            raise Exception(f"SyncParallelPipeline needs at least one argument")
 
         self._sinks = []
         self._sources = []
@@ -66,7 +66,7 @@ class ParallelTask(BasePipeline):
         logger.debug(f"Creating {self} pipelines")
         for processors in args:
             if not isinstance(processors, list):
-                raise TypeError(f"ParallelTask argument {processors} is not a list")
+                raise TypeError(f"SyncParallelPipeline argument {processors} is not a list")
 
             # We add a source at the beginning of the pipeline and a sink at the end.
             source = Source(self._up_queue)

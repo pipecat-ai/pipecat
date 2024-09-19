@@ -44,6 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ParallelTask` has been renamed to `SyncParallelPipeline`. A
+  `SyncParallelPipeline` is a frame processor that contains a list of different
+  pipelines to be executed concurrently. The difference between a
+  `SyncParallelPipeline` and a `ParallelPipeline` is that, given an input frame,
+  the `SyncParallelPipeline` will wait for all the internal pipelines to
+  complete. This is achieved by ensuring all the processors in each of the
+  internal pipelines are synchronous.
+
 - `StartFrame` is back a system frame so we make sure it's processed immediately
   by all processors. `EndFrame` stays a control frame since it needs to be
   ordered allowing the frames in the pipeline to be processed.
