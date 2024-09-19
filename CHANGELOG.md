@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `CartesiaHttpTTSService`. This is a synchronous frame processor
+  (i.e. given an input text frame it will wait for the whole output before
+  returning).
+
 - A clock can now be specified to `PipelineTask` (defaults to
   `SystemClock`). This clock will be passed to each frame processor via the
   `StartFrame`.
