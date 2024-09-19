@@ -20,8 +20,8 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserResponseAggregator,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.transports.services.daily import DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -78,9 +78,9 @@ async def main():
             )
         )
 
-        tts = ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        tts = CartesiaHttpTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
         llm = OpenAILLMService(

@@ -141,12 +141,12 @@ class TkLocalTransport(BaseTransport):
     # BaseTransport
     #
 
-    def input(self) -> FrameProcessor:
+    def input(self) -> TkInputTransport:
         if not self._input:
             self._input = TkInputTransport(self._pyaudio, self._params)
         return self._input
 
-    def output(self) -> FrameProcessor:
+    def output(self) -> TkOutputTransport:
         if not self._output:
             self._output = TkOutputTransport(self._tk_root, self._pyaudio, self._params)
         return self._output

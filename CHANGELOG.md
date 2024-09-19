@@ -9,15 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A clock can now be specified to `PipelineTask` (defaults to
-  `SystemClock`). This clock will be passed to each frame processor via the
-  `StartFrame`.
+- Pipecat has a pipeline-based architecture. The pipeline consists of frame
+  processors linked to each other. The elements traveling across the pipeline
+  are called frames.
+
+  To have a deterministic behavior the frames traveling through the pipeline
+  should always be ordered, except system frames which are out-of-band
+  frames. To achieve that, each frame processor should only output frames from a
+  single task.
+
+  In this version we introduce synchronous and asynchronous frame
+  processors. The synchronous processors push output frames from the same task
+  that they receive input frames, and therefore only pushing frames from one
+  task. Asynchronous frame processors can have internal tasks to perform things
+  asynchronously (e.g. receiving data from a websocket) but they also have a
+  single task where they push frames from.
+
+  By default, frame processors are synchronous. To change a frame processor to
+  asynchronous you only need to pass `sync=False` to the base class constructor.
 
 - Added pipeline clocks. A pipeline clock is used by the output transport to
   know when a frame needs to be presented. For that, all frames now have an
   optional `pts` field (prensentation timestamp). There's currently just one
   clock implementation `SystemClock` and the `pts` field is currently only used
   for `TextFrame`s (audio and image frames will be next).
+
+- A clock can now be specified to `PipelineTask` (defaults to
+  `SystemClock`). This clock will be passed to each frame processor via the
+  `StartFrame`.
+
+- Added `CartesiaHttpTTSService`. This is a synchronous frame processor
+  (i.e. given an input text frame it will wait for the whole output before
+  returning).
 
 - `DailyTransport` now supports setting the audio bitrate to improve audio
   quality through the `DailyParams.audio_out_bitrate` parameter. The new
@@ -40,6 +63,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ParallelTask` has been renamed to `SyncParallelPipeline`. A
+  `SyncParallelPipeline` is a frame processor that contains a list of different
+  pipelines to be executed concurrently. The difference between a
+  `SyncParallelPipeline` and a `ParallelPipeline` is that, given an input frame,
+  the `SyncParallelPipeline` will wait for all the internal pipelines to
+  complete. This is achieved by ensuring all the processors in each of the
+  internal pipelines are synchronous.
+
+- `StartFrame` is back a system frame so we make sure it's processed immediately
+  by all processors. `EndFrame` stays a control frame since it needs to be
+  ordered allowing the frames in the pipeline to be processed.
+
+- Updated `MoondreamService` revision to `2024-08-26`.
+
 - `CartesiaTTSService` and `ElevenLabsTTSService` now add presentation
   timestamps to their text output. This allows the output transport to push the
   text frames downstream at almost the same time the words are spoken. We say
@@ -59,6 +96,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   speaking) instead of a continous stream.
 
 ### Fixed
+
+- Fixed a `BaseOutputTransport` issue that would stop audio and video rendering
+  tasks (after receiving and `EndFrame`) before the internal queue was emptied,
+  causing the pipeline to finish prematurely.
 
 - `StartFrame` should be the first frame every processor receives to avoid
   situations where things are not initialized (because initialization happens on
