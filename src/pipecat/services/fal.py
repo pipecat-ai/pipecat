@@ -43,8 +43,9 @@ class FalImageGenService(ImageGenService):
         aiohttp_session: aiohttp.ClientSession,
         model: str = "fal-ai/fast-sdxl",
         key: str | None = None,
+        **kwargs
     ):
-        super().__init__()
+        super().__init__(**kwargs)
         self._model = model
         self._params = params
         self._aiohttp_session = aiohttp_session
