@@ -811,12 +811,12 @@ class DailyTransport(BaseTransport):
     # BaseTransport
     #
 
-    def input(self) -> FrameProcessor:
+    def input(self) -> DailyInputTransport:
         if not self._input:
             self._input = DailyInputTransport(self._client, self._params, name=self._input_name)
         return self._input
 
-    def output(self) -> FrameProcessor:
+    def output(self) -> DailyOutputTransport:
         if not self._output:
             self._output = DailyOutputTransport(self._client, self._params, name=self._output_name)
         return self._output
