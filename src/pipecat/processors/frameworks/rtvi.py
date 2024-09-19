@@ -121,7 +121,7 @@ class RTVIActionRun(BaseModel):
 @dataclass
 class RTVIActionFrame(DataFrame):
     rtvi_action_run: RTVIActionRun
-    message_id: Optional[str] = "webhook"
+    message_id: Optional[str] = None
 
 
 class RTVIMessage(BaseModel):
@@ -386,9 +386,6 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, TransportMessageFrame):
             await self._message_queue.put(frame)
         elif isinstance(frame, RTVIActionFrame):
-            if not frame.message_id:
-                # The response isn't going anywhere anyway
-                frame.message_id = "webhook"
             await self._handle_action(frame.message_id, frame.rtvi_action_run)
         # Other frames
         else:
@@ -583,7 +580,7 @@ class RTVIProcessor(FrameProcessor):
             result=data.result)
         await self.push_frame(frame)
 
-    async def _handle_action(self, request_id: str, data: RTVIActionRun):
+    async def _handle_action(self, request_id: str | None, data: RTVIActionRun):
         action_id = self._action_id(data.service, data.action)
         if action_id not in self._registered_actions:
             await self._send_error_response(request_id, f"Action {action_id} not registered")
@@ -594,8 +591,11 @@ class RTVIProcessor(FrameProcessor):
             for arg in data.arguments:
                 arguments[arg.name] = arg.value
         result = await action.handler(self, action.service, arguments)
-        message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
-        await self._push_transport_message(message)
+        # Only send a response if request_id is present. Things that don't care about
+        # action responses (such as webhooks) don't set a request_id
+        if request_id:
+            message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
+            await self._push_transport_message(message)
 
     async def _maybe_send_bot_ready(self):
         if self._pipeline_started and self._client_ready:
