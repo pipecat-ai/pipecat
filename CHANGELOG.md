@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `StartFrame` is back a system frame so we make sure it's processed immediately
+  by all processors. `EndFrame` stays a control frame since it needs to be
+  ordered allowing the frames in the pipeline to be processed.
+
 - Updated `MoondreamService` revision to `2024-08-26`.
 
 - `CartesiaTTSService` and `ElevenLabsTTSService` now add presentation
