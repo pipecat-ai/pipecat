@@ -60,6 +60,9 @@ async def configure_livekit():
 
     token = generate_token(room_name, "Say One Thing", api_key, api_secret)
 
+    user_token = generate_token(room_name, "User", api_key, api_secret)
+    logger.info(f"User token: {user_token}")
+
     return (url, token, room_name)
 
 
@@ -68,10 +71,7 @@ async def main():
         (url, token, room_name) = await configure_livekit()
 
         transport = LiveKitTransport(
-            url=url,
-            token=token,
-            room_name=room_name,
-            params=LiveKitParams(audio_out_enabled=True)
+            url=url, token=token, room_name=room_name, params=LiveKitParams(audio_out_enabled=True, audio_out_sample_rate=16000)
         )
 
         tts = CartesiaTTSService(
@@ -87,7 +87,8 @@ async def main():
         # participant joins.
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant_id):
-            await task.queue_frame(TextFrame(f"Hello there!"))
+            await asyncio.sleep(1)
+            await task.queue_frame(TextFrame("Hello there! How are you doing today? Would you like to talk about the weather?"))
 
         await runner.run(task)
 
