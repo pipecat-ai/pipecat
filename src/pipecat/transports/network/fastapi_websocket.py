@@ -164,10 +164,10 @@ class FastAPIWebsocketTransport(BaseTransport):
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
 
-    def input(self) -> FrameProcessor:
+    def input(self) -> FastAPIWebsocketInputTransport:
         return self._input
 
-    def output(self) -> FrameProcessor:
+    def output(self) -> FastAPIWebsocketOutputTransport:
         return self._output
 
     async def _on_client_connected(self, websocket):

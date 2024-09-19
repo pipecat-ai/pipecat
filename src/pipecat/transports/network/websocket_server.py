@@ -190,13 +190,13 @@ class WebsocketServerTransport(BaseTransport):
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
 
-    def input(self) -> FrameProcessor:
+    def input(self) -> WebsocketServerInputTransport:
         if not self._input:
             self._input = WebsocketServerInputTransport(
                 self._host, self._port, self._params, self._callbacks, name=self._input_name)
         return self._input
 
-    def output(self) -> FrameProcessor:
+    def output(self) -> WebsocketServerOutputTransport:
         if not self._output:
             self._output = WebsocketServerOutputTransport(self._params, name=self._output_name)
         return self._output
