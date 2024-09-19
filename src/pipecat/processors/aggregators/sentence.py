@@ -16,7 +16,8 @@ class SentenceAggregator(FrameProcessor):
         TextFrame("Hello,") -> None
         TextFrame(" world.") -> TextFrame("Hello world.")
 
-    Doctest:
+    Doctest: FIXME to work with asyncio
+    >>> import asyncio
     >>> async def print_frames(aggregator, frame):
     ...     async for frame in aggregator.process_frame(frame):
     ...         print(frame.text)

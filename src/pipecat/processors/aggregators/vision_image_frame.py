@@ -12,7 +12,7 @@ class VisionImageFrameAggregator(FrameProcessor):
     """This aggregator waits for a consecutive TextFrame and an
     ImageFrame. After the ImageFrame arrives it will output a VisionImageFrame.
 
-    >>> from pipecat.pipeline.frames import ImageFrame
+    >>> from pipecat.frames.frames import ImageFrame
 
     >>> async def print_frames(aggregator, frame):
     ...     async for frame in aggregator.process_frame(frame):
