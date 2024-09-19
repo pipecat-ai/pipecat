@@ -115,13 +115,13 @@ class CohereLLMService(LLMService):
 
             async for chunk in stream:
                 logger.debug(f"Cohere LLM event: {chunk}")
-                # if chunk.usage:
+                # if chunk.event_type == 'stream-start':
                 #     tokens = {
                 #         "processor": self.name,
                 #         "model": self._model,
-                #         "prompt_tokens": chunk.usage.prompt_tokens,
-                #         "completion_tokens": chunk.usage.completion_tokens,
-                #         "total_tokens": chunk.usage.total_tokens
+                #         # "prompt_tokens": chunk.usage.prompt_tokens,
+                #         # "completion_tokens": chunk.usage.completion_tokens,
+                #         # "total_tokens": chunk.usage.total_tokens
                 #     }
                 #     await self.start_llm_usage_metrics(tokens)
 
@@ -129,17 +129,17 @@ class CohereLLMService(LLMService):
                 #     continue
 
                 if not got_first_chunk:
-                    await self.stop_ttfb_metrics()
-                    if chunk.choices[0].delta.content:
+                    # await self.stop_ttfb_metrics()
+                    if chunk.event_type == 'stream-start':
                         got_first_chunk = True
-                        if chunk.choices[0].delta.content[0] == "<":
-                            accumulating_function_call = True
+                        # if chunk.choices[0].delta.content[0] == "<":
+                        #     accumulating_function_call = True
 
-                if chunk.choices[0].delta.content:
+                if chunk.event_type == 'text-generation':
                     if accumulating_function_call:
                         function_call_accumulator += chunk.choices[0].delta.content
                     else:
-                        await self.push_frame(TextFrame(chunk.choices[0].delta.content))
+                        await self.push_frame(TextFrame(chunk.text))
 
         except CancelledError as e:
             # todo: implement token counting estimates for use when the user interrupts a long generation
