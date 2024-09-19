@@ -10,11 +10,13 @@ from enum import Enum
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
+    EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
     StartInterruptionFrame,
-    UserStoppedSpeakingFrame)
+    StopInterruptionFrame,
+    SystemFrame)
 from pipecat.processors.metrics.base import FrameProcessorMetrics
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -32,6 +34,7 @@ class FrameProcessor:
             *,
             name: str | None = None,
             metrics: FrameProcessorMetrics = FrameProcessorMetrics,
+            sync: bool = True,
             loop: asyncio.AbstractEventLoop | None = None,
             **kwargs):
         self.id: int = obj_id()
@@ -40,6 +43,7 @@ class FrameProcessor:
         self._prev: "FrameProcessor" | None = None
         self._next: "FrameProcessor" | None = None
         self._loop: asyncio.AbstractEventLoop = loop or asyncio.get_running_loop()
+        self._sync = sync
 
         # Clock
         self._clock: BaseClock | None = None
@@ -52,6 +56,14 @@ class FrameProcessor:
 
         # Metrics
         self._metrics = metrics(name=self.name)
+
+        # Every processor in Pipecat should only output frames from a single
+        # task. This avoid problems like audio overlapping. System frames are
+        # the exception to this rule.
+        #
+        # This create this task.
+        if not self._sync:
+            self.__create_push_task()
 
     @property
     def interruptions_allowed(self):
@@ -136,14 +148,38 @@ class FrameProcessor:
             self._enable_usage_metrics = frame.enable_usage_metrics
             self._report_only_initial_ttfb = frame.report_only_initial_ttfb
         elif isinstance(frame, StartInterruptionFrame):
+            await self._start_interruption()
             await self.stop_all_metrics()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        elif isinstance(frame, StopInterruptionFrame):
             self._should_report_ttfb = True
 
     async def push_error(self, error: ErrorFrame):
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        if self._sync or isinstance(frame, SystemFrame):
+            await self.__internal_push_frame(frame, direction)
+        else:
+            await self.__push_queue.put((frame, direction))
+
+    #
+    # Handle interruptions
+    #
+
+    async def _start_interruption(self):
+        if not self._sync:
+            # Cancel the task. This will stop pushing frames downstream.
+            self.__push_frame_task.cancel()
+            await self.__push_frame_task
+
+            # Create a new queue and task.
+            self.__create_push_task()
+
+    async def _stop_interruption(self):
+        # Nothing to do right now.
+        pass
+
+    async def __internal_push_frame(self, frame: Frame, direction: FrameDirection):
         try:
             if direction == FrameDirection.DOWNSTREAM and self._next:
                 logger.trace(f"Pushing {frame} from {self} to {self._next}")
@@ -153,6 +189,21 @@ class FrameProcessor:
                 await self._prev.process_frame(frame, direction)
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
+
+    def __create_push_task(self):
+        self.__push_queue = asyncio.Queue()
+        self.__push_frame_task = self.get_event_loop().create_task(self.__push_frame_task_handler())
+
+    async def __push_frame_task_handler(self):
+        running = True
+        while running:
+            try:
+                (frame, direction) = await self.__push_queue.get()
+                await self.__internal_push_frame(frame, direction)
+                running = not isinstance(frame, EndFrame)
+                self.__push_queue.task_done()
+            except asyncio.CancelledError:
+                break
 
     def __str__(self):
         return self.name
