@@ -5,7 +5,6 @@
 #
 
 import asyncio
-import time
 
 from enum import Enum
 
@@ -13,102 +12,18 @@ from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
-    MetricsFrame,
     StartFrame,
     StartInterruptionFrame,
     UserStoppedSpeakingFrame)
+from pipecat.processors.metrics.base import FrameProcessorMetrics
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
 
-try:
-    import sentry_sdk
-    sentry_available = sentry_sdk.is_initialized()
-    if not sentry_available:
-        logger.debug("Sentry SDK not initialized. Sentry features will be disabled.")
-except ImportError:
-    sentry_available = False
-    logger.debug("Sentry SDK not installed. Sentry features will be disabled.")
 
 class FrameDirection(Enum):
     DOWNSTREAM = 1
     UPSTREAM = 2
-
-
-class FrameProcessorMetrics:
-    def __init__(self, name: str):
-        self._name = name
-        self._start_ttfb_time = 0
-        self._start_processing_time = 0
-        self._should_report_ttfb = True
-        if sentry_available:
-            self._ttfb_metrics_span = None
-            self._processing_metrics_span = None
-
-    async def start_ttfb_metrics(self, report_only_initial_ttfb):
-        if self._should_report_ttfb:
-            self._start_ttfb_time = time.time()
-            if sentry_available:
-                self._ttfb_metrics_span = sentry_sdk.start_span(
-                    op="ttfb", 
-                    description=f"TTFB for {self._name}",
-                    start_timestamp=self._start_ttfb_time
-                )
-            self._should_report_ttfb = not report_only_initial_ttfb
-
-    async def stop_ttfb_metrics(self):
-        if self._start_ttfb_time == 0:
-            return None
-
-        stop_time = time.time()
-        value = stop_time - self._start_ttfb_time
-        if sentry_available:
-            self._ttfb_metrics_span.finish(end_timestamp=stop_time)
-        logger.debug(f"{self._name} TTFB: {value}")
-        ttfb = {
-            "processor": self._name,
-            "value": value
-        }
-        self._start_ttfb_time = 0
-        return MetricsFrame(ttfb=[ttfb])
-
-    async def start_processing_metrics(self):
-        self._start_processing_time = time.time()
-        if sentry_available:
-            self._processing_metrics_span = sentry_sdk.start_span(
-                op="processing", 
-                description=f"Processing for {self._name}",
-                start_timestamp=self._start_processing_time
-            )
-
-    async def stop_processing_metrics(self):
-        if self._start_processing_time == 0:
-            return None
-        stop_time = time.time()
-        value = stop_time - self._start_processing_time
-        if sentry_available:
-            self._processing_metrics_span.finish(end_timestamp=stop_time)
-        logger.debug(f"{self._name} processing time: {value}")
-        processing = {
-            "processor": self._name,
-            "value": value
-        }
-        self._start_processing_time = 0
-        return MetricsFrame(processing=[processing])
-
-    async def start_llm_usage_metrics(self, tokens: dict):
-        logger.debug(
-            f"{self._name} prompt tokens: {tokens['prompt_tokens']}, completion tokens: {tokens['completion_tokens']}")
-        return MetricsFrame(tokens=[tokens])
-
-    async def start_tts_usage_metrics(self, text: str):
-        characters = {
-            "processor": self._name,
-            "value": len(text),
-        }
-        logger.debug(f"{self._name} usage characters: {characters['value']}")
-        return MetricsFrame(characters=[characters])
-
 
 class FrameProcessor:
 
@@ -116,6 +31,7 @@ class FrameProcessor:
             self,
             *,
             name: str | None = None,
+            metrics: FrameProcessorMetrics = FrameProcessorMetrics,
             loop: asyncio.AbstractEventLoop | None = None,
             **kwargs):
         self.id: int = obj_id()
@@ -135,7 +51,7 @@ class FrameProcessor:
         self._report_only_initial_ttfb = False
 
         # Metrics
-        self._metrics = FrameProcessorMetrics(name=self.name)
+        self._metrics = metrics(name=self.name)
 
     @property
     def interruptions_allowed(self):
