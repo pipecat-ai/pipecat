@@ -103,11 +103,11 @@ Reminder:
 """
 
         chat_history = [{"role": "USER",
-                         "content": system_prompt},
+                         "message": "You are a comedian."},
                         {"role": "USER",
-                         "content": "Wait for the user to say something."}]
+                         "message": "Tell a joke."}]
 
-        context = CohereLLMContext(chat_history=chat_history)
+        context = CohereLLMContext(messages=chat_history)
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline([
@@ -125,7 +125,7 @@ Reminder:
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([LLMMessagesFrame(chat_history)])
 
         runner = PipelineRunner()
 

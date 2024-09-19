@@ -15,8 +15,6 @@ import re
 import typing
 import uuid
 
-from cohere import Message
-
 
 from pipecat.frames.frames import (
     Frame,
@@ -34,14 +32,14 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
+from pipecat.processors.aggregators.cohere_llm_context import CohereLLMContext, CohereLLMContextFrame
 from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 
 from loguru import logger
 
 
 try:
-    from cohere import AsyncClient
+    from cohere import AsyncClient, Message
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -83,7 +81,7 @@ class CohereLLMService(LLMService):
         return True
 
     @staticmethod
-    def create_context_aggregator(context: OpenAILLMContext) -> CohereContextAggregatorPair:
+    def create_context_aggregator(context: CohereLLMContext) -> CohereContextAggregatorPair:
         user = CohereUserContextAggregator(context)
         assistant = CohereAssistantContextAggregator(user)
         return CohereContextAggregatorPair(
@@ -91,7 +89,7 @@ class CohereLLMService(LLMService):
             _assistant=assistant
         )
 
-    async def _process_context(self, context: OpenAILLMContext):
+    async def _process_context(self, context: CohereLLMContext):
         try:
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
@@ -103,11 +101,9 @@ class CohereLLMService(LLMService):
             chat_history: typing.Sequence[Message] = context.messages
             print(chat_history)
 
-            chat_history[0].content
-
             stream = self._client.chat_stream(
-                chat_history=chat_history,
-                message="Hello!",
+                chat_history=chat_history[:-1],
+                message=chat_history[-1]['message'],
                 model=self._model,
                 max_tokens=self._max_tokens,
             )
@@ -119,18 +115,18 @@ class CohereLLMService(LLMService):
 
             async for chunk in stream:
                 logger.debug(f"Cohere LLM event: {chunk}")
-                if chunk.usage:
-                    tokens = {
-                        "processor": self.name,
-                        "model": self._model,
-                        "prompt_tokens": chunk.usage.prompt_tokens,
-                        "completion_tokens": chunk.usage.completion_tokens,
-                        "total_tokens": chunk.usage.total_tokens
-                    }
-                    await self.start_llm_usage_metrics(tokens)
+                # if chunk.usage:
+                #     tokens = {
+                #         "processor": self.name,
+                #         "model": self._model,
+                #         "prompt_tokens": chunk.usage.prompt_tokens,
+                #         "completion_tokens": chunk.usage.completion_tokens,
+                #         "total_tokens": chunk.usage.total_tokens
+                #     }
+                #     await self.start_llm_usage_metrics(tokens)
 
-                if len(chunk.choices) == 0:
-                    continue
+                # if len(chunk.choices) == 0:
+                #     continue
 
                 if not got_first_chunk:
                     await self.stop_ttfb_metrics()
@@ -159,7 +155,7 @@ class CohereLLMService(LLMService):
         await super().process_frame(frame, direction)
 
         context = None
-        if isinstance(frame, OpenAILLMContextFrame):
+        if isinstance(frame, CohereLLMContextFrame):
             context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
             context = CohereLLMContext.from_messages(frame.messages)
@@ -173,15 +169,15 @@ class CohereLLMService(LLMService):
             await self._process_context(context)
 
 
-class CohereLLMContext(OpenAILLMContext):
+class CohereLLMContext(CohereLLMContext):
     def __init__(
         self,
         messages: list[dict] | None = None,
     ):
-        super().__init__(messages=messages)
+        super().__init__(messages)
 
     @classmethod
-    def from_openai_context(cls, openai_context: OpenAILLMContext):
+    def from_openai_context(cls, openai_context: CohereLLMContext):
         self = cls(
             messages=openai_context.messages,
         )
@@ -202,14 +198,14 @@ class CohereLLMContext(OpenAILLMContext):
 
 
 class CohereUserContextAggregator(LLMUserContextAggregator):
-    def __init__(self, context: OpenAILLMContext | CohereLLMContext):
+    def __init__(self, context: CohereLLMContext | CohereLLMContext):
         super().__init__(context=context)
 
-        if isinstance(context, OpenAILLMContext):
+        if isinstance(context, CohereLLMContext):
             self._context = CohereLLMContext.from_openai_context(context)
 
     async def push_messages_frame(self):
-        frame = OpenAILLMContextFrame(self._context)
+        frame = CohereLLMContextFrame(self._context)
         await self.push_frame(frame)
 
     async def process_frame(self, frame, direction):

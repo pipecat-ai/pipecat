@@ -43,11 +43,11 @@ class CohereLLMContext:
 
     def __init__(
         self,
-        chat_history: Sequence[Message] | None = None,
+        messages: Sequence[Message] | None = None,
         tools: Sequence[Tool] | None = None,
         # tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN # Maybe not needed
     ):
-        self._chat_history: Sequence[Message] = chat_history if chat_history else [
+        self._chat_history: Sequence[Message] = messages if messages else [
         ]
         self._tools: Sequence[Tool] | None = tools
 
