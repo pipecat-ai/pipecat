@@ -14,7 +14,7 @@ from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.cohere_llm_context import CohereLLMContext
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.cohere import CohereLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -102,12 +102,12 @@ Reminder:
 
 """
 
-        messages = [{"role": "system",
-                     "content": system_prompt},
-                    {"role": "user",
-                     "content": "Wait for the user to say something."}]
+        chat_history = [{"role": "USER",
+                         "content": system_prompt},
+                        {"role": "USER",
+                         "content": "Wait for the user to say something."}]
 
-        context = OpenAILLMContext(messages)
+        context = CohereLLMContext(chat_history=chat_history)
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline([

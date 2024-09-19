@@ -12,7 +12,10 @@ from typing import List, Optional
 from dataclasses import dataclass
 from asyncio import CancelledError
 import re
+import typing
 import uuid
+
+from cohere import Message
 
 
 from pipecat.frames.frames import (
@@ -97,8 +100,13 @@ class CohereLLMService(LLMService):
 
             await self.start_ttfb_metrics()
 
+            chat_history: typing.Sequence[Message] = context.messages
+            print(chat_history)
+
+            chat_history[0].content
+
             stream = self._client.chat_stream(
-                chat_history=context.messages,
+                chat_history=chat_history,
                 message="Hello!",
                 model=self._model,
                 max_tokens=self._max_tokens,
