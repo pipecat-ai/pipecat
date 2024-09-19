@@ -46,12 +46,13 @@ def detect_device():
 class MoondreamService(VisionService):
     def __init__(
         self,
-            *,
+        *,
         model="vikhyatk/moondream2",
-        revision="2024-04-02",
-        use_cpu=False
+        revision="2024-08-26",
+        use_cpu=False,
+        **kwargs
     ):
-        super().__init__()
+        super().__init__(**kwargs)
 
         if not use_cpu:
             device, dtype = detect_device()

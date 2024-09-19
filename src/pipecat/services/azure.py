@@ -18,13 +18,11 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     StartFrame,
-    SystemFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame,
     URLImageRawFrame)
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AsyncAIService, TTSService, ImageGenService
+from pipecat.services.ai_services import STTService, TTSService, ImageGenService
 from pipecat.services.openai import BaseOpenAILLMService
 from pipecat.utils.time import time_now_iso8601
 
@@ -126,7 +124,7 @@ class AzureTTSService(TTSService):
                 logger.error(f"{self} error: {cancellation_details.error_details}")
 
 
-class AzureSTTService(AsyncAIService):
+class AzureSTTService(STTService):
     def __init__(
             self,
             *,
@@ -149,15 +147,11 @@ class AzureSTTService(AsyncAIService):
             speech_config=speech_config, audio_config=audio_config)
         self._speech_recognizer.recognized.connect(self._on_handle_recognized)
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, SystemFrame):
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, AudioRawFrame):
-            self._audio_stream.write(frame.audio)
-        else:
-            await self._push_queue.put((frame, direction))
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        await self.start_processing_metrics()
+        self._audio_stream.write(audio)
+        await self.stop_processing_metrics()
+        yield None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -176,7 +170,7 @@ class AzureSTTService(AsyncAIService):
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
             frame = TranscriptionFrame(event.result.text, "", time_now_iso8601())
-            asyncio.run_coroutine_threadsafe(self.queue_frame(frame), self.get_event_loop())
+            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
 
 
 class AzureImageGenServiceREST(ImageGenService):

@@ -14,21 +14,18 @@ from dataclasses import dataclass
 from pipecat.frames.frames import (
     AppFrame,
     Frame,
-    ImageRawFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     TextFrame
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.task import PipelineTask
-from pipecat.pipeline.parallel_task import ParallelTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.aggregators.gated import GatedAggregator
-from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
 from pipecat.processors.aggregators.sentence import SentenceAggregator
+from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -88,9 +85,9 @@ async def main():
             )
         )
 
-        tts = ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        tts = CartesiaHttpTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
         llm = OpenAILLMService(
@@ -105,24 +102,23 @@ async def main():
             key=os.getenv("FAL_KEY"),
         )
 
-        gated_aggregator = GatedAggregator(
-            gate_open_fn=lambda frame: isinstance(frame, ImageRawFrame),
-            gate_close_fn=lambda frame: isinstance(frame, LLMFullResponseStartFrame),
-            start_open=False
-        )
-
         sentence_aggregator = SentenceAggregator()
         month_prepender = MonthPrepender()
-        llm_full_response_aggregator = LLMFullResponseAggregator()
 
+        # With `SyncParallelPipeline` we synchronize audio and images by pushing
+        # them basically in order (e.g. I1 A1 A1 A1 I2 A2 A2 A2 A2 I3 A3). To do
+        # that, each pipeline runs concurrently and `SyncParallelPipeline` will
+        # wait for the input frame to be processed.
+        #
+        # Note that `SyncParallelPipeline` requires all processors in it to be
+        # synchronous (which is the default for most processors).
         pipeline = Pipeline([
             llm,                     # LLM
             sentence_aggregator,     # Aggregates LLM output into full sentences
-            ParallelTask(            # Run pipelines in parallel aggregating the result
-                [month_prepender, tts],                   # Create "Month: sentence" and output audio
-                [llm_full_response_aggregator, imagegen]  # Aggregate full LLM response
+            SyncParallelPipeline(    # Run pipelines in parallel aggregating the result
+                [month_prepender, tts],  # Create "Month: sentence" and output audio
+                [imagegen]               # Generate image
             ),
-            gated_aggregator,        # Queues everything until an image is available
             transport.output()       # Transport output
         ])
 

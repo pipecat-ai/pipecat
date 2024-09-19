@@ -43,7 +43,7 @@ from pipecat.utils.time import nanoseconds_to_seconds
 class BaseOutputTransport(FrameProcessor):
 
     def __init__(self, params: TransportParams, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(sync=False, **kwargs)
 
         self._params = params
 
@@ -70,10 +70,6 @@ class BaseOutputTransport(FrameProcessor):
         # generating frames upstream while, for example, the audio is playing.
         self._create_sink_tasks()
 
-        # Create push frame task. This is the task that will push frames in
-        # order. We also guarantee that all frames are pushed in the same task.
-        self._create_push_task()
-
     async def start(self, frame: StartFrame):
         # Create camera output queue and task if needed.
         if self._params.camera_out_enabled:
@@ -85,6 +81,13 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_out_task = self.get_event_loop().create_task(self._audio_out_task_handler())
 
     async def stop(self, frame: EndFrame):
+        # At this point we have enqueued an EndFrame and we need to wait for
+        # that EndFrame to be processed by the sink tasks. We also need to wait
+        # for these tasks before cancelling the camera and audio tasks below
+        # because they might be still rendering.
+        await self._sink_task
+        await self._sink_clock_task
+
         # Cancel and wait for the camera output task to finish.
         if self._params.camera_out_enabled:
             self._camera_out_task.cancel()
@@ -95,23 +98,23 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_out_task.cancel()
             await self._audio_out_task
 
-        # Wait for the push frame and sink tasks to finish. They will finish when
-        # the EndFrame is actually processed.
-        await self._push_frame_task
-        await self._sink_task
-
     async def cancel(self, frame: CancelFrame):
-        # Cancel all the tasks and wait for them to finish.
+        # Since we are cancelling everything it doesn't matter if we cancel sink
+        # tasks first or not.
+        self._sink_task.cancel()
+        self._sink_clock_task.cancel()
+        await self._sink_task
+        await self._sink_clock_task
 
+        # Cancel and wait for the camera output task to finish.
         if self._params.camera_out_enabled:
             self._camera_out_task.cancel()
             await self._camera_out_task
 
-        self._push_frame_task.cancel()
-        await self._push_frame_task
-
-        self._sink_task.cancel()
-        await self._sink_task
+        # Cancel and wait for the audio output task to finish.
+        if self._params.audio_out_enabled and self._params.audio_out_is_live:
+            self._audio_out_task.cancel()
+            await self._audio_out_task
 
     async def send_message(self, frame: TransportMessageFrame):
         pass
@@ -137,7 +140,12 @@ class BaseOutputTransport(FrameProcessor):
         # immediately. Other frames require order so they are put in the sink
         # queue.
         #
-        if isinstance(frame, CancelFrame):
+        if isinstance(frame, StartFrame):
+            # Push StartFrame before start(), because we want StartFrame to be
+            # processed by every processor before any other frame is processed.
+            await self.push_frame(frame, direction)
+            await self.start(frame)
+        elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
@@ -149,9 +157,6 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames.
-        elif isinstance(frame, StartFrame):
-            await self._sink_queue.put(frame)
-            await self.start(frame)
         elif isinstance(frame, EndFrame):
             await self._sink_clock_queue.put((sys.maxsize, frame.id, frame))
             await self._sink_queue.put(frame)
@@ -182,10 +187,6 @@ class BaseOutputTransport(FrameProcessor):
             await self._sink_clock_task
             # Create sink tasks.
             self._create_sink_tasks()
-            # Stop push task.
-            self._push_frame_task.cancel()
-            await self._push_frame_task
-            self._create_push_task()
             # Let's send a bot stopped speaking if we have to.
             if self._bot_speaking:
                 await self._bot_stopped_speaking()
@@ -227,7 +228,7 @@ class BaseOutputTransport(FrameProcessor):
     async def _sink_frame_handler(self, frame: Frame):
         if isinstance(frame, AudioRawFrame):
             await self.write_raw_audio_frames(frame.audio)
-            await self._internal_push_frame(frame)
+            await self.push_frame(frame)
             await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
         elif isinstance(frame, ImageRawFrame):
             await self._set_camera_image(frame)
@@ -237,12 +238,12 @@ class BaseOutputTransport(FrameProcessor):
             await self.send_message(frame)
         elif isinstance(frame, TTSStartedFrame):
             await self._bot_started_speaking()
-            await self._internal_push_frame(frame)
+            await self.push_frame(frame)
         elif isinstance(frame, TTSStoppedFrame):
             await self._bot_stopped_speaking()
-            await self._internal_push_frame(frame)
+            await self.push_frame(frame)
         else:
-            await self._internal_push_frame(frame)
+            await self.push_frame(frame)
 
     async def _sink_task_handler(self):
         running = True
@@ -261,7 +262,7 @@ class BaseOutputTransport(FrameProcessor):
         # TODO(aleix): For now we just process TextFrame. But we should process
         # audio and video as well.
         if isinstance(frame, TextFrame):
-            await self._internal_push_frame(frame)
+            await self.push_frame(frame)
 
     async def _sink_clock_task_handler(self):
         running = True
@@ -269,7 +270,7 @@ class BaseOutputTransport(FrameProcessor):
             try:
                 timestamp, _, frame = await self._sink_clock_queue.get()
 
-                # If we hit an EndFrame, we cna finish right away.
+                # If we hit an EndFrame, we can finish right away.
                 running = not isinstance(frame, EndFrame)
 
                 # If we have a frame we check it's presentation timestamp. If it
@@ -293,38 +294,12 @@ class BaseOutputTransport(FrameProcessor):
     async def _bot_started_speaking(self):
         logger.debug("Bot started speaking")
         self._bot_speaking = True
-        await self._internal_push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+        await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
 
     async def _bot_stopped_speaking(self):
         logger.debug("Bot stopped speaking")
         self._bot_speaking = False
-        await self._internal_push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
-
-    #
-    # Push frames task
-    #
-
-    def _create_push_task(self):
-        loop = self.get_event_loop()
-        self._push_queue = asyncio.Queue()
-        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
-
-    async def _internal_push_frame(
-            self,
-            frame: Frame | None,
-            direction: FrameDirection | None = FrameDirection.DOWNSTREAM):
-        await self._push_queue.put((frame, direction))
-
-    async def _push_frame_task_handler(self):
-        running = True
-        while running:
-            try:
-                (frame, direction) = await self._push_queue.get()
-                await self.push_frame(frame, direction)
-                running = not isinstance(frame, EndFrame)
-                self._push_queue.task_done()
-            except asyncio.CancelledError:
-                break
+        await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
 
     #
     # Camera out
@@ -363,9 +338,9 @@ class BaseOutputTransport(FrameProcessor):
                 elif self._camera_images:
                     image = next(self._camera_images)
                     await self._draw_image(image)
-                    await asyncio.sleep(1.0 / self._params.camera_out_framerate)
+                    await asyncio.sleep(self._camera_out_frame_duration)
                 else:
-                    await asyncio.sleep(1.0 / self._params.camera_out_framerate)
+                    await asyncio.sleep(self._camera_out_frame_duration)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -408,7 +383,7 @@ class BaseOutputTransport(FrameProcessor):
             try:
                 frame = await self._audio_out_queue.get()
                 await self.write_raw_audio_frames(frame.audio)
-                await self._internal_push_frame(frame)
+                await self.push_frame(frame)
                 await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
             except asyncio.CancelledError:
                 break

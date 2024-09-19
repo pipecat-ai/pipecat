@@ -161,8 +161,8 @@ class DeepgramSTTService(STTService):
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_processing_metrics()
         await self._connection.send(audio)
-        yield None
         await self.stop_processing_metrics()
+        yield None
 
     async def _connect(self):
         if await self._connection.start(self._live_options):

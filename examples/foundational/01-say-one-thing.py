@@ -9,11 +9,11 @@ import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import TextFrame
+from pipecat.frames.frames import EndFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from runner import configure
@@ -34,7 +34,7 @@ async def main():
         transport = DailyTransport(
             room_url, None, "Say One Thing", DailyParams(audio_out_enabled=True))
 
-        tts = CartesiaTTSService(
+        tts = CartesiaHttpTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
@@ -48,7 +48,7 @@ async def main():
         @transport.event_handler("on_participant_joined")
         async def on_new_participant_joined(transport, participant):
             participant_name = participant["info"]["userName"] or ''
-            await task.queue_frame(TextFrame(f"Hello there, {participant_name}!"))
+            await task.queue_frames([TextFrame(f"Hello there, {participant_name}!"), EndFrame()])
 
         await runner.run(task)
 
