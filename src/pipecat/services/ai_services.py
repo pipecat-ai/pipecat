@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     STTModelUpdateFrame,
     StartFrame,
     StartInterruptionFrame,
+    TTSAudioRawFrame,
     TTSLanguageUpdateFrame,
     TTSModelUpdateFrame,
     TTSSpeakFrame,
@@ -277,7 +278,7 @@ class AsyncTTSService(TTSService):
         if self._push_stop_frames and (
                 isinstance(frame, StartInterruptionFrame) or
                 isinstance(frame, TTSStartedFrame) or
-                isinstance(frame, AudioRawFrame) or
+                isinstance(frame, TTSAudioRawFrame) or
                 isinstance(frame, TTSStoppedFrame)):
             await self._stop_frame_queue.put(frame)
 

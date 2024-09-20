@@ -9,7 +9,10 @@ import json
 
 from pydantic import BaseModel
 
-from pipecat.frames.frames import AudioRawFrame, Frame, StartInterruptionFrame
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    Frame,
+    StartInterruptionFrame)
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.utils.audio import ulaw_to_pcm, pcm_to_ulaw
 
@@ -18,10 +21,6 @@ class TwilioFrameSerializer(FrameSerializer):
     class InputParams(BaseModel):
         twilio_sample_rate: int = 8000
         sample_rate: int = 16000
-
-    SERIALIZABLE_TYPES = {
-        AudioRawFrame: "audio",
-    }
 
     def __init__(self, stream_sid: str, params: InputParams = InputParams()):
         self._stream_sid = stream_sid

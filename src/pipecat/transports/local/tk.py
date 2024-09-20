@@ -11,8 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import tkinter as tk
 
-from pipecat.frames.frames import AudioRawFrame, ImageRawFrame, StartFrame
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.frames.frames import InputAudioRawFrame, OutputImageRawFrame, StartFrame
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -64,9 +63,9 @@ class TkInputTransport(BaseInputTransport):
         self._in_stream.close()
 
     def _audio_in_callback(self, in_data, frame_count, time_info, status):
-        frame = AudioRawFrame(audio=in_data,
-                              sample_rate=self._params.audio_in_sample_rate,
-                              num_channels=self._params.audio_in_channels)
+        frame = InputAudioRawFrame(audio=in_data,
+                                   sample_rate=self._params.audio_in_sample_rate,
+                                   num_channels=self._params.audio_in_channels)
 
         asyncio.run_coroutine_threadsafe(self.push_audio_frame(frame), self.get_event_loop())
 
@@ -108,10 +107,10 @@ class TkOutputTransport(BaseOutputTransport):
     async def write_raw_audio_frames(self, frames: bytes):
         await self.get_event_loop().run_in_executor(self._executor, self._out_stream.write, frames)
 
-    async def write_frame_to_camera(self, frame: ImageRawFrame):
+    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
         self.get_event_loop().call_soon(self._write_frame_to_tk, frame)
 
-    def _write_frame_to_tk(self, frame: ImageRawFrame):
+    def _write_frame_to_tk(self, frame: OutputImageRawFrame):
         width = frame.size[0]
         height = frame.size[1]
         data = f"P6 {width} {height} 255 ".encode() + frame.image

@@ -15,10 +15,10 @@ from pipecat.frames.frames import (
     CancelFrame,
     ErrorFrame,
     Frame,
-    AudioRawFrame,
     StartInterruptionFrame,
     StartFrame,
     EndFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     LLMFullResponseEndFrame
@@ -201,7 +201,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                 elif msg["type"] == "chunk":
                     await self.stop_ttfb_metrics()
                     self.start_word_timestamps()
-                    frame = AudioRawFrame(
+                    frame = TTSAudioRawFrame(
                         audio=base64.b64decode(msg["data"]),
                         sample_rate=self._output_format["sample_rate"],
                         num_channels=1
@@ -326,7 +326,7 @@ class CartesiaHttpTTSService(TTSService):
 
             await self.stop_ttfb_metrics()
 
-            frame = AudioRawFrame(
+            frame = TTSAudioRawFrame(
                 audio=output["audio"],
                 sample_rate=self._output_format["sample_rate"],
                 num_channels=1

@@ -16,11 +16,11 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
 from pipecat.frames.frames import (
-    AudioRawFrame,
-    ImageRawFrame,
+    OutputImageRawFrame,
     SpriteFrame,
     Frame,
     LLMMessagesFrame,
+    TTSAudioRawFrame,
     TTSStoppedFrame
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -49,7 +49,11 @@ for i in range(1, 26):
     # Get the filename without the extension to use as the dictionary key
     # Open the image and convert it to bytes
     with Image.open(full_path) as img:
-        sprites.append(ImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
+        sprites.append(OutputImageRawFrame(
+            image=img.tobytes(),
+            size=img.size,
+            format=img.format)
+        )
 
 flipped = sprites[::-1]
 sprites.extend(flipped)
@@ -72,7 +76,7 @@ class TalkingAnimation(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, AudioRawFrame):
+        if isinstance(frame, TTSAudioRawFrame):
             if not self._is_talking:
                 await self.push_frame(talking_frame)
                 self._is_talking = True

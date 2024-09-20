@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import List
+from typing import List, Type
 
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame, OpenAILLMContext
 
@@ -34,8 +34,8 @@ class LLMResponseAggregator(FrameProcessor):
         role: str,
         start_frame,
         end_frame,
-        accumulator_frame: TextFrame,
-        interim_accumulator_frame: TextFrame | None = None,
+        accumulator_frame: Type[TextFrame],
+        interim_accumulator_frame: Type[TextFrame] | None = None,
         handle_interruptions: bool = False
     ):
         super().__init__()
