@@ -17,13 +17,13 @@ from loguru import logger
 from PIL import Image
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMModelUpdateFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TextFrame,
@@ -364,7 +364,7 @@ class OpenAITTSService(TTSService):
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = AudioRawFrame(chunk, self.sample_rate, 1)
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                         yield frame
                 await self.push_frame(TTSStoppedFrame())
         except BadRequestError as e:

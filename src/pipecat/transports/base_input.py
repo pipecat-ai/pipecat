@@ -10,9 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
-    AudioRawFrame,
     BotInterruptionFrame,
     CancelFrame,
+    InputAudioRawFrame,
     StartFrame,
     EndFrame,
     Frame,
@@ -59,7 +59,7 @@ class BaseInputTransport(FrameProcessor):
     def vad_analyzer(self) -> VADAnalyzer | None:
         return self._params.vad_analyzer
 
-    async def push_audio_frame(self, frame: AudioRawFrame):
+    async def push_audio_frame(self, frame: InputAudioRawFrame):
         if self._params.audio_in_enabled or self._params.vad_enabled:
             await self._audio_in_queue.put(frame)
 
@@ -151,7 +151,7 @@ class BaseInputTransport(FrameProcessor):
         vad_state: VADState = VADState.QUIET
         while True:
             try:
-                frame: AudioRawFrame = await self._audio_in_queue.get()
+                frame: InputAudioRawFrame = await self._audio_in_queue.get()
 
                 audio_passthrough = True
 

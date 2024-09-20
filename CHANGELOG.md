@@ -63,6 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- We now distinguish between input and output audio and image frames. We
+  introduce `InputAudioRawFrame`, `OutputAudioRawFrame`, `InputImageRawFrame`
+  and `OutputImageRawFrame` (and other subclasses of those). The input frames
+  usually come from an input transport and are meant to be processed inside the
+  pipeline to generate new frames. However, the input frames will not be sent
+  through an output transport. The output frames can also be processed by any
+  frame processor in the pipeline and they are allowed to be sent by the output
+  transport.
+
 - `ParallelTask` has been renamed to `SyncParallelPipeline`. A
   `SyncParallelPipeline` is a frame processor that contains a list of different
   pipelines to be executed concurrently. The difference between a

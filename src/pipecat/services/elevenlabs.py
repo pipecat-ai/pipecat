@@ -12,12 +12,12 @@ from typing import Any, AsyncGenerator, List, Literal, Mapping, Tuple
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     Frame,
     StartFrame,
     StartInterruptionFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame)
 from pipecat.processors.frame_processor import FrameDirection
@@ -209,7 +209,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
                     self.start_word_timestamps()
 
                     audio = base64.b64decode(msg["audio"])
-                    frame = AudioRawFrame(audio, self.sample_rate, 1)
+                    frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
                     await self.push_frame(frame)
 
                 if msg.get("alignment"):

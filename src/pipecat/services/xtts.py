@@ -9,10 +9,10 @@ import aiohttp
 from typing import Any, AsyncGenerator, Dict
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     ErrorFrame,
     Frame,
     StartFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame)
 from pipecat.services.ai_services import TTSService
@@ -128,7 +128,7 @@ class XTTSService(TTSService):
                         # Convert the numpy array back to bytes
                         resampled_audio_bytes = resampled_audio.astype(np.int16).tobytes()
                         # Create the frame with the resampled audio
-                        frame = AudioRawFrame(resampled_audio_bytes, 16000, 1)
+                        frame = TTSAudioRawFrame(resampled_audio_bytes, 16000, 1)
                         yield frame
 
             # Process any remaining data in the buffer
@@ -136,7 +136,7 @@ class XTTSService(TTSService):
                 audio_np = np.frombuffer(buffer, dtype=np.int16)
                 resampled_audio = resampy.resample(audio_np, 24000, 16000)
                 resampled_audio_bytes = resampled_audio.astype(np.int16).tobytes()
-                frame = AudioRawFrame(resampled_audio_bytes, 16000, 1)
+                frame = TTSAudioRawFrame(resampled_audio_bytes, 16000, 1)
                 yield frame
 
             await self.push_frame(TTSStoppedFrame())

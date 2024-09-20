@@ -10,9 +10,11 @@ import sys
 
 import tkinter as tk
 
+from pipecat.frames.frames import Frame, InputAudioRawFrame, InputImageRawFrame, OutputAudioRawFrame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.local.tk import TkLocalTransport
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -27,6 +29,25 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
+class MirrorProcessor(FrameProcessor):
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, InputAudioRawFrame):
+            await self.push_frame(OutputAudioRawFrame(
+                audio=frame.audio,
+                sample_rate=frame.sample_rate,
+                num_channels=frame.num_channels)
+            )
+        elif isinstance(frame, InputImageRawFrame):
+            await self.push_frame(OutputImageRawFrame(
+                image=frame.image,
+                size=frame.size,
+                format=frame.format)
+            )
+        else:
+            await self.push_frame(frame, direction)
 
 async def main():
     async with aiohttp.ClientSession() as session:
@@ -52,7 +73,7 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_video(participant["id"])
 
-        pipeline = Pipeline([daily_transport.input(), tk_transport.output()])
+        pipeline = Pipeline([daily_transport.input(), MirrorProcessor(), tk_transport.output()])
 
         task = PipelineTask(pipeline)
 

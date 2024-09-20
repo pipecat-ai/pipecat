@@ -8,7 +8,7 @@ import asyncio
 
 from concurrent.futures import ThreadPoolExecutor
 
-from pipecat.frames.frames import AudioRawFrame, StartFrame
+from pipecat.frames.frames import InputAudioRawFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -54,9 +54,9 @@ class LocalAudioInputTransport(BaseInputTransport):
         self._in_stream.close()
 
     def _audio_in_callback(self, in_data, frame_count, time_info, status):
-        frame = AudioRawFrame(audio=in_data,
-                              sample_rate=self._params.audio_in_sample_rate,
-                              num_channels=self._params.audio_in_channels)
+        frame = InputAudioRawFrame(audio=in_data,
+                                   sample_rate=self._params.audio_in_sample_rate,
+                                   num_channels=self._params.audio_in_channels)
 
         asyncio.run_coroutine_threadsafe(self.push_audio_frame(frame), self.get_event_loop())
 

@@ -4,15 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import base64
 import json
-import io
-import copy
-from typing import List, Optional
-from dataclasses import dataclass
-from asyncio import CancelledError
 import re
 import uuid
+
+from typing import List
+from dataclasses import dataclass
+from asyncio import CancelledError
 
 from pipecat.frames.frames import (
     Frame,

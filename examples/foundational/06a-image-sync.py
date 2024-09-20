@@ -11,7 +11,7 @@ import sys
 
 from PIL import Image
 
-from pipecat.frames.frames import ImageRawFrame, Frame, SystemFrame, TextFrame
+from pipecat.frames.frames import Frame, OutputImageRawFrame, SystemFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -52,9 +52,16 @@ class ImageSyncAggregator(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if not isinstance(frame, SystemFrame) and direction == FrameDirection.DOWNSTREAM:
-            await self.push_frame(ImageRawFrame(image=self._speaking_image_bytes, size=(1024, 1024), format=self._speaking_image_format))
+            await self.push_frame(OutputImageRawFrame(
+                image=self._speaking_image_bytes,
+                size=(1024, 1024),
+                format=self._speaking_image_format)
+            )
             await self.push_frame(frame)
-            await self.push_frame(ImageRawFrame(image=self._waiting_image_bytes, size=(1024, 1024), format=self._waiting_image_format))
+            await self.push_frame(OutputImageRawFrame(
+                image=self._waiting_image_bytes,
+                size=(1024, 1024),
+                format=self._waiting_image_format))
         else:
             await self.push_frame(frame)
 
