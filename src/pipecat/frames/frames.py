@@ -420,7 +420,7 @@ class BotSpeakingFrame(ControlFrame):
 @dataclass
 class TTSStartedFrame(ControlFrame):
     """Used to indicate the beginning of a TTS response. Following
-    AudioRawFrames are part of the TTS response until an TTSEndFrame. These
+    AudioRawFrames are part of the TTS response until an TTSStoppedFrame. These
     frames can be used for aggregating audio frames in a transport to optimize
     the size of frames sent to the session, without needing to control this in
     the TTS service.

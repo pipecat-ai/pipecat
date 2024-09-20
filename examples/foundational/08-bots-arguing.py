@@ -3,14 +3,14 @@ import aiohttp
 import asyncio
 import logging
 import os
-from pipecat.pipeline.aggregators import SentenceAggregator
+from pipecat.processors.aggregators import SentenceAggregator
 from pipecat.pipeline.pipeline import Pipeline
 
-from pipecat.transports.daily_transport import DailyTransport
-from pipecat.services.azure_ai_services import AzureLLMService, AzureTTSService
-from pipecat.services.elevenlabs_ai_services import ElevenLabsTTSService
-from pipecat.services.fal_ai_services import FalImageGenService
-from pipecat.pipeline.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
+from pipecat.transports.services.daily import DailyTransport
+from pipecat.services.azure import AzureLLMService, AzureTTSService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.fal import FalImageGenService
+from pipecat.frames.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
 
 from runner import configure
 
