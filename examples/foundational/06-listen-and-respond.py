@@ -10,6 +10,7 @@ import os
 import sys
 
 from pipecat.frames.frames import Frame, LLMMessagesFrame, MetricsFrame
+from pipecat.metrics.metrics import TTFBMetricsData, ProcessingMetricsData, LLMUsageMetricsData, TTSUsageMetricsData
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -37,8 +38,19 @@ logger.add(sys.stderr, level="DEBUG")
 class MetricsLogger(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, MetricsFrame):
-            print(
-                f"!!! MetricsFrame: {frame}, ttfb: {frame.ttfb}, processing: {frame.processing}, tokens: {frame.tokens}, characters: {frame.characters}")
+            for d in frame.data:
+                if isinstance(d, TTFBMetricsData):
+                    print(f"!!! MetricsFrame: {frame}, ttfb: {d.value}")
+                elif isinstance(d, ProcessingMetricsData):
+                    print(f"!!! MetricsFrame: {frame}, processing: {d.value}")
+                elif isinstance(d, LLMUsageMetricsData):
+                    tokens = d.value
+                    print(
+                        f"!!! MetricsFrame: {frame}, tokens: {
+                            tokens.prompt_tokens}, characters: {
+                            tokens.completion_tokens}")
+                elif isinstance(d, TTSUsageMetricsData):
+                    print(f"!!! MetricsFrame: {frame}, characters: {d.value}")
         await self.push_frame(frame, direction)
 
 

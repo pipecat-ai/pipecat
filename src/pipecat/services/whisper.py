@@ -52,7 +52,7 @@ class WhisperSTTService(SegmentedSTTService):
         super().__init__(**kwargs)
         self._device: str = device
         self._compute_type = compute_type
-        self._model_name: str | Model = model
+        self.set_model_name(model if isinstance(model, str) else model.value)
         self._no_speech_prob = no_speech_prob
         self._model: WhisperModel | None = None
         self._load()
@@ -65,7 +65,7 @@ class WhisperSTTService(SegmentedSTTService):
         this model is being run, it will take time to download."""
         logger.debug("Loading Whisper model...")
         self._model = WhisperModel(
-            self._model_name.value if isinstance(self._model_name, Enum) else self._model_name,
+            self.model_name,
             device=self._device,
             compute_type=self._compute_type)
         logger.debug("Loaded Whisper model")

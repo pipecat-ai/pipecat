@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     StartInterruptionFrame
 )
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
 
 from pipecat.processors.aggregators.openai_llm_context import (
@@ -83,7 +84,7 @@ class BaseOpenAILLMService(LLMService):
 
     def __init__(self, *, model: str, api_key=None, base_url=None, **kwargs):
         super().__init__(**kwargs)
-        self._model: str = model
+        self.set_model_name(model)
         self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
@@ -104,7 +105,7 @@ class BaseOpenAILLMService(LLMService):
             context: OpenAILLMContext,
             messages: List[ChatCompletionMessageParam]) -> AsyncStream[ChatCompletionChunk]:
         chunks = await self._client.chat.completions.create(
-            model=self._model,
+            model=self.model_name,
             stream=True,
             messages=messages,
             tools=context.tools,
@@ -148,13 +149,11 @@ class BaseOpenAILLMService(LLMService):
 
         async for chunk in chunk_stream:
             if chunk.usage:
-                tokens = {
-                    "processor": self.name,
-                    "model": self._model,
-                    "prompt_tokens": chunk.usage.prompt_tokens,
-                    "completion_tokens": chunk.usage.completion_tokens,
-                    "total_tokens": chunk.usage.total_tokens
-                }
+                tokens = LLMTokenUsage(
+                    prompt_tokens=chunk.usage.prompt_tokens,
+                    completion_tokens=chunk.usage.completion_tokens,
+                    total_tokens=chunk.usage.total_tokens
+                )
                 await self.start_llm_usage_metrics(tokens)
 
             if len(chunk.choices) == 0:
@@ -223,7 +222,7 @@ class BaseOpenAILLMService(LLMService):
             context = OpenAILLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMModelUpdateFrame):
             logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self._model = frame.model
+            self.set_model_name(frame.model)
         else:
             await self.push_frame(frame, direction)
 
@@ -273,7 +272,7 @@ class OpenAIImageGenService(ImageGenService):
         model: str = "dall-e-3",
     ):
         super().__init__()
-        self._model = model
+        self.set_model_name(model)
         self._image_size = image_size
         self._client = AsyncOpenAI(api_key=api_key)
         self._aiohttp_session = aiohttp_session
@@ -283,7 +282,7 @@ class OpenAIImageGenService(ImageGenService):
 
         image = await self._client.images.generate(
             prompt=prompt,
-            model=self._model,
+            model=self.model_name,
             n=1,
             size=self._image_size
         )
@@ -325,7 +324,7 @@ class OpenAITTSService(TTSService):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._voice: ValidVoice = VALID_VOICES.get(voice, "alloy")
-        self._model = model
+        self.set_model_name(model)
         self._sample_rate = sample_rate
 
         self._client = AsyncOpenAI(api_key=api_key)
@@ -348,7 +347,7 @@ class OpenAITTSService(TTSService):
 
             async with self._client.audio.speech.with_streaming_response.create(
                     input=text,
-                    model=self._model,
+                    model=self.model_name,
                     voice=self._voice,
                     response_format="pcm",
             ) as r:

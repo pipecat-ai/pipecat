@@ -19,6 +19,13 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame)
+from pipecat.metrics.metrics import (
+    LLMTokenUsage,
+    LLMUsageMetricsData,
+    MetricsData,
+    ProcessingMetricsData,
+    TTFBMetricsData,
+    TTSUsageMetricsData)
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
@@ -31,10 +38,19 @@ class FrameDirection(Enum):
 
 class FrameProcessorMetrics:
     def __init__(self, name: str):
-        self._name = name
+        self._core_metrics_data = MetricsData(processor=name)
         self._start_ttfb_time = 0
         self._start_processing_time = 0
         self._should_report_ttfb = True
+
+    def _processor_name(self):
+        return self._core_metrics_data.processor
+
+    def _model_name(self):
+        return self._core_metrics_data.model
+
+    def set_core_metrics_data(self, data: MetricsData):
+        self._core_metrics_data = data
 
     async def start_ttfb_metrics(self, report_only_initial_ttfb):
         if self._should_report_ttfb:
@@ -46,13 +62,13 @@ class FrameProcessorMetrics:
             return None
 
         value = time.time() - self._start_ttfb_time
-        logger.debug(f"{self._name} TTFB: {value}")
-        ttfb = {
-            "processor": self._name,
-            "value": value
-        }
+        logger.debug(f"{self._processor_name()} TTFB: {value}")
+        ttfb = TTFBMetricsData(
+            processor=self._processor_name(),
+            value=value,
+            model=self._model_name())
         self._start_ttfb_time = 0
-        return MetricsFrame(ttfb=[ttfb])
+        return MetricsFrame(data=[ttfb])
 
     async def start_processing_metrics(self):
         self._start_processing_time = time.time()
@@ -62,26 +78,28 @@ class FrameProcessorMetrics:
             return None
 
         value = time.time() - self._start_processing_time
-        logger.debug(f"{self._name} processing time: {value}")
-        processing = {
-            "processor": self._name,
-            "value": value
-        }
+        logger.debug(f"{self._processor_name()} processing time: {value}")
+        processing = ProcessingMetricsData(
+            processor=self._processor_name(), value=value, model=self._model_name())
         self._start_processing_time = 0
-        return MetricsFrame(processing=[processing])
+        return MetricsFrame(data=[processing])
 
-    async def start_llm_usage_metrics(self, tokens: dict):
+    async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
         logger.debug(
-            f"{self._name} prompt tokens: {tokens['prompt_tokens']}, completion tokens: {tokens['completion_tokens']}")
-        return MetricsFrame(tokens=[tokens])
+            f"{self._processor_name()} prompt tokens: {tokens.prompt_tokens}, completion tokens: {tokens.completion_tokens}")
+        value = LLMUsageMetricsData(
+            processor=self._processor_name(),
+            model=self._model_name(),
+            value=tokens)
+        return MetricsFrame(data=[value])
 
     async def start_tts_usage_metrics(self, text: str):
-        characters = {
-            "processor": self._name,
-            "value": len(text),
-        }
-        logger.debug(f"{self._name} usage characters: {characters['value']}")
-        return MetricsFrame(characters=[characters])
+        characters = TTSUsageMetricsData(
+            processor=self._processor_name(),
+            model=self._model_name(),
+            value=len(text))
+        logger.debug(f"{self._processor_name()} usage characters: {characters.value}")
+        return MetricsFrame(data=[characters])
 
 
 class FrameProcessor:
@@ -140,6 +158,9 @@ class FrameProcessor:
     def can_generate_metrics(self) -> bool:
         return False
 
+    def set_core_metrics_data(self, data: MetricsData):
+        self._metrics.set_core_metrics_data(data)
+
     async def start_ttfb_metrics(self):
         if self.can_generate_metrics() and self.metrics_enabled:
             await self._metrics.start_ttfb_metrics(self._report_only_initial_ttfb)
@@ -160,7 +181,7 @@ class FrameProcessor:
             if frame:
                 await self.push_frame(frame)
 
-    async def start_llm_usage_metrics(self, tokens: dict):
+    async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
         if self.can_generate_metrics() and self.usage_metrics_enabled:
             frame = await self._metrics.start_llm_usage_metrics(tokens)
             if frame:

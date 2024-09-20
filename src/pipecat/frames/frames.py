@@ -4,11 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from dataclasses import dataclass, field
 
 from pipecat.clocks.base_clock import BaseClock
+from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
@@ -333,10 +334,8 @@ class BotInterruptionFrame(SystemFrame):
 class MetricsFrame(SystemFrame):
     """Emitted by processor that can compute metrics like latencies.
     """
-    ttfb: List[Mapping[str, Any]] | None = None
-    processing: List[Mapping[str, Any]] | None = None
-    tokens: List[Mapping[str, Any]] | None = None
-    characters: List[Mapping[str, Any]] | None = None
+    data: List[MetricsData]
+
 
 #
 # Control frames
