@@ -9,13 +9,13 @@ import aiohttp
 from typing import AsyncGenerator
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame)
@@ -101,7 +101,8 @@ class DeepgramTTSService(TTSService):
                 await self.push_frame(TTSStartedFrame())
                 async for data in r.content:
                     await self.stop_ttfb_metrics()
-                    frame = AudioRawFrame(audio=data, sample_rate=self._sample_rate, num_channels=1)
+                    frame = TTSAudioRawFrame(
+                        audio=data, sample_rate=self._sample_rate, num_channels=1)
                     yield frame
                 await self.push_frame(TTSStoppedFrame())
         except Exception as e:

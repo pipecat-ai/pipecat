@@ -24,6 +24,7 @@ message AudioRawFrame {
   bytes audio = 3;
   uint32 sample_rate = 4;
   uint32 num_channels = 5;
+  optional uint64 pts = 6;
 }
 
 message TranscriptionFrame {

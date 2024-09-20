@@ -11,7 +11,13 @@ import sys
 
 import tkinter as tk
 
-from pipecat.frames.frames import AudioRawFrame, Frame, URLImageRawFrame, LLMMessagesFrame, TextFrame
+from pipecat.frames.frames import (
+    Frame,
+    OutputAudioRawFrame,
+    TTSAudioRawFrame,
+    URLImageRawFrame,
+    LLMMessagesFrame,
+    TextFrame)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
@@ -65,9 +71,9 @@ async def main():
                 async def process_frame(self, frame: Frame, direction: FrameDirection):
                     await super().process_frame(frame, direction)
 
-                    if isinstance(frame, AudioRawFrame):
+                    if isinstance(frame, TTSAudioRawFrame):
                         self.audio.extend(frame.audio)
-                        self.frame = AudioRawFrame(
+                        self.frame = OutputAudioRawFrame(
                             bytes(self.audio), frame.sample_rate, frame.num_channels)
 
             class ImageGrabber(FrameProcessor):

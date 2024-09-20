@@ -12,12 +12,12 @@ from PIL import Image
 from typing import AsyncGenerator
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame,
@@ -117,7 +117,7 @@ class AzureTTSService(TTSService):
             await self.stop_ttfb_metrics()
             await self.push_frame(TTSStartedFrame())
             # Azure always sends a 44-byte header. Strip it off.
-            yield AudioRawFrame(audio=result.audio_data[44:], sample_rate=self._sample_rate, num_channels=1)
+            yield TTSAudioRawFrame(audio=result.audio_data[44:], sample_rate=self._sample_rate, num_channels=1)
             await self.push_frame(TTSStoppedFrame())
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details
