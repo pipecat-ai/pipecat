@@ -22,13 +22,14 @@ from daily import (
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     Frame,
-    ImageRawFrame,
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     MetricsFrame,
+    OutputAudioRawFrame,
+    OutputImageRawFrame,
     SpriteFrame,
     StartFrame,
     TranscriptionFrame,
@@ -239,7 +240,7 @@ class DailyTransportClient(EventHandler):
             completion=completion_callback(future))
         await future
 
-    async def read_next_audio_frame(self) -> AudioRawFrame | None:
+    async def read_next_audio_frame(self) -> InputAudioRawFrame | None:
         if not self._speaker:
             return None
 
@@ -252,7 +253,10 @@ class DailyTransportClient(EventHandler):
         audio = await future
 
         if len(audio) > 0:
-            return AudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=num_channels)
+            return InputAudioRawFrame(
+                audio=audio,
+                sample_rate=sample_rate,
+                num_channels=num_channels)
         else:
             # If we don't read any audio it could be there's no participant
             # connected. daily-python will return immediately if that's the
@@ -268,7 +272,7 @@ class DailyTransportClient(EventHandler):
         self._mic.write_frames(frames, completion=completion_callback(future))
         await future
 
-    async def write_frame_to_camera(self, frame: ImageRawFrame):
+    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
         if not self._camera:
             return None
 
@@ -749,7 +753,7 @@ class DailyOutputTransport(BaseOutputTransport):
     async def write_raw_audio_frames(self, frames: bytes):
         await self._client.write_raw_audio_frames(frames)
 
-    async def write_frame_to_camera(self, frame: ImageRawFrame):
+    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
         await self._client.write_frame_to_camera(frame)
 
 
@@ -829,11 +833,11 @@ class DailyTransport(BaseTransport):
     def participant_id(self) -> str:
         return self._client.participant_id
 
-    async def send_image(self, frame: ImageRawFrame | SpriteFrame):
+    async def send_image(self, frame: OutputImageRawFrame | SpriteFrame):
         if self._output:
             await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
 
-    async def send_audio(self, frame: AudioRawFrame):
+    async def send_audio(self, frame: OutputAudioRawFrame):
         if self._output:
             await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
 
