@@ -46,7 +46,7 @@ class FalImageGenService(ImageGenService):
         **kwargs
     ):
         super().__init__(**kwargs)
-        self._model = model
+        self.set_model_name(model)
         self._params = params
         self._aiohttp_session = aiohttp_session
         if key:
@@ -56,7 +56,7 @@ class FalImageGenService(ImageGenService):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         response = await fal_client.run_async(
-            self._model,
+            self.model_name,
             arguments={"prompt": prompt, **self._params.model_dump(exclude_none=True)}
         )
 

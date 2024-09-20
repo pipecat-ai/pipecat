@@ -60,7 +60,7 @@ class OpenPipeLLMService(BaseOpenAILLMService):
             context: OpenAILLMContext,
             messages: List[ChatCompletionMessageParam]) -> AsyncStream[ChatCompletionChunk]:
         chunks = await self._client.chat.completions.create(
-            model=self._model,
+            model=self.model_name,
             stream=True,
             messages=messages,
             openpipe={

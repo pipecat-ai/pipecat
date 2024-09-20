@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     MetricsFrame,
     StartFrame,
     StopTaskFrame)
+from pipecat.metrics.metrics import TTFBMetricsData, ProcessingMetricsData
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
@@ -118,9 +119,11 @@ class PipelineTask:
 
     def _initial_metrics_frame(self) -> MetricsFrame:
         processors = self._pipeline.processors_with_metrics()
-        ttfb = [{"processor": p.name, "value": 0.0} for p in processors]
-        processing = [{"processor": p.name, "value": 0.0} for p in processors]
-        return MetricsFrame(ttfb=ttfb, processing=processing)
+        data = []
+        for p in processors:
+            data.append(TTFBMetricsData(processor=p.name, value=0.0))
+            data.append(ProcessingMetricsData(processor=p.name, value=0.0))
+        return MetricsFrame(data=data)
 
     async def _process_down_queue(self):
         self._clock.start()

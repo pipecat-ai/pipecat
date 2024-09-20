@@ -22,6 +22,8 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TranscriptionFrame,
     URLImageRawFrame)
+from pipecat.metrics.metrics import TTSUsageMetricsData
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import STTService, TTSService, ImageGenService
 from pipecat.services.openai import BaseOpenAILLMService
 from pipecat.utils.time import time_now_iso8601
@@ -190,7 +192,7 @@ class AzureImageGenServiceREST(ImageGenService):
         self._api_key = api_key
         self._azure_endpoint = endpoint
         self._api_version = api_version
-        self._model = model
+        self.set_model_name(model)
         self._image_size = image_size
         self._aiohttp_session = aiohttp_session
 
