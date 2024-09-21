@@ -57,10 +57,12 @@ async def main():
             model=os.getenv("TOGETHER_MODEL"),
             params=TogetherLLMService.InputParams(
                 temperature=1.0,
-                frequency_penalty=2.0,
-                presence_penalty=0.0,
                 top_p=0.9,
-                top_k=40
+                top_k=40,
+                extra={
+                    "frequency_penalty": 2.0,
+                    "presence_penalty": 0.0,
+                }
             )
         )
 

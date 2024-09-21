@@ -8,7 +8,7 @@ import base64
 import json
 import io
 import copy
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from PIL import Image
 from asyncio import CancelledError
@@ -81,6 +81,7 @@ class AnthropicLLMService(LLMService):
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
             self,
@@ -97,6 +98,7 @@ class AnthropicLLMService(LLMService):
         self._temperature = params.temperature
         self._top_k = params.top_k
         self._top_p = params.top_p
+        self._extra = params.extra if isinstance(params.extra, dict) else {}
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -134,6 +136,10 @@ class AnthropicLLMService(LLMService):
         logger.debug(f"Switching LLM top_p to: [{top_p}]")
         self._top_p = top_p
 
+    async def set_extra(self, extra: Dict[str, Any]):
+        logger.debug(f"Switching LLM extra to: [{extra}]")
+        self._extra = extra
+
     async def _process_context(self, context: OpenAILLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
         # completion_tokens. We also estimate the completion tokens from output text
@@ -163,16 +169,21 @@ class AnthropicLLMService(LLMService):
 
             await self.start_ttfb_metrics()
 
-            response = await api_call(
-                tools=context.tools or [],
-                system=context.system,
-                messages=messages,
-                model=self.model_name,
-                max_tokens=self._max_tokens,
-                stream=True,
-                temperature=self._temperature,
-                top_k=self._top_k,
-                top_p=self._top_p)
+            params = {
+                "tools": context.tools or [],
+                "system": context.system,
+                "messages": messages,
+                "model": self.model_name,
+                "max_tokens": self._max_tokens,
+                "stream": True,
+                "temperature": self._temperature,
+                "top_k": self._top_k,
+                "top_p": self._top_p
+            }
+
+            params.update(self._extra)
+
+            response = await api_call(**params)
 
             await self.stop_ttfb_metrics()
 
