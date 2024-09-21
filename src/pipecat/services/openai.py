@@ -11,7 +11,7 @@ import json
 import httpx
 from dataclasses import dataclass
 
-from typing import AsyncGenerator, Dict, List, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 from loguru import logger
@@ -90,6 +90,7 @@ class BaseOpenAILLMService(LLMService):
         seed: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
             self,
@@ -107,6 +108,7 @@ class BaseOpenAILLMService(LLMService):
         self._seed = params.seed
         self._temperature = params.temperature
         self._top_p = params.top_p
+        self._extra = params.extra if isinstance(params.extra, dict) else {}
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(
@@ -141,23 +143,32 @@ class BaseOpenAILLMService(LLMService):
         logger.debug(f"Switching LLM top_p to: [{top_p}]")
         self._top_p = top_p
 
+    async def set_extra(self, extra: Dict[str, Any]):
+        logger.debug(f"Switching LLM extra to: [{extra}]")
+        self._extra = extra
+
     async def get_chat_completions(
             self,
             context: OpenAILLMContext,
             messages: List[ChatCompletionMessageParam]) -> AsyncStream[ChatCompletionChunk]:
-        chunks = await self._client.chat.completions.create(
-            model=self.model_name,
-            stream=True,
-            messages=messages,
-            tools=context.tools,
-            tool_choice=context.tool_choice,
-            stream_options={"include_usage": True},
-            frequency_penalty=self._frequency_penalty,
-            presence_penalty=self._presence_penalty,
-            seed=self._seed,
-            temperature=self._temperature,
-            top_p=self._top_p
-        )
+
+        params = {
+            "model": self.model_name,
+            "stream": True,
+            "messages": messages,
+            "tools": context.tools,
+            "tool_choice": context.tool_choice,
+            "stream_options": {"include_usage": True},
+            "frequency_penalty": self._frequency_penalty,
+            "presence_penalty": self._presence_penalty,
+            "seed": self._seed,
+            "temperature": self._temperature,
+            "top_p": self._top_p,
+        }
+
+        params.update(self._extra)
+
+        chunks = await self._client.chat.completions.create(**params)
         return chunks
 
     async def _stream_chat_completions(

@@ -9,7 +9,7 @@ import re
 import uuid
 from pydantic import BaseModel, Field
 
-from typing import List
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from asyncio import CancelledError
 
@@ -64,6 +64,7 @@ class TogetherLLMService(LLMService):
         temperature: Optional[float] = Field(default=None, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default=None, ge=0)
         top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+        extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
             self,
@@ -81,6 +82,7 @@ class TogetherLLMService(LLMService):
         self._temperature = params.temperature
         self._top_k = params.top_k
         self._top_p = params.top_p
+        self._extra = params.extra if isinstance(params.extra, dict) else {}
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -118,6 +120,10 @@ class TogetherLLMService(LLMService):
         logger.debug(f"Switching LLM top_p to: [{top_p}]")
         self._top_p = top_p
 
+    async def set_extra(self, extra: Dict[str, Any]):
+        logger.debug(f"Switching LLM extra to: [{extra}]")
+        self._extra = extra
+
     async def _process_context(self, context: OpenAILLMContext):
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -127,17 +133,21 @@ class TogetherLLMService(LLMService):
 
             await self.start_ttfb_metrics()
 
-            stream = await self._client.chat.completions.create(
-                messages=context.messages,
-                model=self.model_name,
-                max_tokens=self._max_tokens,
-                stream=True,
-                frequency_penalty=self._frequency_penalty,
-                presence_penalty=self._presence_penalty,
-                temperature=self._temperature,
-                top_k=self._top_k,
-                top_p=self._top_p
-            )
+            params = {
+                "messages": context.messages,
+                "model": self.model_name,
+                "max_tokens": self._max_tokens,
+                "stream": True,
+                "frequency_penalty": self._frequency_penalty,
+                "presence_penalty": self._presence_penalty,
+                "temperature": self._temperature,
+                "top_k": self._top_k,
+                "top_p": self._top_p
+            }
+
+            params.update(self._extra)
+
+            stream = await self._client.chat.completions.create(**params)
 
             # Function calling
             got_first_chunk = False
