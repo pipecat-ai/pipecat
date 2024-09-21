@@ -484,66 +484,6 @@ class LLMModelUpdateFrame(ControlFrame):
 
 
 @dataclass
-class LLMTemperatureUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM temperature.
-    """
-    temperature: float
-
-
-@dataclass
-class LLMTopKUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM top_k.
-    """
-    top_k: int
-
-
-@dataclass
-class LLMTopPUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM top_p.
-    """
-    top_p: float
-
-
-@dataclass
-class LLMFrequencyPenaltyUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM frequency
-    penalty.
-
-    """
-    frequency_penalty: float
-
-
-@dataclass
-class LLMPresencePenaltyUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM presence
-    penalty.
-
-    """
-    presence_penalty: float
-
-
-@dataclass
-class LLMMaxTokensUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM max tokens.
-    """
-    max_tokens: int
-
-
-@dataclass
-class LLMSeedUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM seed.
-    """
-    seed: int
-
-
-@dataclass
-class LLMExtraUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM extra params.
-    """
-    extra: dict
-
-
-@dataclass
 class TTSModelUpdateFrame(ControlFrame):
     """A control frame containing a request to update the TTS model.
     """
