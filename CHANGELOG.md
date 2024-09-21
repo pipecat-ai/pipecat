@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added configurable LLM parameters (e.g., temperature, top_p, max_tokens, seed)
+  for OpenAI, Anthropic, and Together AI services along with corresponding
+  setter functions.
+
+- Added `sample_rate` as a constructor parameter for TTS services.
+
 - Pipecat has a pipeline-based architecture. The pipeline consists of frame
   processors linked to each other. The elements traveling across the pipeline
   are called frames.
@@ -343,7 +349,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - It is now possible to specify a Silero VAD version when using `SileroVADAnalyzer`
   or `SileroVAD`.
 
-- Added `AysncFrameProcessor` and `AsyncAIService`.  Some services like
+- Added `AysncFrameProcessor` and `AsyncAIService`. Some services like
   `DeepgramSTTService` need to process things asynchronously. For example, audio
   is sent to Deepgram but transcriptions are not returned immediately. In these
   cases we still require all frames (except system frames) to be pushed
@@ -360,7 +366,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `WhisperSTTService` model can now also be a string.
 
-- Added missing * keyword separators in services.
+- Added missing \* keyword separators in services.
 
 ### Fixed
 
@@ -437,7 +443,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added new `TwilioFrameSerializer`. This is a new serializer that knows how to
   serialize and deserialize audio frames from Twilio.
 
-- Added Daily transport event: `on_dialout_answered`.  See
+- Added Daily transport event: `on_dialout_answered`. See
   https://reference-python.daily.co/api_reference.html#daily.EventHandler
 
 - Added new `AzureSTTService`. This allows you to use Azure Speech-To-Text.
@@ -677,7 +683,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Daily transport support for dial-in use cases.
 
 - Added Daily transport events: `on_dialout_connected`, `on_dialout_stopped`,
-  `on_dialout_error` and `on_dialout_warning`.  See
+  `on_dialout_error` and `on_dialout_warning`. See
   https://reference-python.daily.co/api_reference.html#daily.EventHandler
 
 ## [0.0.21] - 2024-05-22
