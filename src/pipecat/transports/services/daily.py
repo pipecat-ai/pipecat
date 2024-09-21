@@ -736,11 +736,11 @@ class DailyOutputTransport(BaseOutputTransport):
             if isinstance(d, TTFBMetricsData):
                 if "ttfb" not in metrics:
                     metrics["ttfb"] = []
-                metrics["ttfb"].append(d.model_dump())
+                metrics["ttfb"].append(d.model_dump(exclude_none=True))
             elif isinstance(d, ProcessingMetricsData):
                 if "processing" not in metrics:
                     metrics["processing"] = []
-                metrics["processing"].append(d.model_dump())
+                metrics["processing"].append(d.model_dump(exclude_none=True))
             elif isinstance(d, LLMUsageMetricsData):
                 if "tokens" not in metrics:
                     metrics["tokens"] = []
@@ -748,7 +748,7 @@ class DailyOutputTransport(BaseOutputTransport):
             elif isinstance(d, TTSUsageMetricsData):
                 if "characters" not in metrics:
                     metrics["characters"] = []
-                metrics["characters"].append(d.model_dump())
+                metrics["characters"].append(d.model_dump(exclude_none=True))
 
         message = DailyTransportMessageFrame(message={
             "type": "pipecat-metrics",
