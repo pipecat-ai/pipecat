@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     STTModelUpdateFrame,
     StartFrame,
     StartInterruptionFrame,
+    TTSAudioRawFrame,
     TTSLanguageUpdateFrame,
     TTSModelUpdateFrame,
     TTSSpeakFrame,
@@ -32,6 +33,7 @@ from pipecat.frames.frames import (
     UserImageRequestFrame,
     VisionImageRawFrame
 )
+from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.utils.audio import calculate_audio_volume
@@ -46,6 +48,15 @@ from loguru import logger
 class AIService(FrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._model_name: str = ""
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    def set_model_name(self, model: str):
+        self._model_name = model
+        self.set_core_metrics_data(MetricsData(processor=self.name, model=self._model_name))
 
     async def start(self, frame: StartFrame):
         pass
@@ -158,7 +169,7 @@ class TTSService(AIService):
 
     @abstractmethod
     async def set_model(self, model: str):
-        pass
+        self.set_model_name(model)
 
     @abstractmethod
     async def set_voice(self, voice: str):
@@ -223,7 +234,7 @@ class TTSService(AIService):
             else:
                 await self.push_frame(frame, direction)
         elif isinstance(frame, TTSSpeakFrame):
-            await self._push_tts_frames(frame.text, False)
+            await self._push_tts_frames(frame.text)
         elif isinstance(frame, TTSModelUpdateFrame):
             await self.set_model(frame.model)
         elif isinstance(frame, TTSVoiceUpdateFrame):
@@ -277,7 +288,7 @@ class AsyncTTSService(TTSService):
         if self._push_stop_frames and (
                 isinstance(frame, StartInterruptionFrame) or
                 isinstance(frame, TTSStartedFrame) or
-                isinstance(frame, AudioRawFrame) or
+                isinstance(frame, TTSAudioRawFrame) or
                 isinstance(frame, TTSStoppedFrame)):
             await self._stop_frame_queue.put(frame)
 
@@ -367,7 +378,7 @@ class STTService(AIService):
 
     @abstractmethod
     async def set_model(self, model: str):
-        pass
+        self.set_model_name(model)
 
     @abstractmethod
     async def set_language(self, language: Language):

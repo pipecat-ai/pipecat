@@ -11,8 +11,7 @@ import wave
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, StartFrame
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, InputAudioRawFrame, StartFrame
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
@@ -98,7 +97,11 @@ class WebsocketServerInputTransport(BaseInputTransport):
                 continue
 
             if isinstance(frame, AudioRawFrame):
-                await self.queue_audio_frame(frame)
+                await self.push_audio_frame(InputAudioRawFrame(
+                    audio=frame.audio,
+                    sample_rate=frame.sample_rate,
+                    num_channels=frame.num_channels)
+                )
             else:
                 await self.push_frame(frame)
 

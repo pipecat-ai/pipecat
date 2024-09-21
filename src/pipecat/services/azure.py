@@ -12,16 +12,18 @@ from PIL import Image
 from typing import AsyncGenerator
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame,
     URLImageRawFrame)
+from pipecat.metrics.metrics import TTSUsageMetricsData
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import STTService, TTSService, ImageGenService
 from pipecat.services.openai import BaseOpenAILLMService
 from pipecat.utils.time import time_now_iso8601
@@ -115,7 +117,7 @@ class AzureTTSService(TTSService):
             await self.stop_ttfb_metrics()
             await self.push_frame(TTSStartedFrame())
             # Azure always sends a 44-byte header. Strip it off.
-            yield AudioRawFrame(audio=result.audio_data[44:], sample_rate=self._sample_rate, num_channels=1)
+            yield TTSAudioRawFrame(audio=result.audio_data[44:], sample_rate=self._sample_rate, num_channels=1)
             await self.push_frame(TTSStoppedFrame())
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details
@@ -190,7 +192,7 @@ class AzureImageGenServiceREST(ImageGenService):
         self._api_key = api_key
         self._azure_endpoint = endpoint
         self._api_version = api_version
-        self._model = model
+        self.set_model_name(model)
         self._image_size = image_size
         self._aiohttp_session = aiohttp_session
 

@@ -4,15 +4,21 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from pipecat.frames.frames import Frame, ImageRawFrame, TextFrame, VisionImageRawFrame
+from pipecat.frames.frames import (
+    Frame,
+    InputImageRawFrame,
+    TextFrame,
+    VisionImageRawFrame
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class VisionImageFrameAggregator(FrameProcessor):
     """This aggregator waits for a consecutive TextFrame and an
-    ImageFrame. After the ImageFrame arrives it will output a VisionImageFrame.
+    InputImageRawFrame. After the InputImageRawFrame arrives it will output a
+    VisionImageRawFrame.
 
-    >>> from pipecat.pipeline.frames import ImageFrame
+    >>> from pipecat.frames.frames import ImageFrame
 
     >>> async def print_frames(aggregator, frame):
     ...     async for frame in aggregator.process_frame(frame):
@@ -34,7 +40,7 @@ class VisionImageFrameAggregator(FrameProcessor):
 
         if isinstance(frame, TextFrame):
             self._describe_text = frame.text
-        elif isinstance(frame, ImageRawFrame):
+        elif isinstance(frame, InputImageRawFrame):
             if self._describe_text:
                 frame = VisionImageRawFrame(
                     text=self._describe_text,

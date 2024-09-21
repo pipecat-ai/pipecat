@@ -9,11 +9,11 @@ import asyncio
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     Frame,
-    ImageRawFrame,
+    OutputAudioRawFrame,
+    OutputImageRawFrame,
     StartFrame,
     SystemFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -182,9 +182,9 @@ class GStreamerPipelineSource(FrameProcessor):
     def _appsink_audio_new_sample(self, appsink: GstApp.AppSink):
         buffer = appsink.pull_sample().get_buffer()
         (_, info) = buffer.map(Gst.MapFlags.READ)
-        frame = AudioRawFrame(audio=info.data,
-                              sample_rate=self._out_params.audio_sample_rate,
-                              num_channels=self._out_params.audio_channels)
+        frame = OutputAudioRawFrame(audio=info.data,
+                                    sample_rate=self._out_params.audio_sample_rate,
+                                    num_channels=self._out_params.audio_channels)
         asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
         buffer.unmap(info)
         return Gst.FlowReturn.OK
@@ -192,7 +192,7 @@ class GStreamerPipelineSource(FrameProcessor):
     def _appsink_video_new_sample(self, appsink: GstApp.AppSink):
         buffer = appsink.pull_sample().get_buffer()
         (_, info) = buffer.map(Gst.MapFlags.READ)
-        frame = ImageRawFrame(
+        frame = OutputImageRawFrame(
             image=info.data,
             size=(self._out_params.video_width, self._out_params.video_height),
             format="RGB")

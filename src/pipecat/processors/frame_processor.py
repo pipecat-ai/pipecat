@@ -84,6 +84,9 @@ class FrameProcessor:
     def can_generate_metrics(self) -> bool:
         return False
 
+    def set_core_metrics_data(self, data: MetricsData):
+        self._metrics.set_core_metrics_data(data)
+
     async def start_ttfb_metrics(self):
         if self.can_generate_metrics() and self.metrics_enabled:
             await self._metrics.start_ttfb_metrics(self._report_only_initial_ttfb)
@@ -104,7 +107,7 @@ class FrameProcessor:
             if frame:
                 await self.push_frame(frame)
 
-    async def start_llm_usage_metrics(self, tokens: dict):
+    async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
         if self.can_generate_metrics() and self.usage_metrics_enabled:
             frame = await self._metrics.start_llm_usage_metrics(tokens)
             if frame:

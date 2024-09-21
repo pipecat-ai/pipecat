@@ -25,7 +25,7 @@ class ResponseAggregator(FrameProcessor):
         TranscriptionFrame(" world.") -> None
         UserStoppedSpeakingFrame() -> TextFrame("Hello world.")
 
-    Doctest:
+    Doctest: FIXME to work with asyncio
     >>> async def print_frames(aggregator, frame):
     ...     async for frame in aggregator.process_frame(frame):
     ...         if isinstance(frame, TextFrame):
