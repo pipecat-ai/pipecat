@@ -7,6 +7,7 @@
 import asyncio
 import base64
 import json
+import time
 
 from typing import Any, AsyncGenerator, List, Literal, Mapping, Tuple
 from pydantic import BaseModel
@@ -117,6 +118,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
         # there's an interruption or TTSStoppedFrame.
         self._started = False
         self._cumulative_time = 0
+        self._last_message_time = 0
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -134,8 +136,9 @@ class ElevenLabsTTSService(AsyncWordTTSService):
         await self._connect()
 
     async def start(self, frame: StartFrame):
-        await super().start(frame)
-        await self._connect()
+        if not (self._websocket and self._websocket.open):
+            await super().start(frame)
+            await self._connect()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -225,7 +228,9 @@ class ElevenLabsTTSService(AsyncWordTTSService):
         while True:
             try:
                 await asyncio.sleep(10)
-                await self._send_text("")
+                current_time = time.time()
+                if current_time - self._last_message_time >= 10:
+                    await self._send_text("")
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -235,6 +240,7 @@ class ElevenLabsTTSService(AsyncWordTTSService):
         if self._websocket:
             msg = {"text": text + " "}
             await self._websocket.send(json.dumps(msg))
+            self._last_message_time = time.time()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
