@@ -10,11 +10,11 @@ except ImportError:
     sentry_available = False
     logger.debug("Sentry SDK not installed. Sentry features will be disabled.")
 
-from pipecat.processors.metrics.base import FrameProcessorMetrics
+from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 
 class SentryMetrics(FrameProcessorMetrics):
-    def __init__(self, name: str):
-        super().__init__(name)
+    def __init__(self):
+        super().__init__()
         self._ttfb_metrics_span = None
         self._processing_metrics_span = None
 
@@ -24,9 +24,10 @@ class SentryMetrics(FrameProcessorMetrics):
             if sentry_available:
                 self._ttfb_metrics_span = sentry_sdk.start_span(
                     op="ttfb", 
-                    description=f"TTFB for {self._name}",
+                    description=f"TTFB for {self._processor_name()}",
                     start_timestamp=self._start_ttfb_time
                 )
+                logger.debug(f"Sentry Span ID: {self._ttfb_metrics_span.span_id} Description: {self._ttfb_metrics_span.description} started.")
             self._should_report_ttfb = not report_only_initial_ttfb
 
     async def stop_ttfb_metrics(self):
@@ -39,9 +40,11 @@ class SentryMetrics(FrameProcessorMetrics):
         if sentry_available:
             self._processing_metrics_span = sentry_sdk.start_span(
                 op="processing", 
-                description=f"Processing for {self._name}",
+                description=f"Processing for {self._processor_name()}",
                 start_timestamp=self._start_processing_time
             )
+            logger.debug(f"Sentry Span ID: {self._processing_metrics_span.span_id} Description: {self._processing_metrics_span.description} started.")
+
 
     async def stop_processing_metrics(self):
         stop_time = time.time()

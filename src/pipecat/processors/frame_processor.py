@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import time
 
 from enum import Enum
 
@@ -17,7 +18,10 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame)
-from pipecat.processors.metrics.base import FrameProcessorMetrics
+from pipecat.metrics.metrics import (
+    LLMTokenUsage,
+    MetricsData)
+from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
@@ -33,7 +37,7 @@ class FrameProcessor:
             self,
             *,
             name: str | None = None,
-            metrics: FrameProcessorMetrics = FrameProcessorMetrics,
+            metrics: FrameProcessorMetrics | None = None,
             sync: bool = True,
             loop: asyncio.AbstractEventLoop | None = None,
             **kwargs):
@@ -55,7 +59,8 @@ class FrameProcessor:
         self._report_only_initial_ttfb = False
 
         # Metrics
-        self._metrics = metrics(name=self.name)
+        self._metrics = metrics or FrameProcessorMetrics()
+        self._metrics.set_processor_name(self.name)
 
         # Every processor in Pipecat should only output frames from a single
         # task. This avoid problems like audio overlapping. System frames are
