@@ -75,7 +75,8 @@ class DeepgramTTSService(TTSService):
         logger.debug(f"Generating TTS: [{text}]")
 
         base_url = self._base_url
-        request_url = f"{base_url}?model={self._voice}&encoding={self._encoding}&container=none&sample_rate={self._sample_rate}"
+        request_url = f"{base_url}?model={self._voice}&encoding={
+            self._encoding}&container=none&sample_rate={self._sample_rate}"
         headers = {"authorization": f"token {self._api_key}"}
         body = {"text": text}
 
@@ -133,15 +134,18 @@ class DeepgramSTTService(STTService):
 
         self._client = DeepgramClient(
             api_key, config=DeepgramClientOptions(url=url, options={"keepalive": "true"}))
-        self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
-        self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
+        self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v(
+            "1")
+        self._connection.on(
+            LiveTranscriptionEvents.Transcript, self._on_message)
         if self.vad_enabled:
-            self._connection.on(LiveTranscriptionEvents.SpeechStarted, self._on_speech_started)
+            self._connection.on(
+                LiveTranscriptionEvents.SpeechStarted, self._on_speech_started)
 
     @property
     def vad_enabled(self):
         return self._live_options.vad_events
-    
+
     def can_generate_metrics(self) -> bool:
         return self.vad_enabled
 
@@ -184,7 +188,7 @@ class DeepgramSTTService(STTService):
         if self._connection.is_connected:
             await self._connection.finish()
             logger.debug(f"{self}: Disconnected from Deepgram")
-    
+
     async def _on_speech_started(self, *args, **kwargs):
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
