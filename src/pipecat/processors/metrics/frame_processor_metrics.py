@@ -11,6 +11,7 @@ from pipecat.metrics.metrics import (
 
 from loguru import logger
 
+
 class FrameProcessorMetrics:
     def __init__(self):
         self._start_ttfb_time = 0
@@ -75,5 +76,6 @@ class FrameProcessorMetrics:
             processor=self._processor_name(),
             model=self._model_name(),
             value=len(text))
-        logger.debug(f"{self._processor_name()} usage characters: {characters.value}")
+        logger.debug(f"{self._processor_name()} usage characters: {
+                     characters.value}")
         return MetricsFrame(data=[characters])
