@@ -31,7 +31,7 @@ from pipecat.frames.frames import (
     TTSVoiceUpdateFrame,
     TextFrame,
     UserImageRequestFrame,
-    VisionImageRawFrame
+    VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -114,12 +114,8 @@ class LLMService(AIService):
         return function_name in self._callbacks.keys()
 
     async def call_function(
-            self,
-            *,
-            context: OpenAILLMContext,
-            tool_call_id: str,
-            function_name: str,
-            arguments: str) -> None:
+        self, *, context: OpenAILLMContext, tool_call_id: str, function_name: str, arguments: str
+    ) -> None:
         f = None
         if function_name in self._callbacks.keys():
             f = self._callbacks[function_name]
@@ -128,11 +124,8 @@ class LLMService(AIService):
         else:
             return None
         await context.call_function(
-            f,
-            function_name=function_name,
-            tool_call_id=tool_call_id,
-            arguments=arguments,
-            llm=self)
+            f, function_name=function_name, tool_call_id=tool_call_id, arguments=arguments, llm=self
+        )
 
     # QUESTION FOR CB: maybe this isn't needed anymore?
     async def call_start_function(self, context: OpenAILLMContext, function_name: str):
@@ -142,21 +135,23 @@ class LLMService(AIService):
             return await self._start_callbacks[None](function_name, self, context)
 
     async def request_image_frame(self, user_id: str, *, text_content: str | None = None):
-        await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content),
-                              FrameDirection.UPSTREAM)
+        await self.push_frame(
+            UserImageRequestFrame(user_id=user_id, context=text_content), FrameDirection.UPSTREAM
+        )
 
 
 class TTSService(AIService):
     def __init__(
-            self,
-            *,
-            aggregate_sentences: bool = True,
-            # if True, TTSService will push TextFrames and LLMFullResponseEndFrames,
-            # otherwise subclass must do it
-            push_text_frames: bool = True,
-            # TTS output sample rate
-            sample_rate: int = 16000,
-            **kwargs):
+        self,
+        *,
+        aggregate_sentences: bool = True,
+        # if True, TTSService will push TextFrames and LLMFullResponseEndFrames,
+        # otherwise subclass must do it
+        push_text_frames: bool = True,
+        # TTS output sample rate
+        sample_rate: int = 16000,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._aggregate_sentences: bool = aggregate_sentences
         self._push_text_frames: bool = push_text_frames
@@ -247,12 +242,13 @@ class TTSService(AIService):
 
 class AsyncTTSService(TTSService):
     def __init__(
-            self,
-            # if True, TTSService will push TTSStoppedFrames, otherwise subclass must do it
-            push_stop_frames: bool = False,
-            # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
-            stop_frame_timeout_s: float = 1.0,
-            **kwargs):
+        self,
+        # if True, TTSService will push TTSStoppedFrames, otherwise subclass must do it
+        push_stop_frames: bool = False,
+        # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
+        stop_frame_timeout_s: float = 1.0,
+        **kwargs,
+    ):
         super().__init__(sync=False, **kwargs)
         self._push_stop_frames: bool = push_stop_frames
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
@@ -286,10 +282,11 @@ class AsyncTTSService(TTSService):
         await super().push_frame(frame, direction)
 
         if self._push_stop_frames and (
-                isinstance(frame, StartInterruptionFrame) or
-                isinstance(frame, TTSStartedFrame) or
-                isinstance(frame, TTSAudioRawFrame) or
-                isinstance(frame, TTSStoppedFrame)):
+            isinstance(frame, StartInterruptionFrame)
+            or isinstance(frame, TTSStartedFrame)
+            or isinstance(frame, TTSAudioRawFrame)
+            or isinstance(frame, TTSStoppedFrame)
+        ):
             await self._stop_frame_queue.put(frame)
 
     async def _stop_frame_handler(self):
@@ -297,8 +294,9 @@ class AsyncTTSService(TTSService):
             has_started = False
             while True:
                 try:
-                    frame = await asyncio.wait_for(self._stop_frame_queue.get(),
-                                                   self._stop_frame_timeout_s)
+                    frame = await asyncio.wait_for(
+                        self._stop_frame_queue.get(), self._stop_frame_timeout_s
+                    )
                     if isinstance(frame, TTSStartedFrame):
                         has_started = True
                     elif isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
@@ -327,7 +325,7 @@ class AsyncWordTTSService(AsyncTTSService):
         self._word_timestamps = []
 
     async def add_word_timestamps(self, word_times: List[Tuple[str, float]]):
-        for (word, timestamp) in word_times:
+        for word, timestamp in word_times:
             await self._words_queue.put((word, seconds_to_nanoseconds(timestamp)))
 
     async def stop(self, frame: EndFrame):
@@ -414,14 +412,16 @@ class SegmentedSTTService(STTService):
 
     """
 
-    def __init__(self,
-                 *,
-                 min_volume: float = 0.6,
-                 max_silence_secs: float = 0.3,
-                 max_buffer_secs: float = 1.5,
-                 sample_rate: int = 16000,
-                 num_channels: int = 1,
-                 **kwargs):
+    def __init__(
+        self,
+        *,
+        min_volume: float = 0.6,
+        max_silence_secs: float = 0.3,
+        max_buffer_secs: float = 1.5,
+        sample_rate: int = 16000,
+        num_channels: int = 1,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._min_volume = min_volume
         self._max_silence_secs = max_silence_secs
@@ -450,7 +450,8 @@ class SegmentedSTTService(STTService):
         silence_secs = self._silence_num_frames / self._sample_rate
         buffer_secs = self._wave.getnframes() / self._sample_rate
         if self._content.tell() > 0 and (
-                buffer_secs > self._max_buffer_secs or silence_secs > self._max_silence_secs):
+            buffer_secs > self._max_buffer_secs or silence_secs > self._max_silence_secs
+        ):
             self._silence_num_frames = 0
             self._wave.close()
             self._content.seek(0)
@@ -477,7 +478,6 @@ class SegmentedSTTService(STTService):
 
 
 class ImageGenService(AIService):
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 

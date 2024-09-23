@@ -15,10 +15,7 @@ class TestWhisperOpenAIService(unittest.IsolatedAsyncioTestCase):
     @unittest.skip("FIXME: This test is failing")
     async def test_whisper_tts(self):
         pa = pyaudio.PyAudio()
-        stream = pa.open(format=pyaudio.paInt16,
-                         channels=1,
-                         rate=24_000,
-                         output=True)
+        stream = pa.open(format=pyaudio.paInt16, channels=1, rate=24_000, output=True)
 
         tts = OpenAITTSService(voice="nova")
 
@@ -26,7 +23,7 @@ class TestWhisperOpenAIService(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(frame, AudioRawFrame)
             stream.write(frame.audio)
 
-        await asyncio.sleep(.5)
+        await asyncio.sleep(0.5)
         stream.stop_stream()
         pa.terminate()
 

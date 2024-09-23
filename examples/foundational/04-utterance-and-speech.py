@@ -28,6 +28,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -58,8 +59,7 @@ async def main():
             voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         )
 
-        messages = [{"role": "system",
-                     "content": "tell the user a joke about llamas"}]
+        messages = [{"role": "system", "content": "tell the user a joke about llamas"}]
 
         # Start a task to run the LLM to create a joke, and convert the LLM
         # output to audio frames. This task will run in parallel with generating
@@ -77,8 +77,7 @@ async def main():
             ]
         )
 
-        merge_pipeline = SequentialMergePipeline(
-            [simple_tts_pipeline, llm_pipeline])
+        merge_pipeline = SequentialMergePipeline([simple_tts_pipeline, llm_pipeline])
 
         await asyncio.gather(
             transport.run(merge_pipeline),

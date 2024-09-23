@@ -23,7 +23,8 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use local audio, you need to `pip install pipecat-ai[local]`. On MacOS, you also need to `brew install portaudio`.")
+        "In order to use local audio, you need to `pip install pipecat-ai[local]`. On MacOS, you also need to `brew install portaudio`."
+    )
     raise Exception(f"Missing module: {e}")
 
 try:
@@ -35,7 +36,6 @@ except ModuleNotFoundError as e:
 
 
 class TkInputTransport(BaseInputTransport):
-
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
 
@@ -48,7 +48,8 @@ class TkInputTransport(BaseInputTransport):
             rate=params.audio_in_sample_rate,
             frames_per_buffer=num_frames,
             stream_callback=self._audio_in_callback,
-            input=True)
+            input=True,
+        )
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -63,9 +64,11 @@ class TkInputTransport(BaseInputTransport):
         self._in_stream.close()
 
     def _audio_in_callback(self, in_data, frame_count, time_info, status):
-        frame = InputAudioRawFrame(audio=in_data,
-                                   sample_rate=self._params.audio_in_sample_rate,
-                                   num_channels=self._params.audio_in_channels)
+        frame = InputAudioRawFrame(
+            audio=in_data,
+            sample_rate=self._params.audio_in_sample_rate,
+            num_channels=self._params.audio_in_channels,
+        )
 
         asyncio.run_coroutine_threadsafe(self.push_audio_frame(frame), self.get_event_loop())
 
@@ -73,7 +76,6 @@ class TkInputTransport(BaseInputTransport):
 
 
 class TkOutputTransport(BaseOutputTransport):
-
     def __init__(self, tk_root: tk.Tk, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
 
@@ -83,7 +85,8 @@ class TkOutputTransport(BaseOutputTransport):
             format=py_audio.get_format_from_width(2),
             channels=params.audio_out_channels,
             rate=params.audio_out_sample_rate,
-            output=True)
+            output=True,
+        )
 
         # Start with a neutral gray background.
         array = np.ones((1024, 1024, 3)) * 128
@@ -114,11 +117,7 @@ class TkOutputTransport(BaseOutputTransport):
         width = frame.size[0]
         height = frame.size[1]
         data = f"P6 {width} {height} 255 ".encode() + frame.image
-        photo = tk.PhotoImage(
-            width=width,
-            height=height,
-            data=data,
-            format="PPM")
+        photo = tk.PhotoImage(width=width, height=height, data=data, format="PPM")
         self._image_label.config(image=photo)
 
         # This holds a reference to the photo, preventing it from being garbage
@@ -127,7 +126,6 @@ class TkOutputTransport(BaseOutputTransport):
 
 
 class TkLocalTransport(BaseTransport):
-
     def __init__(self, tk_root: tk.Tk, params: TransportParams):
         self._tk_root = tk_root
         self._params = params

@@ -4,12 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from pipecat.frames.frames import (
-    Frame,
-    InputImageRawFrame,
-    TextFrame,
-    VisionImageRawFrame
-)
+from pipecat.frames.frames import Frame, InputImageRawFrame, TextFrame, VisionImageRawFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -46,7 +41,8 @@ class VisionImageFrameAggregator(FrameProcessor):
                     text=self._describe_text,
                     image=frame.image,
                     size=frame.size,
-                    format=frame.format)
+                    format=frame.format,
+                )
                 await self.push_frame(frame)
                 self._describe_text = None
         else:

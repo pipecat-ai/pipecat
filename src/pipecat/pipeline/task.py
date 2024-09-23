@@ -19,7 +19,8 @@ from pipecat.frames.frames import (
     Frame,
     MetricsFrame,
     StartFrame,
-    StopTaskFrame)
+    StopTaskFrame,
+)
 from pipecat.metrics.metrics import TTFBMetricsData, ProcessingMetricsData
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -37,7 +38,6 @@ class PipelineParams(BaseModel):
 
 
 class Source(FrameProcessor):
-
     def __init__(self, up_queue: asyncio.Queue):
         super().__init__()
         self._up_queue = up_queue
@@ -62,12 +62,12 @@ class Source(FrameProcessor):
 
 
 class PipelineTask:
-
     def __init__(
-            self,
-            pipeline: BasePipeline,
-            params: PipelineParams = PipelineParams(),
-            clock: BaseClock = SystemClock()):
+        self,
+        pipeline: BasePipeline,
+        params: PipelineParams = PipelineParams(),
+        clock: BaseClock = SystemClock(),
+    ):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
 
@@ -133,12 +133,14 @@ class PipelineTask:
             enable_metrics=self._params.enable_metrics,
             enable_usage_metrics=self._params.enable_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
-            clock=self._clock
+            clock=self._clock,
         )
         await self._source.process_frame(start_frame, FrameDirection.DOWNSTREAM)
 
         if self._params.enable_metrics and self._params.send_initial_empty_metrics:
-            await self._source.process_frame(self._initial_metrics_frame(), FrameDirection.DOWNSTREAM)
+            await self._source.process_frame(
+                self._initial_metrics_frame(), FrameDirection.DOWNSTREAM
+            )
 
         running = True
         should_cleanup = True

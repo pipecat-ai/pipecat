@@ -3,14 +3,13 @@ from loguru import logger
 
 try:
     import sentry_sdk
+
     sentry_available = sentry_sdk.is_initialized()
     if not sentry_available:
-        logger.warning(
-            "Sentry SDK not initialized. Sentry features will be disabled.")
+        logger.warning("Sentry SDK not initialized. Sentry features will be disabled.")
 except ImportError:
     sentry_available = False
-    logger.warning(
-        "Sentry SDK not installed. Sentry features will be disabled.")
+    logger.warning("Sentry SDK not installed. Sentry features will be disabled.")
 
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 
@@ -28,7 +27,7 @@ class SentryMetrics(FrameProcessorMetrics):
                 self._ttfb_metrics_span = sentry_sdk.start_span(
                     op="ttfb",
                     description=f"TTFB for {self._processor_name()}",
-                    start_timestamp=self._start_ttfb_time
+                    start_timestamp=self._start_ttfb_time,
                 )
                 logger.debug(f"Sentry Span ID: {self._ttfb_metrics_span.span_id} Description: {
                              self._ttfb_metrics_span.description} started.")
@@ -45,7 +44,7 @@ class SentryMetrics(FrameProcessorMetrics):
             self._processing_metrics_span = sentry_sdk.start_span(
                 op="processing",
                 description=f"Processing for {self._processor_name()}",
-                start_timestamp=self._start_processing_time
+                start_timestamp=self._start_processing_time,
             )
             logger.debug(f"Sentry Span ID: {self._processing_metrics_span.span_id} Description: {
                          self._processing_metrics_span.description} started.")

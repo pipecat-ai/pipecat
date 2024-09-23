@@ -17,10 +17,9 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
-    SystemFrame)
-from pipecat.metrics.metrics import (
-    LLMTokenUsage,
-    MetricsData)
+    SystemFrame,
+)
+from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -33,15 +32,15 @@ class FrameDirection(Enum):
 
 
 class FrameProcessor:
-
     def __init__(
-            self,
-            *,
-            name: str | None = None,
-            metrics: FrameProcessorMetrics | None = None,
-            sync: bool = True,
-            loop: asyncio.AbstractEventLoop | None = None,
-            **kwargs):
+        self,
+        *,
+        name: str | None = None,
+        metrics: FrameProcessorMetrics | None = None,
+        sync: bool = True,
+        loop: asyncio.AbstractEventLoop | None = None,
+        **kwargs,
+    ):
         self.id: int = obj_id()
         self.name = name or f"{self.__class__.__name__}#{obj_count(self)}"
         self._parent: "FrameProcessor" | None = None
@@ -202,8 +201,7 @@ class FrameProcessor:
 
     def __create_push_task(self):
         self.__push_queue = asyncio.Queue()
-        self.__push_frame_task = self.get_event_loop(
-        ).create_task(self.__push_frame_task_handler())
+        self.__push_frame_task = self.get_event_loop().create_task(self.__push_frame_task_handler())
 
     async def __push_frame_task_handler(self):
         running = True

@@ -16,7 +16,7 @@ from pipecat.frames.frames import (
     Frame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    TextFrame
+    TextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -34,6 +34,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -81,8 +82,8 @@ async def main():
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,
-                camera_out_height=1024
-            )
+                camera_out_height=1024,
+            ),
         )
 
         tts = CartesiaHttpTTSService(
@@ -90,14 +91,10 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         imagegen = FalImageGenService(
-            params=FalImageGenService.InputParams(
-                image_size="square_hd"
-            ),
+            params=FalImageGenService.InputParams(image_size="square_hd"),
             aiohttp_session=session,
             key=os.getenv("FAL_KEY"),
         )
@@ -112,15 +109,17 @@ async def main():
         #
         # Note that `SyncParallelPipeline` requires all processors in it to be
         # synchronous (which is the default for most processors).
-        pipeline = Pipeline([
-            llm,                     # LLM
-            sentence_aggregator,     # Aggregates LLM output into full sentences
-            SyncParallelPipeline(    # Run pipelines in parallel aggregating the result
-                [month_prepender, tts],  # Create "Month: sentence" and output audio
-                [imagegen]               # Generate image
-            ),
-            transport.output()       # Transport output
-        ])
+        pipeline = Pipeline(
+            [
+                llm,  # LLM
+                sentence_aggregator,  # Aggregates LLM output into full sentences
+                SyncParallelPipeline(  # Run pipelines in parallel aggregating the result
+                    [month_prepender, tts],  # Create "Month: sentence" and output audio
+                    [imagegen],  # Generate image
+                ),
+                transport.output(),  # Transport output
+            ]
+        )
 
         frames = []
         for month in [

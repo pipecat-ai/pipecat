@@ -8,7 +8,12 @@ import time
 
 import numpy as np
 
-from pipecat.frames.frames import AudioRawFrame, Frame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    Frame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 
@@ -26,19 +31,20 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module(s): {e}")
 
 
-class SileroOnnxModel():
-
+class SileroOnnxModel:
     def __init__(self, path, force_onnx_cpu=True):
         import numpy as np
+
         global np
 
         opts = onnxruntime.SessionOptions()
         opts.inter_op_num_threads = 1
         opts.intra_op_num_threads = 1
 
-        if force_onnx_cpu and 'CPUExecutionProvider' in onnxruntime.get_available_providers():
+        if force_onnx_cpu and "CPUExecutionProvider" in onnxruntime.get_available_providers():
             self.session = onnxruntime.InferenceSession(
-                path, providers=['CPUExecutionProvider'], sess_options=opts)
+                path, providers=["CPUExecutionProvider"], sess_options=opts
+            )
         else:
             self.session = onnxruntime.InferenceSession(path, sess_options=opts)
 
@@ -53,26 +59,27 @@ class SileroOnnxModel():
 
         if sr not in self.sample_rates:
             raise ValueError(
-                f"Supported sampling rates: {self.sample_rates} (or multiply of 16000)")
+                f"Supported sampling rates: {self.sample_rates} (or multiply of 16000)"
+            )
         if sr / np.shape(x)[1] > 31.25:
             raise ValueError("Input audio chunk is too short")
 
         return x, sr
 
     def reset_states(self, batch_size=1):
-        self._state = np.zeros((2, batch_size, 128), dtype='float32')
-        self._context = np.zeros((batch_size, 0), dtype='float32')
+        self._state = np.zeros((2, batch_size, 128), dtype="float32")
+        self._context = np.zeros((batch_size, 0), dtype="float32")
         self._last_sr = 0
         self._last_batch_size = 0
 
     def __call__(self, x, sr: int):
-
         x, sr = self._validate_input(x, sr)
         num_samples = 512 if sr == 16000 else 256
 
         if np.shape(x)[-1] != num_samples:
             raise ValueError(
-                f"Provided number of samples is {np.shape(x)[-1]} (Supported values: 256 for 8000 sample rate, 512 for 16000)")
+                f"Provided number of samples is {np.shape(x)[-1]} (Supported values: 256 for 8000 sample rate, 512 for 16000)"
+            )
 
         batch_size = np.shape(x)[0]
         context_size = 64 if sr == 16000 else 32
@@ -85,12 +92,12 @@ class SileroOnnxModel():
             self.reset_states(batch_size)
 
         if not np.shape(self._context)[1]:
-            self._context = np.zeros((batch_size, context_size), dtype='float32')
+            self._context = np.zeros((batch_size, context_size), dtype="float32")
 
         x = np.concatenate((self._context, x), axis=1)
 
         if sr in [8000, 16000]:
-            ort_inputs = {'input': x, 'state': self._state, 'sr': np.array(sr, dtype='int64')}
+            ort_inputs = {"input": x, "state": self._state, "sr": np.array(sr, dtype="int64")}
             ort_outs = self.session.run(None, ort_inputs)
             out, state = ort_outs
             self._state = state
@@ -105,12 +112,7 @@ class SileroOnnxModel():
 
 
 class SileroVADAnalyzer(VADAnalyzer):
-
-    def __init__(
-            self,
-            *,
-            sample_rate: int = 16000,
-            params: VADParams = VADParams()):
+    def __init__(self, *, sample_rate: int = 16000, params: VADParams = VADParams()):
         super().__init__(sample_rate=sample_rate, num_channels=1, params=params)
 
         if sample_rate != 16000 and sample_rate != 8000:
@@ -118,14 +120,16 @@ class SileroVADAnalyzer(VADAnalyzer):
 
         logger.debug("Loading Silero VAD model...")
 
-        model_name = 'silero_vad.onnx'
+        model_name = "silero_vad.onnx"
         package_path = "pipecat.vad.data"
 
         try:
             import importlib_resources as impresources
+
             model_file_path = str(impresources.files(package_path).joinpath(model_name))
         except BaseException:
             from importlib import resources as impresources
+
             try:
                 with impresources.path(package_path, model_name) as f:
                     model_file_path = f
@@ -168,18 +172,16 @@ class SileroVADAnalyzer(VADAnalyzer):
 
 
 class SileroVAD(FrameProcessor):
-
     def __init__(
-            self,
-            *,
-            sample_rate: int = 16000,
-            vad_params: VADParams = VADParams(),
-            audio_passthrough: bool = False):
+        self,
+        *,
+        sample_rate: int = 16000,
+        vad_params: VADParams = VADParams(),
+        audio_passthrough: bool = False,
+    ):
         super().__init__()
 
-        self._vad_analyzer = SileroVADAnalyzer(
-            sample_rate=sample_rate,
-            params=vad_params)
+        self._vad_analyzer = SileroVADAnalyzer(sample_rate=sample_rate, params=vad_params)
         self._audio_passthrough = audio_passthrough
 
         self._processor_vad_state: VADState = VADState.QUIET
@@ -202,7 +204,11 @@ class SileroVAD(FrameProcessor):
         # Check VAD and push event if necessary. We just care about changes
         # from QUIET to SPEAKING and vice versa.
         new_vad_state = self._vad_analyzer.analyze_audio(frame.audio)
-        if new_vad_state != self._processor_vad_state and new_vad_state != VADState.STARTING and new_vad_state != VADState.STOPPING:
+        if (
+            new_vad_state != self._processor_vad_state
+            and new_vad_state != VADState.STARTING
+            and new_vad_state != VADState.STOPPING
+        ):
             new_frame = None
 
             if new_vad_state == VADState.SPEAKING:
