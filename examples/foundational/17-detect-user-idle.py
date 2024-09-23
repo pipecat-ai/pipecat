@@ -14,7 +14,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
+)
 from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
@@ -26,6 +28,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -44,8 +47,8 @@ async def main():
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         tts = CartesiaTTSService(
@@ -53,9 +56,7 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         messages = [
             {
@@ -69,33 +70,41 @@ async def main():
 
         async def user_idle_callback(user_idle: UserIdleProcessor):
             messages.append(
-                {"role": "system", "content": "Ask the user if they are still there and try to prompt for some input, but be short."})
+                {
+                    "role": "system",
+                    "content": "Ask the user if they are still there and try to prompt for some input, but be short.",
+                }
+            )
             await user_idle.push_frame(LLMMessagesFrame(messages))
 
         user_idle = UserIdleProcessor(callback=user_idle_callback, timeout=5.0)
 
-        pipeline = Pipeline([
-            transport.input(),   # Transport user input
-            user_idle,           # Idle user check-in
-            tma_in,              # User responses
-            llm,                 # LLM
-            tts,                 # TTS
-            transport.output(),  # Transport bot output
-            tma_out              # Assistant spoken responses
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                user_idle,  # Idle user check-in
+                tma_in,  # User responses
+                llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                tma_out,  # Assistant spoken responses
+            ]
+        )
 
-        task = PipelineTask(pipeline, PipelineParams(
-            allow_interruptions=True,
-            enable_metrics=True,
-            report_only_initial_ttfb=True,
-        ))
+        task = PipelineTask(
+            pipeline,
+            PipelineParams(
+                allow_interruptions=True,
+                enable_metrics=True,
+                report_only_initial_ttfb=True,
+            ),
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            messages.append(
-                {"role": "system", "content": "Please introduce yourself to the user."})
+            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()

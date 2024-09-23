@@ -21,6 +21,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -32,7 +33,8 @@ async def main():
         (room_url, _) = await configure(session)
 
         transport = DailyTransport(
-            room_url, None, "Say One Thing", DailyParams(audio_out_enabled=True))
+            room_url, None, "Say One Thing", DailyParams(audio_out_enabled=True)
+        )
 
         tts = CartesiaHttpTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
@@ -47,10 +49,11 @@ async def main():
         # participant joins.
         @transport.event_handler("on_participant_joined")
         async def on_new_participant_joined(transport, participant):
-            participant_name = participant["info"]["userName"] or ''
+            participant_name = participant["info"]["userName"] or ""
             await task.queue_frames([TextFrame(f"Hello there, {participant_name}!"), EndFrame()])
 
         await runner.run(task)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

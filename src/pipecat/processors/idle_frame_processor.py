@@ -19,12 +19,13 @@ class IdleFrameProcessor(FrameProcessor):
     """
 
     def __init__(
-            self,
-            *,
-            callback: Callable[["IdleFrameProcessor"], Awaitable[None]],
-            timeout: float,
-            types: List[type] = [],
-            **kwargs):
+        self,
+        *,
+        callback: Callable[["IdleFrameProcessor"], Awaitable[None]],
+        timeout: float,
+        types: List[type] = [],
+        **kwargs,
+    ):
         super().__init__(sync=False, **kwargs)
 
         self._callback = callback

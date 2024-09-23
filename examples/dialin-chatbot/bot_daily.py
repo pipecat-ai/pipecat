@@ -6,11 +6,11 @@ import argparse
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
-from pipecat.frames.frames import (
-    LLMMessagesFrame,
-    EndFrame
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
 )
+from pipecat.frames.frames import LLMMessagesFrame, EndFrame
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyDialinSettings
@@ -18,6 +18,7 @@ from pipecat.vad.silero import SileroVADAnalyzer
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -31,10 +32,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str):
     # diallin_settings are only needed if Daily's SIP URI is used
     # If you are handling this via Twilio, Telnyx, set this to None
     # and handle call-forwarding when on_dialin_ready fires.
-    diallin_settings = DailyDialinSettings(
-        call_id=callId,
-        call_domain=callDomain
-    )
+    diallin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
 
     transport = DailyTransport(
         room_url,
@@ -50,7 +48,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str):
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             transcription_enabled=True,
-        )
+        ),
     )
 
     tts = ElevenLabsTTSService(
@@ -58,10 +56,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str):
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
     )
 
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o"
-    )
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
     messages = [
         {
@@ -73,14 +68,16 @@ async def main(room_url: str, token: str, callId: str, callDomain: str):
     tma_in = LLMUserResponseAggregator(messages)
     tma_out = LLMAssistantResponseAggregator(messages)
 
-    pipeline = Pipeline([
-        transport.input(),
-        tma_in,
-        llm,
-        tts,
-        transport.output(),
-        tma_out,
-    ])
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            tma_in,
+            llm,
+            tts,
+            transport.output(),
+            tma_out,
+        ]
+    )
 
     task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 

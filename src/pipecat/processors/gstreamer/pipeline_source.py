@@ -15,20 +15,23 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputImageRawFrame,
     StartFrame,
-    SystemFrame)
+    SystemFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from loguru import logger
 
 try:
     import gi
-    gi.require_version('Gst', '1.0')
-    gi.require_version('GstApp', '1.0')
+
+    gi.require_version("Gst", "1.0")
+    gi.require_version("GstApp", "1.0")
     from gi.repository import Gst, GstApp
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use GStreamer, you need to `pip install pipecat-ai[gstreamer]`. Also, you need to install GStreamer in your system.")
+        "In order to use GStreamer, you need to `pip install pipecat-ai[gstreamer]`. Also, you need to install GStreamer in your system."
+    )
     raise Exception(f"Missing module: {e}")
 
 
@@ -120,7 +123,8 @@ class GStreamerPipelineSource(FrameProcessor):
         audioresample = Gst.ElementFactory.make("audioresample", None)
         audiocapsfilter = Gst.ElementFactory.make("capsfilter", None)
         audiocaps = Gst.Caps.from_string(
-            f"audio/x-raw,format=S16LE,rate={self._out_params.audio_sample_rate},channels={self._out_params.audio_channels},layout=interleaved")
+            f"audio/x-raw,format=S16LE,rate={self._out_params.audio_sample_rate},channels={self._out_params.audio_channels},layout=interleaved"
+        )
         audiocapsfilter.set_property("caps", audiocaps)
         appsink_audio = Gst.ElementFactory.make("appsink", None)
         appsink_audio.set_property("emit-signals", True)
@@ -152,7 +156,8 @@ class GStreamerPipelineSource(FrameProcessor):
         videoscale = Gst.ElementFactory.make("videoscale", None)
         videocapsfilter = Gst.ElementFactory.make("capsfilter", None)
         videocaps = Gst.Caps.from_string(
-            f"video/x-raw,format=RGB,width={self._out_params.video_width},height={self._out_params.video_height}")
+            f"video/x-raw,format=RGB,width={self._out_params.video_width},height={self._out_params.video_height}"
+        )
         videocapsfilter.set_property("caps", videocaps)
 
         appsink_video = Gst.ElementFactory.make("appsink", None)
@@ -182,9 +187,11 @@ class GStreamerPipelineSource(FrameProcessor):
     def _appsink_audio_new_sample(self, appsink: GstApp.AppSink):
         buffer = appsink.pull_sample().get_buffer()
         (_, info) = buffer.map(Gst.MapFlags.READ)
-        frame = OutputAudioRawFrame(audio=info.data,
-                                    sample_rate=self._out_params.audio_sample_rate,
-                                    num_channels=self._out_params.audio_channels)
+        frame = OutputAudioRawFrame(
+            audio=info.data,
+            sample_rate=self._out_params.audio_sample_rate,
+            num_channels=self._out_params.audio_channels,
+        )
         asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
         buffer.unmap(info)
         return Gst.FlowReturn.OK
@@ -195,7 +202,8 @@ class GStreamerPipelineSource(FrameProcessor):
         frame = OutputImageRawFrame(
             image=info.data,
             size=(self._out_params.video_width, self._out_params.video_height),
-            format="RGB")
+            format="RGB",
+        )
         asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
         buffer.unmap(info)
         return Gst.FlowReturn.OK

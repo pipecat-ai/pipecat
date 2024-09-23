@@ -11,7 +11,13 @@ import wave
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, InputAudioRawFrame, StartFrame
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    CancelFrame,
+    EndFrame,
+    InputAudioRawFrame,
+    StartFrame,
+)
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
@@ -40,14 +46,14 @@ class WebsocketServerCallbacks(BaseModel):
 
 
 class WebsocketServerInputTransport(BaseInputTransport):
-
     def __init__(
-            self,
-            host: str,
-            port: int,
-            params: WebsocketServerParams,
-            callbacks: WebsocketServerCallbacks,
-            **kwargs):
+        self,
+        host: str,
+        port: int,
+        params: WebsocketServerParams,
+        callbacks: WebsocketServerCallbacks,
+        **kwargs,
+    ):
         super().__init__(params, **kwargs)
 
         self._host = host
@@ -97,10 +103,12 @@ class WebsocketServerInputTransport(BaseInputTransport):
                 continue
 
             if isinstance(frame, AudioRawFrame):
-                await self.push_audio_frame(InputAudioRawFrame(
-                    audio=frame.audio,
-                    sample_rate=frame.sample_rate,
-                    num_channels=frame.num_channels)
+                await self.push_audio_frame(
+                    InputAudioRawFrame(
+                        audio=frame.audio,
+                        sample_rate=frame.sample_rate,
+                        num_channels=frame.num_channels,
+                    )
                 )
             else:
                 await self.push_frame(frame)
@@ -115,7 +123,6 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
 
 class WebsocketServerOutputTransport(BaseOutputTransport):
-
     def __init__(self, params: WebsocketServerParams, **kwargs):
         super().__init__(params, **kwargs)
 
@@ -138,9 +145,9 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         self._websocket_audio_buffer += frames
         while len(self._websocket_audio_buffer) >= self._params.audio_frame_size:
             frame = AudioRawFrame(
-                audio=self._websocket_audio_buffer[:self._params.audio_frame_size],
+                audio=self._websocket_audio_buffer[: self._params.audio_frame_size],
                 sample_rate=self._params.audio_out_sample_rate,
-                num_channels=self._params.audio_out_channels
+                num_channels=self._params.audio_out_channels,
             )
 
             if self._params.add_wav_header:
@@ -153,28 +160,29 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
                 ww.close()
                 content.seek(0)
                 wav_frame = AudioRawFrame(
-                    content.read(),
-                    sample_rate=frame.sample_rate,
-                    num_channels=frame.num_channels)
+                    content.read(), sample_rate=frame.sample_rate, num_channels=frame.num_channels
+                )
                 frame = wav_frame
 
             proto = self._params.serializer.serialize(frame)
             if proto:
                 await self._websocket.send(proto)
 
-            self._websocket_audio_buffer = self._websocket_audio_buffer[self._params.audio_frame_size:]
+            self._websocket_audio_buffer = self._websocket_audio_buffer[
+                self._params.audio_frame_size :
+            ]
 
 
 class WebsocketServerTransport(BaseTransport):
-
     def __init__(
-            self,
-            host: str = "localhost",
-            port: int = 8765,
-            params: WebsocketServerParams = WebsocketServerParams(),
-            input_name: str | None = None,
-            output_name: str | None = None,
-            loop: asyncio.AbstractEventLoop | None = None):
+        self,
+        host: str = "localhost",
+        port: int = 8765,
+        params: WebsocketServerParams = WebsocketServerParams(),
+        input_name: str | None = None,
+        output_name: str | None = None,
+        loop: asyncio.AbstractEventLoop | None = None,
+    ):
         super().__init__(input_name=input_name, output_name=output_name, loop=loop)
         self._host = host
         self._port = port
@@ -182,7 +190,7 @@ class WebsocketServerTransport(BaseTransport):
 
         self._callbacks = WebsocketServerCallbacks(
             on_client_connected=self._on_client_connected,
-            on_client_disconnected=self._on_client_disconnected
+            on_client_disconnected=self._on_client_disconnected,
         )
         self._input: WebsocketServerInputTransport | None = None
         self._output: WebsocketServerOutputTransport | None = None
@@ -196,7 +204,8 @@ class WebsocketServerTransport(BaseTransport):
     def input(self) -> WebsocketServerInputTransport:
         if not self._input:
             self._input = WebsocketServerInputTransport(
-                self._host, self._port, self._params, self._callbacks, name=self._input_name)
+                self._host, self._port, self._params, self._callbacks, name=self._input_name
+            )
         return self._input
 
     def output(self) -> WebsocketServerOutputTransport:

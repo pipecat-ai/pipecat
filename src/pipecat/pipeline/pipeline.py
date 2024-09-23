@@ -12,7 +12,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class PipelineSource(FrameProcessor):
-
     def __init__(self, upstream_push_frame: Callable[[Frame, FrameDirection], Coroutine]):
         super().__init__()
         self._upstream_push_frame = upstream_push_frame
@@ -28,7 +27,6 @@ class PipelineSource(FrameProcessor):
 
 
 class PipelineSink(FrameProcessor):
-
     def __init__(self, downstream_push_frame: Callable[[Frame, FrameDirection], Coroutine]):
         super().__init__()
         self._downstream_push_frame = downstream_push_frame
@@ -44,7 +42,6 @@ class PipelineSink(FrameProcessor):
 
 
 class Pipeline(BasePipeline):
-
     def __init__(self, processors: List[FrameProcessor]):
         super().__init__()
 

@@ -1,4 +1,4 @@
-name: lint
+name: format
 
 on:
   workflow_dispatch:
@@ -12,12 +12,12 @@ on:
       - "docs/**"
 
 concurrency:
-  group: build-lint-${{ github.event.pull_request.number || github.ref }}
+  group: build-format-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  autopep8:
-    name: "Formatting lints"
+  ruff-format:
+    name: "Formatting checker"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -25,7 +25,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: "3.10"
       - name: Setup virtual environment
         run: |
           python -m venv .venv
@@ -34,11 +34,8 @@ jobs:
           source .venv/bin/activate
           python -m pip install --upgrade pip
           pip install -r dev-requirements.txt
-      - name: autopep8
-        id: autopep8
+      - name: Ruff formatter
+        id: ruff
         run: |
           source .venv/bin/activate
-          autopep8 --max-line-length 100 --exit-code -r -d --exclude "*_pb2.py" -a -a src/
-      - name: Fail if autopep8 requires changes
-        if: steps.autopep8.outputs.exit-code == 2
-        run: exit 1
+          ruff format --config line-length=100 --diff --exclude "*_pb2.py"

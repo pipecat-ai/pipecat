@@ -7,7 +7,6 @@ provisioning a room and starting a Pipecat bot in response.
 Refer to README for more information.
 """
 
-
 import aiohttp
 import os
 import argparse
@@ -25,17 +24,18 @@ from pipecat.transports.services.helpers.daily_rest import (
     DailyRoomObject,
     DailyRoomProperties,
     DailyRoomSipParams,
-    DailyRoomParams)
+    DailyRoomParams,
+)
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 
 # ------------ Configuration ------------ #
 
 MAX_SESSION_TIME = 5 * 60  # 5 minutes
-REQUIRED_ENV_VARS = ['OPENAI_API_KEY', 'DAILY_API_KEY',
-                     'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID']
+REQUIRED_ENV_VARS = ["OPENAI_API_KEY", "DAILY_API_KEY", "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"]
 
 daily_helpers = {}
 
@@ -47,11 +47,12 @@ async def lifespan(app: FastAPI):
     aiohttp_session = aiohttp.ClientSession()
     daily_helpers["rest"] = DailyRESTHelper(
         daily_api_key=os.getenv("DAILY_API_KEY", ""),
-        daily_api_url=os.getenv("DAILY_API_URL", 'https://api.daily.co/v1'),
-        aiohttp_session=aiohttp_session
+        daily_api_url=os.getenv("DAILY_API_URL", "https://api.daily.co/v1"),
+        aiohttp_session=aiohttp_session,
     )
     yield
     await aiohttp_session.close()
+
 
 app = FastAPI(lifespan=lifespan)
 
@@ -60,7 +61,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
 """
@@ -80,10 +81,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
             properties=DailyRoomProperties(
                 # Note: these are the default values, except for the display name
                 sip=DailyRoomSipParams(
-                    display_name="dialin-user",
-                    video=False,
-                    sip_mode="dial-in",
-                    num_endpoints=1
+                    display_name="dialin-user", video=False, sip_mode="dial-in", num_endpoints=1
                 )
             )
         )
@@ -97,8 +95,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
             print(f"Joining existing room: {room_url}")
             room: DailyRoomObject = await daily_helpers["rest"].get_room_from_url(room_url)
         except Exception:
-            raise HTTPException(
-                status_code=500, detail=f"Room not found: {room_url}")
+            raise HTTPException(status_code=500, detail=f"Room not found: {room_url}")
 
     print(f"Daily room: {room.url} {room.config.sip_endpoint}")
 
@@ -106,8 +103,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     token = await daily_helpers["rest"].get_token(room.url, MAX_SESSION_TIME)
 
     if not room or not token:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get room or token token")
+        raise HTTPException(status_code=500, detail=f"Failed to get room or token token")
 
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
@@ -120,14 +116,10 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
 
     try:
         subprocess.Popen(
-            [bot_proc],
-            shell=True,
-            bufsize=1,
-            cwd=os.path.dirname(os.path.abspath(__file__))
+            [bot_proc], shell=True, bufsize=1, cwd=os.path.dirname(os.path.abspath(__file__))
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to start subprocess: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
 
     return room
 
@@ -150,11 +142,10 @@ async def twilio_start_bot(request: Request):
         pass
 
     room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
-    callId = data.get('CallSid')
+    callId = data.get("CallSid")
 
     if not callId:
-        raise HTTPException(
-            status_code=500, detail="Missing 'CallSid' in request")
+        raise HTTPException(status_code=500, detail="Missing 'CallSid' in request")
 
     print("CallId: %s" % callId)
 
@@ -170,7 +161,8 @@ async def twilio_start_bot(request: Request):
     # http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.mp3
     resp = VoiceResponse()
     resp.play(
-        url="http://com.twilio.sounds.music.s3.amazonaws.com/MARKOVICHAMP-Borghestral.mp3", loop=10)
+        url="http://com.twilio.sounds.music.s3.amazonaws.com/MARKOVICHAMP-Borghestral.mp3", loop=10
+    )
     return str(resp)
 
 
@@ -192,18 +184,14 @@ async def daily_start_bot(request: Request) -> JSONResponse:
         callId = data.get("callId", None)
         callDomain = data.get("callDomain", None)
     except Exception:
-        raise HTTPException(
-            status_code=500,
-            detail="Missing properties 'callId' or 'callDomain'")
+        raise HTTPException(status_code=500, detail="Missing properties 'callId' or 'callDomain'")
 
     print(f"CallId: {callId}, CallDomain: {callDomain}")
     room: DailyRoomObject = await _create_daily_room(room_url, callId, callDomain, "daily")
 
     # Grab a token for the user to join with
-    return JSONResponse({
-        "room_url": room.url,
-        "sipUri": room.config.sip_endpoint
-    })
+    return JSONResponse({"room_url": room.url, "sipUri": room.config.sip_endpoint})
+
 
 # ----------------- Main ----------------- #
 
@@ -215,24 +203,18 @@ if __name__ == "__main__":
             raise Exception(f"Missing environment variable: {env_var}.")
 
     parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
-    parser.add_argument("--host", type=str,
-                        default=os.getenv("HOST", "0.0.0.0"), help="Host address")
-    parser.add_argument("--port", type=int,
-                        default=os.getenv("PORT", 7860), help="Port number")
-    parser.add_argument("--reload", action="store_true",
-                        default=True, help="Reload code on change")
+    parser.add_argument(
+        "--host", type=str, default=os.getenv("HOST", "0.0.0.0"), help="Host address"
+    )
+    parser.add_argument("--port", type=int, default=os.getenv("PORT", 7860), help="Port number")
+    parser.add_argument("--reload", action="store_true", default=True, help="Reload code on change")
 
     config = parser.parse_args()
 
     try:
         import uvicorn
 
-        uvicorn.run(
-            "bot_runner:app",
-            host=config.host,
-            port=config.port,
-            reload=config.reload
-        )
+        uvicorn.run("bot_runner:app", host=config.host, port=config.port, reload=config.reload)
 
     except KeyboardInterrupt:
         print("Pipecat runner shutting down...")
