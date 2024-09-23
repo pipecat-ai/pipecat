@@ -26,6 +26,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -52,8 +53,8 @@ async def main():
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         tts = CartesiaTTSService(
@@ -61,15 +62,10 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
         # Register a function_name of None to get all functions
         # sent to the same callback with an additional function_name parameter.
-        llm.register_function(
-            None,
-            fetch_weather_from_api,
-            start_callback=start_fetch_weather)
+        llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
 
         fl_in = FrameLogger("Inner")
         fl_out = FrameLogger("Outer")
@@ -89,17 +85,15 @@ async def main():
                             },
                             "format": {
                                 "type": "string",
-                                "enum": [
-                                    "celsius",
-                                    "fahrenheit"],
+                                "enum": ["celsius", "fahrenheit"],
                                 "description": "The temperature unit to use. Infer this from the users location.",
                             },
                         },
-                        "required": [
-                            "location",
-                            "format"],
+                        "required": ["location", "format"],
                     },
-                })]
+                },
+            )
+        ]
         messages = [
             {
                 "role": "system",
@@ -110,16 +104,18 @@ async def main():
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
-        pipeline = Pipeline([
-            fl_in,
-            transport.input(),
-            context_aggregator.user(),
-            llm,
-            fl_out,
-            tts,
-            transport.output(),
-            context_aggregator.assistant(),
-        ])
+        pipeline = Pipeline(
+            [
+                fl_in,
+                transport.input(),
+                context_aggregator.user(),
+                llm,
+                fl_out,
+                tts,
+                transport.output(),
+                context_aggregator.assistant(),
+            ]
+        )
 
         task = PipelineTask(pipeline)
 
@@ -132,6 +128,7 @@ async def main():
         runner = PipelineRunner()
 
         await runner.run(task)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

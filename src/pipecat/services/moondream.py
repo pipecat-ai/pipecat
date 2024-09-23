@@ -31,6 +31,7 @@ def detect_device():
     """
     try:
         import intel_extension_for_pytorch
+
         if torch.xpu.is_available():
             return torch.device("xpu"), torch.float32
     except ImportError:
@@ -45,12 +46,7 @@ def detect_device():
 
 class MoondreamService(VisionService):
     def __init__(
-        self,
-        *,
-        model="vikhyatk/moondream2",
-        revision="2024-08-26",
-        use_cpu=False,
-        **kwargs
+        self, *, model="vikhyatk/moondream2", revision="2024-08-26", use_cpu=False, **kwargs
     ):
         super().__init__(**kwargs)
 
@@ -85,9 +81,8 @@ class MoondreamService(VisionService):
             image = Image.frombytes(frame.format, frame.size, frame.image)
             image_embeds = self._model.encode_image(image)
             description = self._model.answer_question(
-                image_embeds=image_embeds,
-                question=frame.text,
-                tokenizer=self._tokenizer)
+                image_embeds=image_embeds, question=frame.text, tokenizer=self._tokenizer
+            )
             return description
 
         description = await asyncio.to_thread(get_image_description, frame)
