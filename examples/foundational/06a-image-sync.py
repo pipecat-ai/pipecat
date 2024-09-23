@@ -11,7 +11,7 @@ import sys
 
 from PIL import Image
 
-from pipecat.frames.frames import ImageRawFrame, Frame, SystemFrame, TextFrame
+from pipecat.frames.frames import Frame, OutputImageRawFrame, SystemFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -20,8 +20,8 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserResponseAggregator,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.transports.services.daily import DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -31,6 +31,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -52,9 +53,21 @@ class ImageSyncAggregator(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if not isinstance(frame, SystemFrame) and direction == FrameDirection.DOWNSTREAM:
-            await self.push_frame(ImageRawFrame(image=self._speaking_image_bytes, size=(1024, 1024), format=self._speaking_image_format))
+            await self.push_frame(
+                OutputImageRawFrame(
+                    image=self._speaking_image_bytes,
+                    size=(1024, 1024),
+                    format=self._speaking_image_format,
+                )
+            )
             await self.push_frame(frame)
-            await self.push_frame(ImageRawFrame(image=self._waiting_image_bytes, size=(1024, 1024), format=self._waiting_image_format))
+            await self.push_frame(
+                OutputImageRawFrame(
+                    image=self._waiting_image_bytes,
+                    size=(1024, 1024),
+                    format=self._waiting_image_format,
+                )
+            )
         else:
             await self.push_frame(frame)
 
@@ -75,17 +88,15 @@ async def main():
                 transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
-            )
+            ),
         )
 
-        tts = ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        tts = CartesiaHttpTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         messages = [
             {
@@ -102,21 +113,23 @@ async def main():
             os.path.join(os.path.dirname(__file__), "assets", "waiting.png"),
         )
 
-        pipeline = Pipeline([
-            transport.input(),
-            image_sync_aggregator,
-            tma_in,
-            llm,
-            tts,
-            transport.output(),
-            tma_out
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),
+                image_sync_aggregator,
+                tma_in,
+                llm,
+                tts,
+                transport.output(),
+                tma_out,
+            ]
+        )
 
         task = PipelineTask(pipeline)
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            participant_name = participant["info"]["userName"] or ''
+            participant_name = participant["info"]["userName"] or ""
             transport.capture_participant_transcription(participant["id"])
             await task.queue_frames([TextFrame(f"Hi there {participant_name}!")])
 

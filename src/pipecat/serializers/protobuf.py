@@ -18,7 +18,7 @@ class ProtobufFrameSerializer(FrameSerializer):
     SERIALIZABLE_TYPES = {
         TextFrame: "text",
         AudioRawFrame: "audio",
-        TranscriptionFrame: "transcription"
+        TranscriptionFrame: "transcription",
     }
 
     SERIALIZABLE_FIELDS = {v: k for k, v in SERIALIZABLE_TYPES.items()}
@@ -29,14 +29,15 @@ class ProtobufFrameSerializer(FrameSerializer):
     def serialize(self, frame: Frame) -> str | bytes | None:
         proto_frame = frame_protos.Frame()
         if type(frame) not in self.SERIALIZABLE_TYPES:
-            raise ValueError(
-                f"Frame type {type(frame)} is not serializable. You may need to add it to ProtobufFrameSerializer.SERIALIZABLE_FIELDS.")
+            logger.warning(f"Frame type {type(frame)} is not serializable")
+            return None
 
         # ignoring linter errors; we check that type(frame) is in this dict above
         proto_optional_name = self.SERIALIZABLE_TYPES[type(frame)]  # type: ignore
         for field in dataclasses.fields(frame):  # type: ignore
-            setattr(getattr(proto_frame, proto_optional_name), field.name,
-                    getattr(frame, field.name))
+            value = getattr(frame, field.name)
+            if value:
+                setattr(getattr(proto_frame, proto_optional_name), field.name, value)
 
         result = proto_frame.SerializeToString()
         return result
@@ -48,8 +49,8 @@ class ProtobufFrameSerializer(FrameSerializer):
 
         >>> serializer = ProtobufFrameSerializer()
         >>> serializer.deserialize(
-        ...     serializer.serialize(AudioFrame(data=b'1234567890')))
-        AudioFrame(data=b'1234567890')
+        ...     serializer.serialize(OutputAudioFrame(data=b'1234567890')))
+        InputAudioFrame(data=b'1234567890')
 
         >>> serializer.deserialize(
         ...     serializer.serialize(TextFrame(text='hello world')))
@@ -75,10 +76,13 @@ class ProtobufFrameSerializer(FrameSerializer):
         # Remove special fields if needed
         id = getattr(args, "id")
         name = getattr(args, "name")
+        pts = getattr(args, "pts")
         if not id:
             del args_dict["id"]
         if not name:
             del args_dict["name"]
+        if not pts:
+            del args_dict["pts"]
 
         # Create the instance
         instance = class_name(**args_dict)
@@ -88,5 +92,7 @@ class ProtobufFrameSerializer(FrameSerializer):
             setattr(instance, "id", getattr(args, "id"))
         if name:
             setattr(instance, "name", getattr(args, "name"))
+        if pts:
+            setattr(instance, "pts", getattr(args, "pts"))
 
         return instance

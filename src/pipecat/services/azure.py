@@ -12,19 +12,20 @@ from PIL import Image
 from typing import AsyncGenerator
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
-    SystemFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame,
-    URLImageRawFrame)
+    URLImageRawFrame,
+)
+from pipecat.metrics.metrics import TTSUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AsyncAIService, TTSService, ImageGenService
+from pipecat.services.ai_services import STTService, TTSService, ImageGenService
 from pipecat.services.openai import BaseOpenAILLMService
 from pipecat.utils.time import time_now_iso8601
 
@@ -45,18 +46,15 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Azure, you need to `pip install pipecat-ai[azure]`. Also, set `AZURE_SPEECH_API_KEY` and `AZURE_SPEECH_REGION` environment variables.")
+        "In order to use Azure, you need to `pip install pipecat-ai[azure]`. Also, set `AZURE_SPEECH_API_KEY` and `AZURE_SPEECH_REGION` environment variables."
+    )
     raise Exception(f"Missing module: {e}")
 
 
 class AzureLLMService(BaseOpenAILLMService):
     def __init__(
-            self,
-            *,
-            api_key: str,
-            endpoint: str,
-            model: str,
-            api_version: str = "2023-12-01-preview"):
+        self, *, api_key: str, endpoint: str, model: str, api_version: str = "2023-12-01-preview"
+    ):
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
         self._endpoint = endpoint
@@ -72,13 +70,22 @@ class AzureLLMService(BaseOpenAILLMService):
 
 
 class AzureTTSService(TTSService):
-    def __init__(self, *, api_key: str, region: str, voice="en-US-SaraNeural", **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        region: str,
+        voice="en-US-SaraNeural",
+        sample_rate: int = 16000,
+        **kwargs,
+    ):
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         speech_config = SpeechConfig(subscription=api_key, region=region)
         self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
 
         self._voice = voice
+        self._sample_rate = sample_rate
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -100,7 +107,8 @@ class AzureTTSService(TTSService):
             "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>"
             "<prosody rate='1.05'>"
             f"{text}"
-            "</prosody></mstts:express-as></voice></speak> ")
+            "</prosody></mstts:express-as></voice></speak> "
+        )
 
         result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, (ssml))
 
@@ -109,7 +117,9 @@ class AzureTTSService(TTSService):
             await self.stop_ttfb_metrics()
             await self.push_frame(TTSStartedFrame())
             # Azure always sends a 44-byte header. Strip it off.
-            yield AudioRawFrame(audio=result.audio_data[44:], sample_rate=16000, num_channels=1)
+            yield TTSAudioRawFrame(
+                audio=result.audio_data[44:], sample_rate=self._sample_rate, num_channels=1
+            )
             await self.push_frame(TTSStoppedFrame())
         elif result.reason == ResultReason.Canceled:
             cancellation_details = result.cancellation_details
@@ -118,16 +128,17 @@ class AzureTTSService(TTSService):
                 logger.error(f"{self} error: {cancellation_details.error_details}")
 
 
-class AzureSTTService(AsyncAIService):
+class AzureSTTService(STTService):
     def __init__(
-            self,
-            *,
-            api_key: str,
-            region: str,
-            language="en-US",
-            sample_rate=16000,
-            channels=1,
-            **kwargs):
+        self,
+        *,
+        api_key: str,
+        region: str,
+        language="en-US",
+        sample_rate=16000,
+        channels=1,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
 
         speech_config = SpeechConfig(subscription=api_key, region=region)
@@ -138,18 +149,15 @@ class AzureSTTService(AsyncAIService):
 
         audio_config = AudioConfig(stream=self._audio_stream)
         self._speech_recognizer = SpeechRecognizer(
-            speech_config=speech_config, audio_config=audio_config)
+            speech_config=speech_config, audio_config=audio_config
+        )
         self._speech_recognizer.recognized.connect(self._on_handle_recognized)
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, SystemFrame):
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, AudioRawFrame):
-            self._audio_stream.write(frame.audio)
-        else:
-            await self._push_queue.put((frame, direction))
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        await self.start_processing_metrics()
+        self._audio_stream.write(audio)
+        await self.stop_processing_metrics()
+        yield None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -168,11 +176,10 @@ class AzureSTTService(AsyncAIService):
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
             frame = TranscriptionFrame(event.result.text, "", time_now_iso8601())
-            asyncio.run_coroutine_threadsafe(self.queue_frame(frame), self.get_event_loop())
+            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
 
 
 class AzureImageGenServiceREST(ImageGenService):
-
     def __init__(
         self,
         *,
@@ -188,16 +195,14 @@ class AzureImageGenServiceREST(ImageGenService):
         self._api_key = api_key
         self._azure_endpoint = endpoint
         self._api_version = api_version
-        self._model = model
+        self.set_model_name(model)
         self._image_size = image_size
         self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         url = f"{self._azure_endpoint}openai/images/generations:submit?api-version={self._api_version}"
 
-        headers = {
-            "api-key": self._api_key,
-            "Content-Type": "application/json"}
+        headers = {"api-key": self._api_key, "Content-Type": "application/json"}
 
         body = {
             # Enter your prompt text here
@@ -239,8 +244,6 @@ class AzureImageGenServiceREST(ImageGenService):
                 image_stream = io.BytesIO(await response.content.read())
                 image = Image.open(image_stream)
                 frame = URLImageRawFrame(
-                    url=image_url,
-                    image=image.tobytes(),
-                    size=image.size,
-                    format=image.format)
+                    url=image_url, image=image.tobytes(), size=image.size, format=image.format
+                )
                 yield frame

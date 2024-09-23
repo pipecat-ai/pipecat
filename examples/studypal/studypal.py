@@ -13,7 +13,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
+)
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -24,6 +26,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 # Run this script directly from your command line.
@@ -45,14 +48,16 @@ def truncate_content(content, model_name):
         return encoding.decode(truncated_tokens)
     return content
 
+
 # Main function to extract content from url
 
 
 async def get_article_content(url: str, aiohttp_session: aiohttp.ClientSession):
-    if 'arxiv.org' in url:
+    if "arxiv.org" in url:
         return await get_arxiv_content(url, aiohttp_session)
     else:
         return await get_wikipedia_content(url, aiohttp_session)
+
 
 # Helper function to extract content from Wikipedia url (this is
 # technically agnostic to URL type but will work best with Wikipedia
@@ -65,23 +70,24 @@ async def get_wikipedia_content(url: str, aiohttp_session: aiohttp.ClientSession
             return "Failed to download Wikipedia article."
 
         text = await response.text()
-        soup = BeautifulSoup(text, 'html.parser')
+        soup = BeautifulSoup(text, "html.parser")
 
-        content = soup.find('div', {'class': 'mw-parser-output'})
+        content = soup.find("div", {"class": "mw-parser-output"})
 
         if content:
             return content.get_text()
         else:
             return "Failed to extract Wikipedia article content."
 
+
 # Helper function to extract content from arXiv url
 
 
 async def get_arxiv_content(url: str, aiohttp_session: aiohttp.ClientSession):
-    if '/abs/' in url:
-        url = url.replace('/abs/', '/pdf/')
-    if not url.endswith('.pdf'):
-        url += '.pdf'
+    if "/abs/" in url:
+        url = url.replace("/abs/", "/pdf/")
+    if not url.endswith(".pdf"):
+        url += ".pdf"
 
     async with aiohttp_session.get(url) as response:
         if response.status != 200:
@@ -94,6 +100,7 @@ async def get_arxiv_content(url: str, aiohttp_session: aiohttp.ClientSession):
         for page in pdf_reader.pages:
             text += page.extract_text()
         return text
+
 
 # This is the main function that handles STT -> LLM -> TTS
 
@@ -116,8 +123,8 @@ async def main():
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         tts = CartesiaTTSService(
@@ -127,29 +134,33 @@ async def main():
             sample_rate=44100,
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o-mini")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
 
-        messages = [{
-            "role": "system", "content": f"""You are an AI study partner. You have been given the following article content:
+        messages = [
+            {
+                "role": "system",
+                "content": f"""You are an AI study partner. You have been given the following article content:
 
 {article_content}
 
 Your task is to help the user understand and learn from this article in 2 sentences. THESE RESPONSES SHOULD BE ONLY MAX 2 SENTENCES. THIS INSTRUCTION IS VERY IMPORTANT. RESPONSES SHOULDN'T BE LONG.
-""", }, ]
+""",
+            },
+        ]
 
         tma_in = LLMUserResponseAggregator(messages)
         tma_out = LLMAssistantResponseAggregator(messages)
 
-        pipeline = Pipeline([
-            transport.input(),
-            tma_in,
-            llm,
-            tts,
-            transport.output(),
-            tma_out,
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),
+                tma_in,
+                llm,
+                tts,
+                transport.output(),
+                tma_out,
+            ]
+        )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
 
@@ -159,12 +170,15 @@ Your task is to help the user understand and learn from this article in 2 senten
             messages.append(
                 {
                     "role": "system",
-                    "content": "Hello! I'm ready to discuss the article with you. What would you like to learn about?"})
+                    "content": "Hello! I'm ready to discuss the article with you. What would you like to learn about?",
+                }
+            )
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()
 
         await runner.run(task)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

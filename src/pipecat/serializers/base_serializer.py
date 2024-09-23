@@ -10,7 +10,6 @@ from pipecat.frames.frames import Frame
 
 
 class FrameSerializer(ABC):
-
     @abstractmethod
     def serialize(self, frame: Frame) -> str | bytes | None:
         pass
