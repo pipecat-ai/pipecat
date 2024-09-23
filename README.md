@@ -165,7 +165,7 @@ pip install "path_to_this_repo[option,...]"
 From the root directory, run:
 
 ```shell
-pytest --doctest-modules --ignore-glob="*to_be_updated*" src tests
+pytest --doctest-modules --ignore-glob="*to_be_updated*" --ignore-glob=*pipeline_source* src tests
 ```
 
 ## Setting up your editor

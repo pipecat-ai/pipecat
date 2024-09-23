@@ -12,8 +12,16 @@ import wave
 from typing import Awaitable, Callable
 from pydantic.main import BaseModel
 
-from pipecat.frames.frames import AudioRawFrame, CancelFrame, EndFrame, Frame, StartFrame, StartInterruptionFrame
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    CancelFrame,
+    EndFrame,
+    Frame,
+    InputAudioRawFrame,
+    StartFrame,
+    StartInterruptionFrame
+)
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -79,7 +87,11 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                 continue
 
             if isinstance(frame, AudioRawFrame):
-                await self.push_audio_frame(frame)
+                await self.push_audio_frame(InputAudioRawFrame(
+                    audio=frame.audio,
+                    sample_rate=frame.sample_rate,
+                    num_channels=frame.num_channels)
+                )
 
         await self._callbacks.on_client_disconnected(self._websocket)
 
@@ -164,10 +176,10 @@ class FastAPIWebsocketTransport(BaseTransport):
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
 
-    def input(self) -> FrameProcessor:
+    def input(self) -> FastAPIWebsocketInputTransport:
         return self._input
 
-    def output(self) -> FrameProcessor:
+    def output(self) -> FastAPIWebsocketOutputTransport:
         return self._output
 
     async def _on_client_connected(self, websocket):

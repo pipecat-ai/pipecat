@@ -9,7 +9,11 @@ import struct
 
 from typing import AsyncGenerator
 
-from pipecat.frames.frames import AudioRawFrame, Frame, TTSStartedFrame, TTSStoppedFrame
+from pipecat.frames.frames import (
+    Frame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame)
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -27,8 +31,15 @@ except ModuleNotFoundError as e:
 
 class PlayHTTTSService(TTSService):
 
-    def __init__(self, *, api_key: str, user_id: str, voice_url: str, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+            self,
+            *,
+            api_key: str,
+            user_id: str,
+            voice_url: str,
+            sample_rate: int = 16000,
+            **kwargs):
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._user_id = user_id
         self._speech_key = api_key
@@ -39,12 +50,16 @@ class PlayHTTTSService(TTSService):
         )
         self._options = TTSOptions(
             voice=voice_url,
-            sample_rate=16000,
+            sample_rate=sample_rate,
             quality="higher",
             format=Format.FORMAT_WAV)
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    async def set_voice(self, voice: str):
+        logger.debug(f"Switching TTS voice to: [{voice}]")
+        self._options.voice = voice
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -80,7 +95,7 @@ class PlayHTTTSService(TTSService):
                 else:
                     if len(chunk):
                         await self.stop_ttfb_metrics()
-                        frame = AudioRawFrame(chunk, 16000, 1)
+                        frame = TTSAudioRawFrame(chunk, 16000, 1)
                         yield frame
             await self.push_frame(TTSStoppedFrame())
         except Exception as e:

@@ -1,5 +1,5 @@
 from typing import List
-from pipecat.pipeline.frames import EndFrame, EndPipeFrame
+from pipecat.frames.frames import EndFrame, EndPipeFrame
 from pipecat.pipeline.pipeline import Pipeline
 
 

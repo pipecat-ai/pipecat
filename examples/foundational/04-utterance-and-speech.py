@@ -4,6 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+#
+# This example broken on latest pipecat and needs updating.
+#
+
 import aiohttp
 import asyncio
 import os

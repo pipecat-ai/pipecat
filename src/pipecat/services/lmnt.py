@@ -10,13 +10,13 @@ from typing import AsyncGenerator
 
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
     StartInterruptionFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -46,7 +46,7 @@ class LmntTTSService(AsyncTTSService):
             **kwargs):
         # Let TTSService produce TTSStoppedFrames after a short delay of
         # no activity.
-        super().__init__(push_stop_frames=True, **kwargs)
+        super().__init__(sync=False, push_stop_frames=True, sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._voice_id = voice_id
@@ -126,7 +126,7 @@ class LmntTTSService(AsyncTTSService):
                     await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
                 elif "audio" in msg:
                     await self.stop_ttfb_metrics()
-                    frame = AudioRawFrame(
+                    frame = TTSAudioRawFrame(
                         audio=msg["audio"],
                         sample_rate=self._output_format["sample_rate"],
                         num_channels=1

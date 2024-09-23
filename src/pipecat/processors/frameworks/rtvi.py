@@ -272,8 +272,9 @@ class RTVIProcessor(FrameProcessor):
     def __init__(self,
                  *,
                  config: RTVIConfig = RTVIConfig(config=[]),
-                 params: RTVIProcessorParams = RTVIProcessorParams()):
-        super().__init__()
+                 params: RTVIProcessorParams = RTVIProcessorParams(),
+                 **kwargs):
+        super().__init__(sync=False, **kwargs)
         self._config = config
         self._params = params
 
@@ -285,9 +286,6 @@ class RTVIProcessor(FrameProcessor):
 
         self._registered_actions: Dict[str, RTVIAction] = {}
         self._registered_services: Dict[str, RTVIService] = {}
-
-        self._push_frame_task = self.get_event_loop().create_task(self._push_frame_task_handler())
-        self._push_queue = asyncio.Queue()
 
         self._message_task = self.get_event_loop().create_task(self._message_task_handler())
         self._message_queue = asyncio.Queue()
@@ -335,17 +333,16 @@ class RTVIProcessor(FrameProcessor):
         message = RTVILLMFunctionCallStartMessage(data=fn)
         await self._push_transport_message(message, exclude_none=False)
 
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        if isinstance(frame, SystemFrame):
-            await super().push_frame(frame, direction)
-        else:
-            await self._internal_push_frame(frame, direction)
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         # Specific system frames
-        if isinstance(frame, CancelFrame):
+        if isinstance(frame, StartFrame):
+            # Push StartFrame before start(), because we want StartFrame to be
+            # processed by every processor before any other frame is processed.
+            await self.push_frame(frame, direction)
+            await self._start(frame)
+        elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, ErrorFrame):
@@ -355,11 +352,6 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames
-        elif isinstance(frame, StartFrame):
-            # Push StartFrame before start(), because we want StartFrame to be
-            # processed by every processor before any other frame is processed.
-            await self.push_frame(frame, direction)
-            await self._start(frame)
         elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.
@@ -394,30 +386,10 @@ class RTVIProcessor(FrameProcessor):
         # processing EndFrames.
         self._message_task.cancel()
         await self._message_task
-        await self._push_frame_task
 
     async def _cancel(self, frame: CancelFrame):
         self._message_task.cancel()
         await self._message_task
-        self._push_frame_task.cancel()
-        await self._push_frame_task
-
-    async def _internal_push_frame(
-            self,
-            frame: Frame | None,
-            direction: FrameDirection | None = FrameDirection.DOWNSTREAM):
-        await self._push_queue.put((frame, direction))
-
-    async def _push_frame_task_handler(self):
-        running = True
-        while running:
-            try:
-                (frame, direction) = await self._push_queue.get()
-                await super().push_frame(frame, direction)
-                self._push_queue.task_done()
-                running = not isinstance(frame, EndFrame)
-            except asyncio.CancelledError:
-                break
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
         frame = TransportMessageFrame(

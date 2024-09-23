@@ -8,7 +8,6 @@ import json
 import uuid
 import base64
 import asyncio
-import time
 
 from typing import AsyncGenerator, Optional
 from pydantic.main import BaseModel
@@ -17,23 +16,23 @@ from pipecat.frames.frames import (
     CancelFrame,
     ErrorFrame,
     Frame,
-    AudioRawFrame,
     StartInterruptionFrame,
     StartFrame,
     EndFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TextFrame,
     LLMFullResponseEndFrame
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
-from pipecat.services.ai_services import AsyncWordTTSService
+from pipecat.services.ai_services import AsyncWordTTSService, TTSService
 
 from loguru import logger
 
 # See .env.example for Cartesia configuration needed
 try:
+    from cartesia import AsyncCartesia
     import websockets
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -90,13 +89,14 @@ class CartesiaTTSService(AsyncWordTTSService):
         # if we're interrupted. Cartesia gives us word-by-word timestamps. We
         # can use those to generate text frames ourselves aligned with the
         # playout timing of the audio!
-        super().__init__(aggregate_sentences=True, push_text_frames=False, **kwargs)
+        super().__init__(aggregate_sentences=True,
+                         push_text_frames=False, sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._cartesia_version = cartesia_version
         self._url = url
         self._voice_id = voice_id
-        self._model_id = model_id
+        self.set_model_name(model_id)
         self._output_format = {
             "container": params.container,
             "encoding": params.encoding,
@@ -114,8 +114,8 @@ class CartesiaTTSService(AsyncWordTTSService):
         return True
 
     async def set_model(self, model: str):
+        await super().set_model(model)
         logger.debug(f"Switching TTS model to: [{model}]")
-        self._model_id = model
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
@@ -173,6 +173,11 @@ class CartesiaTTSService(AsyncWordTTSService):
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
+    def _get_websocket(self):
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
@@ -182,12 +187,12 @@ class CartesiaTTSService(AsyncWordTTSService):
     async def flush_audio(self):
         if not self._context_id or not self._websocket:
             return
-        logger.debug("Flushing audio")
+        logger.trace("Flushing audio")
         msg = {
             "transcript": "",
             "continue": False,
             "context_id": self._context_id,
-            "model_id": self._model_id,
+            "model_id": self.model_name,
             "voice": {
                 "mode": "id",
                 "id": self._voice_id
@@ -200,7 +205,7 @@ class CartesiaTTSService(AsyncWordTTSService):
 
     async def _receive_task_handler(self):
         try:
-            async for message in self._websocket:
+            async for message in self._get_websocket():
                 msg = json.loads(message)
                 if not msg or msg["context_id"] != self._context_id:
                     continue
@@ -220,7 +225,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                 elif msg["type"] == "chunk":
                     await self.stop_ttfb_metrics()
                     self.start_word_timestamps()
-                    frame = AudioRawFrame(
+                    frame = TTSAudioRawFrame(
                         audio=base64.b64decode(msg["data"]),
                         sample_rate=self._output_format["sample_rate"],
                         num_channels=1
@@ -274,7 +279,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                 "add_timestamps": True,
             }
             try:
-                await self._websocket.send(json.dumps(msg))
+                await self._get_websocket().send(json.dumps(msg))
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
@@ -285,3 +290,84 @@ class CartesiaTTSService(AsyncWordTTSService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+
+
+class CartesiaHttpTTSService(TTSService):
+
+    def __init__(
+            self,
+            *,
+            api_key: str,
+            voice_id: str,
+            model_id: str = "sonic-english",
+            base_url: str = "https://api.cartesia.ai",
+            encoding: str = "pcm_s16le",
+            sample_rate: int = 16000,
+            language: str = "en",
+            **kwargs):
+        super().__init__(**kwargs)
+
+        self._api_key = api_key
+        self._voice_id = voice_id
+        self._model_id = model_id
+        self._output_format = {
+            "container": "raw",
+            "encoding": encoding,
+            "sample_rate": sample_rate,
+        }
+        self._language = language
+
+        self._client = AsyncCartesia(api_key=api_key, base_url=base_url)
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
+    async def set_model(self, model: str):
+        logger.debug(f"Switching TTS model to: [{model}]")
+        self._model_id = model
+
+    async def set_voice(self, voice: str):
+        logger.debug(f"Switching TTS voice to: [{voice}]")
+        self._voice_id = voice
+
+    async def set_language(self, language: Language):
+        logger.debug(f"Switching TTS language to: [{language}]")
+        self._language = language_to_cartesia_language(language)
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self._client.close()
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self._client.close()
+
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        logger.debug(f"Generating TTS: [{text}]")
+
+        await self.push_frame(TTSStartedFrame())
+        await self.start_ttfb_metrics()
+
+        try:
+            output = await self._client.tts.sse(
+                model_id=self._model_id,
+                transcript=text,
+                voice_id=self._voice_id,
+                output_format=self._output_format,
+                language=self._language,
+                stream=False
+            )
+
+            await self.stop_ttfb_metrics()
+
+            frame = TTSAudioRawFrame(
+                audio=output["audio"],
+                sample_rate=self._output_format["sample_rate"],
+                num_channels=1
+            )
+            yield frame
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
+
+        await self.start_tts_usage_metrics(text)
+        await self.push_frame(TTSStoppedFrame())

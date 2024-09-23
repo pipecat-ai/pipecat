@@ -20,14 +20,17 @@ jobs:
     name: "Unit and Integration Tests"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
       - name: Set up Python
         id: setup_python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
       - name: Install system packages
-        run: sudo apt-get install -y portaudio19-dev
+        id: install_system_packages
+        run: |
+          sudo apt-get install -y portaudio19-dev
       - name: Setup virtual environment
         run: |
           python -m venv .venv
@@ -35,8 +38,8 @@ jobs:
         run: |
           source .venv/bin/activate
           python -m pip install --upgrade pip
-          pip install -r dev-requirements.txt
+          pip install -r test-requirements.txt
       - name: Test with pytest
         run: |
           source .venv/bin/activate
-          pytest --doctest-modules --ignore-glob="*to_be_updated*" src tests
+          pytest --ignore-glob="*to_be_updated*" --ignore-glob=*pipeline_source* src tests

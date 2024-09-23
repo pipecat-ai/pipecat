@@ -13,7 +13,11 @@ from typing import Any, Awaitable, Callable, List
 
 from PIL import Image
 
-from pipecat.frames.frames import Frame, VisionImageRawFrame, FunctionCallInProgressFrame, FunctionCallResultFrame
+from pipecat.frames.frames import (
+    Frame,
+    VisionImageRawFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame)
 from pipecat.processors.frame_processor import FrameProcessor
 
 from loguru import logger
