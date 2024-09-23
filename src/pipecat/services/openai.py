@@ -32,21 +32,20 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
     FunctionCallResultFrame,
     FunctionCallInProgressFrame,
-    StartInterruptionFrame
+    StartInterruptionFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
+from pipecat.processors.aggregators.llm_response import (
+    LLMUserContextAggregator,
+    LLMAssistantContextAggregator,
+)
 
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
-    OpenAILLMContextFrame
+    OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import (
-    ImageGenService,
-    LLMService,
-    TTSService
-)
+from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
 
 try:
     from openai import AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient, BadRequestError, NOT_GIVEN
@@ -54,7 +53,8 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable.")
+        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 ValidVoice = Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
@@ -82,24 +82,28 @@ class BaseOpenAILLMService(LLMService):
     as well as tool choices and the tool, which is used if requesting function
     calls from the LLM.
     """
+
     class InputParams(BaseModel):
         frequency_penalty: Optional[float] = Field(
-            default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0)
+            default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0
+        )
         presence_penalty: Optional[float] = Field(
-            default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0)
+            default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0
+        )
         seed: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
-            self,
-            *,
-            model: str,
-            api_key=None,
-            base_url=None,
-            params: InputParams = InputParams(),
-            **kwargs):
+        self,
+        *,
+        model: str,
+        api_key=None,
+        base_url=None,
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.set_model_name(model)
         self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
@@ -116,9 +120,10 @@ class BaseOpenAILLMService(LLMService):
             base_url=base_url,
             http_client=DefaultAsyncHttpxClient(
                 limits=httpx.Limits(
-                    max_keepalive_connections=100,
-                    max_connections=1000,
-                    keepalive_expiry=None)))
+                    max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
+                )
+            ),
+        )
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -148,10 +153,8 @@ class BaseOpenAILLMService(LLMService):
         self._extra = extra
 
     async def get_chat_completions(
-            self,
-            context: OpenAILLMContext,
-            messages: List[ChatCompletionMessageParam]) -> AsyncStream[ChatCompletionChunk]:
-
+        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
+    ) -> AsyncStream[ChatCompletionChunk]:
         params = {
             "model": self.model_name,
             "stream": True,
@@ -172,7 +175,8 @@ class BaseOpenAILLMService(LLMService):
         return chunks
 
     async def _stream_chat_completions(
-            self, context: OpenAILLMContext) -> AsyncStream[ChatCompletionChunk]:
+        self, context: OpenAILLMContext
+    ) -> AsyncStream[ChatCompletionChunk]:
         logger.debug(f"Generating chat: {context.get_messages_json()}")
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
@@ -184,7 +188,10 @@ class BaseOpenAILLMService(LLMService):
                 text = message["content"]
                 message["content"] = [
                     {"type": "text", "text": text},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}}
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
+                    },
                 ]
                 del message["data"]
                 del message["mime_type"]
@@ -200,8 +207,8 @@ class BaseOpenAILLMService(LLMService):
 
         await self.start_ttfb_metrics()
 
-        chunk_stream: AsyncStream[ChatCompletionChunk] = (
-            await self._stream_chat_completions(context)
+        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
+            context
         )
 
         async for chunk in chunk_stream:
@@ -209,7 +216,7 @@ class BaseOpenAILLMService(LLMService):
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,
                     completion_tokens=chunk.usage.completion_tokens,
-                    total_tokens=chunk.usage.total_tokens
+                    total_tokens=chunk.usage.total_tokens,
                 )
                 await self.start_llm_usage_metrics(tokens)
 
@@ -250,21 +257,16 @@ class BaseOpenAILLMService(LLMService):
                 await self._handle_function_call(context, tool_call_id, function_name, arguments)
             else:
                 raise OpenAIUnhandledFunctionException(
-                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
+                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
+                )
 
-    async def _handle_function_call(
-            self,
-            context,
-            tool_call_id,
-            function_name,
-            arguments
-    ):
+    async def _handle_function_call(self, context, tool_call_id, function_name, arguments):
         arguments = json.loads(arguments)
         await self.call_function(
             context=context,
             tool_call_id=tool_call_id,
             function_name=function_name,
-            arguments=arguments
+            arguments=arguments,
         )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -293,38 +295,34 @@ class BaseOpenAILLMService(LLMService):
 
 @dataclass
 class OpenAIContextAggregatorPair:
-    _user: 'OpenAIUserContextAggregator'
-    _assistant: 'OpenAIAssistantContextAggregator'
+    _user: "OpenAIUserContextAggregator"
+    _assistant: "OpenAIAssistantContextAggregator"
 
-    def user(self) -> 'OpenAIUserContextAggregator':
+    def user(self) -> "OpenAIUserContextAggregator":
         return self._user
 
-    def assistant(self) -> 'OpenAIAssistantContextAggregator':
+    def assistant(self) -> "OpenAIAssistantContextAggregator":
         return self._assistant
 
 
 class OpenAILLMService(BaseOpenAILLMService):
-
     def __init__(
-            self,
-            *,
-            model: str = "gpt-4o",
-            params: BaseOpenAILLMService.InputParams = BaseOpenAILLMService.InputParams(),
-            **kwargs):
+        self,
+        *,
+        model: str = "gpt-4o",
+        params: BaseOpenAILLMService.InputParams = BaseOpenAILLMService.InputParams(),
+        **kwargs,
+    ):
         super().__init__(model=model, params=params, **kwargs)
 
     @staticmethod
     def create_context_aggregator(context: OpenAILLMContext) -> OpenAIContextAggregatorPair:
         user = OpenAIUserContextAggregator(context)
         assistant = OpenAIAssistantContextAggregator(user)
-        return OpenAIContextAggregatorPair(
-            _user=user,
-            _assistant=assistant
-        )
+        return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
 
 class OpenAIImageGenService(ImageGenService):
-
     def __init__(
         self,
         *,
@@ -343,10 +341,7 @@ class OpenAIImageGenService(ImageGenService):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         image = await self._client.images.generate(
-            prompt=prompt,
-            model=self.model_name,
-            n=1,
-            size=self._image_size
+            prompt=prompt, model=self.model_name, n=1, size=self._image_size
         )
 
         image_url = image.data[0].url
@@ -376,13 +371,14 @@ class OpenAITTSService(TTSService):
     """
 
     def __init__(
-            self,
-            *,
-            api_key: str | None = None,
-            voice: str = "alloy",
-            model: Literal["tts-1", "tts-1-hd"] = "tts-1",
-            sample_rate: int = 24000,
-            **kwargs):
+        self,
+        *,
+        api_key: str | None = None,
+        voice: str = "alloy",
+        model: Literal["tts-1", "tts-1-hd"] = "tts-1",
+        sample_rate: int = 24000,
+        **kwargs,
+    ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._voice: ValidVoice = VALID_VOICES.get(voice, "alloy")
@@ -408,16 +404,19 @@ class OpenAITTSService(TTSService):
             await self.start_ttfb_metrics()
 
             async with self._client.audio.speech.with_streaming_response.create(
-                    input=text,
-                    model=self.model_name,
-                    voice=self._voice,
-                    response_format="pcm",
+                input=text,
+                model=self.model_name,
+                voice=self._voice,
+                response_format="pcm",
             ) as r:
                 if r.status_code != 200:
                     error = await r.text()
                     logger.error(
-                        f"{self} error getting audio (status: {r.status_code}, error: {error})")
-                    yield ErrorFrame(f"Error getting audio (status: {r.status_code}, error: {error})")
+                        f"{self} error getting audio (status: {r.status_code}, error: {error})"
+                    )
+                    yield ErrorFrame(
+                        f"Error getting audio (status: {r.status_code}, error: {error})"
+                    )
                     return
 
                 await self.start_tts_usage_metrics(text)
@@ -454,14 +453,18 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._function_call_in_progress = frame
         elif isinstance(frame, FunctionCallResultFrame):
-            if self._function_call_in_progress and self._function_call_in_progress.tool_call_id == frame.tool_call_id:
+            if (
+                self._function_call_in_progress
+                and self._function_call_in_progress.tool_call_id == frame.tool_call_id
+            ):
                 self._function_call_in_progress = None
                 self._function_call_result = frame
                 # TODO-CB: Kwin wants us to refactor this out of here but I REFUSE
                 await self._push_aggregation()
             else:
                 logger.warning(
-                    f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id")
+                    f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id"
+                )
                 self._function_call_in_progress = None
                 self._function_call_result = None
 
@@ -479,24 +482,28 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                 frame = self._function_call_result
                 self._function_call_result = None
                 if frame.result:
-                    self._context.add_message({
-                        "role": "assistant",
-                        "tool_calls": [
-                            {
-                                "id": frame.tool_call_id,
-                                "function": {
-                                    "name": frame.function_name,
-                                    "arguments": json.dumps(frame.arguments)
-                                },
-                                "type": "function"
-                            }
-                        ]
-                    })
-                    self._context.add_message({
-                        "role": "tool",
-                        "content": json.dumps(frame.result),
-                        "tool_call_id": frame.tool_call_id
-                    })
+                    self._context.add_message(
+                        {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "id": frame.tool_call_id,
+                                    "function": {
+                                        "name": frame.function_name,
+                                        "arguments": json.dumps(frame.arguments),
+                                    },
+                                    "type": "function",
+                                }
+                            ],
+                        }
+                    )
+                    self._context.add_message(
+                        {
+                            "role": "tool",
+                            "content": json.dumps(frame.result),
+                            "tool_call_id": frame.tool_call_id,
+                        }
+                    )
                     run_llm = True
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})

@@ -12,7 +12,8 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame)
+    UserStoppedSpeakingFrame,
+)
 
 
 class ResponseAggregator(FrameProcessor):
@@ -49,7 +50,7 @@ class ResponseAggregator(FrameProcessor):
         start_frame,
         end_frame,
         accumulator_frame: TextFrame,
-        interim_accumulator_frame: TextFrame | None = None
+        interim_accumulator_frame: TextFrame | None = None,
     ):
         super().__init__()
 

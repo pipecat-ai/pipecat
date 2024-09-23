@@ -23,13 +23,19 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     FunctionCallResultFrame,
     FunctionCallInProgressFrame,
-    StartInterruptionFrame
+    StartInterruptionFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
-from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator, LLMAssistantContextAggregator
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
+from pipecat.processors.aggregators.llm_response import (
+    LLMUserContextAggregator,
+    LLMAssistantContextAggregator,
+)
 
 from loguru import logger
 
@@ -38,25 +44,26 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Together.ai, you need to `pip install pipecat-ai[together]`. Also, set `TOGETHER_API_KEY` environment variable.")
+        "In order to use Together.ai, you need to `pip install pipecat-ai[together]`. Also, set `TOGETHER_API_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 
 @dataclass
 class TogetherContextAggregatorPair:
-    _user: 'TogetherUserContextAggregator'
-    _assistant: 'TogetherAssistantContextAggregator'
+    _user: "TogetherUserContextAggregator"
+    _assistant: "TogetherAssistantContextAggregator"
 
-    def user(self) -> 'TogetherUserContextAggregator':
+    def user(self) -> "TogetherUserContextAggregator":
         return self._user
 
-    def assistant(self) -> 'TogetherAssistantContextAggregator':
+    def assistant(self) -> "TogetherAssistantContextAggregator":
         return self._assistant
 
 
 class TogetherLLMService(LLMService):
-    """This class implements inference with Together's Llama 3.1 models
-    """
+    """This class implements inference with Together's Llama 3.1 models"""
+
     class InputParams(BaseModel):
         frequency_penalty: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
         max_tokens: Optional[int] = Field(default=4096, ge=1)
@@ -67,12 +74,13 @@ class TogetherLLMService(LLMService):
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
-            self,
-            *,
-            api_key: str,
-            model: str = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-            params: InputParams = InputParams(),
-            **kwargs):
+        self,
+        *,
+        api_key: str,
+        model: str = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._client = AsyncTogether(api_key=api_key)
         self.set_model_name(model)
@@ -91,10 +99,7 @@ class TogetherLLMService(LLMService):
     def create_context_aggregator(context: OpenAILLMContext) -> TogetherContextAggregatorPair:
         user = TogetherUserContextAggregator(context)
         assistant = TogetherAssistantContextAggregator(user)
-        return TogetherContextAggregatorPair(
-            _user=user,
-            _assistant=assistant
-        )
+        return TogetherContextAggregatorPair(_user=user, _assistant=assistant)
 
     async def set_frequency_penalty(self, frequency_penalty: float):
         logger.debug(f"Switching LLM frequency_penalty to: [{frequency_penalty}]")
@@ -142,7 +147,7 @@ class TogetherLLMService(LLMService):
                 "presence_penalty": self._presence_penalty,
                 "temperature": self._temperature,
                 "top_k": self._top_k,
-                "top_p": self._top_p
+                "top_p": self._top_p,
             }
 
             params.update(self._extra)
@@ -160,7 +165,7 @@ class TogetherLLMService(LLMService):
                     tokens = LLMTokenUsage(
                         prompt_tokens=chunk.usage.prompt_tokens,
                         completion_tokens=chunk.usage.completion_tokens,
-                        total_tokens=chunk.usage.total_tokens
+                        total_tokens=chunk.usage.total_tokens,
                     )
                     await self.start_llm_usage_metrics(tokens)
 
@@ -180,7 +185,7 @@ class TogetherLLMService(LLMService):
                     else:
                         await self.push_frame(TextFrame(chunk.choices[0].delta.content))
 
-                if chunk.choices[0].finish_reason == 'eos' and accumulating_function_call:
+                if chunk.choices[0].finish_reason == "eos" and accumulating_function_call:
                     await self._extract_function_call(context, function_call_accumulator)
 
         except CancelledError as e:
@@ -219,10 +224,12 @@ class TogetherLLMService(LLMService):
             function_name, args_string = match.groups()
             try:
                 arguments = json.loads(args_string)
-                await self.call_function(context=context,
-                                         tool_call_id=str(uuid.uuid4()),
-                                         function_name=function_name,
-                                         arguments=arguments)
+                await self.call_function(
+                    context=context,
+                    tool_call_id=str(uuid.uuid4()),
+                    function_name=function_name,
+                    arguments=arguments,
+                )
                 return
             except json.JSONDecodeError as error:
                 # We get here if the LLM returns a function call with invalid JSON arguments. This could happen
@@ -281,18 +288,20 @@ class TogetherUserContextAggregator(LLMUserContextAggregator):
                 # The LLM sends a UserImageRequestFrame upstream. Cache any context provided with
                 # that frame so we can use it when we assemble the image message in the assistant
                 # context aggregator.
-                if (frame.context):
+                if frame.context:
                     if isinstance(frame.context, str):
                         self._context._user_image_request_context[frame.user_id] = frame.context
                     else:
                         logger.error(
-                            f"Unexpected UserImageRequestFrame context type: {type(frame.context)}")
+                            f"Unexpected UserImageRequestFrame context type: {type(frame.context)}"
+                        )
                         del self._context._user_image_request_context[frame.user_id]
                 else:
                     if frame.user_id in self._context._user_image_request_context:
                         del self._context._user_image_request_context[frame.user_id]
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
+
 
 #
 # Claude returns a text content block along with a tool use content block. This works quite nicely
@@ -320,13 +329,17 @@ class TogetherAssistantContextAggregator(LLMAssistantContextAggregator):
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._function_call_in_progress = frame
         elif isinstance(frame, FunctionCallResultFrame):
-            if self._function_call_in_progress and self._function_call_in_progress.tool_call_id == frame.tool_call_id:
+            if (
+                self._function_call_in_progress
+                and self._function_call_in_progress.tool_call_id == frame.tool_call_id
+            ):
                 self._function_call_in_progress = None
                 self._function_call_result = frame
                 await self._push_aggregation()
             else:
                 logger.warning(
-                    f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id")
+                    f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id"
+                )
                 self._function_call_in_progress = None
                 self._function_call_result = None
 
@@ -346,11 +359,13 @@ class TogetherAssistantContextAggregator(LLMAssistantContextAggregator):
             if self._function_call_result:
                 frame = self._function_call_result
                 self._function_call_result = None
-                self._context.add_message({
-                    "role": "tool",
-                    # Together expects the content here to be a string, so stringify it
-                    "content": str(frame.result)
-                })
+                self._context.add_message(
+                    {
+                        "role": "tool",
+                        # Together expects the content here to be a string, so stringify it
+                        "content": str(frame.result),
+                    }
+                )
                 run_llm = True
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})

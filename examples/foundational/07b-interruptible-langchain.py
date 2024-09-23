@@ -15,7 +15,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
+)
 from pipecat.processors.frameworks.langchain import LangchainProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -32,6 +34,7 @@ from loguru import logger
 from runner import configure
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 
@@ -70,19 +73,22 @@ async def main():
 
         prompt = ChatPromptTemplate.from_messages(
             [
-                ("system",
-                 "Be nice and helpful. Answer very briefly and without special characters like `#` or `*`. "
-                 "Your response will be synthesized to voice and those characters will create unnatural sounds.",
-                 ),
+                (
+                    "system",
+                    "Be nice and helpful. Answer very briefly and without special characters like `#` or `*`. "
+                    "Your response will be synthesized to voice and those characters will create unnatural sounds.",
+                ),
                 MessagesPlaceholder("chat_history"),
                 ("human", "{input}"),
-            ])
+            ]
+        )
         chain = prompt | ChatOpenAI(model="gpt-4o", temperature=0.7)
         history_chain = RunnableWithMessageHistory(
             chain,
             get_session_history,
             history_messages_key="chat_history",
-            input_messages_key="input")
+            input_messages_key="input",
+        )
         lc = LangchainProcessor(history_chain)
 
         tma_in = LLMUserResponseAggregator()
@@ -90,12 +96,12 @@ async def main():
 
         pipeline = Pipeline(
             [
-                transport.input(),      # Transport user input
-                tma_in,                 # User responses
-                lc,                     # Langchain
-                tts,                    # TTS
-                transport.output(),     # Transport bot output
-                tma_out,                # Assistant spoken responses
+                transport.input(),  # Transport user input
+                tma_in,  # User responses
+                lc,  # Langchain
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                tma_out,  # Assistant spoken responses
             ]
         )
 
@@ -109,11 +115,7 @@ async def main():
             # the `LLMMessagesFrame` will be picked up by the LangchainProcessor using
             # only the content of the last message to inject it in the prompt defined
             # above. So no role is required here.
-            messages = [(
-                {
-                    "content": "Please briefly introduce yourself to the user."
-                }
-            )]
+            messages = [({"content": "Please briefly introduce yourself to the user."})]
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()

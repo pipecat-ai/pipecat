@@ -7,18 +7,22 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator
+    LLMUserResponseAggregator,
 )
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketTransport, FastAPIWebsocketParams
+from pipecat.transports.network.fastapi_websocket import (
+    FastAPIWebsocketTransport,
+    FastAPIWebsocketParams,
+)
 from pipecat.vad.silero import SileroVADAnalyzer
 from pipecat.serializers.twilio import TwilioFrameSerializer
 
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -34,15 +38,13 @@ async def run_bot(websocket_client, stream_sid):
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            serializer=TwilioFrameSerializer(stream_sid)
-        )
+            serializer=TwilioFrameSerializer(stream_sid),
+        ),
     )
 
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
-    stt = DeepgramSTTService(api_key=os.getenv('DEEPGRAM_API_KEY'))
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
@@ -59,23 +61,24 @@ async def run_bot(websocket_client, stream_sid):
     tma_in = LLMUserResponseAggregator(messages)
     tma_out = LLMAssistantResponseAggregator(messages)
 
-    pipeline = Pipeline([
-        transport.input(),   # Websocket input from client
-        stt,                 # Speech-To-Text
-        tma_in,              # User responses
-        llm,                 # LLM
-        tts,                 # Text-To-Speech
-        transport.output(),  # Websocket output to client
-        tma_out              # LLM responses
-    ])
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Websocket input from client
+            stt,  # Speech-To-Text
+            tma_in,  # User responses
+            llm,  # LLM
+            tts,  # Text-To-Speech
+            transport.output(),  # Websocket output to client
+            tma_out,  # LLM responses
+        ]
+    )
 
     task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         # Kick off the conversation.
-        messages.append(
-            {"role": "system", "content": "Please introduce yourself to the user."})
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMMessagesFrame(messages)])
 
     @transport.event_handler("on_client_disconnected")

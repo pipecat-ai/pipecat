@@ -15,10 +15,7 @@ class TestBaseAIService(unittest.IsolatedAsyncioTestCase):
     async def test_simple_processing(self):
         service = SimpleAIService()
 
-        input_frames = [
-            TextFrame("hello"),
-            EndFrame()
-        ]
+        input_frames = [TextFrame("hello"), EndFrame()]
 
         output_frames = []
         for input_frame in input_frames:

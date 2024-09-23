@@ -11,7 +11,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class FrameFilter(FrameProcessor):
-
     def __init__(self, types: List[type]):
         super().__init__()
         self._types = types
@@ -25,9 +24,11 @@ class FrameFilter(FrameProcessor):
             if isinstance(frame, t):
                 return True
 
-        return (isinstance(frame, AppFrame)
-                or isinstance(frame, ControlFrame)
-                or isinstance(frame, SystemFrame))
+        return (
+            isinstance(frame, AppFrame)
+            or isinstance(frame, ControlFrame)
+            or isinstance(frame, SystemFrame)
+        )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

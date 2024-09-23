@@ -17,7 +17,8 @@ def load_images(image_files):
         # Open the image and convert it to bytes
         with Image.open(full_path) as img:
             images[filename] = OutputImageRawFrame(
-                image=img.tobytes(), size=img.size, format=img.format)
+                image=img.tobytes(), size=img.size, format=img.format
+            )
     return images
 
 
@@ -31,8 +32,10 @@ def load_sounds(sound_files):
         filename = os.path.splitext(os.path.basename(full_path))[0]
         # Open the sound and convert it to bytes
         with wave.open(full_path) as audio_file:
-            sounds[filename] = OutputAudioRawFrame(audio=audio_file.readframes(-1),
-                                                   sample_rate=audio_file.getframerate(),
-                                                   num_channels=audio_file.getnchannels())
+            sounds[filename] = OutputAudioRawFrame(
+                audio=audio_file.readframes(-1),
+                sample_rate=audio_file.getframerate(),
+                num_channels=audio_file.getnchannels(),
+            )
 
     return sounds

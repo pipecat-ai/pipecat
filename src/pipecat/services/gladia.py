@@ -16,7 +16,8 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
-    TranscriptionFrame)
+    TranscriptionFrame,
+)
 from pipecat.services.ai_services import STTService
 from pipecat.utils.time import time_now_iso8601
 
@@ -28,7 +29,8 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Gladia, you need to `pip install pipecat-ai[gladia]`. Also, set `GLADIA_API_KEY` environment variable.")
+        "In order to use Gladia, you need to `pip install pipecat-ai[gladia]`. Also, set `GLADIA_API_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 
@@ -40,13 +42,15 @@ class GladiaSTTService(STTService):
         endpointing: Optional[int] = 200
         prosody: Optional[bool] = None
 
-    def __init__(self,
-                 *,
-                 api_key: str,
-                 url: str = "wss://api.gladia.io/audio/text/audio-transcription",
-                 confidence: float = 0.5,
-                 params: InputParams = InputParams(),
-                 **kwargs):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        url: str = "wss://api.gladia.io/audio/text/audio-transcription",
+        confidence: float = 0.5,
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
         super().__init__(sync=False, **kwargs)
 
         self._api_key = api_key
@@ -80,15 +84,13 @@ class GladiaSTTService(STTService):
             "encoding": "WAV/PCM",
             "model_type": "fast",
             "language_behaviour": "manual",
-            **self._params.model_dump(exclude_none=True)
+            **self._params.model_dump(exclude_none=True),
         }
 
         await self._websocket.send(json.dumps(configuration))
 
     async def _send_audio(self, audio: bytes):
-        message = {
-            'frames': base64.b64encode(audio).decode("utf-8")
-        }
+        message = {"frames": base64.b64encode(audio).decode("utf-8")}
         await self._websocket.send(json.dumps(message))
 
     async def _receive_task_handler(self):
@@ -106,6 +108,10 @@ class GladiaSTTService(STTService):
                 transcript = utterance["transcription"]
                 if confidence >= self._confidence:
                     if type == "final":
-                        await self.push_frame(TranscriptionFrame(transcript, "", time_now_iso8601()))
+                        await self.push_frame(
+                            TranscriptionFrame(transcript, "", time_now_iso8601())
+                        )
                     else:
-                        await self.push_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601()))
+                        await self.push_frame(
+                            InterimTranscriptionFrame(transcript, "", time_now_iso8601())
+                        )

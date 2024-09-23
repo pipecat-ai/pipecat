@@ -47,9 +47,10 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
     @unittest.skip("FIXME: This test is failing")
     async def test_gated_accumulator(self):
         gated_aggregator = GatedAggregator(
-            gate_open_fn=lambda frame: isinstance(
-                frame, ImageRawFrame), gate_close_fn=lambda frame: isinstance(
-                frame, LLMFullResponseStartFrame), start_open=False, )
+            gate_open_fn=lambda frame: isinstance(frame, ImageRawFrame),
+            gate_close_fn=lambda frame: isinstance(frame, LLMFullResponseStartFrame),
+            start_open=False,
+        )
 
         frames = [
             LLMFullResponseStartFrame(),
@@ -77,15 +78,12 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
 
     @unittest.skip("FIXME: This test is failing")
     async def test_parallel_pipeline(self):
-
         async def slow_add(sleep_time: float, name: str, x: str):
             await asyncio.sleep(sleep_time)
             return ":".join([x, name])
 
-        pipe1_annotation = StatelessTextTransformer(
-            functools.partial(slow_add, 0.1, 'pipe1'))
-        pipe2_annotation = StatelessTextTransformer(
-            functools.partial(slow_add, 0.2, 'pipe2'))
+        pipe1_annotation = StatelessTextTransformer(functools.partial(slow_add, 0.1, "pipe1"))
+        pipe2_annotation = StatelessTextTransformer(functools.partial(slow_add, 0.2, "pipe2"))
         sentence_aggregator = SentenceAggregator()
         add_dots = StatelessTextTransformer(lambda x: x + ".")
 
@@ -93,26 +91,20 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
         sink = asyncio.Queue()
         pipeline = Pipeline(
             [
-                ParallelPipeline(
-                    [[pipe1_annotation], [sentence_aggregator, pipe2_annotation]]
-                ),
+                ParallelPipeline([[pipe1_annotation], [sentence_aggregator, pipe2_annotation]]),
                 add_dots,
             ],
             source,
             sink,
         )
 
-        frames = [
-            TextFrame("Hello, "),
-            TextFrame("world."),
-            EndFrame()
-        ]
+        frames = [TextFrame("Hello, "), TextFrame("world."), EndFrame()]
 
         expected_output_frames: list[Frame] = [
-            TextFrame(text='Hello, :pipe1.'),
-            TextFrame(text='world.:pipe1.'),
-            TextFrame(text='Hello, world.:pipe2.'),
-            EndFrame()
+            TextFrame(text="Hello, :pipe1."),
+            TextFrame(text="world.:pipe1."),
+            TextFrame(text="Hello, world.:pipe2."),
+            EndFrame(),
         ]
 
         for frame in frames:
@@ -126,7 +118,8 @@ class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
 
 
 def load_tests(loader, tests, ignore):
-    """ Run doctests on the aggregators module. """
+    """Run doctests on the aggregators module."""
     from pipecat.processors import aggregators
+
     tests.addTests(doctest.DocTestSuite(aggregators))
     return tests

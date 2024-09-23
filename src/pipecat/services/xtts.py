@@ -14,7 +14,8 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
-    TTSStoppedFrame)
+    TTSStoppedFrame,
+)
 from pipecat.services.ai_services import TTSService
 
 from loguru import logger
@@ -38,15 +39,15 @@ except ModuleNotFoundError as e:
 
 
 class XTTSService(TTSService):
-
     def __init__(
-            self,
-            *,
-            voice_id: str,
-            language: str,
-            base_url: str,
-            aiohttp_session: aiohttp.ClientSession,
-            **kwargs):
+        self,
+        *,
+        voice_id: str,
+        language: str,
+        base_url: str,
+        aiohttp_session: aiohttp.ClientSession,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
 
         self._voice_id = voice_id
@@ -64,9 +65,13 @@ class XTTSService(TTSService):
             if r.status != 200:
                 text = await r.text()
                 logger.error(
-                    f"{self} error getting studio speakers (status: {r.status}, error: {text})")
+                    f"{self} error getting studio speakers (status: {r.status}, error: {text})"
+                )
                 await self.push_error(
-                    ErrorFrame(f"Error error getting studio speakers (status: {r.status}, error: {text})"))
+                    ErrorFrame(
+                        f"Error error getting studio speakers (status: {r.status}, error: {text})"
+                    )
+                )
                 return
             self._studio_speakers = await r.json()
 
@@ -86,7 +91,7 @@ class XTTSService(TTSService):
         url = self._base_url + "/tts_stream"
 
         payload = {
-            "text": text.replace('.', '').replace('*', ''),
+            "text": text.replace(".", "").replace("*", ""),
             "language": self._language,
             "speaker_embedding": embeddings["speaker_embedding"],
             "gpt_cond_latent": embeddings["gpt_cond_latent"],
@@ -115,7 +120,9 @@ class XTTSService(TTSService):
                     buffer.extend(chunk)
 
                     # Check if buffer has enough data for processing
-                    while len(buffer) >= 48000:  # Assuming at least 0.5 seconds of audio data at 24000 Hz
+                    while (
+                        len(buffer) >= 48000
+                    ):  # Assuming at least 0.5 seconds of audio data at 24000 Hz
                         # Process the buffer up to a safe size for resampling
                         process_data = buffer[:48000]
                         # Remove processed data from buffer

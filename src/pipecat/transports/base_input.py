@@ -21,7 +21,8 @@ from pipecat.frames.frames import (
     SystemFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
-    VADParamsUpdateFrame)
+    VADParamsUpdateFrame,
+)
 from pipecat.transports.base_transport import TransportParams
 from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
 
@@ -29,7 +30,6 @@ from loguru import logger
 
 
 class BaseInputTransport(FrameProcessor):
-
     def __init__(self, params: TransportParams, **kwargs):
         super().__init__(sync=False, **kwargs)
 
@@ -129,12 +129,17 @@ class BaseInputTransport(FrameProcessor):
         vad_analyzer = self.vad_analyzer()
         if vad_analyzer:
             state = await self.get_event_loop().run_in_executor(
-                self._executor, vad_analyzer.analyze_audio, audio_frames)
+                self._executor, vad_analyzer.analyze_audio, audio_frames
+            )
         return state
 
     async def _handle_vad(self, audio_frames: bytes, vad_state: VADState):
         new_vad_state = await self._vad_analyze(audio_frames)
-        if new_vad_state != vad_state and new_vad_state != VADState.STARTING and new_vad_state != VADState.STOPPING:
+        if (
+            new_vad_state != vad_state
+            and new_vad_state != VADState.STARTING
+            and new_vad_state != VADState.STOPPING
+        ):
             frame = None
             if new_vad_state == VADState.SPEAKING:
                 frame = UserStartedSpeakingFrame()
