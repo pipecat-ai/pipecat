@@ -14,18 +14,14 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    MetricsFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame)
 from pipecat.metrics.metrics import (
     LLMTokenUsage,
-    LLMUsageMetricsData,
-    MetricsData,
-    ProcessingMetricsData,
-    TTFBMetricsData,
-    TTSUsageMetricsData)
+    MetricsData)
+from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.utils import obj_count, obj_id
 
 from loguru import logger
@@ -36,78 +32,13 @@ class FrameDirection(Enum):
     UPSTREAM = 2
 
 
-class FrameProcessorMetrics:
-    def __init__(self, name: str):
-        self._core_metrics_data = MetricsData(processor=name)
-        self._start_ttfb_time = 0
-        self._start_processing_time = 0
-        self._should_report_ttfb = True
-
-    def _processor_name(self):
-        return self._core_metrics_data.processor
-
-    def _model_name(self):
-        return self._core_metrics_data.model
-
-    def set_core_metrics_data(self, data: MetricsData):
-        self._core_metrics_data = data
-
-    async def start_ttfb_metrics(self, report_only_initial_ttfb):
-        if self._should_report_ttfb:
-            self._start_ttfb_time = time.time()
-            self._should_report_ttfb = not report_only_initial_ttfb
-
-    async def stop_ttfb_metrics(self):
-        if self._start_ttfb_time == 0:
-            return None
-
-        value = time.time() - self._start_ttfb_time
-        logger.debug(f"{self._processor_name()} TTFB: {value}")
-        ttfb = TTFBMetricsData(
-            processor=self._processor_name(),
-            value=value,
-            model=self._model_name())
-        self._start_ttfb_time = 0
-        return MetricsFrame(data=[ttfb])
-
-    async def start_processing_metrics(self):
-        self._start_processing_time = time.time()
-
-    async def stop_processing_metrics(self):
-        if self._start_processing_time == 0:
-            return None
-
-        value = time.time() - self._start_processing_time
-        logger.debug(f"{self._processor_name()} processing time: {value}")
-        processing = ProcessingMetricsData(
-            processor=self._processor_name(), value=value, model=self._model_name())
-        self._start_processing_time = 0
-        return MetricsFrame(data=[processing])
-
-    async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
-        logger.debug(
-            f"{self._processor_name()} prompt tokens: {tokens.prompt_tokens}, completion tokens: {tokens.completion_tokens}")
-        value = LLMUsageMetricsData(
-            processor=self._processor_name(),
-            model=self._model_name(),
-            value=tokens)
-        return MetricsFrame(data=[value])
-
-    async def start_tts_usage_metrics(self, text: str):
-        characters = TTSUsageMetricsData(
-            processor=self._processor_name(),
-            model=self._model_name(),
-            value=len(text))
-        logger.debug(f"{self._processor_name()} usage characters: {characters.value}")
-        return MetricsFrame(data=[characters])
-
-
 class FrameProcessor:
 
     def __init__(
             self,
             *,
             name: str | None = None,
+            metrics: FrameProcessorMetrics | None = None,
             sync: bool = True,
             loop: asyncio.AbstractEventLoop | None = None,
             **kwargs):
@@ -129,7 +60,8 @@ class FrameProcessor:
         self._report_only_initial_ttfb = False
 
         # Metrics
-        self._metrics = FrameProcessorMetrics(name=self.name)
+        self._metrics = metrics or FrameProcessorMetrics()
+        self._metrics.set_processor_name(self.name)
 
         # Every processor in Pipecat should only output frames from a single
         # task. This avoid problems like audio overlapping. System frames are
@@ -262,14 +194,16 @@ class FrameProcessor:
                 logger.trace(f"Pushing {frame} from {self} to {self._next}")
                 await self._next.process_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
-                logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
+                logger.trace(f"Pushing {frame} upstream from {
+                             self} to {self._prev}")
                 await self._prev.process_frame(frame, direction)
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
 
     def __create_push_task(self):
         self.__push_queue = asyncio.Queue()
-        self.__push_frame_task = self.get_event_loop().create_task(self.__push_frame_task_handler())
+        self.__push_frame_task = self.get_event_loop(
+        ).create_task(self.__push_frame_task_handler())
 
     async def __push_frame_task_handler(self):
         running = True
