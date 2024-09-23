@@ -31,6 +31,7 @@ class FrameDirection(Enum):
     DOWNSTREAM = 1
     UPSTREAM = 2
 
+
 class FrameProcessor:
 
     def __init__(
@@ -193,14 +194,16 @@ class FrameProcessor:
                 logger.trace(f"Pushing {frame} from {self} to {self._next}")
                 await self._next.process_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
-                logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
+                logger.trace(f"Pushing {frame} upstream from {
+                             self} to {self._prev}")
                 await self._prev.process_frame(frame, direction)
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
 
     def __create_push_task(self):
         self.__push_queue = asyncio.Queue()
-        self.__push_frame_task = self.get_event_loop().create_task(self.__push_frame_task_handler())
+        self.__push_frame_task = self.get_event_loop(
+        ).create_task(self.__push_frame_task_handler())
 
     async def __push_frame_task_handler(self):
         running = True
