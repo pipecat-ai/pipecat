@@ -41,8 +41,13 @@ class GatedAggregator(FrameProcessor):
     Goodbye.
     """
 
-    def __init__(self, gate_open_fn, gate_close_fn, start_open,
-                 direction: FrameDirection = FrameDirection.DOWNSTREAM):
+    def __init__(
+        self,
+        gate_open_fn,
+        gate_close_fn,
+        start_open,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+    ):
         super().__init__()
         self._gate_open_fn = gate_open_fn
         self._gate_close_fn = gate_close_fn
@@ -75,7 +80,7 @@ class GatedAggregator(FrameProcessor):
 
         if self._gate_open:
             await self.push_frame(frame, direction)
-            for (f, d) in self._accumulator:
+            for f, d in self._accumulator:
                 await self.push_frame(f, d)
             self._accumulator = []
         else:

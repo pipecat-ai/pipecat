@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    LLMFullResponseEndFrame
+    LLMFullResponseEndFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
@@ -36,7 +36,8 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`. Also, set `CARTESIA_API_KEY` environment variable.")
+        "In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`. Also, set `CARTESIA_API_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 
@@ -60,19 +61,19 @@ def language_to_cartesia_language(language: Language) -> str | None:
 
 
 class CartesiaTTSService(AsyncWordTTSService):
-
     def __init__(
-            self,
-            *,
-            api_key: str,
-            voice_id: str,
-            cartesia_version: str = "2024-06-10",
-            url: str = "wss://api.cartesia.ai/tts/websocket",
-            model_id: str = "sonic-english",
-            encoding: str = "pcm_s16le",
-            sample_rate: int = 16000,
-            language: str = "en",
-            **kwargs):
+        self,
+        *,
+        api_key: str,
+        voice_id: str,
+        cartesia_version: str = "2024-06-10",
+        url: str = "wss://api.cartesia.ai/tts/websocket",
+        model_id: str = "sonic-english",
+        encoding: str = "pcm_s16le",
+        sample_rate: int = 16000,
+        language: str = "en",
+        **kwargs,
+    ):
         # Aggregating sentences still gives cleaner-sounding results and fewer
         # artifacts than streaming one word at a time. On average, waiting for a
         # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
@@ -83,7 +84,9 @@ class CartesiaTTSService(AsyncWordTTSService):
         # if we're interrupted. Cartesia gives us word-by-word timestamps. We
         # can use those to generate text frames ourselves aligned with the
         # playout timing of the audio!
-        super().__init__(aggregate_sentences=True, push_text_frames=False, sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            aggregate_sentences=True, push_text_frames=False, sample_rate=sample_rate, **kwargs
+        )
 
         self._api_key = api_key
         self._cartesia_version = cartesia_version
@@ -175,10 +178,7 @@ class CartesiaTTSService(AsyncWordTTSService):
             "continue": False,
             "context_id": self._context_id,
             "model_id": self.model_name,
-            "voice": {
-                "mode": "id",
-                "id": self._voice_id
-            },
+            "voice": {"mode": "id", "id": self._voice_id},
             "output_format": self._output_format,
             "language": self._language,
             "add_timestamps": True,
@@ -209,7 +209,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                     frame = TTSAudioRawFrame(
                         audio=base64.b64decode(msg["data"]),
                         sample_rate=self._output_format["sample_rate"],
-                        num_channels=1
+                        num_channels=1,
                     )
                     await self.push_frame(frame)
                 elif msg["type"] == "error":
@@ -241,10 +241,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                 "continue": True,
                 "context_id": self._context_id,
                 "model_id": self.model_name,
-                "voice": {
-                    "mode": "id",
-                    "id": self._voice_id
-                },
+                "voice": {"mode": "id", "id": self._voice_id},
                 "output_format": self._output_format,
                 "language": self._language,
                 "add_timestamps": True,
@@ -264,18 +261,18 @@ class CartesiaTTSService(AsyncWordTTSService):
 
 
 class CartesiaHttpTTSService(TTSService):
-
     def __init__(
-            self,
-            *,
-            api_key: str,
-            voice_id: str,
-            model_id: str = "sonic-english",
-            base_url: str = "https://api.cartesia.ai",
-            encoding: str = "pcm_s16le",
-            sample_rate: int = 16000,
-            language: str = "en",
-            **kwargs):
+        self,
+        *,
+        api_key: str,
+        voice_id: str,
+        model_id: str = "sonic-english",
+        base_url: str = "https://api.cartesia.ai",
+        encoding: str = "pcm_s16le",
+        sample_rate: int = 16000,
+        language: str = "en",
+        **kwargs,
+    ):
         super().__init__(**kwargs)
 
         self._api_key = api_key
@@ -326,7 +323,7 @@ class CartesiaHttpTTSService(TTSService):
                 voice_id=self._voice_id,
                 output_format=self._output_format,
                 language=self._language,
-                stream=False
+                stream=False,
             )
 
             await self.stop_ttfb_metrics()
@@ -334,7 +331,7 @@ class CartesiaHttpTTSService(TTSService):
             frame = TTSAudioRawFrame(
                 audio=output["audio"],
                 sample_rate=self._output_format["sample_rate"],
-                num_channels=1
+                num_channels=1,
             )
             yield frame
         except Exception as e:

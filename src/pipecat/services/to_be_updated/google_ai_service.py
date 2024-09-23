@@ -18,14 +18,12 @@ class GoogleAIService(AIService):
         )
 
         self.audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.LINEAR16,
-            sample_rate_hertz=16000
+            audio_encoding=texttospeech.AudioEncoding.LINEAR16, sample_rate_hertz=16000
         )
 
     def run_tts(self, sentence):
         synthesis_input = texttospeech.SynthesisInput(text=sentence.strip())
         result = self.client.synthesize_speech(
-            input=synthesis_input,
-            voice=self.voice,
-            audio_config=self.audio_config)
+            input=synthesis_input, voice=self.voice, audio_config=self.audio_config
+        )
         return result

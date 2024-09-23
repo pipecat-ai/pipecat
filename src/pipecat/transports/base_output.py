@@ -32,7 +32,8 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TextFrame,
-    TransportMessageFrame)
+    TransportMessageFrame,
+)
 from pipecat.transports.base_transport import TransportParams
 
 from loguru import logger
@@ -41,7 +42,6 @@ from pipecat.utils.time import nanoseconds_to_seconds
 
 
 class BaseOutputTransport(FrameProcessor):
-
     def __init__(self, params: TransportParams, **kwargs):
         super().__init__(sync=False, **kwargs)
 
@@ -53,8 +53,9 @@ class BaseOutputTransport(FrameProcessor):
 
         # We will write 20ms audio at a time. If we receive long audio frames we
         # will chunk them. This will help with interruption handling.
-        audio_bytes_10ms = int(self._params.audio_out_sample_rate / 100) * \
-            self._params.audio_out_channels * 2
+        audio_bytes_10ms = (
+            int(self._params.audio_out_sample_rate / 100) * self._params.audio_out_channels * 2
+        )
         self._audio_chunk_size = audio_bytes_10ms * 2
         self._audio_buffer = bytearray()
 
@@ -74,7 +75,9 @@ class BaseOutputTransport(FrameProcessor):
         # Create camera output queue and task if needed.
         if self._params.camera_out_enabled:
             self._camera_out_queue = asyncio.Queue()
-            self._camera_out_task = self.get_event_loop().create_task(self._camera_out_task_handler())
+            self._camera_out_task = self.get_event_loop().create_task(
+                self._camera_out_task_handler()
+            )
         # Create audio output queue and task if needed.
         if self._params.audio_out_enabled and self._params.audio_out_is_live:
             self._audio_out_queue = asyncio.Queue()
@@ -201,11 +204,12 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_buffer.extend(frame.audio)
             while len(self._audio_buffer) >= self._audio_chunk_size:
                 chunk = OutputAudioRawFrame(
-                    bytes(self._audio_buffer[:self._audio_chunk_size]),
-                    sample_rate=frame.sample_rate, num_channels=frame.num_channels
+                    bytes(self._audio_buffer[: self._audio_chunk_size]),
+                    sample_rate=frame.sample_rate,
+                    num_channels=frame.num_channels,
                 )
                 await self._sink_queue.put(chunk)
-                self._audio_buffer = self._audio_buffer[self._audio_chunk_size:]
+                self._audio_buffer = self._audio_buffer[self._audio_chunk_size :]
 
     async def _handle_image(self, frame: OutputImageRawFrame | SpriteFrame):
         if not self._params.camera_out_enabled:
@@ -316,12 +320,10 @@ class BaseOutputTransport(FrameProcessor):
         if frame.size != desired_size:
             image = Image.frombytes(frame.format, frame.size, frame.image)
             resized_image = image.resize(desired_size)
-            logger.warning(
-                f"{frame} does not have the expected size {desired_size}, resizing")
+            logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
             frame = OutputImageRawFrame(
-                resized_image.tobytes(),
-                resized_image.size,
-                resized_image.format)
+                resized_image.tobytes(), resized_image.size, resized_image.format
+            )
 
         await self.write_frame_to_camera(frame)
 
