@@ -37,6 +37,9 @@ try:
         SpeechConfig,
         SpeechRecognizer,
         SpeechSynthesizer,
+        ResultReason,
+        CancellationReason,
+        languageconfig,
     )
     from azure.cognitiveservices.speech.audio import AudioStreamFormat, PushAudioInputStream
     from azure.cognitiveservices.speech.dialog import AudioConfig
@@ -240,15 +243,23 @@ class AzureSTTService(STTService):
         super().__init__(**kwargs)
 
         speech_config = SpeechConfig(subscription=api_key, region=region)
-        speech_config.speech_recognition_language = language
-
         stream_format = AudioStreamFormat(samples_per_second=sample_rate, channels=channels)
         self._audio_stream = PushAudioInputStream(stream_format)
 
         audio_config = AudioConfig(stream=self._audio_stream)
-        self._speech_recognizer = SpeechRecognizer(
-            speech_config=speech_config, audio_config=audio_config
-        )
+        # supported languages are listed here:
+        # https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=language-identification
+        if isinstance(language, list):
+            self._speech_recognizer = SpeechRecognizer(
+                speech_config=speech_config,
+                audio_config=audio_config,
+                auto_detect_source_language_config=languageconfig.AutoDetectSourceLanguageConfig(
+                    languages=language)
+            )
+        else:
+            self._speech_recognizer = SpeechRecognizer(speech_config=speech_config,
+                                                       audio_config=audio_config,
+                                                       language=language)
         self._speech_recognizer.recognized.connect(self._on_handle_recognized)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
