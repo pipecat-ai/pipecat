@@ -6,7 +6,10 @@
 
 from typing import List, Type
 
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame, OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContextFrame,
+    OpenAILLMContext,
+)
 
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
@@ -22,11 +25,11 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TextFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame)
+    UserStoppedSpeakingFrame,
+)
 
 
 class LLMResponseAggregator(FrameProcessor):
-
     def __init__(
         self,
         *,
@@ -36,7 +39,7 @@ class LLMResponseAggregator(FrameProcessor):
         end_frame,
         accumulator_frame: Type[TextFrame],
         interim_accumulator_frame: Type[TextFrame] | None = None,
-        handle_interruptions: bool = False
+        handle_interruptions: bool = False,
     ):
         super().__init__()
 
@@ -175,7 +178,7 @@ class LLMAssistantResponseAggregator(LLMResponseAggregator):
             start_frame=LLMFullResponseStartFrame,
             end_frame=LLMFullResponseEndFrame,
             accumulator_frame=TextFrame,
-            handle_interruptions=True
+            handle_interruptions=True,
         )
 
 
@@ -187,7 +190,7 @@ class LLMUserResponseAggregator(LLMResponseAggregator):
             start_frame=UserStartedSpeakingFrame,
             end_frame=UserStoppedSpeakingFrame,
             accumulator_frame=TranscriptionFrame,
-            interim_accumulator_frame=InterimTranscriptionFrame
+            interim_accumulator_frame=InterimTranscriptionFrame,
         )
 
 
@@ -295,7 +298,7 @@ class LLMAssistantContextAggregator(LLMContextAggregator):
             start_frame=LLMFullResponseStartFrame,
             end_frame=LLMFullResponseEndFrame,
             accumulator_frame=TextFrame,
-            handle_interruptions=True
+            handle_interruptions=True,
         )
 
 
@@ -308,5 +311,5 @@ class LLMUserContextAggregator(LLMContextAggregator):
             start_frame=UserStartedSpeakingFrame,
             end_frame=UserStoppedSpeakingFrame,
             accumulator_frame=TranscriptionFrame,
-            interim_accumulator_frame=InterimTranscriptionFrame
+            interim_accumulator_frame=InterimTranscriptionFrame,
         )

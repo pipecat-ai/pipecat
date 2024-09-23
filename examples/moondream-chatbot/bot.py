@@ -43,6 +43,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -60,11 +61,7 @@ for i in range(1, 26):
     # Get the filename without the extension to use as the dictionary key
     # Open the image and convert it to bytes
     with Image.open(full_path) as img:
-        sprites.append(OutputImageRawFrame(
-            image=img.tobytes(),
-            size=img.size,
-            format=img.format)
-        )
+        sprites.append(OutputImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
 
 flipped = sprites[::-1]
 sprites.extend(flipped)
@@ -110,7 +107,9 @@ class UserImageRequester(FrameProcessor):
 
         if self.participant_id and isinstance(frame, TextFrame):
             if frame.text == user_request_answer:
-                await self.push_frame(UserImageRequestFrame(self.participant_id), FrameDirection.UPSTREAM)
+                await self.push_frame(
+                    UserImageRequestFrame(self.participant_id), FrameDirection.UPSTREAM
+                )
                 await self.push_frame(TextFrame("Describe the image in a short sentence."))
         elif isinstance(frame, UserImageRawFrame):
             await self.push_frame(frame)
@@ -154,8 +153,8 @@ async def main():
                 camera_out_height=576,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         tts = CartesiaTTSService(
@@ -163,9 +162,7 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         ta = TalkingAnimation()
 
@@ -188,17 +185,17 @@ async def main():
 
         ura = LLMUserResponseAggregator(messages)
 
-        pipeline = Pipeline([
-            transport.input(),
-            ura,
-            llm,
-            ParallelPipeline(
-                [sa, ir, va, moondream],
-                [tf, imgf]),
-            tts,
-            ta,
-            transport.output()
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),
+                ura,
+                llm,
+                ParallelPipeline([sa, ir, va, moondream], [tf, imgf]),
+                tts,
+                ta,
+                transport.output(),
+            ]
+        )
 
         task = PipelineTask(pipeline)
         await task.queue_frame(quiet_frame)

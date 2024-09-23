@@ -17,7 +17,8 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     URLImageRawFrame,
     LLMMessagesFrame,
-    TextFrame)
+    TextFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
@@ -48,7 +49,12 @@ async def main():
         runner = PipelineRunner()
 
         async def get_month_data(month):
-            messages = [{"role": "system", "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.", }]
+            messages = [
+                {
+                    "role": "system",
+                    "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
+                }
+            ]
 
             class ImageDescription(FrameProcessor):
                 def __init__(self):
@@ -74,7 +80,8 @@ async def main():
                     if isinstance(frame, TTSAudioRawFrame):
                         self.audio.extend(frame.audio)
                         self.frame = OutputAudioRawFrame(
-                            bytes(self.audio), frame.sample_rate, frame.num_channels)
+                            bytes(self.audio), frame.sample_rate, frame.num_channels
+                        )
 
             class ImageGrabber(FrameProcessor):
                 def __init__(self):
@@ -87,9 +94,7 @@ async def main():
                     if isinstance(frame, URLImageRawFrame):
                         self.frame = frame
 
-            llm = OpenAILLMService(
-                api_key=os.getenv("OPENAI_API_KEY"),
-                model="gpt-4o")
+            llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
             tts = CartesiaHttpTTSService(
                 api_key=os.getenv("CARTESIA_API_KEY"),
@@ -97,11 +102,10 @@ async def main():
             )
 
             imagegen = FalImageGenService(
-                params=FalImageGenService.InputParams(
-                    image_size="square_hd"
-                ),
+                params=FalImageGenService.InputParams(image_size="square_hd"),
                 aiohttp_session=session,
-                key=os.getenv("FAL_KEY"))
+                key=os.getenv("FAL_KEY"),
+            )
 
             sentence_aggregator = SentenceAggregator()
 
@@ -119,15 +123,17 @@ async def main():
             #
             # Note that `SyncParallelPipeline` requires all processors in it to
             # be synchronous (which is the default for most processors).
-            pipeline = Pipeline([
-                llm,                     # LLM
-                sentence_aggregator,     # Aggregates LLM output into full sentences
-                description,             # Store sentence
-                SyncParallelPipeline(
-                    [tts, audio_grabber],      # Generate and store audio for the given sentence
-                    [imagegen, image_grabber]  # Generate and storeimage for the given sentence
-                )
-            ])
+            pipeline = Pipeline(
+                [
+                    llm,  # LLM
+                    sentence_aggregator,  # Aggregates LLM output into full sentences
+                    description,  # Store sentence
+                    SyncParallelPipeline(
+                        [tts, audio_grabber],  # Generate and store audio for the given sentence
+                        [imagegen, image_grabber],  # Generate and storeimage for the given sentence
+                    ),
+                ]
+            )
 
             task = PipelineTask(pipeline)
             await task.queue_frame(LLMMessagesFrame(messages))
@@ -148,7 +154,9 @@ async def main():
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,
-                camera_out_height=1024))
+                camera_out_height=1024,
+            ),
+        )
 
         pipeline = Pipeline([transport.output()])
 

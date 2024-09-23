@@ -12,7 +12,8 @@ from pipecat.frames.frames import (
     BotSpeakingFrame,
     Frame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame)
+    UserStoppedSpeakingFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -24,11 +25,12 @@ class UserIdleProcessor(FrameProcessor):
     """
 
     def __init__(
-            self,
-            *,
-            callback: Callable[["UserIdleProcessor"], Awaitable[None]],
-            timeout: float,
-            **kwargs):
+        self,
+        *,
+        callback: Callable[["UserIdleProcessor"], Awaitable[None]],
+        timeout: float,
+        **kwargs,
+    ):
         super().__init__(sync=False, **kwargs)
 
         self._callback = callback

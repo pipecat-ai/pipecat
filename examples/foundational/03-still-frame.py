@@ -21,6 +21,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -35,17 +36,11 @@ async def main():
             room_url,
             None,
             "Show a still frame image",
-            DailyParams(
-                camera_out_enabled=True,
-                camera_out_width=1024,
-                camera_out_height=1024
-            )
+            DailyParams(camera_out_enabled=True, camera_out_width=1024, camera_out_height=1024),
         )
 
         imagegen = FalImageGenService(
-            params=FalImageGenService.InputParams(
-                image_size="square_hd"
-            ),
+            params=FalImageGenService.InputParams(image_size="square_hd"),
             aiohttp_session=session,
             key=os.getenv("FAL_KEY"),
         )

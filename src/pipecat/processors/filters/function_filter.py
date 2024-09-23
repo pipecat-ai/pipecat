@@ -11,7 +11,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class FunctionFilter(FrameProcessor):
-
     def __init__(self, filter: Callable[[Frame], Awaitable[bool]]):
         super().__init__()
         self._filter = filter

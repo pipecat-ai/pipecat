@@ -15,6 +15,7 @@ from pipecat.frames.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesF
 from runner import configure
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
@@ -53,9 +54,7 @@ async def main():
             voice_id="jBpfuIE2acCO8z3wKNLl",
         )
         dalle = FalImageGenService(
-            params=FalImageGenService.InputParams(
-                image_size="1024x1024"
-            ),
+            params=FalImageGenService.InputParams(image_size="1024x1024"),
             aiohttp_session=session,
             key=os.getenv("FAL_KEY"),
         )
@@ -75,13 +74,11 @@ async def main():
 
         async def get_text_and_audio(messages) -> Tuple[str, bytearray]:
             """This function streams text from the LLM and uses the TTS service to convert
-             that text to speech as it's received. """
+            that text to speech as it's received."""
             source_queue = asyncio.Queue()
             sink_queue = asyncio.Queue()
             sentence_aggregator = SentenceAggregator()
-            pipeline = Pipeline(
-                [llm, sentence_aggregator, tts1], source_queue, sink_queue
-            )
+            pipeline = Pipeline([llm, sentence_aggregator, tts1], source_queue, sink_queue)
 
             await source_queue.put(LLMMessagesFrame(messages))
             await source_queue.put(EndFrame())

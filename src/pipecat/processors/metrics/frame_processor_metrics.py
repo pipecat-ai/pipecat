@@ -7,7 +7,8 @@ from pipecat.metrics.metrics import (
     MetricsData,
     ProcessingMetricsData,
     TTFBMetricsData,
-    TTSUsageMetricsData)
+    TTSUsageMetricsData,
+)
 
 from loguru import logger
 
@@ -42,9 +43,8 @@ class FrameProcessorMetrics:
         value = time.time() - self._start_ttfb_time
         logger.debug(f"{self._processor_name()} TTFB: {value}")
         ttfb = TTFBMetricsData(
-            processor=self._processor_name(),
-            value=value,
-            model=self._model_name())
+            processor=self._processor_name(), value=value, model=self._model_name()
+        )
         self._start_ttfb_time = 0
         return MetricsFrame(data=[ttfb])
 
@@ -58,24 +58,23 @@ class FrameProcessorMetrics:
         value = time.time() - self._start_processing_time
         logger.debug(f"{self._processor_name()} processing time: {value}")
         processing = ProcessingMetricsData(
-            processor=self._processor_name(), value=value, model=self._model_name())
+            processor=self._processor_name(), value=value, model=self._model_name()
+        )
         self._start_processing_time = 0
         return MetricsFrame(data=[processing])
 
     async def start_llm_usage_metrics(self, tokens: LLMTokenUsage):
         logger.debug(
-            f"{self._processor_name()} prompt tokens: {tokens.prompt_tokens}, completion tokens: {tokens.completion_tokens}")
+            f"{self._processor_name()} prompt tokens: {tokens.prompt_tokens}, completion tokens: {tokens.completion_tokens}"
+        )
         value = LLMUsageMetricsData(
-            processor=self._processor_name(),
-            model=self._model_name(),
-            value=tokens)
+            processor=self._processor_name(), model=self._model_name(), value=tokens
+        )
         return MetricsFrame(data=[value])
 
     async def start_tts_usage_metrics(self, text: str):
         characters = TTSUsageMetricsData(
-            processor=self._processor_name(),
-            model=self._model_name(),
-            value=len(text))
-        logger.debug(f"{self._processor_name()} usage characters: {
-                     characters.value}")
+            processor=self._processor_name(), model=self._model_name(), value=len(text)
+        )
+        logger.debug(f"{self._processor_name()} usage characters: {characters.value}")
         return MetricsFrame(data=[characters])

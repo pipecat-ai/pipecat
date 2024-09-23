@@ -18,7 +18,8 @@ from daily import (
     EventHandler,
     VirtualCameraDevice,
     VirtualMicrophoneDevice,
-    VirtualSpeakerDevice)
+    VirtualSpeakerDevice,
+)
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
@@ -35,8 +36,14 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TransportMessageFrame,
     UserImageRawFrame,
-    UserImageRequestFrame)
-from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData, TTFBMetricsData, TTSUsageMetricsData
+    UserImageRequestFrame,
+)
+from pipecat.metrics.metrics import (
+    LLMUsageMetricsData,
+    ProcessingMetricsData,
+    TTFBMetricsData,
+    TTSUsageMetricsData,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
@@ -47,11 +54,12 @@ from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams
 from loguru import logger
 
 try:
-    from daily import (EventHandler, CallClient, Daily)
+    from daily import EventHandler, CallClient, Daily
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use the Daily transport, you need to `pip install pipecat-ai[daily]`.")
+        "In order to use the Daily transport, you need to `pip install pipecat-ai[daily]`."
+    )
     raise Exception(f"Missing module: {e}")
 
 VAD_RESET_PERIOD_MS = 2000
@@ -63,14 +71,11 @@ class DailyTransportMessageFrame(TransportMessageFrame):
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
-
     def __init__(self, *, sample_rate=16000, num_channels=1, params: VADParams = VADParams()):
         super().__init__(sample_rate=sample_rate, num_channels=num_channels, params=params)
 
         self._webrtc_vad = Daily.create_native_vad(
-            reset_period_ms=VAD_RESET_PERIOD_MS,
-            sample_rate=sample_rate,
-            channels=num_channels
+            reset_period_ms=VAD_RESET_PERIOD_MS, sample_rate=sample_rate, channels=num_channels
         )
         logger.debug("Loaded native WebRTC VAD")
 
@@ -98,9 +103,7 @@ class DailyTranscriptionSettings(BaseModel):
     endpointing: bool = True
     punctuate: bool = True
     includeRawResponse: bool = True
-    extra: Mapping[str, Any] = {
-        "interim_results": True
-    }
+    extra: Mapping[str, Any] = {"interim_results": True}
 
 
 class DailyParams(TransportParams):
@@ -139,12 +142,13 @@ def completion_callback(future):
                     future.set_result(*args)
             except asyncio.InvalidStateError:
                 pass
+
         future.get_loop().call_soon_threadsafe(set_result, future, *args)
+
     return _callback
 
 
 class DailyTransportClient(EventHandler):
-
     _daily_initialized: bool = False
 
     # This is necessary to override EventHandler's __new__ method.
@@ -152,13 +156,14 @@ class DailyTransportClient(EventHandler):
         return super().__new__(cls)
 
     def __init__(
-            self,
-            room_url: str,
-            token: str | None,
-            bot_name: str,
-            params: DailyParams,
-            callbacks: DailyCallbacks,
-            loop: asyncio.AbstractEventLoop):
+        self,
+        room_url: str,
+        token: str | None,
+        bot_name: str,
+        params: DailyParams,
+        callbacks: DailyCallbacks,
+        loop: asyncio.AbstractEventLoop,
+    ):
         super().__init__()
 
         if not DailyTransportClient._daily_initialized:
@@ -191,7 +196,8 @@ class DailyTransportClient(EventHandler):
                 self._camera_name(),
                 width=self._params.camera_out_width,
                 height=self._params.camera_out_height,
-                color_format=self._params.camera_out_color_format)
+                color_format=self._params.camera_out_color_format,
+            )
 
         self._mic: VirtualMicrophoneDevice | None = None
         if self._params.audio_out_enabled:
@@ -199,7 +205,8 @@ class DailyTransportClient(EventHandler):
                 self._mic_name(),
                 sample_rate=self._params.audio_out_sample_rate,
                 channels=self._params.audio_out_channels,
-                non_blocking=True)
+                non_blocking=True,
+            )
 
         self._speaker: VirtualSpeakerDevice | None = None
         if self._params.audio_in_enabled or self._params.vad_enabled:
@@ -207,7 +214,8 @@ class DailyTransportClient(EventHandler):
                 self._speaker_name(),
                 sample_rate=self._params.audio_in_sample_rate,
                 channels=self._params.audio_in_channels,
-                non_blocking=True)
+                non_blocking=True,
+            )
             Daily.select_speaker_device(self._speaker_name())
 
     def _camera_name(self):
@@ -236,9 +244,8 @@ class DailyTransportClient(EventHandler):
 
         future = self._loop.create_future()
         self._client.send_app_message(
-            frame.message,
-            participant_id,
-            completion=completion_callback(future))
+            frame.message, participant_id, completion=completion_callback(future)
+        )
         await future
 
     async def read_next_audio_frame(self) -> InputAudioRawFrame | None:
@@ -255,9 +262,8 @@ class DailyTransportClient(EventHandler):
 
         if len(audio) > 0:
             return InputAudioRawFrame(
-                audio=audio,
-                sample_rate=sample_rate,
-                num_channels=num_channels)
+                audio=audio, sample_rate=sample_rate, num_channels=num_channels
+            )
         else:
             # If we don't read any audio it could be there's no participant
             # connected. daily-python will return immediately if that's the
@@ -290,12 +296,9 @@ class DailyTransportClient(EventHandler):
 
         # For performance reasons, never subscribe to video streams (unless a
         # video renderer is registered).
-        self._client.update_subscription_profiles({
-            "base": {
-                "camera": "unsubscribed",
-                "screenVideo": "unsubscribed"
-            }
-        })
+        self._client.update_subscription_profiles(
+            {"base": {"camera": "unsubscribed", "screenVideo": "unsubscribed"}}
+        )
 
         self._client.set_user_name(self._bot_name)
 
@@ -327,7 +330,7 @@ class DailyTransportClient(EventHandler):
         future = self._loop.create_future()
         self._client.start_transcription(
             settings=self._params.transcription_settings.model_dump(exclude_none=True),
-            completion=completion_callback(future)
+            completion=completion_callback(future),
         )
         error = await future
         if error:
@@ -374,12 +377,15 @@ class DailyTransportClient(EventHandler):
                     },
                     "microphone": {
                         "sendSettings": {
-                            "channelConfig": "stereo" if self._params.audio_out_channels == 2 else "mono",
+                            "channelConfig": "stereo"
+                            if self._params.audio_out_channels == 2
+                            else "mono",
                             "bitrate": self._params.audio_out_bitrate,
                         }
-                    }
+                    },
                 },
-            })
+            },
+        )
 
         return await asyncio.wait_for(future, timeout=10)
 
@@ -456,18 +462,17 @@ class DailyTransportClient(EventHandler):
         self._transcription_renderers[participant_id] = callback
 
     def capture_participant_video(
-            self,
-            participant_id: str,
-            callback: Callable,
-            framerate: int = 30,
-            video_source: str = "camera",
-            color_format: str = "RGB"):
+        self,
+        participant_id: str,
+        callback: Callable,
+        framerate: int = 30,
+        video_source: str = "camera",
+        color_format: str = "RGB",
+    ):
         # Only enable camera subscription on this participant
-        self._client.update_subscriptions(participant_settings={
-            participant_id: {
-                "media": "subscribed"
-            }
-        })
+        self._client.update_subscriptions(
+            participant_settings={participant_id: {"media": "subscribed"}}
+        )
 
         self._video_renderers[participant_id] = callback
 
@@ -475,7 +480,8 @@ class DailyTransportClient(EventHandler):
             participant_id,
             self._video_frame_received,
             video_source=video_source,
-            color_format=color_format)
+            color_format=color_format,
+        )
 
     #
     #
@@ -553,9 +559,9 @@ class DailyTransportClient(EventHandler):
             callback,
             participant_id,
             video_frame.buffer,
-            (video_frame.width,
-             video_frame.height),
-            video_frame.color_format)
+            (video_frame.width, video_frame.height),
+            video_frame.color_format,
+        )
 
     def _call_async_callback(self, callback, *args):
         future = asyncio.run_coroutine_threadsafe(callback(*args), self._loop)
@@ -563,7 +569,6 @@ class DailyTransportClient(EventHandler):
 
 
 class DailyInputTransport(BaseInputTransport):
-
     def __init__(self, client: DailyTransportClient, params: DailyParams, **kwargs):
         super().__init__(params, **kwargs)
 
@@ -576,7 +581,8 @@ class DailyInputTransport(BaseInputTransport):
         if params.vad_enabled and not params.vad_analyzer:
             self._vad_analyzer = WebRTCVADAnalyzer(
                 sample_rate=self._params.audio_in_sample_rate,
-                num_channels=self._params.audio_in_channels)
+                num_channels=self._params.audio_in_channels,
+            )
 
     async def start(self, frame: StartFrame):
         # Parent start.
@@ -654,11 +660,12 @@ class DailyInputTransport(BaseInputTransport):
     #
 
     def capture_participant_video(
-            self,
-            participant_id: str,
-            framerate: int = 30,
-            video_source: str = "camera",
-            color_format: str = "RGB"):
+        self,
+        participant_id: str,
+        framerate: int = 30,
+        video_source: str = "camera",
+        color_format: str = "RGB",
+    ):
         self._video_renderers[participant_id] = {
             "framerate": framerate,
             "timestamp": 0,
@@ -666,11 +673,7 @@ class DailyInputTransport(BaseInputTransport):
         }
 
         self._client.capture_participant_video(
-            participant_id,
-            self._on_participant_video_frame,
-            framerate,
-            video_source,
-            color_format
+            participant_id, self._on_participant_video_frame, framerate, video_source, color_format
         )
 
     def request_participant_image(self, participant_id: str):
@@ -693,17 +696,14 @@ class DailyInputTransport(BaseInputTransport):
 
         if render_frame:
             frame = UserImageRawFrame(
-                user_id=participant_id,
-                image=buffer,
-                size=size,
-                format=format)
+                user_id=participant_id, image=buffer, size=size, format=format
+            )
             await self.push_frame(frame)
 
         self._video_renderers[participant_id]["timestamp"] = curr_time
 
 
 class DailyOutputTransport(BaseOutputTransport):
-
     def __init__(self, client: DailyTransportClient, params: DailyParams, **kwargs):
         super().__init__(params, **kwargs)
 
@@ -754,10 +754,9 @@ class DailyOutputTransport(BaseOutputTransport):
                     metrics["characters"] = []
                 metrics["characters"].append(d.model_dump(exclude_none=True))
 
-        message = DailyTransportMessageFrame(message={
-            "type": "pipecat-metrics",
-            "metrics": metrics
-        })
+        message = DailyTransportMessageFrame(
+            message={"type": "pipecat-metrics", "metrics": metrics}
+        )
         await self._client.send_message(message)
 
     async def write_raw_audio_frames(self, frames: bytes):
@@ -768,16 +767,16 @@ class DailyOutputTransport(BaseOutputTransport):
 
 
 class DailyTransport(BaseTransport):
-
     def __init__(
-            self,
-            room_url: str,
-            token: str | None,
-            bot_name: str,
-            params: DailyParams = DailyParams(),
-            input_name: str | None = None,
-            output_name: str | None = None,
-            loop: asyncio.AbstractEventLoop | None = None):
+        self,
+        room_url: str,
+        token: str | None,
+        bot_name: str,
+        params: DailyParams = DailyParams(),
+        input_name: str | None = None,
+        output_name: str | None = None,
+        loop: asyncio.AbstractEventLoop | None = None,
+    ):
         super().__init__(input_name=input_name, output_name=output_name, loop=loop)
 
         callbacks = DailyCallbacks(
@@ -800,7 +799,8 @@ class DailyTransport(BaseTransport):
         self._params = params
 
         self._client = DailyTransportClient(
-            room_url, token, bot_name, params, callbacks, self._loop)
+            room_url, token, bot_name, params, callbacks, self._loop
+        )
         self._input: DailyInputTransport | None = None
         self._output: DailyOutputTransport | None = None
 
@@ -871,19 +871,20 @@ class DailyTransport(BaseTransport):
 
     def capture_participant_transcription(self, participant_id: str):
         self._client.capture_participant_transcription(
-            participant_id,
-            self._on_transcription_message
+            participant_id, self._on_transcription_message
         )
 
     def capture_participant_video(
-            self,
-            participant_id: str,
-            framerate: int = 30,
-            video_source: str = "camera",
-            color_format: str = "RGB"):
+        self,
+        participant_id: str,
+        framerate: int = 30,
+        video_source: str = "camera",
+        color_format: str = "RGB",
+    ):
         if self._input:
             self._input.capture_participant_video(
-                participant_id, framerate, video_source, color_format)
+                participant_id, framerate, video_source, color_format
+            )
 
     async def _on_joined(self, data):
         await self._call_event_handler("on_joined", data)
@@ -911,12 +912,12 @@ class DailyTransport(BaseTransport):
         async with aiohttp.ClientSession() as session:
             headers = {
                 "Authorization": f"Bearer {self._params.api_key}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
             data = {
                 "callId": self._params.dialin_settings.call_id,
                 "callDomain": self._params.dialin_settings.call_domain,
-                "sipUri": sip_endpoint
+                "sipUri": sip_endpoint,
             }
 
             url = f"{self._params.api_url}/dialin/pinlessCallUpdate"
@@ -926,7 +927,8 @@ class DailyTransport(BaseTransport):
                     if r.status != 200:
                         text = await r.text()
                         logger.error(
-                            f"Unable to handle dialin-ready event (status: {r.status}, error: {text})")
+                            f"Unable to handle dialin-ready event (status: {r.status}, error: {text})"
+                        )
                         return
 
                     logger.debug("Event dialin-ready was handled successfully")
