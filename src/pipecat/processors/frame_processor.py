@@ -193,8 +193,7 @@ class FrameProcessor:
                 logger.trace(f"Pushing {frame} from {self} to {self._next}")
                 await self._next.process_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
-                logger.trace(f"Pushing {frame} upstream from {
-                             self} to {self._prev}")
+                logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
                 await self._prev.process_frame(frame, direction)
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")

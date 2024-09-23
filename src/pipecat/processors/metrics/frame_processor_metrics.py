@@ -76,6 +76,5 @@ class FrameProcessorMetrics:
         characters = TTSUsageMetricsData(
             processor=self._processor_name(), model=self._model_name(), value=len(text)
         )
-        logger.debug(f"{self._processor_name()} usage characters: {
-                     characters.value}")
+        logger.debug(f"{self._processor_name()} usage characters: {characters.value}")
         return MetricsFrame(data=[characters])
