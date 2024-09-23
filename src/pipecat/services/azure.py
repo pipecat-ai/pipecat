@@ -13,23 +13,32 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel
 
-from pipecat.frames.frames import (CancelFrame, EndFrame, ErrorFrame, Frame,
-                                   StartFrame, TranscriptionFrame,
-                                   TTSAudioRawFrame, TTSStartedFrame,
-                                   TTSStoppedFrame, URLImageRawFrame)
-from pipecat.services.ai_services import (ImageGenService, STTService,
-                                          TTSService)
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    ErrorFrame,
+    Frame,
+    StartFrame,
+    TranscriptionFrame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+    URLImageRawFrame,
+)
+from pipecat.services.ai_services import ImageGenService, STTService, TTSService
 from pipecat.services.openai import BaseOpenAILLMService
 from pipecat.utils.time import time_now_iso8601
 
 # See .env.example for Azure configuration needed
 try:
-    from azure.cognitiveservices.speech import (CancellationReason,
-                                                ResultReason, SpeechConfig,
-                                                SpeechRecognizer,
-                                                SpeechSynthesizer)
-    from azure.cognitiveservices.speech.audio import (AudioStreamFormat,
-                                                      PushAudioInputStream)
+    from azure.cognitiveservices.speech import (
+        CancellationReason,
+        ResultReason,
+        SpeechConfig,
+        SpeechRecognizer,
+        SpeechSynthesizer,
+    )
+    from azure.cognitiveservices.speech.audio import AudioStreamFormat, PushAudioInputStream
     from azure.cognitiveservices.speech.dialog import AudioConfig
     from openai import AsyncAzureOpenAI
 except ModuleNotFoundError as e:
@@ -68,7 +77,6 @@ class AzureTTSService(TTSService):
         style: Optional[str] = None
         style_degree: Optional[str] = None
         volume: Optional[str] = None
-
 
     def __init__(
         self,
@@ -116,7 +124,7 @@ class AzureTTSService(TTSService):
             prosody_attrs.append(f"pitch='{self._params.pitch}'")
         if self._params.volume:
             prosody_attrs.append(f"volume='{self._params.volume}'")
-        
+
         ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
         if self._params.emphasis:
@@ -139,6 +147,59 @@ class AzureTTSService(TTSService):
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
         self._voice = voice
+
+    async def set_emphasis(self, emphasis: str):
+        logger.debug(f"Setting TTS emphasis to: [{emphasis}]")
+        self._params.emphasis = emphasis
+
+    async def set_language_code(self, language_code: str):
+        logger.debug(f"Setting TTS language code to: [{language_code}]")
+        self._params.language_code = language_code
+
+    async def set_pitch(self, pitch: str):
+        logger.debug(f"Setting TTS pitch to: [{pitch}]")
+        self._params.pitch = pitch
+
+    async def set_rate(self, rate: str):
+        logger.debug(f"Setting TTS rate to: [{rate}]")
+        self._params.rate = rate
+
+    async def set_role(self, role: str):
+        logger.debug(f"Setting TTS role to: [{role}]")
+        self._params.role = role
+
+    async def set_style(self, style: str):
+        logger.debug(f"Setting TTS style to: [{style}]")
+        self._params.style = style
+
+    async def set_style_degree(self, style_degree: str):
+        logger.debug(f"Setting TTS style degree to: [{style_degree}]")
+        self._params.style_degree = style_degree
+
+    async def set_volume(self, volume: str):
+        logger.debug(f"Setting TTS volume to: [{volume}]")
+        self._params.volume = volume
+
+    async def set_params(self, **kwargs):
+        valid_params = {
+            "voice": self.set_voice,
+            "emphasis": self.set_emphasis,
+            "language_code": self.set_language_code,
+            "pitch": self.set_pitch,
+            "rate": self.set_rate,
+            "role": self.set_role,
+            "style": self.set_style,
+            "style_degree": self.set_style_degree,
+            "volume": self.set_volume,
+        }
+
+        for param, value in kwargs.items():
+            if param in valid_params:
+                await valid_params[param](value)
+            else:
+                logger.warning(f"Ignoring unknown parameter: {param}")
+
+        logger.debug(f"Updated TTS parameters: {', '.join(kwargs.keys())}")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
