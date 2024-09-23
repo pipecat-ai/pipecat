@@ -14,7 +14,8 @@ ENDOFSENTENCE_PATTERN_STR = r"""
     (?<!Mr|Ms|Dr)    # Negative lookbehind: not preceded by Mr, Ms, Dr (combined bc. length is the same)
     (?<!Mrs)         # Negative lookbehind: not preceded by "Mrs"
     (?<!Prof)        # Negative lookbehind: not preceded by "Prof"
-    [\.\?\!:]        # Match a period, question mark, exclamation point, or colon
+    [\.\?\!:;]|      # Match a period, question mark, exclamation point, colon, or semicolon
+    [。？！：；]       # the full-width version (mainly used in East Asian languages such as Chinese)
     $                # End of string
 """
 ENDOFSENTENCE_PATTERN = re.compile(ENDOFSENTENCE_PATTERN_STR, re.VERBOSE)
