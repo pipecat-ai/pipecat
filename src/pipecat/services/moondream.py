@@ -46,12 +46,15 @@ def detect_device():
 class MoondreamService(VisionService):
     def __init__(
         self,
-            *,
+        *,
         model="vikhyatk/moondream2",
-        revision="2024-04-02",
-        use_cpu=False
+        revision="2024-08-26",
+        use_cpu=False,
+        **kwargs
     ):
-        super().__init__()
+        super().__init__(**kwargs)
+
+        self.set_model_name(model)
 
         if not use_cpu:
             device, dtype = detect_device()
@@ -72,7 +75,7 @@ class MoondreamService(VisionService):
 
     async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
         if not self._model:
-            logger.error(f"{self} error: Moondream model not available")
+            logger.error(f"{self} error: Moondream model not available ({self.model_name})")
             yield ErrorFrame("Moondream model not available")
             return
 

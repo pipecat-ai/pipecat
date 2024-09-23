@@ -50,6 +50,7 @@ class GoogleLLMService(LLMService):
         return True
 
     def _create_client(self, model: str):
+        self.set_model_name(model)
         self._client = gai.GenerativeModel(model)
 
     def _get_messages_from_openai_context(

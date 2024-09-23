@@ -22,19 +22,21 @@ from daily import (
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     Frame,
-    ImageRawFrame,
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     MetricsFrame,
+    OutputAudioRawFrame,
+    OutputImageRawFrame,
     SpriteFrame,
     StartFrame,
     TranscriptionFrame,
     TransportMessageFrame,
     UserImageRawFrame,
     UserImageRequestFrame)
+from pipecat.metrics.metrics import LLMUsageMetricsData, ProcessingMetricsData, TTFBMetricsData, TTSUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
@@ -239,7 +241,7 @@ class DailyTransportClient(EventHandler):
             completion=completion_callback(future))
         await future
 
-    async def read_next_audio_frame(self) -> AudioRawFrame | None:
+    async def read_next_audio_frame(self) -> InputAudioRawFrame | None:
         if not self._speaker:
             return None
 
@@ -252,7 +254,10 @@ class DailyTransportClient(EventHandler):
         audio = await future
 
         if len(audio) > 0:
-            return AudioRawFrame(audio=audio, sample_rate=sample_rate, num_channels=num_channels)
+            return InputAudioRawFrame(
+                audio=audio,
+                sample_rate=sample_rate,
+                num_channels=num_channels)
         else:
             # If we don't read any audio it could be there's no participant
             # connected. daily-python will return immediately if that's the
@@ -268,7 +273,7 @@ class DailyTransportClient(EventHandler):
         self._mic.write_frames(frames, completion=completion_callback(future))
         await future
 
-    async def write_frame_to_camera(self, frame: ImageRawFrame):
+    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
         if not self._camera:
             return None
 
@@ -625,11 +630,11 @@ class DailyInputTransport(BaseInputTransport):
     #
 
     async def push_transcription_frame(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
-        await self._internal_push_frame(frame)
+        await self.push_frame(frame)
 
     async def push_app_message(self, message: Any, sender: str):
         frame = DailyTransportMessageFrame(message=message, participant_id=sender)
-        await self._internal_push_frame(frame)
+        await self.push_frame(frame)
 
     #
     # Audio in
@@ -692,7 +697,7 @@ class DailyInputTransport(BaseInputTransport):
                 image=buffer,
                 size=size,
                 format=format)
-            await self._internal_push_frame(frame)
+            await self.push_frame(frame)
 
         self._video_renderers[participant_id]["timestamp"] = curr_time
 
@@ -731,14 +736,23 @@ class DailyOutputTransport(BaseOutputTransport):
 
     async def send_metrics(self, frame: MetricsFrame):
         metrics = {}
-        if frame.ttfb:
-            metrics["ttfb"] = frame.ttfb
-        if frame.processing:
-            metrics["processing"] = frame.processing
-        if frame.tokens:
-            metrics["tokens"] = frame.tokens
-        if frame.characters:
-            metrics["characters"] = frame.characters
+        for d in frame.data:
+            if isinstance(d, TTFBMetricsData):
+                if "ttfb" not in metrics:
+                    metrics["ttfb"] = []
+                metrics["ttfb"].append(d.model_dump(exclude_none=True))
+            elif isinstance(d, ProcessingMetricsData):
+                if "processing" not in metrics:
+                    metrics["processing"] = []
+                metrics["processing"].append(d.model_dump(exclude_none=True))
+            elif isinstance(d, LLMUsageMetricsData):
+                if "tokens" not in metrics:
+                    metrics["tokens"] = []
+                metrics["tokens"].append(d.value.model_dump(exclude_none=True))
+            elif isinstance(d, TTSUsageMetricsData):
+                if "characters" not in metrics:
+                    metrics["characters"] = []
+                metrics["characters"].append(d.model_dump(exclude_none=True))
 
         message = DailyTransportMessageFrame(message={
             "type": "pipecat-metrics",
@@ -749,7 +763,7 @@ class DailyOutputTransport(BaseOutputTransport):
     async def write_raw_audio_frames(self, frames: bytes):
         await self._client.write_raw_audio_frames(frames)
 
-    async def write_frame_to_camera(self, frame: ImageRawFrame):
+    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
         await self._client.write_frame_to_camera(frame)
 
 
@@ -811,12 +825,12 @@ class DailyTransport(BaseTransport):
     # BaseTransport
     #
 
-    def input(self) -> FrameProcessor:
+    def input(self) -> DailyInputTransport:
         if not self._input:
             self._input = DailyInputTransport(self._client, self._params, name=self._input_name)
         return self._input
 
-    def output(self) -> FrameProcessor:
+    def output(self) -> DailyOutputTransport:
         if not self._output:
             self._output = DailyOutputTransport(self._client, self._params, name=self._output_name)
         return self._output
@@ -829,11 +843,11 @@ class DailyTransport(BaseTransport):
     def participant_id(self) -> str:
         return self._client.participant_id
 
-    async def send_image(self, frame: ImageRawFrame | SpriteFrame):
+    async def send_image(self, frame: OutputImageRawFrame | SpriteFrame):
         if self._output:
             await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
 
-    async def send_audio(self, frame: AudioRawFrame):
+    async def send_audio(self, frame: OutputAudioRawFrame):
         if self._output:
             await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
 

@@ -22,4 +22,4 @@ class FireworksLLMService(BaseOpenAILLMService):
                  *,
                  model: str = "accounts/fireworks/models/firefunction-v1",
                  base_url: str = "https://api.fireworks.ai/inference/v1"):
-        super().__init__(model, base_url)
+        super().__init__(model=model, base_url=base_url)

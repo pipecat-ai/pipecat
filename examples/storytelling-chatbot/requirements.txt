@@ -2,4 +2,4 @@ async_timeout
 fastapi
 uvicorn
 python-dotenv
-pipecat-ai[daily,openai,fal]
+pipecat-ai[daily,elevenlabs,openai,fal]

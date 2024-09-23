@@ -10,7 +10,7 @@ import os
 import sys
 import wave
 
-from pipecat.frames.frames import AudioRawFrame
+from pipecat.frames.frames import OutputAudioRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -49,8 +49,9 @@ for file in sound_files:
     filename = os.path.splitext(os.path.basename(full_path))[0]
     # Open the sound and convert it to bytes
     with wave.open(full_path) as audio_file:
-        sounds[file] = AudioRawFrame(audio_file.readframes(-1),
-                                     audio_file.getframerate(), audio_file.getnchannels())
+        sounds[file] = OutputAudioRawFrame(audio_file.readframes(-1),
+                                           audio_file.getframerate(),
+                                           audio_file.getnchannels())
 
 
 class IntakeProcessor:

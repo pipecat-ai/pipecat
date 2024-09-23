@@ -4,23 +4,20 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import base64
 import json
-import io
-import copy
-from typing import List, Optional
-from dataclasses import dataclass
-from asyncio import CancelledError
 import re
 import uuid
+from pydantic import BaseModel, Field
+
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from asyncio import CancelledError
 
 from pipecat.frames.frames import (
     Frame,
     LLMModelUpdateFrame,
     TextFrame,
-    VisionImageRawFrame,
     UserImageRequestFrame,
-    UserImageRawFrame,
     LLMMessagesFrame,
     LLMFullResponseStartFrame,
     LLMFullResponseEndFrame,
@@ -28,6 +25,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     StartInterruptionFrame
 )
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
@@ -59,18 +57,32 @@ class TogetherContextAggregatorPair:
 class TogetherLLMService(LLMService):
     """This class implements inference with Together's Llama 3.1 models
     """
+    class InputParams(BaseModel):
+        frequency_penalty: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
+        max_tokens: Optional[int] = Field(default=4096, ge=1)
+        presence_penalty: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
+        temperature: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+        top_k: Optional[int] = Field(default=None, ge=0)
+        top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+        extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
             self,
             *,
             api_key: str,
             model: str = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-            max_tokens: int = 4096,
+            params: InputParams = InputParams(),
             **kwargs):
         super().__init__(**kwargs)
         self._client = AsyncTogether(api_key=api_key)
-        self._model = model
-        self._max_tokens = max_tokens
+        self.set_model_name(model)
+        self._max_tokens = params.max_tokens
+        self._frequency_penalty = params.frequency_penalty
+        self._presence_penalty = params.presence_penalty
+        self._temperature = params.temperature
+        self._top_k = params.top_k
+        self._top_p = params.top_p
+        self._extra = params.extra if isinstance(params.extra, dict) else {}
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -84,6 +96,34 @@ class TogetherLLMService(LLMService):
             _assistant=assistant
         )
 
+    async def set_frequency_penalty(self, frequency_penalty: float):
+        logger.debug(f"Switching LLM frequency_penalty to: [{frequency_penalty}]")
+        self._frequency_penalty = frequency_penalty
+
+    async def set_max_tokens(self, max_tokens: int):
+        logger.debug(f"Switching LLM max_tokens to: [{max_tokens}]")
+        self._max_tokens = max_tokens
+
+    async def set_presence_penalty(self, presence_penalty: float):
+        logger.debug(f"Switching LLM presence_penalty to: [{presence_penalty}]")
+        self._presence_penalty = presence_penalty
+
+    async def set_temperature(self, temperature: float):
+        logger.debug(f"Switching LLM temperature to: [{temperature}]")
+        self._temperature = temperature
+
+    async def set_top_k(self, top_k: float):
+        logger.debug(f"Switching LLM top_k to: [{top_k}]")
+        self._top_k = top_k
+
+    async def set_top_p(self, top_p: float):
+        logger.debug(f"Switching LLM top_p to: [{top_p}]")
+        self._top_p = top_p
+
+    async def set_extra(self, extra: Dict[str, Any]):
+        logger.debug(f"Switching LLM extra to: [{extra}]")
+        self._extra = extra
+
     async def _process_context(self, context: OpenAILLMContext):
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -93,12 +133,21 @@ class TogetherLLMService(LLMService):
 
             await self.start_ttfb_metrics()
 
-            stream = await self._client.chat.completions.create(
-                messages=context.messages,
-                model=self._model,
-                max_tokens=self._max_tokens,
-                stream=True,
-            )
+            params = {
+                "messages": context.messages,
+                "model": self.model_name,
+                "max_tokens": self._max_tokens,
+                "stream": True,
+                "frequency_penalty": self._frequency_penalty,
+                "presence_penalty": self._presence_penalty,
+                "temperature": self._temperature,
+                "top_k": self._top_k,
+                "top_p": self._top_p
+            }
+
+            params.update(self._extra)
+
+            stream = await self._client.chat.completions.create(**params)
 
             # Function calling
             got_first_chunk = False
@@ -108,13 +157,11 @@ class TogetherLLMService(LLMService):
             async for chunk in stream:
                 # logger.debug(f"Together LLM event: {chunk}")
                 if chunk.usage:
-                    tokens = {
-                        "processor": self.name,
-                        "model": self._model,
-                        "prompt_tokens": chunk.usage.prompt_tokens,
-                        "completion_tokens": chunk.usage.completion_tokens,
-                        "total_tokens": chunk.usage.total_tokens
-                    }
+                    tokens = LLMTokenUsage(
+                        prompt_tokens=chunk.usage.prompt_tokens,
+                        completion_tokens=chunk.usage.completion_tokens,
+                        total_tokens=chunk.usage.total_tokens
+                    )
                     await self.start_llm_usage_metrics(tokens)
 
                 if len(chunk.choices) == 0:
@@ -156,7 +203,7 @@ class TogetherLLMService(LLMService):
             context = TogetherLLMContext.from_messages(frame.messages)
         elif isinstance(frame, LLMModelUpdateFrame):
             logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self._model = frame.model
+            self.set_model_name(frame.model)
         else:
             await self.push_frame(frame, direction)
 
