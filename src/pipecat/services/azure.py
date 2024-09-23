@@ -4,45 +4,34 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import io
+from typing import AsyncGenerator, Optional
 
+import aiohttp
+from loguru import logger
 from PIL import Image
-from typing import AsyncGenerator
+from pydantic import BaseModel
 
-from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
-    ErrorFrame,
-    Frame,
-    StartFrame,
-    TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
-    TranscriptionFrame,
-    URLImageRawFrame,
-)
-from pipecat.metrics.metrics import TTSUsageMetricsData
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import STTService, TTSService, ImageGenService
+from pipecat.frames.frames import (CancelFrame, EndFrame, ErrorFrame, Frame,
+                                   StartFrame, TranscriptionFrame,
+                                   TTSAudioRawFrame, TTSStartedFrame,
+                                   TTSStoppedFrame, URLImageRawFrame)
+from pipecat.services.ai_services import (ImageGenService, STTService,
+                                          TTSService)
 from pipecat.services.openai import BaseOpenAILLMService
 from pipecat.utils.time import time_now_iso8601
 
-from loguru import logger
-
 # See .env.example for Azure configuration needed
 try:
-    from openai import AsyncAzureOpenAI
-    from azure.cognitiveservices.speech import (
-        SpeechConfig,
-        SpeechRecognizer,
-        SpeechSynthesizer,
-        ResultReason,
-        CancellationReason,
-    )
-    from azure.cognitiveservices.speech.audio import AudioStreamFormat, PushAudioInputStream
+    from azure.cognitiveservices.speech import (CancellationReason,
+                                                ResultReason, SpeechConfig,
+                                                SpeechRecognizer,
+                                                SpeechSynthesizer)
+    from azure.cognitiveservices.speech.audio import (AudioStreamFormat,
+                                                      PushAudioInputStream)
     from azure.cognitiveservices.speech.dialog import AudioConfig
+    from openai import AsyncAzureOpenAI
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -70,6 +59,17 @@ class AzureLLMService(BaseOpenAILLMService):
 
 
 class AzureTTSService(TTSService):
+    class InputParams(BaseModel):
+        emphasis: Optional[str] = None
+        language_code: Optional[str] = "en-US"
+        pitch: Optional[str] = None
+        rate: Optional[str] = "1.05"
+        role: Optional[str] = None
+        style: Optional[str] = None
+        style_degree: Optional[str] = None
+        volume: Optional[str] = None
+
+
     def __init__(
         self,
         *,
@@ -77,6 +77,7 @@ class AzureTTSService(TTSService):
         region: str,
         voice="en-US-SaraNeural",
         sample_rate: int = 16000,
+        params: InputParams = InputParams(),
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -86,9 +87,54 @@ class AzureTTSService(TTSService):
 
         self._voice = voice
         self._sample_rate = sample_rate
+        self._params = params
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    def _construct_ssml(self, text: str) -> str:
+        ssml = (
+            f"<speak version='1.0' xml:lang='{self._params.language_code}' "
+            "xmlns='http://www.w3.org/2001/10/synthesis' "
+            "xmlns:mstts='http://www.w3.org/2001/mstts'>"
+            f"<voice name='{self._voice}'>"
+            "<mstts:silence type='Sentenceboundary' value='20ms' />"
+        )
+
+        if self._params.style:
+            ssml += f"<mstts:express-as style='{self._params.style}'"
+            if self._params.style_degree:
+                ssml += f" styledegree='{self._params.style_degree}'"
+            if self._params.role:
+                ssml += f" role='{self._params.role}'"
+            ssml += ">"
+
+        prosody_attrs = []
+        if self._params.rate:
+            prosody_attrs.append(f"rate='{self._params.rate}'")
+        if self._params.pitch:
+            prosody_attrs.append(f"pitch='{self._params.pitch}'")
+        if self._params.volume:
+            prosody_attrs.append(f"volume='{self._params.volume}'")
+        
+        ssml += f"<prosody {' '.join(prosody_attrs)}>"
+
+        if self._params.emphasis:
+            ssml += f"<emphasis level='{self._params.emphasis}'>"
+
+        ssml += text
+
+        if self._params.emphasis:
+            ssml += "</emphasis>"
+
+        ssml += "</prosody>"
+
+        if self._params.style:
+            ssml += "</mstts:express-as>"
+
+        ssml += "</voice></speak>"
+
+        return ssml
 
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
@@ -99,16 +145,7 @@ class AzureTTSService(TTSService):
 
         await self.start_ttfb_metrics()
 
-        ssml = (
-            "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' "
-            "xmlns:mstts='http://www.w3.org/2001/mstts'>"
-            f"<voice name='{self._voice}'>"
-            "<mstts:silence type='Sentenceboundary' value='20ms' />"
-            "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>"
-            "<prosody rate='1.05'>"
-            f"{text}"
-            "</prosody></mstts:express-as></voice></speak> "
-        )
+        ssml = self._construct_ssml(text)
 
         result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, (ssml))
 
