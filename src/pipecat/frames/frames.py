@@ -132,9 +132,7 @@ class VisionImageRawFrame(InputImageRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return (
-            f"{self.name}(pts: {pts}, text: {self.text}, size: {self.size}, format: {self.format})"
-        )
+        return f"{self.name}(pts: {pts}, text: [{self.text}], size: {self.size}, format: {self.format})"
 
 
 @dataclass
@@ -177,7 +175,7 @@ class TextFrame(DataFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, text: {self.text})"
+        return f"{self.name}(pts: {pts}, text: [{self.text}])"
 
 
 @dataclass
@@ -192,7 +190,7 @@ class TranscriptionFrame(TextFrame):
     language: Language | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
@@ -205,7 +203,7 @@ class InterimTranscriptionFrame(TextFrame):
     language: Language | None = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: {self.text}, language: {self.language}, timestamp: {self.timestamp})"
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
