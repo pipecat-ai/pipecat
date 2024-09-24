@@ -77,8 +77,7 @@ class DeepgramTTSService(TTSService):
         logger.debug(f"Generating TTS: [{text}]")
 
         base_url = self._base_url
-        request_url = f"{base_url}?model={self._voice}&encoding={
-            self._encoding}&container=none&sample_rate={self._sample_rate}"
+        request_url = f"{base_url}?model={self._voice}&encoding={self._encoding}&container=none&sample_rate={self._sample_rate}"
         headers = {"authorization": f"token {self._api_key}"}
         body = {"text": text}
 
