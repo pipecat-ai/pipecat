@@ -242,6 +242,22 @@ class RTVILLMFunctionCallResultData(BaseModel):
     result: dict | str
 
 
+class RTVITextMessageData(BaseModel):
+    text: str
+
+
+class RTVILLMTextMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["llm-text"] = "llm-text"
+    data: RTVITextMessageData
+
+
+class RTVITTSTextMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["tts-text"] = "tts-text"
+    data: RTVITextMessageData
+
+
 class RTVITranscriptionMessageData(BaseModel):
     text: str
     user_id: str
