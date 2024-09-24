@@ -521,7 +521,8 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_update_config(message.id, update_config)
                 case "action":
                     action = RTVIActionRun.model_validate(message.data)
-                    await self._handle_action(message.id, action)
+                    action_frame = RTVIActionFrame(message_id=message.id, rtvi_action_run=action)
+                    await self._action_queue.put(action_frame)
                 case "llm-function-call-result":
                     data = RTVILLMFunctionCallResultData.model_validate(message.data)
                     await self._handle_function_call_result(data)
