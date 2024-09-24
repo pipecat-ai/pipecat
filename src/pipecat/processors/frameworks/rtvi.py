@@ -316,6 +316,11 @@ class RTVIProcessor(FrameProcessor):
         self._registered_actions: Dict[str, RTVIAction] = {}
         self._registered_services: Dict[str, RTVIService] = {}
 
+        # A task to process incoming action frames.
+        self._action_task = self.get_event_loop().create_task(self._action_task_handler())
+        self._action_queue = asyncio.Queue()
+
+        # A task to process incoming transport messages.
         self._message_task = self.get_event_loop().create_task(self._message_task_handler())
         self._message_queue = asyncio.Queue()
 
@@ -401,7 +406,7 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, TransportMessageFrame):
             await self._message_queue.put(frame)
         elif isinstance(frame, RTVIActionFrame):
-            await self._handle_action(frame.message_id, frame.rtvi_action_run)
+            await self._action_queue.put(frame)
         # Other frames
         else:
             await self.push_frame(frame, direction)
@@ -415,12 +420,16 @@ class RTVIProcessor(FrameProcessor):
         await self._maybe_send_bot_ready()
 
     async def _stop(self, frame: EndFrame):
-        # We need to cancel the message task handler because that one is not
-        # processing EndFrames.
+        self._action_task.cancel()
+        await self._action_task
+
         self._message_task.cancel()
         await self._message_task
 
     async def _cancel(self, frame: CancelFrame):
+        self._action_task.cancel()
+        await self._action_task
+
         self._message_task.cancel()
         await self._message_task
 
@@ -470,6 +479,15 @@ class RTVIProcessor(FrameProcessor):
 
         if message:
             await self._push_transport_message(message)
+
+    async def _action_task_handler(self):
+        while True:
+            try:
+                frame = await self._action_queue.get()
+                await self._handle_action(frame.message_id, frame.rtvi_action_run)
+                self._action_queue.task_done()
+            except asyncio.CancelledError:
+                break
 
     async def _message_task_handler(self):
         while True:
