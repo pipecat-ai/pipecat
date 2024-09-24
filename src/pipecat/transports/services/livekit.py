@@ -326,7 +326,7 @@ class LiveKitInputTransport(BaseInputTransport):
 
     async def push_app_message(self, message: Any, sender: str):
         frame = LiveKitTransportMessageFrame(message=message, participant_id=sender)
-        await self._internal_push_frame(frame)
+        await self.push_frame(frame)
 
     async def _audio_in_task_handler(self):
         logger.info("Audio input task started")
@@ -337,7 +337,7 @@ class LiveKitInputTransport(BaseInputTransport):
                     audio_frame_event, participant_id = audio_data
                     pipecat_audio_frame = self._convert_livekit_audio_to_pipecat(audio_frame_event)
                     await self.push_audio_frame(pipecat_audio_frame)
-                    await self._internal_push_frame(
+                    await self.push_frame(
                         pipecat_audio_frame
                     )  # TODO: ensure audio frames are pushed with the default BaseInputTransport.push_audio_frame()
             except asyncio.CancelledError:
