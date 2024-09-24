@@ -109,8 +109,12 @@ class LiveKitTransportClient:
             logger.info(f"Connected to {self._room_name}")
 
             # Set up audio source and track
-            self._audio_source = rtc.AudioSource(self._params.audio_out_sample_rate, self._params.audio_out_channels)
-            self._audio_track = rtc.LocalAudioTrack.create_audio_track("pipecat-audio", self._audio_source)
+            self._audio_source = rtc.AudioSource(
+                self._params.audio_out_sample_rate, self._params.audio_out_channels
+            )
+            self._audio_track = rtc.LocalAudioTrack.create_audio_track(
+                "pipecat-audio", self._audio_source
+            )
             options = rtc.TrackPublishOptions()
             options.source = rtc.TrackSource.SOURCE_MICROPHONE
             await self._room.local_participant.publish_track(self._audio_track, options)
@@ -136,7 +140,9 @@ class LiveKitTransportClient:
 
         try:
             if participant_id:
-                await self._room.local_participant.publish_data(data, reliable=True, destination_identities=[participant_id])
+                await self._room.local_participant.publish_data(
+                    data, reliable=True, destination_identities=[participant_id]
+                )
             else:
                 await self._room.local_participant.publish_data(data, reliable=True)
         except Exception as e:
@@ -190,12 +196,18 @@ class LiveKitTransportClient:
         asyncio.create_task(self._async_on_participant_disconnected(participant))
 
     def _on_track_subscribed_wrapper(
-        self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant
+        self,
+        track: rtc.Track,
+        publication: rtc.RemoteTrackPublication,
+        participant: rtc.RemoteParticipant,
     ):
         asyncio.create_task(self._async_on_track_subscribed(track, publication, participant))
 
     def _on_track_unsubscribed_wrapper(
-        self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant
+        self,
+        track: rtc.Track,
+        publication: rtc.RemoteTrackPublication,
+        participant: rtc.RemoteParticipant,
     ):
         asyncio.create_task(self._async_on_track_unsubscribed(track, publication, participant))
 
@@ -218,7 +230,10 @@ class LiveKitTransportClient:
         await self._callbacks.on_participant_disconnected(participant.sid)
 
     async def _async_on_track_subscribed(
-        self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant
+        self,
+        track: rtc.Track,
+        publication: rtc.RemoteTrackPublication,
+        participant: rtc.RemoteParticipant,
     ):
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             logger.info(f"Audio track subscribed: {track.sid} from participant {participant.sid}")
@@ -227,7 +242,10 @@ class LiveKitTransportClient:
             asyncio.create_task(self._process_audio_stream(audio_stream, participant.sid))
 
     async def _async_on_track_unsubscribed(
-        self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant
+        self,
+        track: rtc.Track,
+        publication: rtc.RemoteTrackPublication,
+        participant: rtc.RemoteParticipant,
     ):
         logger.info(f"Track unsubscribed: {publication.sid} from {participant.identity}")
         if track.kind == rtc.TrackKind.KIND_AUDIO:
@@ -268,7 +286,9 @@ class LiveKitInputTransport(BaseInputTransport):
         self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
         self._current_sample_rate: int = params.audio_in_sample_rate
         if params.vad_enabled and not params.vad_analyzer:
-            self._vad_analyzer = VADAnalyzer(sample_rate=self._current_sample_rate, num_channels=self._params.audio_in_channels)
+            self._vad_analyzer = VADAnalyzer(
+                sample_rate=self._current_sample_rate, num_channels=self._params.audio_in_channels
+            )
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -326,7 +346,9 @@ class LiveKitInputTransport(BaseInputTransport):
             except Exception as e:
                 logger.error(f"Error in audio input task: {e}")
 
-    def _convert_livekit_audio_to_pipecat(self, audio_frame_event: rtc.AudioFrameEvent) -> AudioRawFrame:
+    def _convert_livekit_audio_to_pipecat(
+        self, audio_frame_event: rtc.AudioFrameEvent
+    ) -> AudioRawFrame:
         audio_frame = audio_frame_event.frame
         audio_data = np.frombuffer(audio_frame.data, dtype=np.int16)
         original_sample_rate = audio_frame.sample_rate
@@ -340,11 +362,19 @@ class LiveKitInputTransport(BaseInputTransport):
 
         if sample_rate != self._current_sample_rate:
             self._current_sample_rate = sample_rate
-            self._vad_analyzer = VADAnalyzer(sample_rate=self._current_sample_rate, num_channels=self._params.audio_in_channels)
+            self._vad_analyzer = VADAnalyzer(
+                sample_rate=self._current_sample_rate, num_channels=self._params.audio_in_channels
+            )
 
-        return AudioRawFrame(audio=audio_data.tobytes(), sample_rate=sample_rate, num_channels=audio_frame.num_channels)
+        return AudioRawFrame(
+            audio=audio_data.tobytes(),
+            sample_rate=sample_rate,
+            num_channels=audio_frame.num_channels,
+        )
 
-    def _resample_audio(self, audio_data: np.ndarray, original_rate: int, target_rate: int) -> np.ndarray:
+    def _resample_audio(
+        self, audio_data: np.ndarray, original_rate: int, target_rate: int
+    ) -> np.ndarray:
         num_samples = int(len(audio_data) * target_rate / original_rate)
         resampled_audio = signal.resample(audio_data, num_samples)
         return resampled_audio.astype(np.int16)
@@ -392,7 +422,9 @@ class LiveKitOutputTransport(BaseOutputTransport):
         if hasattr(frame, "characters"):
             metrics["characters"] = frame.characters
 
-        message = LiveKitTransportMessageFrame(message={"type": "pipecat-metrics", "metrics": metrics})
+        message = LiveKitTransportMessageFrame(
+            message={"type": "pipecat-metrics", "metrics": metrics}
+        )
         await self._client.send_data(str(message.message).encode())
 
     async def write_raw_audio_frames(self, frames: bytes):
@@ -430,7 +462,9 @@ class LiveKitTransport(BaseTransport):
         self._room_name = room_name
         self._params = params
 
-        self._client = LiveKitTransportClient(url, token, room_name, self._params, self._create_callbacks(), self._loop)
+        self._client = LiveKitTransportClient(
+            url, token, room_name, self._params, self._create_callbacks(), self._loop
+        )
         self._input: LiveKitInputTransport | None = None
         self._output: LiveKitOutputTransport | None = None
 
@@ -463,7 +497,9 @@ class LiveKitTransport(BaseTransport):
 
     def output(self) -> FrameProcessor:
         if not self._output:
-            self._output = LiveKitOutputTransport(self._client, self._params, name=self._output_name)
+            self._output = LiveKitOutputTransport(
+                self._client, self._params, name=self._output_name
+            )
         return self._output
 
     @property
@@ -519,7 +555,9 @@ class LiveKitTransport(BaseTransport):
         participant = self._client._room.remote_participants.get(participant_id)
         if participant:
             for publication in participant.audio_tracks.values():
-                self._client._on_track_subscribed_wrapper(publication.track, publication, participant)
+                self._client._on_track_subscribed_wrapper(
+                    publication.track, publication, participant
+                )
 
     async def _on_audio_track_unsubscribed(self, participant_id: str):
         await self._call_event_handler("on_audio_track_unsubscribed", participant_id)

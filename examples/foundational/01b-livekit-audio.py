@@ -35,7 +35,9 @@ def generate_token(room_name: str, participant_name: str, api_key: str, api_secr
 
 async def configure_livekit():
     parser = argparse.ArgumentParser(description="LiveKit AI SDK Bot Sample")
-    parser.add_argument("-r", "--room", type=str, required=False, help="Name of the LiveKit room to join")
+    parser.add_argument(
+        "-r", "--room", type=str, required=False, help="Name of the LiveKit room to join"
+    )
     parser.add_argument("-u", "--url", type=str, required=False, help="URL of the LiveKit server")
 
     args, unknown = parser.parse_known_args()
@@ -56,7 +58,9 @@ async def configure_livekit():
         )
 
     if not api_key or not api_secret:
-        raise Exception("LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set in environment variables.")
+        raise Exception(
+            "LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set in environment variables."
+        )
 
     token = generate_token(room_name, "Say One Thing", api_key, api_secret)
 
@@ -71,7 +75,10 @@ async def main():
         (url, token, room_name) = await configure_livekit()
 
         transport = LiveKitTransport(
-            url=url, token=token, room_name=room_name, params=LiveKitParams(audio_out_enabled=True, audio_out_sample_rate=16000)
+            url=url,
+            token=token,
+            room_name=room_name,
+            params=LiveKitParams(audio_out_enabled=True, audio_out_sample_rate=16000),
         )
 
         tts = CartesiaTTSService(
@@ -88,7 +95,11 @@ async def main():
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant_id):
             await asyncio.sleep(1)
-            await task.queue_frame(TextFrame("Hello there! How are you doing today? Would you like to talk about the weather?"))
+            await task.queue_frame(
+                TextFrame(
+                    "Hello there! How are you doing today? Would you like to talk about the weather?"
+                )
+            )
 
         await runner.run(task)
 
