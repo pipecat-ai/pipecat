@@ -77,6 +77,7 @@ class AzureTTSService(TTSService):
         region: str,
         voice="en-US-SaraNeural",
         sample_rate: int = 16000,
+        speed: float = 1.05,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -86,6 +87,7 @@ class AzureTTSService(TTSService):
 
         self._voice = voice
         self._sample_rate = sample_rate
+        self._speed = speed
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -105,7 +107,7 @@ class AzureTTSService(TTSService):
             f"<voice name='{self._voice}'>"
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
             "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>"
-            "<prosody rate='1.05'>"
+            "<prosody rate='{self._speed}'>"
             f"{text}"
             "</prosody></mstts:express-as></voice></speak> "
         )
