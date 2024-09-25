@@ -56,7 +56,7 @@ openpipe = [ "openpipe~=4.24.0" ]
 playht = [ "pyht~=0.0.28" ]
 silero = [ "onnxruntime>=1.16.1" ]
 together = [ "together~=1.2.7" ]
-websocket = [ "websockets~=12.0", "fastapi~=0.112.1" ]
+websocket = [ "websockets~=12.0", "fastapi~=0.115.0" ]
 whisper = [ "faster-whisper~=1.0.3" ]
 xtts = [ "resampy~=0.4.3" ]
 
