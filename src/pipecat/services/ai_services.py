@@ -283,7 +283,7 @@ class AsyncTTSService(TTSService):
             self._stop_frame_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        super().process_frame(frame, direction)
+        await super().process_frame(frame, direction)
         if isinstance(frame, TTSSpeakFrame):
             await self.flush_audio()
 
