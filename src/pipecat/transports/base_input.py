@@ -37,6 +37,10 @@ class BaseInputTransport(FrameProcessor):
 
         self._executor = ThreadPoolExecutor(max_workers=5)
 
+        # Task to process incoming audio (VAD) and push audio frames downstream
+        # if passthrough is enabled.
+        self._audio_task = None
+
     async def start(self, frame: StartFrame):
         # Create audio input queue and task if needed.
         if self._params.audio_in_enabled or self._params.vad_enabled:
@@ -45,16 +49,17 @@ class BaseInputTransport(FrameProcessor):
 
     async def stop(self, frame: EndFrame):
         # Cancel and wait for the audio input task to finish.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_task.cancel()
             await self._audio_task
+            self._audio_task = None
 
     async def cancel(self, frame: CancelFrame):
-        # Cancel all the tasks and wait for them to finish.
-
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        # Cancel and wait for the audio input task to finish.
+        if self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_task.cancel()
             await self._audio_task
+            self._audio_task = None
 
     def vad_analyzer(self) -> VADAnalyzer | None:
         return self._params.vad_analyzer
