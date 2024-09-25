@@ -350,6 +350,7 @@ class AsyncWordTTSService(AsyncTTSService):
         if self._words_task:
             self._words_task.cancel()
             await self._words_task
+            self._words_task = None
 
     async def _words_task_handler(self):
         while True:
