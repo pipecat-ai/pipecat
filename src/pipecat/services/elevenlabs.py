@@ -72,6 +72,7 @@ def calculate_word_times(
 
 class ElevenLabsTTSService(AsyncWordTTSService):
     class InputParams(BaseModel):
+        language_code: Optional[str] = None
         output_format: Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"] = "pcm_16000"
         optimize_streaming_latency: Optional[str] = None
         stability: Optional[float] = None
@@ -227,6 +228,15 @@ class ElevenLabsTTSService(AsyncWordTTSService):
 
             if self._params.optimize_streaming_latency:
                 url += f"&optimize_streaming_latency={self._params.optimize_streaming_latency}"
+
+            # language_code can only be used with the 'eleven_turbo_v2_5' model
+            if self._params.language_code:
+                if model == "eleven_turbo_v2_5":
+                    url += f"&language_code={self._params.language_code}"
+                else:
+                    logger.debug(
+                        f"Language code [{self._params.language_code}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
+                    )
 
             self._websocket = await websockets.connect(url)
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
