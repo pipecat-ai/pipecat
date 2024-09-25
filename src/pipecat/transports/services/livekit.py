@@ -16,6 +16,12 @@ from pipecat.frames.frames import (
     StartFrame,
     TransportMessageFrame,
 )
+from pipecat.metrics.metrics import (
+    LLMUsageMetricsData,
+    ProcessingMetricsData,
+    TTFBMetricsData,
+    TTSUsageMetricsData,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -257,9 +263,9 @@ class LiveKitTransportClient:
     async def _async_on_connected(self):
         await self._callbacks.on_connected()
 
-    async def _async_on_disconnected(self):
+    async def _async_on_disconnected(self, reason=None):
         self._connected = False
-        logger.info(f"Disconnected from {self._room_name}")
+        logger.info(f"Disconnected from {self._room_name}. Reason: {reason}")
         await self._callbacks.on_disconnected()
 
     async def _process_audio_stream(self, audio_stream: rtc.AudioStream, participant_id: str):
@@ -413,14 +419,23 @@ class LiveKitOutputTransport(BaseOutputTransport):
 
     async def send_metrics(self, frame: MetricsFrame):
         metrics = {}
-        if frame.ttfb:
-            metrics["ttfb"] = frame.ttfb
-        if frame.processing:
-            metrics["processing"] = frame.processing
-        if hasattr(frame, "tokens"):
-            metrics["tokens"] = frame.tokens
-        if hasattr(frame, "characters"):
-            metrics["characters"] = frame.characters
+        for d in frame.data:
+            if isinstance(d, TTFBMetricsData):
+                if "ttfb" not in metrics:
+                    metrics["ttfb"] = []
+                metrics["ttfb"].append(d.model_dump())
+            elif isinstance(d, ProcessingMetricsData):
+                if "processing" not in metrics:
+                    metrics["processing"] = []
+                metrics["processing"].append(d.model_dump())
+            elif isinstance(d, LLMUsageMetricsData):
+                if "tokens" not in metrics:
+                    metrics["tokens"] = []
+                metrics["tokens"].append(d.value.model_dump(exclude_none=True))
+            elif isinstance(d, TTSUsageMetricsData):
+                if "characters" not in metrics:
+                    metrics["characters"] = []
+                metrics["characters"].append(d.model_dump())
 
         message = LiveKitTransportMessageFrame(
             message={"type": "pipecat-metrics", "metrics": metrics}
