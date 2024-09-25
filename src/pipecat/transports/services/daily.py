@@ -575,6 +575,9 @@ class DailyInputTransport(BaseInputTransport):
         self._client = client
 
         self._video_renderers = {}
+
+        # Task that gets audio data from a device or the network and queues it
+        # internally to be processed.
         self._audio_in_task = None
 
         self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
@@ -603,6 +606,7 @@ class DailyInputTransport(BaseInputTransport):
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_in_task.cancel()
             await self._audio_in_task
+            self._audio_in_task = None
 
     async def cancel(self, frame: CancelFrame):
         # Parent stop.
@@ -613,6 +617,7 @@ class DailyInputTransport(BaseInputTransport):
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_in_task.cancel()
             await self._audio_in_task
+            self._audio_in_task = None
 
     async def cleanup(self):
         await super().cleanup()

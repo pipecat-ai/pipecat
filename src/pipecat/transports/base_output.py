@@ -47,6 +47,18 @@ class BaseOutputTransport(FrameProcessor):
 
         self._params = params
 
+        # Task to process incoming frames so we don't block upstream elements.
+        self._sink_task = None
+
+        # Task to process incoming frames using a clock.
+        self._sink_clock_task = None
+
+        # Task to write/send audio frames.
+        self._audio_out_task = None
+
+        # Task to write/send image frames.
+        self._camera_out_task = None
+
         # These are the images that we should send to the camera at our desired
         # framerate.
         self._camera_images = None
@@ -88,36 +100,53 @@ class BaseOutputTransport(FrameProcessor):
         # that EndFrame to be processed by the sink tasks. We also need to wait
         # for these tasks before cancelling the camera and audio tasks below
         # because they might be still rendering.
-        await self._sink_task
-        await self._sink_clock_task
+        if self._sink_task:
+            await self._sink_task
+        if self._sink_clock_task:
+            await self._sink_clock_task
 
         # Cancel and wait for the camera output task to finish.
-        if self._params.camera_out_enabled:
+        if self._camera_out_task and self._params.camera_out_enabled:
             self._camera_out_task.cancel()
             await self._camera_out_task
+            self._camera_out_task = None
 
         # Cancel and wait for the audio output task to finish.
-        if self._params.audio_out_enabled and self._params.audio_out_is_live:
+        if (
+            self._audio_out_task
+            and self._params.audio_out_enabled
+            and self._params.audio_out_is_live
+        ):
             self._audio_out_task.cancel()
             await self._audio_out_task
+            self._audio_out_task = None
 
     async def cancel(self, frame: CancelFrame):
         # Since we are cancelling everything it doesn't matter if we cancel sink
         # tasks first or not.
-        self._sink_task.cancel()
-        self._sink_clock_task.cancel()
-        await self._sink_task
-        await self._sink_clock_task
+        if self._sink_task:
+            self._sink_task.cancel()
+            await self._sink_task
+            self._sink_task = None
+
+        if self._sink_clock_task:
+            self._sink_clock_task.cancel()
+            await self._sink_clock_task
+            self._sink_clock_task = None
 
         # Cancel and wait for the camera output task to finish.
-        if self._params.camera_out_enabled:
+        if self._camera_out_task and self._params.camera_out_enabled:
             self._camera_out_task.cancel()
             await self._camera_out_task
+            self._camera_out_task = None
 
         # Cancel and wait for the audio output task to finish.
-        if self._params.audio_out_enabled and self._params.audio_out_is_live:
+        if self._audio_out_task and (
+            self._params.audio_out_enabled and self._params.audio_out_is_live
+        ):
             self._audio_out_task.cancel()
             await self._audio_out_task
+            self._audio_out_task = None
 
     async def send_message(self, frame: TransportMessageFrame):
         pass
@@ -183,11 +212,13 @@ class BaseOutputTransport(FrameProcessor):
 
         if isinstance(frame, StartInterruptionFrame):
             # Stop sink tasks.
-            self._sink_task.cancel()
-            await self._sink_task
+            if self._sink_task:
+                self._sink_task.cancel()
+                await self._sink_task
             # Stop sink clock tasks.
-            self._sink_clock_task.cancel()
-            await self._sink_clock_task
+            if self._sink_clock_task:
+                self._sink_clock_task.cancel()
+                await self._sink_clock_task
             # Create sink tasks.
             self._create_sink_tasks()
             # Let's send a bot stopped speaking if we have to.

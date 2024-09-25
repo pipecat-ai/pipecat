@@ -423,18 +423,26 @@ class RTVIProcessor(FrameProcessor):
         await self._maybe_send_bot_ready()
 
     async def _stop(self, frame: EndFrame):
-        self._action_task.cancel()
-        await self._action_task
+        if self._action_task:
+            self._action_task.cancel()
+            await self._action_task
+            self._action_task = None
 
-        self._message_task.cancel()
-        await self._message_task
+        if self._message_task:
+            self._message_task.cancel()
+            await self._message_task
+            self._message_task = None
 
     async def _cancel(self, frame: CancelFrame):
-        self._action_task.cancel()
-        await self._action_task
+        if self._action_task:
+            self._action_task.cancel()
+            await self._action_task
+            self._action_task = None
 
-        self._message_task.cancel()
-        await self._message_task
+        if self._message_task:
+            self._message_task.cancel()
+            await self._message_task
+            self._message_task = None
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
         frame = TransportMessageFrame(
