@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import inspect
 
 from enum import Enum
 
@@ -47,6 +48,8 @@ class FrameProcessor:
         self._next: "FrameProcessor" | None = None
         self._loop: asyncio.AbstractEventLoop = loop or asyncio.get_running_loop()
         self._sync = sync
+
+        self._event_handlers: dict = {}
 
         # Clock
         self._clock: BaseClock | None = None
@@ -169,6 +172,23 @@ class FrameProcessor:
         else:
             await self.__push_queue.put((frame, direction))
 
+    def event_handler(self, event_name: str):
+        def decorator(handler):
+            self.add_event_handler(event_name, handler)
+            return handler
+
+        return decorator
+
+    def add_event_handler(self, event_name: str, handler):
+        if event_name not in self._event_handlers:
+            raise Exception(f"Event handler {event_name} not registered")
+        self._event_handlers[event_name].append(handler)
+
+    def _register_event_handler(self, event_name: str):
+        if event_name in self._event_handlers:
+            raise Exception(f"Event handler {event_name} already registered")
+        self._event_handlers[event_name] = []
+
     #
     # Handle interruptions
     #
@@ -211,6 +231,16 @@ class FrameProcessor:
                 self.__push_queue.task_done()
             except asyncio.CancelledError:
                 break
+
+    async def _call_event_handler(self, event_name: str, *args, **kwargs):
+        try:
+            for handler in self._event_handlers[event_name]:
+                if inspect.iscoroutinefunction(handler):
+                    await handler(self, *args, **kwargs)
+                else:
+                    handler(self, *args, **kwargs)
+        except Exception as e:
+            logger.exception(f"Exception in event handler {event_name}: {e}")
 
     def __str__(self):
         return self.name
