@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `AsyncGeneratorProcessor`. This processor can be used together with a
+  `FrameSerializer` as an async generator. It provides a `generator()` function
+  that returns an `AsyncGenerator` and that yields serialized frames.
+
 - Added `EndTaskFrame` and `CancelTaskFrame`. These are new frames that are
   meant to be pushed upstream to tell the pipeline task to stop nicely or
   immediately respectively.
