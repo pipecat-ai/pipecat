@@ -259,6 +259,10 @@ class AsyncTTSService(TTSService):
     async def flush_audio(self):
         pass
 
+    async def say(self, text: str):
+        await super.say(text)
+        await self.flush_audio()
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
         if self._push_stop_frames:
@@ -277,6 +281,11 @@ class AsyncTTSService(TTSService):
             self._stop_frame_task.cancel()
             await self._stop_frame_task
             self._stop_frame_task = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TTSSpeakFrame):
+            await self.flush_audio()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         await super().push_frame(frame, direction)
