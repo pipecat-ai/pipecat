@@ -340,6 +340,27 @@ class FatalErrorFrame(ErrorFrame):
 
 
 @dataclass
+class EndTaskFrame(SystemFrame):
+    """This is used to notify the pipeline task that the pipeline should be
+    closed nicely (flushing all the queued frames) by pushing an EndFrame
+    downstream.
+
+    """
+
+    pass
+
+
+@dataclass
+class CancelTaskFrame(SystemFrame):
+    """This is used to notify the pipeline task that the pipeline should be
+    stopped immediately by pushing a CancelFrame downstream.
+
+    """
+
+    pass
+
+
+@dataclass
 class StopTaskFrame(SystemFrame):
     """Indicates that a pipeline task should be stopped but that the pipeline
     processors should be kept in a running state. This is normally queued from
