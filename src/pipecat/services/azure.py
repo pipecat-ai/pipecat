@@ -4,12 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import io
+from typing import AsyncGenerator, Optional
 
+import aiohttp
+from loguru import logger
 from PIL import Image
-from typing import AsyncGenerator
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -17,32 +19,28 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     StartFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TranscriptionFrame,
     URLImageRawFrame,
 )
-from pipecat.metrics.metrics import TTSUsageMetricsData
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import STTService, TTSService, ImageGenService
+from pipecat.services.ai_services import ImageGenService, STTService, TTSService
 from pipecat.services.openai import BaseOpenAILLMService
 from pipecat.utils.time import time_now_iso8601
 
-from loguru import logger
-
 # See .env.example for Azure configuration needed
 try:
-    from openai import AsyncAzureOpenAI
     from azure.cognitiveservices.speech import (
+        CancellationReason,
+        ResultReason,
         SpeechConfig,
         SpeechRecognizer,
         SpeechSynthesizer,
-        ResultReason,
-        CancellationReason,
     )
     from azure.cognitiveservices.speech.audio import AudioStreamFormat, PushAudioInputStream
     from azure.cognitiveservices.speech.dialog import AudioConfig
+    from openai import AsyncAzureOpenAI
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -70,6 +68,16 @@ class AzureLLMService(BaseOpenAILLMService):
 
 
 class AzureTTSService(TTSService):
+    class InputParams(BaseModel):
+        emphasis: Optional[str] = None
+        language_code: Optional[str] = "en-US"
+        pitch: Optional[str] = None
+        rate: Optional[str] = "1.05"
+        role: Optional[str] = None
+        style: Optional[str] = None
+        style_degree: Optional[str] = None
+        volume: Optional[str] = None
+
     def __init__(
         self,
         *,
@@ -77,6 +85,7 @@ class AzureTTSService(TTSService):
         region: str,
         voice="en-US-SaraNeural",
         sample_rate: int = 16000,
+        params: InputParams = InputParams(),
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -86,29 +95,118 @@ class AzureTTSService(TTSService):
 
         self._voice = voice
         self._sample_rate = sample_rate
+        self._params = params
 
     def can_generate_metrics(self) -> bool:
         return True
 
+    def _construct_ssml(self, text: str) -> str:
+        ssml = (
+            f"<speak version='1.0' xml:lang='{self._params.language_code}' "
+            "xmlns='http://www.w3.org/2001/10/synthesis' "
+            "xmlns:mstts='http://www.w3.org/2001/mstts'>"
+            f"<voice name='{self._voice}'>"
+            "<mstts:silence type='Sentenceboundary' value='20ms' />"
+        )
+
+        if self._params.style:
+            ssml += f"<mstts:express-as style='{self._params.style}'"
+            if self._params.style_degree:
+                ssml += f" styledegree='{self._params.style_degree}'"
+            if self._params.role:
+                ssml += f" role='{self._params.role}'"
+            ssml += ">"
+
+        prosody_attrs = []
+        if self._params.rate:
+            prosody_attrs.append(f"rate='{self._params.rate}'")
+        if self._params.pitch:
+            prosody_attrs.append(f"pitch='{self._params.pitch}'")
+        if self._params.volume:
+            prosody_attrs.append(f"volume='{self._params.volume}'")
+
+        ssml += f"<prosody {' '.join(prosody_attrs)}>"
+
+        if self._params.emphasis:
+            ssml += f"<emphasis level='{self._params.emphasis}'>"
+
+        ssml += text
+
+        if self._params.emphasis:
+            ssml += "</emphasis>"
+
+        ssml += "</prosody>"
+
+        if self._params.style:
+            ssml += "</mstts:express-as>"
+
+        ssml += "</voice></speak>"
+
+        return ssml
+
     async def set_voice(self, voice: str):
         logger.debug(f"Switching TTS voice to: [{voice}]")
         self._voice = voice
+
+    async def set_emphasis(self, emphasis: str):
+        logger.debug(f"Setting TTS emphasis to: [{emphasis}]")
+        self._params.emphasis = emphasis
+
+    async def set_language_code(self, language_code: str):
+        logger.debug(f"Setting TTS language code to: [{language_code}]")
+        self._params.language_code = language_code
+
+    async def set_pitch(self, pitch: str):
+        logger.debug(f"Setting TTS pitch to: [{pitch}]")
+        self._params.pitch = pitch
+
+    async def set_rate(self, rate: str):
+        logger.debug(f"Setting TTS rate to: [{rate}]")
+        self._params.rate = rate
+
+    async def set_role(self, role: str):
+        logger.debug(f"Setting TTS role to: [{role}]")
+        self._params.role = role
+
+    async def set_style(self, style: str):
+        logger.debug(f"Setting TTS style to: [{style}]")
+        self._params.style = style
+
+    async def set_style_degree(self, style_degree: str):
+        logger.debug(f"Setting TTS style degree to: [{style_degree}]")
+        self._params.style_degree = style_degree
+
+    async def set_volume(self, volume: str):
+        logger.debug(f"Setting TTS volume to: [{volume}]")
+        self._params.volume = volume
+
+    async def set_params(self, **kwargs):
+        valid_params = {
+            "voice": self.set_voice,
+            "emphasis": self.set_emphasis,
+            "language_code": self.set_language_code,
+            "pitch": self.set_pitch,
+            "rate": self.set_rate,
+            "role": self.set_role,
+            "style": self.set_style,
+            "style_degree": self.set_style_degree,
+            "volume": self.set_volume,
+        }
+
+        for param, value in kwargs.items():
+            if param in valid_params:
+                await valid_params[param](value)
+            else:
+                logger.warning(f"Ignoring unknown parameter: {param}")
+
+        logger.debug(f"Updated TTS parameters: {', '.join(kwargs.keys())}")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
         await self.start_ttfb_metrics()
 
-        ssml = (
-            "<speak version='1.0' xml:lang='en-US' xmlns='http://www.w3.org/2001/10/synthesis' "
-            "xmlns:mstts='http://www.w3.org/2001/mstts'>"
-            f"<voice name='{self._voice}'>"
-            "<mstts:silence type='Sentenceboundary' value='20ms' />"
-            "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>"
-            "<prosody rate='1.05'>"
-            f"{text}"
-            "</prosody></mstts:express-as></voice></speak> "
-        )
+        ssml = self._construct_ssml(text)
 
         result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, (ssml))
 
