@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `EndTaskFrame` and `CancelTaskFrame`. These are new frames that are
+  meant to be pushed upstream to tell the pipeline task to stop nicely or
+  immediately respectively.
+
 - Added configurable LLM parameters (e.g., temperature, top_p, max_tokens, seed)
   for OpenAI, Anthropic, and Together AI services along with corresponding
   setter functions.

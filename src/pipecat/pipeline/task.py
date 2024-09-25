@@ -14,7 +14,9 @@ from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     CancelFrame,
+    CancelTaskFrame,
     EndFrame,
+    EndTaskFrame,
     ErrorFrame,
     Frame,
     MetricsFrame,
@@ -52,7 +54,13 @@ class Source(FrameProcessor):
                 await self.push_frame(frame, direction)
 
     async def _handle_upstream_frame(self, frame: Frame):
-        if isinstance(frame, ErrorFrame):
+        if isinstance(frame, EndTaskFrame):
+            # Tell the task we should end nicely.
+            await self._up_queue.put(EndTaskFrame())
+        elif isinstance(frame, CancelTaskFrame):
+            # Tell the task we should end right away.
+            await self._up_queue.put(CancelTaskFrame())
+        elif isinstance(frame, ErrorFrame):
             logger.error(f"Error running app: {frame}")
             if frame.fatal:
                 # Cancel all tasks downstream.
@@ -165,7 +173,11 @@ class PipelineTask:
         while True:
             try:
                 frame = await self._up_queue.get()
-                if isinstance(frame, StopTaskFrame):
+                if isinstance(frame, EndTaskFrame):
+                    await self.queue_frame(EndFrame())
+                elif isinstance(frame, CancelTaskFrame):
+                    await self.queue_frame(CancelFrame())
+                elif isinstance(frame, StopTaskFrame):
                     await self.queue_frame(StopTaskFrame())
                 self._up_queue.task_done()
             except asyncio.CancelledError:
