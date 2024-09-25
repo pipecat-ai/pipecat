@@ -107,7 +107,7 @@ class AzureTTSService(TTSService):
             f"<voice name='{self._voice}'>"
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
             "<mstts:express-as style='lyrical' styledegree='2' role='SeniorFemale'>"
-            "<prosody rate='1.05'>"
+            f"<prosody rate='{self._speed}'>"
             f"{text}"
             "</prosody></mstts:express-as></voice></speak> "
         )
