@@ -37,8 +37,6 @@ try:
         SpeechConfig,
         SpeechRecognizer,
         SpeechSynthesizer,
-        ResultReason,
-        CancellationReason,
         languageconfig,
     )
     from azure.cognitiveservices.speech.audio import AudioStreamFormat, PushAudioInputStream
