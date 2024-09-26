@@ -260,7 +260,7 @@ class AsyncTTSService(TTSService):
         pass
 
     async def say(self, text: str):
-        await super.say(text)
+        await super().say(text)
         await self.flush_audio()
 
     async def start(self, frame: StartFrame):
