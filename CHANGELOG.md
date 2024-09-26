@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Google TTS service and corresponding foundational example `07n-interruptible-google.py`
+
 - Added AWS Polly TTS support and `07m-interruptible-aws.py` as an example.
 
 - Added InputParams to Azure TTS service.

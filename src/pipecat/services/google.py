@@ -5,30 +5,37 @@
 #
 
 import asyncio
+import json
+from typing import AsyncGenerator, List, Literal, Optional
 
-from typing import List
+import numpy as np
+from loguru import logger
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     Frame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMessagesFrame,
     LLMModelUpdateFrame,
     TextFrame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     VisionImageRawFrame,
-    LLMMessagesFrame,
-    LLMFullResponseStartFrame,
-    LLMFullResponseEndFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
-
-from loguru import logger
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import LLMService, TTSService
 
 try:
-    import google.generativeai as gai
     import google.ai.generativelanguage as glm
+    import google.generativeai as gai
+    from google.cloud import texttospeech_v1
+    from google.oauth2 import service_account
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -137,3 +144,195 @@ class GoogleLLMService(LLMService):
 
         if context:
             await self._process_context(context)
+
+
+class GoogleTTSService(TTSService):
+    class InputParams(BaseModel):
+        pitch: Optional[str] = None
+        rate: Optional[str] = None
+        volume: Optional[str] = None
+        emphasis: Optional[Literal["strong", "moderate", "reduced", "none"]] = None
+        language: Optional[str] = None
+        gender: Optional[Literal["male", "female", "neutral"]] = None
+        google_style: Optional[Literal["apologetic", "calm", "empathetic", "firm", "lively"]] = None
+
+    def __init__(
+        self,
+        *,
+        credentials: Optional[str] = None,
+        credentials_path: Optional[str] = None,
+        voice_id: str = "en-US-Neural2-A",
+        sample_rate: int = 24000,
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
+        super().__init__(sample_rate=sample_rate, **kwargs)
+
+        self._voice_id: str = voice_id
+        self._params = params
+        self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
+            credentials, credentials_path
+        )
+
+    def _create_client(
+        self, credentials: Optional[str], credentials_path: Optional[str]
+    ) -> texttospeech_v1.TextToSpeechAsyncClient:
+        creds: Optional[service_account.Credentials] = None
+
+        # Create a Google Cloud service account for the Cloud Text-to-Speech API
+        # Using either the provided credentials JSON string or the path to a service account JSON
+        # file, create a Google Cloud service account and use it to authenticate with the API.
+        if credentials:
+            # Use provided credentials JSON string
+            json_account_info = json.loads(credentials)
+            creds = service_account.Credentials.from_service_account_info(json_account_info)
+        elif credentials_path:
+            # Use service account JSON file if provided
+            creds = service_account.Credentials.from_service_account_file(credentials_path)
+        else:
+            raise ValueError("Either 'credentials' or 'credentials_path' must be provided.")
+
+        return texttospeech_v1.TextToSpeechAsyncClient(credentials=creds)
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
+    def _construct_ssml(self, text: str) -> str:
+        ssml = "<speak>"
+
+        # Voice tag
+        voice_attrs = [f"name='{self._voice_id}'"]
+        if self._params.language:
+            voice_attrs.append(f"language='{self._params.language}'")
+        if self._params.gender:
+            voice_attrs.append(f"gender='{self._params.gender}'")
+        ssml += f"<voice {' '.join(voice_attrs)}>"
+
+        # Prosody tag
+        prosody_attrs = []
+        if self._params.pitch:
+            prosody_attrs.append(f"pitch='{self._params.pitch}'")
+        if self._params.rate:
+            prosody_attrs.append(f"rate='{self._params.rate}'")
+        if self._params.volume:
+            prosody_attrs.append(f"volume='{self._params.volume}'")
+
+        if prosody_attrs:
+            ssml += f"<prosody {' '.join(prosody_attrs)}>"
+
+        # Emphasis tag
+        if self._params.emphasis:
+            ssml += f"<emphasis level='{self._params.emphasis}'>"
+
+        # Google style tag
+        if self._params.google_style:
+            ssml += f"<google:style name='{self._params.google_style}'>"
+
+        ssml += text
+
+        # Close tags
+        if self._params.google_style:
+            ssml += "</google:style>"
+        if self._params.emphasis:
+            ssml += "</emphasis>"
+        if prosody_attrs:
+            ssml += "</prosody>"
+        ssml += "</voice></speak>"
+
+        return ssml
+
+    async def set_voice(self, voice: str) -> None:
+        logger.debug(f"Switching TTS voice to: [{voice}]")
+        self._voice_id = voice
+
+    async def set_language(self, language: str) -> None:
+        logger.debug(f"Switching TTS language to: [{language}]")
+        self._params.language = language
+
+    async def set_pitch(self, pitch: str) -> None:
+        logger.debug(f"Switching TTS pitch to: [{pitch}]")
+        self._params.pitch = pitch
+
+    async def set_rate(self, rate: str) -> None:
+        logger.debug(f"Switching TTS rate to: [{rate}]")
+        self._params.rate = rate
+
+    async def set_volume(self, volume: str) -> None:
+        logger.debug(f"Switching TTS volume to: [{volume}]")
+        self._params.volume = volume
+
+    async def set_emphasis(
+        self, emphasis: Literal["strong", "moderate", "reduced", "none"]
+    ) -> None:
+        logger.debug(f"Switching TTS emphasis to: [{emphasis}]")
+        self._params.emphasis = emphasis
+
+    async def set_gender(self, gender: Literal["male", "female", "neutral"]) -> None:
+        logger.debug(f"Switch TTS gender to [{gender}]")
+        self._params.gender = gender
+
+    async def google_style(
+        self, google_style: Literal["apologetic", "calm", "empathetic", "firm", "lively"]
+    ) -> None:
+        logger.debug(f"Switching TTS google style to: [{google_style}]")
+        self._params.google_style = google_style
+
+    async def set_params(self, params: InputParams) -> None:
+        logger.debug(f"Switching TTS params to: [{params}]")
+        self._params = params
+
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        logger.debug(f"Generating TTS: [{text}]")
+
+        try:
+            await self.start_ttfb_metrics()
+
+            ssml = self._construct_ssml(text)
+            synthesis_input = texttospeech_v1.SynthesisInput(ssml=ssml)
+            voice = texttospeech_v1.VoiceSelectionParams(
+                language_code=self._params.language, name=self._voice_id
+            )
+            audio_config = texttospeech_v1.AudioConfig(
+                audio_encoding=texttospeech_v1.AudioEncoding.LINEAR16,
+                sample_rate_hertz=self.sample_rate,
+            )
+
+            request = texttospeech_v1.SynthesizeSpeechRequest(
+                input=synthesis_input, voice=voice, audio_config=audio_config
+            )
+
+            response = await self._client.synthesize_speech(request=request)
+
+            await self.start_tts_usage_metrics(text)
+
+            await self.push_frame(TTSStartedFrame())
+
+            # The audio produced by the TTS service has an audible click or pop at the beginning.
+            # This is due to the abrupt start of the audio waveform. To mitigate this, we apply a
+            # short fade-in effect to the audio data.
+
+            # Convert the response to a mutable numpy array
+            audio_content = np.frombuffer(response.audio_content, dtype=np.int16).copy()
+
+            # Apply a smooth, short fade-in
+            fade_duration = int(0.01 * self.sample_rate)  # 10ms fade-in
+            fade_in = np.square(
+                np.linspace(0, 1, fade_duration)
+            )  # Quadratic fade for smoother start
+            audio_content[:fade_duration] = audio_content[:fade_duration] * fade_in
+
+            # Read and yield audio data in chunks
+            chunk_size = 8192
+            for i in range(0, len(audio_content), chunk_size):
+                chunk = audio_content[i : i + chunk_size].tobytes()
+                if not chunk:
+                    break
+                await self.stop_ttfb_metrics()
+                frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                yield frame
+                await asyncio.sleep(0)  # Allow other tasks to run
+
+            await self.push_frame(TTSStoppedFrame())
+
+        except Exception as e:
+            logger.exception(f"{self} error generating TTS: {e}")
