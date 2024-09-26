@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added AWS Polly TTS support.
+
+- Added InputParams to Azure TTS service.
+
 - All `FrameProcessors` can now register event handlers.
 
 ```
