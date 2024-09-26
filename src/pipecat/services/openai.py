@@ -9,7 +9,9 @@ import base64
 import io
 import json
 import httpx
+import time  # Add this import
 from dataclasses import dataclass
+import asyncio
 
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
@@ -50,6 +52,8 @@ from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
 try:
     from openai import AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient, BadRequestError, NOT_GIVEN
     from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+    from openai.types.beta import Assistant, Thread
+    from openai.types.beta.threads import Run
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -94,6 +98,7 @@ class BaseOpenAILLMService(LLMService):
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
+        assistant_id: Optional[str] = None
 
     def __init__(
         self,
@@ -113,6 +118,7 @@ class BaseOpenAILLMService(LLMService):
         self._temperature = params.temperature
         self._top_p = params.top_p
         self._extra = params.extra if isinstance(params.extra, dict) else {}
+        self._assistant_id = params.assistant_id
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(
@@ -154,29 +160,78 @@ class BaseOpenAILLMService(LLMService):
 
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> AsyncStream[ChatCompletionChunk]:
-        params = {
-            "model": self.model_name,
-            "stream": True,
-            "messages": messages,
-            "tools": context.tools,
-            "tool_choice": context.tool_choice,
-            "stream_options": {"include_usage": True},
-            "frequency_penalty": self._frequency_penalty,
-            "presence_penalty": self._presence_penalty,
-            "seed": self._seed,
-            "temperature": self._temperature,
-            "top_p": self._top_p,
-        }
+    ) -> AsyncGenerator[ChatCompletionChunk, None]:
+        if self._assistant_id:
+            return self._get_assistant_completions(context, messages)
+        else:
+            params = {
+                "model": self.model_name,
+                "stream": True,
+                "messages": messages,
+                "tools": context.tools,
+                "tool_choice": context.tool_choice,
+                "stream_options": {"include_usage": True},
+                "frequency_penalty": self._frequency_penalty,
+                "presence_penalty": self._presence_penalty,
+                "seed": self._seed,
+                "temperature": self._temperature,
+                "top_p": self._top_p,
+            }
 
-        params.update(self._extra)
+            params.update(self._extra)
 
-        chunks = await self._client.chat.completions.create(**params)
-        return chunks
+            chunks = await self._client.chat.completions.create(**params)
+            return chunks
+
+    async def _get_assistant_completions(
+        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
+    ) -> AsyncGenerator[ChatCompletionChunk, None]:
+        thread = await self._client.beta.threads.create()
+        
+        for message in messages:
+            if message["role"] == "user":
+                await self._client.beta.threads.messages.create(
+                    thread_id=thread.id,
+                    role="user",
+                    content=message["content"]
+                )
+
+        run = await self._client.beta.threads.runs.create(
+            thread_id=thread.id,
+            assistant_id=self._assistant_id,
+        )
+
+        while True:
+            run = await self._client.beta.threads.runs.retrieve(
+                thread_id=thread.id,
+                run_id=run.id
+            )
+            if run.status == "completed":
+                break
+            await asyncio.sleep(1)  # Wait before checking again
+
+        messages = await self._client.beta.threads.messages.list(thread_id=thread.id)
+        
+        assistant_message = next(msg for msg in messages.data if msg.role == "assistant")
+        content = assistant_message.content[0].text.value if assistant_message.content else ""
+        
+        chunk = ChatCompletionChunk(
+            id="assistant_" + assistant_message.id,
+            choices=[{
+                "delta": {"content": content},
+                "index": 0,
+                "finish_reason": "stop"
+            }],
+            created=int(time.time()),
+            model=self.model_name,
+            object="chat.completion.chunk"
+        )
+        
+        yield chunk
 
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
-    ) -> AsyncStream[ChatCompletionChunk]:
+    ) -> AsyncGenerator[ChatCompletionChunk, None]:
         logger.debug(f"Generating chat: {context.get_messages_json()}")
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
@@ -207,7 +262,7 @@ class BaseOpenAILLMService(LLMService):
 
         await self.start_ttfb_metrics()
 
-        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
+        chunk_stream: AsyncGenerator[ChatCompletionChunk, None] = await self._stream_chat_completions(
             context
         )
 
