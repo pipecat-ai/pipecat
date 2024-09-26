@@ -324,6 +324,8 @@ class RTVIProcessor(FrameProcessor):
         self._message_task = self.get_event_loop().create_task(self._message_task_handler())
         self._message_queue = asyncio.Queue()
 
+        self._register_event_handler("on_bot_ready")
+
     def register_action(self, action: RTVIAction):
         id = self._action_id(action.service, action.action)
         self._registered_actions[id] = action
@@ -624,8 +626,9 @@ class RTVIProcessor(FrameProcessor):
 
     async def _maybe_send_bot_ready(self):
         if self._pipeline_started and self._client_ready:
-            await self._send_bot_ready()
             await self._update_config(self._config, False)
+            await self._send_bot_ready()
+            await self._call_event_handler("on_bot_ready")
 
     async def _send_bot_ready(self):
         if not self._params.send_bot_ready:
