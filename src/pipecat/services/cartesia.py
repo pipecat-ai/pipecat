@@ -71,15 +71,16 @@ class CartesiaTTSService(AsyncWordTTSService):
         emotion: Optional[List[str]] = []
 
     def __init__(
-            self,
-            *,
-            api_key: str,
-            voice_id: str,
-            cartesia_version: str = "2024-06-10",
-            url: str = "wss://api.cartesia.ai/tts/websocket",
-            model_id: str = "sonic-english",
-            params: InputParams = InputParams(),
-            **kwargs):
+        self,
+        *,
+        api_key: str,
+        voice_id: str,
+        cartesia_version: str = "2024-06-10",
+        url: str = "wss://api.cartesia.ai/tts/websocket",
+        model_id: str = "sonic-english",
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
         # Aggregating sentences still gives cleaner-sounding results and fewer
         # artifacts than streaming one word at a time. On average, waiting for a
         # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
@@ -91,7 +92,10 @@ class CartesiaTTSService(AsyncWordTTSService):
         # can use those to generate text frames ourselves aligned with the
         # playout timing of the audio!
         super().__init__(
-            aggregate_sentences=True, push_text_frames=False, sample_rate=params.sample_rate, **kwargs
+            aggregate_sentences=True,
+            push_text_frames=False,
+            sample_rate=params.sample_rate,
+            **kwargs,
         )
 
         self._api_key = api_key
@@ -137,11 +141,10 @@ class CartesiaTTSService(AsyncWordTTSService):
         logger.debug(f"Switching TTS language to: [{language}]")
         self._language = language_to_cartesia_language(language)
 
-    def _build_msg(self, text: str = "", continue_transcript: bool = True, add_timestamps: bool = True):
-        voice_config = {
-            "mode": "id",
-            "id": self._voice_id
-        }
+    def _build_msg(
+        self, text: str = "", continue_transcript: bool = True, add_timestamps: bool = True
+    ):
+        voice_config = {"mode": "id", "id": self._voice_id}
 
         if self._speed or self._emotion:
             voice_config["__experimental_controls"] = {}
@@ -236,8 +239,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                     await self.add_word_timestamps([("LLMFullResponseEndFrame", 0)])
                 elif msg["type"] == "timestamps":
                     await self.add_word_timestamps(
-                        list(zip(msg["word_timestamps"]["words"],
-                             msg["word_timestamps"]["start"]))
+                        list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
                     )
                 elif msg["type"] == "chunk":
                     await self.stop_ttfb_metrics()
@@ -254,8 +256,7 @@ class CartesiaTTSService(AsyncWordTTSService):
                     await self.stop_all_metrics()
                     await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
                 else:
-                    logger.error(
-                        f"Cartesia error, unknown message type: {msg}")
+                    logger.error(f"Cartesia error, unknown message type: {msg}")
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -379,7 +380,7 @@ class CartesiaHttpTTSService(TTSService):
                 output_format=self._output_format,
                 language=self._language,
                 stream=False,
-                _experimental_voice_controls=voice_controls
+                _experimental_voice_controls=voice_controls,
             )
 
             await self.stop_ttfb_metrics()
