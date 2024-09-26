@@ -102,6 +102,26 @@ class AWSTTSService(TTSService):
         logger.debug(f"Switching TTS engine to: [{engine}]")
         self._params.engine = engine
 
+    async def set_language(self, language: str):
+        logger.debug(f"Switching TTS language to: [{language}]")
+        self._params.language = language
+
+    async def set_pitch(self, pitch: str):
+        logger.debug(f"Switching TTS pitch to: [{pitch}]")
+        self._params.pitch = pitch
+
+    async def set_rate(self, rate: str):
+        logger.debug(f"Switching TTS rate to: [{rate}]")
+        self._params.rate = rate
+
+    async def set_volume(self, volume: str):
+        logger.debug(f"Switching TTS volume to: [{volume}]")
+        self._params.volume = volume
+
+    async def set_params(self, params: InputParams):
+        logger.debug(f"Switching TTS params to: [{params}]")
+        self._params = params
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
