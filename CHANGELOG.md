@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- All `FrameProcessors` can now register event handlers.
+
+```
+tts = SomeTTSService(...)
+
+@tts.event_handler("on_connected"):
+async def on_connected(processor):
+  ...
+```
+
 - Added `AsyncGeneratorProcessor`. This processor can be used together with a
   `FrameSerializer` as an async generator. It provides a `generator()` function
   that returns an `AsyncGenerator` and that yields serialized frames.
