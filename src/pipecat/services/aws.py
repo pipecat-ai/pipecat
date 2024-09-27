@@ -9,6 +9,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -152,7 +153,7 @@ class AWSTTSService(TTSService):
             if "AudioStream" in response:
                 with response["AudioStream"] as stream:
                     audio_data = stream.read()
-                    chunk_size = 4096  # You can adjust this value
+                    chunk_size = 8192
                     for i in range(0, len(audio_data), chunk_size):
                         chunk = audio_data[i : i + chunk_size]
                         if len(chunk) > 0:
@@ -164,3 +165,8 @@ class AWSTTSService(TTSService):
 
         except (BotoCoreError, ClientError) as error:
             logger.exception(f"{self} error generating TTS: {error}")
+            error_message = f"AWS Polly TTS error: {str(error)}"
+            yield ErrorFrame(error=error_message)
+
+        finally:
+            await self.push_frame(TTSStoppedFrame())
