@@ -41,7 +41,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from loguru import logger
 
 
-RTVI_PROTOCOL_VERSION = "0.1"
+RTVI_PROTOCOL_VERSION = "0.2"
 
 ActionResult = Union[bool, int, float, str, list, dict]
 
