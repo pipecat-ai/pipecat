@@ -1,41 +1,55 @@
 import asyncio
 import json
-from typing import List, AsyncGenerator, Optional  # Ensure Optional is imported
+from typing import AsyncGenerator, List, Optional
+
 from loguru import logger
 
 from pipecat.frames.frames import (
     Frame,
-    TextFrame,
-    LLMMessagesFrame,
+    LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMFullResponseEndFrame
+    LLMMessagesFrame,
+    TextFrame,
 )
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 
 try:
     from dify_client import ChatClient
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Dify, you need to pip install dify-client. Also, set DIFY_API_KEY environment variable.")
+        "In order to use Dify, you need to pip install dify-client. Also, set DIFY_API_KEY environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 
 class DifyLLMService(LLMService):
     """This class implements inference with Dify's AI models"""
 
-    def __init__(self, *, api_key: str, **kwargs):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        inputs: List[dict],
+        conversation_id: Optional[str] = None,
+        user: Optional[str] = None,
+        **kwargs,
+    ):
         super().__init__(api_key=api_key)
-        self.client = ChatClient(api_key=api_key)  # Ensure this is initialized
-        self._conversation_id: Optional[str] = None  # Store the conversation_id
+        self.client = ChatClient(api_key=api_key)
+        self._conversation_id = conversation_id
+        self._user = user  # Store user identifier
+        self._inputs = inputs
+        logger.debug(f"Inputs inside DifyLLMService: {inputs}")
 
     def can_generate_metrics(self) -> bool:
         return True
 
     def _get_messages_from_openai_context(
-            self, context: OpenAILLMContext) -> List[dict]:
+        self, context: OpenAILLMContext
+    ) -> List[dict]:
         openai_messages = context.get_messages()
         dify_messages = []
 
@@ -59,9 +73,14 @@ class DifyLLMService(LLMService):
             messages = self._get_messages_from_openai_context(context)
 
             await self.start_ttfb_metrics()
-
-            # Ensure response_mode is "streaming" for compatibility
-            async for text in self.create_chat_message(inputs=messages, query=context.get_prompt(), user="user_id", response_mode="streaming"):
+            (logger.debug(f"Inputs just before create_chat_message{self._inputs}"),)
+            async for text in self.create_chat_message(
+                inputs=self._inputs,
+                query=context.get_prompt(),
+                user=self._user,  # Use the user from initialization
+                response_mode="streaming",
+                conversation_id=self._conversation_id,
+            ):
                 await self.push_frame(TextFrame(text))
 
             await self.stop_ttfb_metrics()
@@ -91,33 +110,42 @@ class DifyLLMService(LLMService):
             yield item
             await asyncio.sleep(0)
 
-    async def create_chat_message(self, inputs: List[dict], query: str, user: str, response_mode: str, conversation_id: str) -> AsyncGenerator[str, None]:
+    async def create_chat_message(
+        self,
+        inputs: List[dict],
+        query: str,
+        user: str,
+        response_mode: str,
+        conversation_id: Optional[str],
+    ) -> AsyncGenerator[str, None]:
         """Create a chat message"""
-        logger.debug(f"Creating chat message with inputs: {inputs}, query: {query}, user: {user}, response_mode: {response_mode}")
-        
+        logger.debug(
+            f"Creating chat message with inputs: {inputs}, query: {query}, user: {user}, response_mode: {response_mode}, conversation_id: {conversation_id}"
+        )
+
         chat_response = self.client.create_chat_message(
-            inputs={},
+            inputs=inputs,
             query=query,
             user=user,
             conversation_id=conversation_id,
-            response_mode=response_mode
+            response_mode=response_mode,
         )
-        
+
         chat_response.raise_for_status()
 
         # Process streaming response
         for line in chat_response.iter_lines(decode_unicode=True):
-            line = line.split('data:', 1)[-1]
+            line = line.split("data:", 1)[-1]
             if line.strip():
-
                 response_data = json.loads(line.strip())
-                logger.debug(f"api response: {response_data}")
-                if self._conversation_id is None:
-                   self._conversation_id = response_data.get('conversation_id')
-                text = response_data.get('answer', '')
 
-                yield text
-        
+                if response_data.get("event") == "message":
+                    if self._conversation_id is None:
+                        self._conversation_id = response_data.get("conversation_id")
+                    text = response_data.get("answer", "")
+                    logger.debug(f"answer: {text}")
+                    yield text
+
     def get_conversation_id(self) -> Optional[str]:
         """Get the current conversation ID"""
         return self._conversation_id
