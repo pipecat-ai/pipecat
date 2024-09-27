@@ -8,11 +8,11 @@ import asyncio
 import json
 from typing import AsyncGenerator, List, Literal, Optional
 
-import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -307,24 +307,13 @@ class GoogleTTSService(TTSService):
 
             await self.push_frame(TTSStartedFrame())
 
-            # The audio produced by the TTS service has an audible click or pop at the beginning.
-            # This is due to the abrupt start of the audio waveform. To mitigate this, we apply a
-            # short fade-in effect to the audio data.
-
-            # Convert the response to a mutable numpy array
-            audio_content = np.frombuffer(response.audio_content, dtype=np.int16).copy()
-
-            # Apply a smooth, short fade-in
-            fade_duration = int(0.01 * self.sample_rate)  # 10ms fade-in
-            fade_in = np.square(
-                np.linspace(0, 1, fade_duration)
-            )  # Quadratic fade for smoother start
-            audio_content[:fade_duration] = audio_content[:fade_duration] * fade_in
+            # Skip the first 44 bytes to remove the WAV header
+            audio_content = response.audio_content[44:]
 
             # Read and yield audio data in chunks
             chunk_size = 8192
             for i in range(0, len(audio_content), chunk_size):
-                chunk = audio_content[i : i + chunk_size].tobytes()
+                chunk = audio_content[i : i + chunk_size]
                 if not chunk:
                     break
                 await self.stop_ttfb_metrics()
@@ -336,3 +325,7 @@ class GoogleTTSService(TTSService):
 
         except Exception as e:
             logger.exception(f"{self} error generating TTS: {e}")
+            error_message = f"TTS generation error: {str(e)}"
+            yield ErrorFrame(error=error_message)
+        finally:
+            await self.push_frame(TTSStoppedFrame())
