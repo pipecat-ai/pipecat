@@ -8,7 +8,7 @@ import asyncio
 import io
 import wave
 from abc import abstractmethod
-from typing import AsyncGenerator, List, Optional, Tuple
+from typing import AsyncGenerator, List, Optional, Tuple, Union
 
 from loguru import logger
 
@@ -170,6 +170,46 @@ class TTSService(AIService):
     async def set_language(self, language: Language):
         pass
 
+    @abstractmethod
+    async def set_speed(self, speed: Union[str, float]):
+        pass
+
+    @abstractmethod
+    async def set_emotion(self, emotion: List[str]):
+        pass
+
+    @abstractmethod
+    async def set_engine(self, engine: str):
+        pass
+
+    @abstractmethod
+    async def set_pitch(self, pitch: str):
+        pass
+
+    @abstractmethod
+    async def set_rate(self, rate: str):
+        pass
+
+    @abstractmethod
+    async def set_volume(self, volume: str):
+        pass
+
+    @abstractmethod
+    async def set_emphasis(self, emphasis: str):
+        pass
+
+    @abstractmethod
+    async def set_style(self, style: str):
+        pass
+
+    @abstractmethod
+    async def set_style_degree(self, style_degree: str):
+        pass
+
+    @abstractmethod
+    async def set_role(self, role: str):
+        pass
+
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -233,6 +273,26 @@ class TTSService(AIService):
                 await self.set_voice(frame.voice)
             if frame.language is not None:
                 await self.set_language(frame.language)
+            if frame.speed is not None:
+                await self.set_speed(frame.speed)
+            if frame.emotion is not None:
+                await self.set_emotion(frame.emotion)
+            if frame.engine is not None:
+                await self.set_engine(frame.engine)
+            if frame.pitch is not None:
+                await self.set_pitch(frame.pitch)
+            if frame.rate is not None:
+                await self.set_rate(frame.rate)
+            if frame.volume is not None:
+                await self.set_volume(frame.volume)
+            if frame.emphasis is not None:
+                await self.set_emphasis(frame.emphasis)
+            if frame.style is not None:
+                await self.set_style(frame.style)
+            if frame.style_degree is not None:
+                await self.set_style_degree(frame.style_degree)
+            if frame.role is not None:
+                await self.set_role(frame.role)
         else:
             await self.push_frame(frame, direction)
 

@@ -5,7 +5,7 @@
 #
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Union
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.metrics.metrics import MetricsData
@@ -548,6 +548,16 @@ class TTSUpdateSettingsFrame(ControlFrame):
     model: Optional[str] = None
     voice: Optional[str] = None
     language: Optional[Language] = None
+    speed: Optional[Union[str, float]] = None
+    emotion: Optional[List[str]] = None
+    engine: Optional[str] = None
+    pitch: Optional[str] = None
+    rate: Optional[str] = None
+    volume: Optional[str] = None
+    emphasis: Optional[str] = None
+    style: Optional[str] = None
+    style_degree: Optional[str] = None
+    role: Optional[str] = None
 
 
 @dataclass
