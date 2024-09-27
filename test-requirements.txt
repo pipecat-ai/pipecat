@@ -1,6 +1,7 @@
 aiohttp~=3.10.3
 anthropic~=0.30.0
 azure-cognitiveservices-speech~=1.40.0
+boto3~=1.35.27
 daily-python~=0.10.1
 deepgram-sdk~=3.5.0
 fal-client~=0.4.1
