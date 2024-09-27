@@ -18,9 +18,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.ai_services import TTSService
 
-from loguru import logger
-
 import numpy as np
+
+from loguru import logger
 
 try:
     import resampy

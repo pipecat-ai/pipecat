@@ -9,13 +9,11 @@ import base64
 import io
 import json
 import httpx
+
 from dataclasses import dataclass
 
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
-
-from loguru import logger
-from PIL import Image
 
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -39,13 +37,16 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserContextAggregator,
     LLMAssistantContextAggregator,
 )
-
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
+
+from PIL import Image
+
+from loguru import logger
 
 try:
     from openai import AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient, BadRequestError, NOT_GIVEN

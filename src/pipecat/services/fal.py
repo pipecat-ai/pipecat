@@ -8,12 +8,13 @@ import aiohttp
 import io
 import os
 
-from PIL import Image
 from pydantic import BaseModel
 from typing import AsyncGenerator, Optional, Union, Dict
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.ai_services import ImageGenService
+
+from PIL import Image
 
 from loguru import logger
 

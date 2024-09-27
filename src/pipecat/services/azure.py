@@ -4,13 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import aiohttp
 import asyncio
 import io
+
 from typing import AsyncGenerator, Optional
 
-import aiohttp
-from loguru import logger
-from PIL import Image
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
@@ -28,6 +27,10 @@ from pipecat.frames.frames import (
 from pipecat.services.ai_services import ImageGenService, STTService, TTSService
 from pipecat.services.openai import BaseOpenAILLMService
 from pipecat.utils.time import time_now_iso8601
+
+from PIL import Image
+
+from loguru import logger
 
 # See .env.example for Azure configuration needed
 try:

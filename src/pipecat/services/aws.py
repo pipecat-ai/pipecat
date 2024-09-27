@@ -3,9 +3,9 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
 from typing import AsyncGenerator, Optional
 
-from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
@@ -16,6 +16,8 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.ai_services import TTSService
+
+from loguru import logger
 
 try:
     import boto3
