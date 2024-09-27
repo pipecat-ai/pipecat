@@ -22,6 +22,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -29,7 +30,6 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 class TranscriptionLogger(FrameProcessor):
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -41,8 +41,9 @@ async def main():
     async with aiohttp.ClientSession() as session:
         (room_url, _) = await configure(session)
 
-        transport = DailyTransport(room_url, None, "Transcription bot",
-                                   DailyParams(audio_in_enabled=True))
+        transport = DailyTransport(
+            room_url, None, "Transcription bot", DailyParams(audio_in_enabled=True)
+        )
 
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 

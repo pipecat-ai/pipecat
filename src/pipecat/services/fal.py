@@ -22,7 +22,8 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Fal, you need to `pip install pipecat-ai[fal]`. Also, set `FAL_KEY` environment variable.")
+        "In order to use Fal, you need to `pip install pipecat-ai[fal]`. Also, set `FAL_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 
@@ -43,9 +44,10 @@ class FalImageGenService(ImageGenService):
         aiohttp_session: aiohttp.ClientSession,
         model: str = "fal-ai/fast-sdxl",
         key: str | None = None,
+        **kwargs,
     ):
-        super().__init__()
-        self._model = model
+        super().__init__(**kwargs)
+        self.set_model_name(model)
         self._params = params
         self._aiohttp_session = aiohttp_session
         if key:
@@ -55,8 +57,8 @@ class FalImageGenService(ImageGenService):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         response = await fal_client.run_async(
-            self._model,
-            arguments={"prompt": prompt, **self._params.model_dump(exclude_none=True)}
+            self.model_name,
+            arguments={"prompt": prompt, **self._params.model_dump(exclude_none=True)},
         )
 
         image_url = response["images"][0]["url"] if response else None
@@ -76,8 +78,6 @@ class FalImageGenService(ImageGenService):
             image = Image.open(image_stream)
 
             frame = URLImageRawFrame(
-                url=image_url,
-                image=image.tobytes(),
-                size=image.size,
-                format=image.format)
+                url=image_url, image=image.tobytes(), size=image.size, format=image.format
+            )
             yield frame

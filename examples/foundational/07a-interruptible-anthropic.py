@@ -14,7 +14,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
+)
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.anthropic import AnthropicLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -25,6 +27,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -43,8 +46,8 @@ async def main():
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         tts = CartesiaTTSService(
@@ -53,8 +56,8 @@ async def main():
         )
 
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            model="claude-3-opus-20240229")
+            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-opus-20240229"
+        )
 
         # todo: think more about how to handle system prompts in a more general way. OpenAI,
         # Google, and Anthropic all have slightly different approaches to providing a system
@@ -69,14 +72,16 @@ async def main():
         tma_in = LLMUserResponseAggregator(messages)
         tma_out = LLMAssistantResponseAggregator(messages)
 
-        pipeline = Pipeline([
-            transport.input(),   # Transport user input
-            tma_in,              # User responses
-            llm,                 # LLM
-            tts,                 # TTS
-            transport.output(),  # Transport bot output
-            tma_out              # Assistant spoken responses
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                tma_in,  # User responses
+                llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                tma_out,  # Assistant spoken responses
+            ]
+        )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 

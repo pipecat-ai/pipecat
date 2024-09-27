@@ -29,6 +29,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -64,8 +65,8 @@ async def main():
                 audio_out_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True
-            )
+                vad_audio_passthrough=True,
+            ),
         )
 
         stt = WhisperSTTService(model=Model.LARGE)
@@ -80,9 +81,7 @@ async def main():
             voice_id="846d6cb0-2301-48b6-9683-48f5618ea2f6",  # Spanish-speaking Lady
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
         llm.register_function("switch_language", switch_language)
 
         tools = [
@@ -101,7 +100,9 @@ async def main():
                         },
                         "required": ["language"],
                     },
-                })]
+                },
+            )
+        ]
         messages = [
             {
                 "role": "system",
@@ -112,18 +113,20 @@ async def main():
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
-        pipeline = Pipeline([
-            transport.input(),   # Transport user input
-            stt,                 # STT
-            context_aggregator.user(),  # User responses
-            llm,                 # LLM
-            ParallelPipeline(    # TTS (bot will speak the chosen language)
-                [FunctionFilter(english_filter), english_tts],  # English
-                [FunctionFilter(spanish_filter), spanish_tts],  # Spanish
-            ),
-            transport.output(),  # Transport bot output
-            context_aggregator.assistant()  # Assistant spoken responses
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                stt,  # STT
+                context_aggregator.user(),  # User responses
+                llm,  # LLM
+                ParallelPipeline(  # TTS (bot will speak the chosen language)
+                    [FunctionFilter(english_filter), english_tts],  # English
+                    [FunctionFilter(spanish_filter), spanish_tts],  # Spanish
+                ),
+                transport.output(),  # Transport bot output
+                context_aggregator.assistant(),  # Assistant spoken responses
+            ]
+        )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
@@ -134,7 +137,9 @@ async def main():
             messages.append(
                 {
                     "role": "system",
-                    "content": f"Please introduce yourself to the user and let them know the languages you speak. Your initial responses should be in {current_language}."})
+                    "content": f"Please introduce yourself to the user and let them know the languages you speak. Your initial responses should be in {current_language}.",
+                }
+            )
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()

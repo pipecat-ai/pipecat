@@ -12,7 +12,8 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame)
+    UserStoppedSpeakingFrame,
+)
 
 
 class ResponseAggregator(FrameProcessor):
@@ -25,7 +26,7 @@ class ResponseAggregator(FrameProcessor):
         TranscriptionFrame(" world.") -> None
         UserStoppedSpeakingFrame() -> TextFrame("Hello world.")
 
-    Doctest:
+    Doctest: FIXME to work with asyncio
     >>> async def print_frames(aggregator, frame):
     ...     async for frame in aggregator.process_frame(frame):
     ...         if isinstance(frame, TextFrame):
@@ -49,7 +50,7 @@ class ResponseAggregator(FrameProcessor):
         start_frame,
         end_frame,
         accumulator_frame: TextFrame,
-        interim_accumulator_frame: TextFrame | None = None
+        interim_accumulator_frame: TextFrame | None = None,
     ):
         super().__init__()
 

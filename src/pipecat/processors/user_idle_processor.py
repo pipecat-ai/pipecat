@@ -11,30 +11,27 @@ from typing import Awaitable, Callable
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     Frame,
-    SystemFrame,
     UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame)
-from pipecat.processors.async_frame_processor import AsyncFrameProcessor
-from pipecat.processors.frame_processor import FrameDirection
+    UserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
-class UserIdleProcessor(AsyncFrameProcessor):
+class UserIdleProcessor(FrameProcessor):
     """This class is useful to check if the user is interacting with the bot
     within a given timeout. If the timeout is reached before any interaction
     occurred the provided callback will be called.
 
-    The callback can then be used to push frames downstream by using
-    `queue_frame()` (or `push_frame()` for system frames).
-
     """
 
     def __init__(
-            self,
-            *,
-            callback: Callable[["UserIdleProcessor"], Awaitable[None]],
-            timeout: float,
-            **kwargs):
-        super().__init__(**kwargs)
+        self,
+        *,
+        callback: Callable[["UserIdleProcessor"], Awaitable[None]],
+        timeout: float,
+        **kwargs,
+    ):
+        super().__init__(sync=False, **kwargs)
 
         self._callback = callback
         self._timeout = timeout
@@ -46,10 +43,7 @@ class UserIdleProcessor(AsyncFrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, SystemFrame):
-            await self.push_frame(frame, direction)
-        else:
-            await self.queue_frame(frame, direction)
+        await self.push_frame(frame, direction)
 
         # We shouldn't call the idle callback if the user or the bot are speaking.
         if isinstance(frame, UserStartedSpeakingFrame):
