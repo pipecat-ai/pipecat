@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added AWS Polly TTS support.
+- Added AWS Polly TTS support and `07m-interruptible-aws.py` as an example.
 
 - Added InputParams to Azure TTS service.
 

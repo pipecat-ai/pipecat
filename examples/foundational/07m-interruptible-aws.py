@@ -22,6 +22,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserResponseAggregator,
 )
 from pipecat.services.aws import AWSTTSService
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
@@ -43,11 +44,13 @@ async def main():
             DailyParams(
                 audio_out_enabled=True,
                 audio_out_sample_rate=16000,
-                transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
         )
+
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = AWSTTSService(
             api_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
@@ -72,6 +75,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                stt,  # STT
                 tma_in,  # User responses
                 llm,  # LLM
                 tts,  # TTS
