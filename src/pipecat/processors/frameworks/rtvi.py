@@ -609,7 +609,7 @@ class RTVIProcessor(FrameProcessor):
             await self._stop(frame)
         # Data frames
         elif isinstance(frame, TransportMessageFrame):
-            await self._message_queue.put(frame)
+            await self._handle_transport_message(frame)
         elif isinstance(frame, RTVIActionFrame):
             await self._action_queue.put(frame)
         # Other frames
