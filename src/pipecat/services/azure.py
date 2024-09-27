@@ -41,7 +41,10 @@ try:
         SpeechRecognizer,
         SpeechSynthesizer,
     )
-    from azure.cognitiveservices.speech.audio import AudioStreamFormat, PushAudioInputStream
+    from azure.cognitiveservices.speech.audio import (
+        AudioStreamFormat,
+        PushAudioInputStream,
+    )
     from azure.cognitiveservices.speech.dialog import AudioConfig
     from openai import AsyncAzureOpenAI
 except ModuleNotFoundError as e:
@@ -73,7 +76,7 @@ class AzureLLMService(BaseOpenAILLMService):
 class AzureTTSService(TTSService):
     class InputParams(BaseModel):
         emphasis: Optional[str] = None
-        language_code: Optional[str] = "en-US"
+        language: Optional[str] = "en-US"
         pitch: Optional[str] = None
         rate: Optional[str] = "1.05"
         role: Optional[str] = None
@@ -105,7 +108,7 @@ class AzureTTSService(TTSService):
 
     def _construct_ssml(self, text: str) -> str:
         ssml = (
-            f"<speak version='1.0' xml:lang='{self._params.language_code}' "
+            f"<speak version='1.0' xml:lang='{self._params.language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
             f"<voice name='{self._voice}'>"
@@ -155,9 +158,9 @@ class AzureTTSService(TTSService):
         logger.debug(f"Setting TTS emphasis to: [{emphasis}]")
         self._params.emphasis = emphasis
 
-    async def set_language_code(self, language_code: str):
-        logger.debug(f"Setting TTS language code to: [{language_code}]")
-        self._params.language_code = language_code
+    async def set_language(self, language: str):
+        logger.debug(f"Setting TTS language code to: [{language}]")
+        self._params.language = language
 
     async def set_pitch(self, pitch: str):
         logger.debug(f"Setting TTS pitch to: [{pitch}]")
@@ -187,7 +190,7 @@ class AzureTTSService(TTSService):
         valid_params = {
             "voice": self.set_voice,
             "emphasis": self.set_emphasis,
-            "language_code": self.set_language_code,
+            "language_code": self.set_language,
             "pitch": self.set_pitch,
             "rate": self.set_rate,
             "role": self.set_role,
