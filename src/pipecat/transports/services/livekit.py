@@ -1,10 +1,17 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
+
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List
 
-import numpy as np
-from loguru import logger
 from pydantic import BaseModel
+
+import numpy as np
 from scipy import signal
 
 from pipecat.frames.frames import (
@@ -27,6 +34,8 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.vad.vad_analyzer import VADAnalyzer
+
+from loguru import logger
 
 try:
     from livekit import rtc
