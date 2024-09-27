@@ -5,9 +5,8 @@
 #
 
 import asyncio
-from typing import AsyncGenerator
 
-from loguru import logger
+from typing import AsyncGenerator
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -24,6 +23,8 @@ from pipecat.frames.frames import (
 from pipecat.services.ai_services import STTService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+
+from loguru import logger
 
 # See .env.example for Deepgram configuration needed
 try:
