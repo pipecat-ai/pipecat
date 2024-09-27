@@ -17,7 +17,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    LLMModelUpdateFrame,
+    LLMUpdateSettingsFrame,
     TextFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -136,9 +136,10 @@ class GoogleLLMService(LLMService):
             context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
-        elif isinstance(frame, LLMModelUpdateFrame):
-            logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self._create_client(frame.model)
+        elif isinstance(frame, LLMUpdateSettingsFrame):
+            if frame.model is not None:
+                logger.debug(f"Switching LLM model to: [{frame.model}]")
+                self.set_model_name(frame.model)
         else:
             await self.push_frame(frame, direction)
 

@@ -4,38 +4,39 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import base64
 import io
 import json
-import httpx
-
 from dataclasses import dataclass
-
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
+
+import aiohttp
+import httpx
+from loguru import logger
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    LLMModelUpdateFrame,
+    LLMUpdateSettingsFrame,
+    StartInterruptionFrame,
+    TextFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TextFrame,
     URLImageRawFrame,
     VisionImageRawFrame,
-    FunctionCallResultFrame,
-    FunctionCallInProgressFrame,
-    StartInterruptionFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_response import (
-    LLMUserContextAggregator,
     LLMAssistantContextAggregator,
+    LLMUserContextAggregator,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -44,12 +45,14 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
 
-from PIL import Image
-
-from loguru import logger
-
 try:
-    from openai import AsyncOpenAI, AsyncStream, DefaultAsyncHttpxClient, BadRequestError, NOT_GIVEN
+    from openai import (
+        NOT_GIVEN,
+        AsyncOpenAI,
+        AsyncStream,
+        BadRequestError,
+        DefaultAsyncHttpxClient,
+    )
     from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -280,9 +283,22 @@ class BaseOpenAILLMService(LLMService):
             context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
-        elif isinstance(frame, LLMModelUpdateFrame):
-            logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self.set_model_name(frame.model)
+        elif isinstance(frame, LLMUpdateSettingsFrame):
+            if frame.model is not None:
+                logger.debug(f"Switching LLM model to: [{frame.model}]")
+                self.set_model_name(frame.model)
+            if frame.frequency_penalty is not None:
+                await self.set_frequency_penalty(frame.frequency_penalty)
+            if frame.presence_penalty is not None:
+                await self.set_presence_penalty(frame.presence_penalty)
+            if frame.seed is not None:
+                await self.set_seed(frame.seed)
+            if frame.temperature is not None:
+                await self.set_temperature(frame.temperature)
+            if frame.top_p is not None:
+                await self.set_top_p(frame.top_p)
+            if frame.extra:
+                await self.set_extra(frame.extra)
         else:
             await self.push_frame(frame, direction)
 
@@ -464,7 +480,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                 await self._push_aggregation()
             else:
                 logger.warning(
-                    f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id"
+                    "FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id"
                 )
                 self._function_call_in_progress = None
                 self._function_call_result = None

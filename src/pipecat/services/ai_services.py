@@ -7,9 +7,10 @@
 import asyncio
 import io
 import wave
-
 from abc import abstractmethod
 from typing import AsyncGenerator, List, Optional, Tuple
+
+from loguru import logger
 
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -18,31 +19,26 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
-    STTLanguageUpdateFrame,
-    STTModelUpdateFrame,
     StartFrame,
     StartInterruptionFrame,
+    STTUpdateSettingsFrame,
+    TextFrame,
     TTSAudioRawFrame,
-    TTSLanguageUpdateFrame,
-    TTSModelUpdateFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TTSVoiceUpdateFrame,
-    TextFrame,
+    TTSUpdateSettingsFrame,
     UserImageRequestFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import MetricsData
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.utils import exp_smoothing
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-
-from loguru import logger
 
 
 class AIService(FrameProcessor):
@@ -230,12 +226,13 @@ class TTSService(AIService):
                 await self.push_frame(frame, direction)
         elif isinstance(frame, TTSSpeakFrame):
             await self._push_tts_frames(frame.text)
-        elif isinstance(frame, TTSModelUpdateFrame):
-            await self.set_model(frame.model)
-        elif isinstance(frame, TTSVoiceUpdateFrame):
-            await self.set_voice(frame.voice)
-        elif isinstance(frame, TTSLanguageUpdateFrame):
-            await self.set_language(frame.language)
+        elif isinstance(frame, TTSUpdateSettingsFrame):
+            if frame.model is not None:
+                await self.set_model(frame.model)
+            if frame.voice is not None:
+                await self.set_voice(frame.voice)
+            if frame.language is not None:
+                await self.set_language(frame.language)
         else:
             await self.push_frame(frame, direction)
 
@@ -408,10 +405,11 @@ class STTService(AIService):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We don't really want to push audio frames down.
             await self.process_audio_frame(frame)
-        elif isinstance(frame, STTModelUpdateFrame):
-            await self.set_model(frame.model)
-        elif isinstance(frame, STTLanguageUpdateFrame):
-            await self.set_language(frame.language)
+        elif isinstance(frame, STTUpdateSettingsFrame):
+            if frame.model is not None:
+                await self.set_model(frame.model)
+            if frame.language is not None:
+                await self.set_language(frame.language)
         else:
             await self.push_frame(frame, direction)
 

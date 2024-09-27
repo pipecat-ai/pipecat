@@ -4,9 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Any, List, Optional, Tuple
-
 from dataclasses import dataclass, field
+from typing import Any, List, Optional, Tuple
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.metrics.metrics import MetricsData
@@ -528,113 +527,35 @@ class UserImageRequestFrame(ControlFrame):
 
 
 @dataclass
-class LLMModelUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM model."""
+class LLMUpdateSettingsFrame(ControlFrame):
+    """A control frame containing a request to update LLM settings."""
 
-    model: str
-
-
-@dataclass
-class LLMTemperatureUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM temperature."""
-
-    temperature: float
-
-
-@dataclass
-class LLMTopKUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM top_k."""
-
-    top_k: int
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    top_k: Optional[int] = None
+    top_p: Optional[float] = None
+    frequency_penalty: Optional[float] = None
+    presence_penalty: Optional[float] = None
+    max_tokens: Optional[int] = None
+    seed: Optional[int] = None
+    extra: dict = field(default_factory=dict)
 
 
 @dataclass
-class LLMTopPUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM top_p."""
+class TTSUpdateSettingsFrame(ControlFrame):
+    """A control frame containing a request to update TTS settings."""
 
-    top_p: float
-
-
-@dataclass
-class LLMFrequencyPenaltyUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM frequency
-    penalty.
-
-    """
-
-    frequency_penalty: float
+    model: Optional[str] = None
+    voice: Optional[str] = None
+    language: Optional[Language] = None
 
 
 @dataclass
-class LLMPresencePenaltyUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM presence
-    penalty.
+class STTUpdateSettingsFrame(ControlFrame):
+    """A control frame containing a request to update STT settings."""
 
-    """
-
-    presence_penalty: float
-
-
-@dataclass
-class LLMMaxTokensUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM max tokens."""
-
-    max_tokens: int
-
-
-@dataclass
-class LLMSeedUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM seed."""
-
-    seed: int
-
-
-@dataclass
-class LLMExtraUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new LLM extra params."""
-
-    extra: dict
-
-
-@dataclass
-class TTSModelUpdateFrame(ControlFrame):
-    """A control frame containing a request to update the TTS model."""
-
-    model: str
-
-
-@dataclass
-class TTSVoiceUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new TTS voice."""
-
-    voice: str
-
-
-@dataclass
-class TTSLanguageUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to a new TTS language and
-    optional voice.
-
-    """
-
-    language: Language
-
-
-@dataclass
-class STTModelUpdateFrame(ControlFrame):
-    """A control frame containing a request to update the STT model and optional
-    language.
-
-    """
-
-    model: str
-
-
-@dataclass
-class STTLanguageUpdateFrame(ControlFrame):
-    """A control frame containing a request to update to STT language."""
-
-    language: Language
+    model: Optional[str] = None
+    language: Optional[Language] = None
 
 
 @dataclass
