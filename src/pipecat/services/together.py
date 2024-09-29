@@ -370,7 +370,7 @@ class TogetherAssistantContextAggregator(LLMAssistantContextAggregator):
         run_llm = False
 
         aggregation = self._aggregation
-        self._aggregation = ""
+        self._reset()
 
         try:
             if self._function_call_result:
@@ -389,6 +389,9 @@ class TogetherAssistantContextAggregator(LLMAssistantContextAggregator):
 
             if run_llm:
                 await self._user_context_aggregator.push_messages_frame()
+
+            frame = OpenAILLMContextFrame(self._context)
+            await self.push_frame(frame)
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
