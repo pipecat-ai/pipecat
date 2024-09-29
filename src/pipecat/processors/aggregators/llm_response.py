@@ -39,6 +39,7 @@ class LLMResponseAggregator(FrameProcessor):
         accumulator_frame: Type[TextFrame],
         interim_accumulator_frame: Type[TextFrame] | None = None,
         handle_interruptions: bool = False,
+        expect_stripped_words: bool = True,  # if True, need to add spaces between words
     ):
         super().__init__()
 
@@ -49,6 +50,7 @@ class LLMResponseAggregator(FrameProcessor):
         self._accumulator_frame = accumulator_frame
         self._interim_accumulator_frame = interim_accumulator_frame
         self._handle_interruptions = handle_interruptions
+        self._expect_stripped_words = expect_stripped_words
 
         # Reset our accumulator state.
         self._reset()
@@ -110,7 +112,10 @@ class LLMResponseAggregator(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, self._accumulator_frame):
             if self._aggregating:
-                self._aggregation += frame.text if self._aggregation else frame.text
+                if self._expect_stripped_words:
+                    self._aggregation += f" {frame.text}" if self._aggregation else frame.text
+                else:
+                    self._aggregation += frame.text if self._aggregation else frame.text
                 # We have recevied a complete sentence, so if we have seen the
                 # end frame and we were still aggregating, it means we should
                 # send the aggregation.
@@ -289,7 +294,7 @@ class LLMContextAggregator(LLMResponseAggregator):
 
 
 class LLMAssistantContextAggregator(LLMContextAggregator):
-    def __init__(self, context: OpenAILLMContext):
+    def __init__(self, context: OpenAILLMContext, *, expect_stripped_words: bool = True):
         super().__init__(
             messages=[],
             context=context,
@@ -298,6 +303,7 @@ class LLMAssistantContextAggregator(LLMContextAggregator):
             end_frame=LLMFullResponseEndFrame,
             accumulator_frame=TextFrame,
             handle_interruptions=True,
+            expect_stripped_words=expect_stripped_words,
         )
 
 
