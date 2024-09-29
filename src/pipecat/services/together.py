@@ -95,9 +95,13 @@ class TogetherLLMService(LLMService):
         return True
 
     @staticmethod
-    def create_context_aggregator(context: OpenAILLMContext) -> TogetherContextAggregatorPair:
+    def create_context_aggregator(
+        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+    ) -> TogetherContextAggregatorPair:
         user = TogetherUserContextAggregator(context)
-        assistant = TogetherAssistantContextAggregator(user)
+        assistant = TogetherAssistantContextAggregator(
+            user, expect_stripped_words=assistant_expect_stripped_words
+        )
         return TogetherContextAggregatorPair(_user=user, _assistant=assistant)
 
     async def set_frequency_penalty(self, frequency_penalty: float):
@@ -331,8 +335,8 @@ class TogetherUserContextAggregator(LLMUserContextAggregator):
 
 
 class TogetherAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, user_context_aggregator: TogetherUserContextAggregator):
-        super().__init__(context=user_context_aggregator._context)
+    def __init__(self, user_context_aggregator: TogetherUserContextAggregator, **kwargs):
+        super().__init__(context=user_context_aggregator._context, **kwargs)
         self._user_context_aggregator = user_context_aggregator
         self._function_call_in_progress = None
         self._function_call_result = None
