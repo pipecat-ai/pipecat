@@ -71,7 +71,7 @@ async def main():
             },
         ]
 
-        context = OpenAILLMContext(messages, tools)
+        context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
         user_aggregator = context_aggregator.user()
         assistant_aggregator = context_aggregator.assistant()
