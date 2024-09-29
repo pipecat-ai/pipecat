@@ -6,12 +6,6 @@
 
 from typing import List, Type
 
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContextFrame,
-    OpenAILLMContext,
-)
-
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
@@ -22,11 +16,16 @@ from pipecat.frames.frames import (
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
     StartInterruptionFrame,
-    TranscriptionFrame,
     TextFrame,
+    TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class LLMResponseAggregator(FrameProcessor):
@@ -111,7 +110,7 @@ class LLMResponseAggregator(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, self._accumulator_frame):
             if self._aggregating:
-                self._aggregation += f" {frame.text}" if self._aggregation else frame.text
+                self._aggregation += frame.text if self._aggregation else frame.text
                 # We have recevied a complete sentence, so if we have seen the
                 # end frame and we were still aggregating, it means we should
                 # send the aggregation.

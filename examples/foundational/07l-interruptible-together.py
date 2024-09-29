@@ -5,28 +5,23 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.services.ai_services import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.together import TogetherLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -76,17 +71,19 @@ async def main():
             },
         ]
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+        context = OpenAILLMContext(messages, tools)
+        context_aggregator = llm.create_context_aggregator(context)
+        user_aggregator = context_aggregator.user()
+        assistant_aggregator = context_aggregator.assistant()
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                tma_in,  # User responses
+                user_aggregator,  # User responses
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
-                tma_out,  # Assistant spoken responses
+                assistant_aggregator,  # Assistant spoken responses
             ]
         )
 
