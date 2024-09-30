@@ -14,14 +14,17 @@ from PIL import Image
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
+)
 from pipecat.frames.frames import (
-    AudioRawFrame,
-    ImageRawFrame,
+    OutputImageRawFrame,
     SpriteFrame,
     Frame,
     LLMMessagesFrame,
-    TTSStoppedFrame
+    TTSAudioRawFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
@@ -34,6 +37,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -49,7 +53,7 @@ for i in range(1, 26):
     # Get the filename without the extension to use as the dictionary key
     # Open the image and convert it to bytes
     with Image.open(full_path) as img:
-        sprites.append(ImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
+        sprites.append(OutputImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
 
 flipped = sprites[::-1]
 sprites.extend(flipped)
@@ -72,7 +76,7 @@ class TalkingAnimation(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, AudioRawFrame):
+        if isinstance(frame, TTSAudioRawFrame):
             if not self._is_talking:
                 await self.push_frame(talking_frame)
                 self._is_talking = True
@@ -107,7 +111,7 @@ async def main():
                 #     tier="nova",
                 #     model="2-general"
                 # )
-            )
+            ),
         )
 
         tts = ElevenLabsTTSService(
@@ -116,7 +120,6 @@ async def main():
             # English
             #
             voice_id="pNInz6obpgDQGcFmaJgB",
-
             #
             # Spanish
             #
@@ -124,9 +127,7 @@ async def main():
             # voice_id="gD1IexrzCvsXPHUuT0s3",
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         messages = [
             {
@@ -135,7 +136,6 @@ async def main():
                 # English
                 #
                 "content": "You are Chatbot, a friendly, helpful robot. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by introducing yourself.",
-
                 #
                 # Spanish
                 #
@@ -148,15 +148,17 @@ async def main():
 
         ta = TalkingAnimation()
 
-        pipeline = Pipeline([
-            transport.input(),
-            user_response,
-            llm,
-            tts,
-            ta,
-            transport.output(),
-            assistant_response,
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),
+                user_response,
+                llm,
+                tts,
+                ta,
+                transport.output(),
+                assistant_response,
+            ]
+        )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
         await task.queue_frame(quiet_frame)

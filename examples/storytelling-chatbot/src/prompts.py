@@ -3,7 +3,7 @@ LLM_INTRO_PROMPT = {
     "content": "You are a creative storyteller who loves to tell whimsical, fantastical stories. \
         Your goal is to craft an engaging and fun story. \
         Start by asking the user what kind of story they'd like to hear. Don't provide any examples. \
-        Keep your response to only a few sentences."
+        Keep your response to only a few sentences.",
 }
 
 
@@ -25,7 +25,7 @@ LLM_BASE_PROMPT = {
         Responses should use the format: <...> story sentence [break] <...> story sentence [break] ... \
         After each response, ask me how I'd like the story to continue and wait for my input. \
         Please ensure your responses are less than 3-4 sentences long. \
-        Please refrain from using any explicit language or content. Do not tell scary stories."
+        Please refrain from using any explicit language or content. Do not tell scary stories.",
 }
 
 

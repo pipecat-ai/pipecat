@@ -28,6 +28,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -39,7 +40,11 @@ current_voice = "News Lady"
 async def switch_voice(function_name, tool_call_id, args, llm, context, result_callback):
     global current_voice
     current_voice = args["voice"]
-    await result_callback({"voice": f"You are now using your {current_voice} voice. Your responses should now be as if you were a {current_voice}."})
+    await result_callback(
+        {
+            "voice": f"You are now using your {current_voice} voice. Your responses should now be as if you were a {current_voice}."
+        }
+    )
 
 
 async def news_lady_filter(frame) -> bool:
@@ -66,8 +71,8 @@ async def main():
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         news_lady = CartesiaTTSService(
@@ -85,9 +90,7 @@ async def main():
             voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
         llm.register_function("switch_voice", switch_voice)
 
         tools = [
@@ -106,7 +109,9 @@ async def main():
                         },
                         "required": ["voice"],
                     },
-                })]
+                },
+            )
+        ]
         messages = [
             {
                 "role": "system",
@@ -117,18 +122,20 @@ async def main():
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
-        pipeline = Pipeline([
-            transport.input(),   # Transport user input
-            context_aggregator.user(),  # User responses
-            llm,                 # LLM
-            ParallelPipeline(    # TTS (one of the following vocies)
-                [FunctionFilter(news_lady_filter), news_lady],            # News Lady voice
-                [FunctionFilter(british_lady_filter), british_lady],      # British Lady voice
-                [FunctionFilter(barbershop_man_filter), barbershop_man],  # Barbershop Man voice
-            ),
-            transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                context_aggregator.user(),  # User responses
+                llm,  # LLM
+                ParallelPipeline(  # TTS (one of the following vocies)
+                    [FunctionFilter(news_lady_filter), news_lady],  # News Lady voice
+                    [FunctionFilter(british_lady_filter), british_lady],  # British Lady voice
+                    [FunctionFilter(barbershop_man_filter), barbershop_man],  # Barbershop Man voice
+                ),
+                transport.output(),  # Transport bot output
+                context_aggregator.assistant(),  # Assistant spoken responses
+            ]
+        )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
@@ -139,7 +146,9 @@ async def main():
             messages.append(
                 {
                     "role": "system",
-                    "content": f"Please introduce yourself to the user and let them know the voices you can do. Your initial responses should be as if you were a {current_voice}."})
+                    "content": f"Please introduce yourself to the user and let them know the voices you can do. Your initial responses should be as if you were a {current_voice}.",
+                }
+            )
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()

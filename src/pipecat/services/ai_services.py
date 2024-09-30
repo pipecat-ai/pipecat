@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     STTModelUpdateFrame,
     StartFrame,
     StartInterruptionFrame,
+    TTSAudioRawFrame,
     TTSLanguageUpdateFrame,
     TTSModelUpdateFrame,
     TTSSpeakFrame,
@@ -30,9 +31,9 @@ from pipecat.frames.frames import (
     TTSVoiceUpdateFrame,
     TextFrame,
     UserImageRequestFrame,
-    VisionImageRawFrame
+    VisionImageRawFrame,
 )
-from pipecat.processors.async_frame_processor import AsyncFrameProcessor
+from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.utils.audio import calculate_audio_volume
@@ -47,6 +48,15 @@ from loguru import logger
 class AIService(FrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._model_name: str = ""
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    def set_model_name(self, model: str):
+        self._model_name = model
+        self.set_core_metrics_data(MetricsData(processor=self.name, model=self._model_name))
 
     async def start(self, frame: StartFrame):
         pass
@@ -67,37 +77,13 @@ class AIService(FrameProcessor):
         elif isinstance(frame, EndFrame):
             await self.stop(frame)
 
-    async def process_generator(self, generator: AsyncGenerator[Frame, None]):
+    async def process_generator(self, generator: AsyncGenerator[Frame | None, None]):
         async for f in generator:
             if f:
                 if isinstance(f, ErrorFrame):
                     await self.push_error(f)
                 else:
                     await self.push_frame(f)
-
-
-class AsyncAIService(AsyncFrameProcessor):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    async def start(self, frame: StartFrame):
-        pass
-
-    async def stop(self, frame: EndFrame):
-        pass
-
-    async def cancel(self, frame: CancelFrame):
-        pass
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, StartFrame):
-            await self.start(frame)
-        elif isinstance(frame, CancelFrame):
-            await self.cancel(frame)
-        elif isinstance(frame, EndFrame):
-            await self.stop(frame)
 
 
 class LLMService(AIService):
@@ -128,12 +114,8 @@ class LLMService(AIService):
         return function_name in self._callbacks.keys()
 
     async def call_function(
-            self,
-            *,
-            context: OpenAILLMContext,
-            tool_call_id: str,
-            function_name: str,
-            arguments: str) -> None:
+        self, *, context: OpenAILLMContext, tool_call_id: str, function_name: str, arguments: str
+    ) -> None:
         f = None
         if function_name in self._callbacks.keys():
             f = self._callbacks[function_name]
@@ -142,11 +124,8 @@ class LLMService(AIService):
         else:
             return None
         await context.call_function(
-            f,
-            function_name=function_name,
-            tool_call_id=tool_call_id,
-            arguments=arguments,
-            llm=self)
+            f, function_name=function_name, tool_call_id=tool_call_id, arguments=arguments, llm=self
+        )
 
     # QUESTION FOR CB: maybe this isn't needed anymore?
     async def call_start_function(self, context: OpenAILLMContext, function_name: str):
@@ -156,34 +135,36 @@ class LLMService(AIService):
             return await self._start_callbacks[None](function_name, self, context)
 
     async def request_image_frame(self, user_id: str, *, text_content: str | None = None):
-        await self.push_frame(UserImageRequestFrame(user_id=user_id, context=text_content),
-                              FrameDirection.UPSTREAM)
+        await self.push_frame(
+            UserImageRequestFrame(user_id=user_id, context=text_content), FrameDirection.UPSTREAM
+        )
 
 
 class TTSService(AIService):
     def __init__(
-            self,
-            *,
-            aggregate_sentences: bool = True,
-            # if True, subclass is responsible for pushing TextFrames and LLMFullResponseEndFrames
-            push_text_frames: bool = True,
-            # if True, TTSService will push TTSStoppedFrames, otherwise subclass must do it
-            push_stop_frames: bool = False,
-            # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
-            stop_frame_timeout_s: float = 1.0,
-            **kwargs):
+        self,
+        *,
+        aggregate_sentences: bool = True,
+        # if True, TTSService will push TextFrames and LLMFullResponseEndFrames,
+        # otherwise subclass must do it
+        push_text_frames: bool = True,
+        # TTS output sample rate
+        sample_rate: int = 16000,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._aggregate_sentences: bool = aggregate_sentences
         self._push_text_frames: bool = push_text_frames
-        self._push_stop_frames: bool = push_stop_frames
-        self._stop_frame_timeout_s: float = stop_frame_timeout_s
-        self._stop_frame_task: Optional[asyncio.Task] = None
-        self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
         self._current_sentence: str = ""
+        self._sample_rate: int = sample_rate
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
 
     @abstractmethod
     async def set_model(self, model: str):
-        pass
+        self.set_model_name(model)
 
     @abstractmethod
     async def set_voice(self, voice: str):
@@ -218,7 +199,7 @@ class TTSService(AIService):
         if text:
             await self._push_tts_frames(text)
 
-    async def _push_tts_frames(self, text: str, text_passthrough: bool = True):
+    async def _push_tts_frames(self, text: str):
         text = text.strip()
         if not text:
             return
@@ -248,7 +229,7 @@ class TTSService(AIService):
             else:
                 await self.push_frame(frame, direction)
         elif isinstance(frame, TTSSpeakFrame):
-            await self._push_tts_frames(frame.text, False)
+            await self._push_tts_frames(frame.text)
         elif isinstance(frame, TTSModelUpdateFrame):
             await self.set_model(frame.model)
         elif isinstance(frame, TTSVoiceUpdateFrame):
@@ -257,6 +238,30 @@ class TTSService(AIService):
             await self.set_language(frame.language)
         else:
             await self.push_frame(frame, direction)
+
+
+class AsyncTTSService(TTSService):
+    def __init__(
+        self,
+        # if True, TTSService will push TTSStoppedFrames, otherwise subclass must do it
+        push_stop_frames: bool = False,
+        # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
+        stop_frame_timeout_s: float = 1.0,
+        **kwargs,
+    ):
+        super().__init__(sync=False, **kwargs)
+        self._push_stop_frames: bool = push_stop_frames
+        self._stop_frame_timeout_s: float = stop_frame_timeout_s
+        self._stop_frame_task: Optional[asyncio.Task] = None
+        self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
+
+    @abstractmethod
+    async def flush_audio(self):
+        pass
+
+    async def say(self, text: str):
+        await super().say(text)
+        await self.flush_audio()
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -277,14 +282,20 @@ class TTSService(AIService):
             await self._stop_frame_task
             self._stop_frame_task = None
 
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TTSSpeakFrame):
+            await self.flush_audio()
+
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         await super().push_frame(frame, direction)
 
         if self._push_stop_frames and (
-                isinstance(frame, StartInterruptionFrame) or
-                isinstance(frame, TTSStartedFrame) or
-                isinstance(frame, AudioRawFrame) or
-                isinstance(frame, TTSStoppedFrame)):
+            isinstance(frame, StartInterruptionFrame)
+            or isinstance(frame, TTSStartedFrame)
+            or isinstance(frame, TTSAudioRawFrame)
+            or isinstance(frame, TTSStoppedFrame)
+        ):
             await self._stop_frame_queue.put(frame)
 
     async def _stop_frame_handler(self):
@@ -292,8 +303,9 @@ class TTSService(AIService):
             has_started = False
             while True:
                 try:
-                    frame = await asyncio.wait_for(self._stop_frame_queue.get(),
-                                                   self._stop_frame_timeout_s)
+                    frame = await asyncio.wait_for(
+                        self._stop_frame_queue.get(), self._stop_frame_timeout_s
+                    )
                     if isinstance(frame, TTSStartedFrame):
                         has_started = True
                     elif isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
@@ -304,15 +316,6 @@ class TTSService(AIService):
                         has_started = False
         except asyncio.CancelledError:
             pass
-
-
-class AsyncTTSService(TTSService):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    @abstractmethod
-    async def flush_audio(self):
-        pass
 
 
 class AsyncWordTTSService(AsyncTTSService):
@@ -331,7 +334,7 @@ class AsyncWordTTSService(AsyncTTSService):
         self._word_timestamps = []
 
     async def add_word_timestamps(self, word_times: List[Tuple[str, float]]):
-        for (word, timestamp) in word_times:
+        for word, timestamp in word_times:
             await self._words_queue.put((word, seconds_to_nanoseconds(timestamp)))
 
     async def stop(self, frame: EndFrame):
@@ -356,6 +359,7 @@ class AsyncWordTTSService(AsyncTTSService):
         if self._words_task:
             self._words_task.cancel()
             await self._words_task
+            self._words_task = None
 
     async def _words_task_handler(self):
         while True:
@@ -382,7 +386,7 @@ class STTService(AIService):
 
     @abstractmethod
     async def set_model(self, model: str):
-        pass
+        self.set_model_name(model)
 
     @abstractmethod
     async def set_language(self, language: Language):
@@ -418,14 +422,16 @@ class SegmentedSTTService(STTService):
 
     """
 
-    def __init__(self,
-                 *,
-                 min_volume: float = 0.6,
-                 max_silence_secs: float = 0.3,
-                 max_buffer_secs: float = 1.5,
-                 sample_rate: int = 16000,
-                 num_channels: int = 1,
-                 **kwargs):
+    def __init__(
+        self,
+        *,
+        min_volume: float = 0.6,
+        max_silence_secs: float = 0.3,
+        max_buffer_secs: float = 1.5,
+        sample_rate: int = 16000,
+        num_channels: int = 1,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._min_volume = min_volume
         self._max_silence_secs = max_silence_secs
@@ -454,7 +460,8 @@ class SegmentedSTTService(STTService):
         silence_secs = self._silence_num_frames / self._sample_rate
         buffer_secs = self._wave.getnframes() / self._sample_rate
         if self._content.tell() > 0 and (
-                buffer_secs > self._max_buffer_secs or silence_secs > self._max_silence_secs):
+            buffer_secs > self._max_buffer_secs or silence_secs > self._max_silence_secs
+        ):
             self._silence_num_frames = 0
             self._wave.close()
             self._content.seek(0)
@@ -481,7 +488,6 @@ class SegmentedSTTService(STTService):
 
 
 class ImageGenService(AIService):
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 

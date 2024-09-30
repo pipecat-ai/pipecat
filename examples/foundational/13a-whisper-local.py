@@ -19,6 +19,7 @@ from pipecat.transports.local.audio import LocalAudioTransport
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -26,7 +27,6 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 class TranscriptionLogger(FrameProcessor):
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 

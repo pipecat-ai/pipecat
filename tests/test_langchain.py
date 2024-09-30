@@ -6,16 +6,22 @@
 
 import unittest
 
-from pipecat.frames.frames import (LLMFullResponseEndFrame,
-                                   LLMFullResponseStartFrame, StopTaskFrame,
-                                   TextFrame, TranscriptionFrame,
-                                   UserStartedSpeakingFrame,
-                                   UserStoppedSpeakingFrame)
+from pipecat.frames.frames import (
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    StopTaskFrame,
+    TextFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
+)
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.processors.frameworks.langchain import LangchainProcessor
 
@@ -24,7 +30,6 @@ from langchain_core.language_models import FakeStreamingListLLM
 
 
 class TestLangchain(unittest.IsolatedAsyncioTestCase):
-
     class MockProcessor(FrameProcessor):
         def __init__(self, name):
             self.name = name
@@ -53,7 +58,6 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         self.mock_proc = self.MockProcessor("token_collector")
 
     async def test_langchain(self):
-
         messages = [("system", "Say hello to {name}"), ("human", "{input}")]
         prompt = ChatPromptTemplate.from_messages(messages).partial(name="Thomas")
         chain = prompt | self.fake_llm

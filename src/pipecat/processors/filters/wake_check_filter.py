@@ -21,6 +21,7 @@ class WakeCheckFilter(FrameProcessor):
     after a wake phrase has been detected. It also has a keepalive timeout to allow for a brief
     period of continued conversation after a wake phrase has been detected.
     """
+
     class WakeState(Enum):
         IDLE = 1
         AWAKE = 2
@@ -38,8 +39,9 @@ class WakeCheckFilter(FrameProcessor):
         self._keepalive_timeout = keepalive_timeout
         self._wake_patterns = []
         for name in wake_phrases:
-            pattern = re.compile(r'\b' + r'\s*'.join(re.escape(word)
-                                 for word in name.split()) + r'\b', re.IGNORECASE)
+            pattern = re.compile(
+                r"\b" + r"\s*".join(re.escape(word) for word in name.split()) + r"\b", re.IGNORECASE
+            )
             self._wake_patterns.append(pattern)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -57,7 +59,8 @@ class WakeCheckFilter(FrameProcessor):
                 if p.state == WakeCheckFilter.WakeState.AWAKE:
                     if time.time() - p.wake_timer < self._keepalive_timeout:
                         logger.debug(
-                            f"Wake phrase keepalive timeout has not expired. Pushing {frame}")
+                            f"Wake phrase keepalive timeout has not expired. Pushing {frame}"
+                        )
                         p.wake_timer = time.time()
                         await self.push_frame(frame)
                         return
@@ -73,7 +76,7 @@ class WakeCheckFilter(FrameProcessor):
                         # and modify the frame in place.
                         p.state = WakeCheckFilter.WakeState.AWAKE
                         p.wake_timer = time.time()
-                        frame.text = p.accumulator[match.start():]
+                        frame.text = p.accumulator[match.start() :]
                         p.accumulator = ""
                         await self.push_frame(frame)
                     else:

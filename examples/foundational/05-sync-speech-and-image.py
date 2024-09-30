@@ -14,21 +14,18 @@ from dataclasses import dataclass
 from pipecat.frames.frames import (
     AppFrame,
     Frame,
-    ImageRawFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    TextFrame
+    TextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.task import PipelineTask
-from pipecat.pipeline.parallel_task import ParallelTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.aggregators.gated import GatedAggregator
-from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
 from pipecat.processors.aggregators.sentence import SentenceAggregator
+from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -37,6 +34,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -84,47 +82,44 @@ async def main():
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,
-                camera_out_height=1024
-            )
+                camera_out_height=1024,
+            ),
         )
 
-        tts = ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        tts = CartesiaHttpTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         imagegen = FalImageGenService(
-            params=FalImageGenService.InputParams(
-                image_size="square_hd"
-            ),
+            params=FalImageGenService.InputParams(image_size="square_hd"),
             aiohttp_session=session,
             key=os.getenv("FAL_KEY"),
         )
 
-        gated_aggregator = GatedAggregator(
-            gate_open_fn=lambda frame: isinstance(frame, ImageRawFrame),
-            gate_close_fn=lambda frame: isinstance(frame, LLMFullResponseStartFrame),
-            start_open=False
-        )
-
         sentence_aggregator = SentenceAggregator()
         month_prepender = MonthPrepender()
-        llm_full_response_aggregator = LLMFullResponseAggregator()
 
-        pipeline = Pipeline([
-            llm,                     # LLM
-            sentence_aggregator,     # Aggregates LLM output into full sentences
-            ParallelTask(            # Run pipelines in parallel aggregating the result
-                [month_prepender, tts],                   # Create "Month: sentence" and output audio
-                [llm_full_response_aggregator, imagegen]  # Aggregate full LLM response
-            ),
-            gated_aggregator,        # Queues everything until an image is available
-            transport.output()       # Transport output
-        ])
+        # With `SyncParallelPipeline` we synchronize audio and images by pushing
+        # them basically in order (e.g. I1 A1 A1 A1 I2 A2 A2 A2 A2 I3 A3). To do
+        # that, each pipeline runs concurrently and `SyncParallelPipeline` will
+        # wait for the input frame to be processed.
+        #
+        # Note that `SyncParallelPipeline` requires all processors in it to be
+        # synchronous (which is the default for most processors).
+        pipeline = Pipeline(
+            [
+                llm,  # LLM
+                sentence_aggregator,  # Aggregates LLM output into full sentences
+                SyncParallelPipeline(  # Run pipelines in parallel aggregating the result
+                    [month_prepender, tts],  # Create "Month: sentence" and output audio
+                    [imagegen],  # Generate image
+                ),
+                transport.output(),  # Transport output
+            ]
+        )
 
         frames = []
         for month in [

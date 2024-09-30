@@ -8,11 +8,12 @@ import base64
 import json
 import io
 import copy
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from PIL import Image
 from asyncio import CancelledError
 import re
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     Frame,
@@ -27,17 +28,18 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     FunctionCallResultFrame,
     FunctionCallInProgressFrame,
-    StartInterruptionFrame
+    StartInterruptionFrame,
 )
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
-    OpenAILLMContextFrame
+    OpenAILLMContextFrame,
 )
 from pipecat.processors.aggregators.llm_response import (
     LLMUserContextAggregator,
-    LLMAssistantContextAggregator
+    LLMAssistantContextAggregator,
 )
 
 from loguru import logger
@@ -47,8 +49,9 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`. " +
-        "Also, set `ANTHROPIC_API_KEY` environment variable.")
+        "In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`. "
+        + "Also, set `ANTHROPIC_API_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 
@@ -60,33 +63,44 @@ class AnthropicImageMessageFrame(Frame):
 
 @dataclass
 class AnthropicContextAggregatorPair:
-    _user: 'AnthropicUserContextAggregator'
-    _assistant: 'AnthropicAssistantContextAggregator'
+    _user: "AnthropicUserContextAggregator"
+    _assistant: "AnthropicAssistantContextAggregator"
 
-    def user(self) -> 'AnthropicUserContextAggregator':
+    def user(self) -> "AnthropicUserContextAggregator":
         return self._user
 
-    def assistant(self) -> 'AnthropicAssistantContextAggregator':
+    def assistant(self) -> "AnthropicAssistantContextAggregator":
         return self._assistant
 
 
 class AnthropicLLMService(LLMService):
-    """This class implements inference with Anthropic's AI models
-    """
+    """This class implements inference with Anthropic's AI models"""
+
+    class InputParams(BaseModel):
+        enable_prompt_caching_beta: Optional[bool] = False
+        max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
+        temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
+        top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
-            self,
-            *,
-            api_key: str,
-            model: str = "claude-3-5-sonnet-20240620",
-            max_tokens: int = 4096,
-            enable_prompt_caching_beta: bool = False,
-            **kwargs):
+        self,
+        *,
+        api_key: str,
+        model: str = "claude-3-5-sonnet-20240620",
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._client = AsyncAnthropic(api_key=api_key)
-        self._model = model
-        self._max_tokens = max_tokens
-        self._enable_prompt_caching_beta = enable_prompt_caching_beta
+        self.set_model_name(model)
+        self._max_tokens = params.max_tokens
+        self._enable_prompt_caching_beta: bool = params.enable_prompt_caching_beta or False
+        self._temperature = params.temperature
+        self._top_k = params.top_k
+        self._top_p = params.top_p
+        self._extra = params.extra if isinstance(params.extra, dict) else {}
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -99,10 +113,31 @@ class AnthropicLLMService(LLMService):
     def create_context_aggregator(context: OpenAILLMContext) -> AnthropicContextAggregatorPair:
         user = AnthropicUserContextAggregator(context)
         assistant = AnthropicAssistantContextAggregator(user)
-        return AnthropicContextAggregatorPair(
-            _user=user,
-            _assistant=assistant
-        )
+        return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
+
+    async def set_enable_prompt_caching_beta(self, enable_prompt_caching_beta: bool):
+        logger.debug(f"Switching LLM enable_prompt_caching_beta to: [{enable_prompt_caching_beta}]")
+        self._enable_prompt_caching_beta = enable_prompt_caching_beta
+
+    async def set_max_tokens(self, max_tokens: int):
+        logger.debug(f"Switching LLM max_tokens to: [{max_tokens}]")
+        self._max_tokens = max_tokens
+
+    async def set_temperature(self, temperature: float):
+        logger.debug(f"Switching LLM temperature to: [{temperature}]")
+        self._temperature = temperature
+
+    async def set_top_k(self, top_k: float):
+        logger.debug(f"Switching LLM top_k to: [{top_k}]")
+        self._top_k = top_k
+
+    async def set_top_p(self, top_p: float):
+        logger.debug(f"Switching LLM top_p to: [{top_p}]")
+        self._top_p = top_p
+
+    async def set_extra(self, extra: Dict[str, Any]):
+        logger.debug(f"Switching LLM extra to: [{extra}]")
+        self._extra = extra
 
     async def _process_context(self, context: OpenAILLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
@@ -121,7 +156,8 @@ class AnthropicLLMService(LLMService):
             await self.start_processing_metrics()
 
             logger.debug(
-                f"Generating chat: {context.system} | {context.get_messages_for_logging()}")
+                f"Generating chat: {context.system} | {context.get_messages_for_logging()}"
+            )
 
             messages = context.messages
             if self._enable_prompt_caching_beta:
@@ -133,66 +169,90 @@ class AnthropicLLMService(LLMService):
 
             await self.start_ttfb_metrics()
 
-            response = await api_call(
-                tools=context.tools or [],
-                system=context.system,
-                messages=messages,
-                model=self._model,
-                max_tokens=self._max_tokens,
-                stream=True)
+            params = {
+                "tools": context.tools or [],
+                "system": context.system,
+                "messages": messages,
+                "model": self.model_name,
+                "max_tokens": self._max_tokens,
+                "stream": True,
+                "temperature": self._temperature,
+                "top_k": self._top_k,
+                "top_p": self._top_p,
+            }
+
+            params.update(self._extra)
+
+            response = await api_call(**params)
 
             await self.stop_ttfb_metrics()
 
             # Function calling
             tool_use_block = None
-            json_accumulator = ''
+            json_accumulator = ""
 
             async for event in response:
                 # logger.debug(f"Anthropic LLM event: {event}")
 
                 # Aggregate streaming content, create frames, trigger events
 
-                if (event.type == "content_block_delta"):
-                    if hasattr(event.delta, 'text'):
+                if event.type == "content_block_delta":
+                    if hasattr(event.delta, "text"):
                         await self.push_frame(TextFrame(event.delta.text))
                         completion_tokens_estimate += self._estimate_tokens(event.delta.text)
-                    elif hasattr(event.delta, 'partial_json') and tool_use_block:
+                    elif hasattr(event.delta, "partial_json") and tool_use_block:
                         json_accumulator += event.delta.partial_json
                         completion_tokens_estimate += self._estimate_tokens(
-                            event.delta.partial_json)
-                elif (event.type == "content_block_start"):
+                            event.delta.partial_json
+                        )
+                elif event.type == "content_block_start":
                     if event.content_block.type == "tool_use":
                         tool_use_block = event.content_block
-                        json_accumulator = ''
-                elif ((event.type == "message_delta" and
-                      hasattr(event.delta, 'stop_reason')
-                      and event.delta.stop_reason == 'tool_use')):
+                        json_accumulator = ""
+                elif (
+                    event.type == "message_delta"
+                    and hasattr(event.delta, "stop_reason")
+                    and event.delta.stop_reason == "tool_use"
+                ):
                     if tool_use_block:
-                        await self.call_function(context=context,
-                                                 tool_call_id=tool_use_block.id,
-                                                 function_name=tool_use_block.name,
-                                                 arguments=json.loads(json_accumulator) if json_accumulator else dict()
-                                                 )
+                        await self.call_function(
+                            context=context,
+                            tool_call_id=tool_use_block.id,
+                            function_name=tool_use_block.name,
+                            arguments=json.loads(json_accumulator) if json_accumulator else dict(),
+                        )
 
                 # Calculate usage. Do this here in its own if statement, because there may be usage
                 # data embedded in messages that we do other processing for, above.
                 if hasattr(event, "usage"):
-                    prompt_tokens += event.usage.input_tokens if hasattr(
-                        event.usage, "input_tokens") else 0
-                    completion_tokens += event.usage.output_tokens if hasattr(
-                        event.usage, "output_tokens") else 0
+                    prompt_tokens += (
+                        event.usage.input_tokens if hasattr(event.usage, "input_tokens") else 0
+                    )
+                    completion_tokens += (
+                        event.usage.output_tokens if hasattr(event.usage, "output_tokens") else 0
+                    )
                 elif hasattr(event, "message") and hasattr(event.message, "usage"):
-                    prompt_tokens += event.message.usage.input_tokens if hasattr(
-                        event.message.usage, "input_tokens") else 0
-                    completion_tokens += event.message.usage.output_tokens if hasattr(
-                        event.message.usage, "output_tokens") else 0
+                    prompt_tokens += (
+                        event.message.usage.input_tokens
+                        if hasattr(event.message.usage, "input_tokens")
+                        else 0
+                    )
+                    completion_tokens += (
+                        event.message.usage.output_tokens
+                        if hasattr(event.message.usage, "output_tokens")
+                        else 0
+                    )
                     if hasattr(event.message.usage, "cache_creation_input_tokens"):
-                        cache_creation_input_tokens += event.message.usage.cache_creation_input_tokens
+                        cache_creation_input_tokens += (
+                            event.message.usage.cache_creation_input_tokens
+                        )
                         logger.debug(f"Cache creation input tokens: {cache_creation_input_tokens}")
                     if hasattr(event.message.usage, "cache_read_input_tokens"):
                         cache_read_input_tokens += event.message.usage.cache_read_input_tokens
                         logger.debug(f"Cache read input tokens: {cache_read_input_tokens}")
-                    total_input_tokens = prompt_tokens + cache_creation_input_tokens + cache_read_input_tokens
+                    total_input_tokens = (
+                        prompt_tokens + cache_creation_input_tokens + cache_read_input_tokens
+                    )
                     if total_input_tokens >= 1024:
                         context.turns_above_cache_threshold += 1
 
@@ -207,12 +267,16 @@ class AnthropicLLMService(LLMService):
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
-            comp_tokens = completion_tokens if not use_completion_tokens_estimate else completion_tokens_estimate
+            comp_tokens = (
+                completion_tokens
+                if not use_completion_tokens_estimate
+                else completion_tokens_estimate
+            )
             await self._report_usage_metrics(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=comp_tokens,
                 cache_creation_input_tokens=cache_creation_input_tokens,
-                cache_read_input_tokens=cache_read_input_tokens
+                cache_read_input_tokens=cache_read_input_tokens,
             )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -231,7 +295,7 @@ class AnthropicLLMService(LLMService):
             context = AnthropicLLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMModelUpdateFrame):
             logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self._model = frame.model
+            self.set_model_name(frame.model)
         elif isinstance(frame, LLMEnablePromptCachingFrame):
             logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
             self._enable_prompt_caching_beta = frame.enable
@@ -242,24 +306,28 @@ class AnthropicLLMService(LLMService):
             await self._process_context(context)
 
     def _estimate_tokens(self, text: str) -> int:
-        return int(len(re.split(r'[^\w]+', text)) * 1.3)
+        return int(len(re.split(r"[^\w]+", text)) * 1.3)
 
     async def _report_usage_metrics(
-            self,
-            prompt_tokens: int,
-            completion_tokens: int,
-            cache_creation_input_tokens: int,
-            cache_read_input_tokens: int):
-        if prompt_tokens or completion_tokens or cache_creation_input_tokens or cache_read_input_tokens:
-            tokens = {
-                "processor": self.name,
-                "model": self._model,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "cache_creation_input_tokens": cache_creation_input_tokens,
-                "cache_read_input_tokens": cache_read_input_tokens,
-                "total_tokens": prompt_tokens + completion_tokens
-            }
+        self,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cache_creation_input_tokens: int,
+        cache_read_input_tokens: int,
+    ):
+        if (
+            prompt_tokens
+            or completion_tokens
+            or cache_creation_input_tokens
+            or cache_read_input_tokens
+        ):
+            tokens = LLMTokenUsage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cache_creation_input_tokens=cache_creation_input_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+                total_tokens=prompt_tokens + completion_tokens,
+            )
             await self.start_llm_usage_metrics(tokens)
 
 
@@ -270,7 +338,7 @@ class AnthropicLLMContext(OpenAILLMContext):
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
         *,
-        system: str | NotGiven = NOT_GIVEN
+        system: str | NotGiven = NOT_GIVEN,
     ):
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self._user_image_request_context = {}
@@ -303,10 +371,8 @@ class AnthropicLLMContext(OpenAILLMContext):
     def from_image_frame(cls, frame: VisionImageRawFrame) -> "AnthropicLLMContext":
         context = cls()
         context.add_image_frame_message(
-            format=frame.format,
-            size=frame.size,
-            image=frame.image,
-            text=frame.text)
+            format=frame.format, size=frame.size, image=frame.image, text=frame.text
+        )
         return context
 
     def set_messages(self, messages: List):
@@ -315,18 +381,23 @@ class AnthropicLLMContext(OpenAILLMContext):
         self._restructure_from_openai_messages()
 
     def add_image_frame_message(
-            self, *, format: str, size: tuple[int, int], image: bytes, text: str = None):
+        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
+    ):
         buffer = io.BytesIO()
         Image.frombytes(format, size, image).save(buffer, format="JPEG")
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
         # Anthropic docs say that the image should be the first content block in the message.
-        content = [{"type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": encoded_image,
-                    }}]
+        content = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": encoded_image,
+                },
+            }
+        ]
         if text:
             content.append({"type": "text", "text": text})
         self.add_message({"role": "user", "content": content})
@@ -340,8 +411,9 @@ class AnthropicLLMContext(OpenAILLMContext):
                     # if the last message has just a content string, convert it to a list
                     # in the proper format
                     if isinstance(self.messages[-1]["content"], str):
-                        self.messages[-1]["content"] = [{"type": "text",
-                                                         "text": self.messages[-1]["content"]}]
+                        self.messages[-1]["content"] = [
+                            {"type": "text", "text": self.messages[-1]["content"]}
+                        ]
                     # if this message has just a content string, convert it to a list
                     # in the proper format
                     if isinstance(message["content"], str):
@@ -362,8 +434,11 @@ class AnthropicLLMContext(OpenAILLMContext):
                 if isinstance(messages[-1]["content"], str):
                     messages[-1]["content"] = [{"type": "text", "text": messages[-1]["content"]}]
                 messages[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
-            if (self.turns_above_cache_threshold >= 2 and
-                    len(messages) > 2 and messages[-3]["role"] == "user"):
+            if (
+                self.turns_above_cache_threshold >= 2
+                and len(messages) > 2
+                and messages[-3]["role"] == "user"
+            ):
                 if isinstance(messages[-3]["content"], str):
                     messages[-3]["content"] = [{"type": "text", "text": messages[-3]["content"]}]
                 messages[-3]["content"][-1]["cache_control"] = {"type": "ephemeral"}
@@ -417,12 +492,13 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
                 # The LLM sends a UserImageRequestFrame upstream. Cache any context provided with
                 # that frame so we can use it when we assemble the image message in the assistant
                 # context aggregator.
-                if (frame.context):
+                if frame.context:
                     if isinstance(frame.context, str):
                         self._context._user_image_request_context[frame.user_id] = frame.context
                     else:
                         logger.error(
-                            f"Unexpected UserImageRequestFrame context type: {type(frame.context)}")
+                            f"Unexpected UserImageRequestFrame context type: {type(frame.context)}"
+                        )
                         del self._context._user_image_request_context[frame.user_id]
                 else:
                     if frame.user_id in self._context._user_image_request_context:
@@ -438,6 +514,7 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
                 await self.push_frame(frame)
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
+
 
 #
 # Claude returns a text content block along with a tool use content block. This works quite nicely
@@ -466,13 +543,16 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._function_call_in_progress = frame
         elif isinstance(frame, FunctionCallResultFrame):
-            if (self._function_call_in_progress and self._function_call_in_progress.tool_call_id ==
-                    frame.tool_call_id):
+            if (
+                self._function_call_in_progress
+                and self._function_call_in_progress.tool_call_id == frame.tool_call_id
+            ):
                 self._function_call_in_progress = None
                 self._function_call_result = frame
             else:
                 logger.warning(
-                    "FunctionCallResultFrame tool_call_id != InProgressFrame tool_call_id")
+                    "FunctionCallResultFrame tool_call_id != InProgressFrame tool_call_id"
+                )
                 self._function_call_in_progress = None
                 self._function_call_result = None
         elif isinstance(frame, AnthropicImageMessageFrame):
@@ -492,31 +572,32 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                 frame = self._function_call_result
                 self._function_call_result = None
                 if frame.result:
-                    self._context.add_message({
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": aggregation
-                            },
-                            {
-                                "type": "tool_use",
-                                "id": frame.tool_call_id,
-                                "name": frame.function_name,
-                                "input": frame.arguments
-                            }
-                        ]
-                    })
-                    self._context.add_message({
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": frame.tool_call_id,
-                                "content": json.dumps(frame.result)
-                            }
-                        ]
-                    })
+                    self._context.add_message(
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": aggregation},
+                                {
+                                    "type": "tool_use",
+                                    "id": frame.tool_call_id,
+                                    "name": frame.function_name,
+                                    "input": frame.arguments,
+                                },
+                            ],
+                        }
+                    )
+                    self._context.add_message(
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": frame.tool_call_id,
+                                    "content": json.dumps(frame.result),
+                                }
+                            ],
+                        }
+                    )
                     run_llm = True
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
@@ -528,7 +609,8 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                     format=frame.user_image_raw_frame.format,
                     size=frame.user_image_raw_frame.size,
                     image=frame.user_image_raw_frame.image,
-                    text=frame.text)
+                    text=frame.text,
+                )
                 run_llm = True
 
             if run_llm:
