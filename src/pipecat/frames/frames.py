@@ -585,6 +585,7 @@ class FunctionCallResultFrame(DataFrame):
     tool_call_id: str
     arguments: str
     result: Any
+    run_llm: bool = True
 
 
 @dataclass
