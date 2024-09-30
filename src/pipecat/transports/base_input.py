@@ -31,7 +31,7 @@ from loguru import logger
 
 class BaseInputTransport(FrameProcessor):
     def __init__(self, params: TransportParams, **kwargs):
-        super().__init__(sync=False, **kwargs)
+        super().__init__(**kwargs)
 
         self._params = params
 

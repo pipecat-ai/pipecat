@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AsyncWordTTSService
+from pipecat.services.ai_services import WordTTSService
 
 # See .env.example for ElevenLabs configuration needed
 try:
@@ -70,7 +70,7 @@ def calculate_word_times(
     return word_times
 
 
-class ElevenLabsTTSService(AsyncWordTTSService):
+class ElevenLabsTTSService(WordTTSService):
     class InputParams(BaseModel):
         language: Optional[str] = None
         output_format: Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"] = "pcm_16000"

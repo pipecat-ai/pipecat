@@ -51,7 +51,7 @@ class GladiaSTTService(STTService):
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(sync=False, **kwargs)
+        super().__init__(**kwargs)
 
         self._api_key = api_key
         self._url = url
