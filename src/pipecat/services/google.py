@@ -153,7 +153,7 @@ class GoogleTTSService(TTSService):
         rate: Optional[str] = None
         volume: Optional[str] = None
         emphasis: Optional[Literal["strong", "moderate", "reduced", "none"]] = None
-        language: Optional[str] = None
+        language: Optional[str] = "en-US"
         gender: Optional[Literal["male", "female", "neutral"]] = None
         google_style: Optional[Literal["apologetic", "calm", "empathetic", "firm", "lively"]] = None
 
