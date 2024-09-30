@@ -7,9 +7,10 @@
 import asyncio
 import io
 import wave
-
 from abc import abstractmethod
-from typing import AsyncGenerator, List, Optional, Tuple
+from typing import AsyncGenerator, List, Optional, Tuple, Union
+
+from loguru import logger
 
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -18,31 +19,26 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
-    STTLanguageUpdateFrame,
-    STTModelUpdateFrame,
     StartFrame,
     StartInterruptionFrame,
+    STTUpdateSettingsFrame,
+    TextFrame,
     TTSAudioRawFrame,
-    TTSLanguageUpdateFrame,
-    TTSModelUpdateFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TTSVoiceUpdateFrame,
-    TextFrame,
+    TTSUpdateSettingsFrame,
     UserImageRequestFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import MetricsData
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.utils import exp_smoothing
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-
-from loguru import logger
 
 
 class AIService(FrameProcessor):
@@ -174,6 +170,46 @@ class TTSService(AIService):
     async def set_language(self, language: Language):
         pass
 
+    @abstractmethod
+    async def set_speed(self, speed: Union[str, float]):
+        pass
+
+    @abstractmethod
+    async def set_emotion(self, emotion: List[str]):
+        pass
+
+    @abstractmethod
+    async def set_engine(self, engine: str):
+        pass
+
+    @abstractmethod
+    async def set_pitch(self, pitch: str):
+        pass
+
+    @abstractmethod
+    async def set_rate(self, rate: str):
+        pass
+
+    @abstractmethod
+    async def set_volume(self, volume: str):
+        pass
+
+    @abstractmethod
+    async def set_emphasis(self, emphasis: str):
+        pass
+
+    @abstractmethod
+    async def set_style(self, style: str):
+        pass
+
+    @abstractmethod
+    async def set_style_degree(self, style_degree: str):
+        pass
+
+    @abstractmethod
+    async def set_role(self, role: str):
+        pass
+
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -212,6 +248,34 @@ class TTSService(AIService):
             # interrupted, the text is not added to the assistant context.
             await self.push_frame(TextFrame(text))
 
+    async def _update_tts_settings(self, frame: TTSUpdateSettingsFrame):
+        if frame.model is not None:
+            await self.set_model(frame.model)
+        if frame.voice is not None:
+            await self.set_voice(frame.voice)
+        if frame.language is not None:
+            await self.set_language(frame.language)
+        if frame.speed is not None:
+            await self.set_speed(frame.speed)
+        if frame.emotion is not None:
+            await self.set_emotion(frame.emotion)
+        if frame.engine is not None:
+            await self.set_engine(frame.engine)
+        if frame.pitch is not None:
+            await self.set_pitch(frame.pitch)
+        if frame.rate is not None:
+            await self.set_rate(frame.rate)
+        if frame.volume is not None:
+            await self.set_volume(frame.volume)
+        if frame.emphasis is not None:
+            await self.set_emphasis(frame.emphasis)
+        if frame.style is not None:
+            await self.set_style(frame.style)
+        if frame.style_degree is not None:
+            await self.set_style_degree(frame.style_degree)
+        if frame.role is not None:
+            await self.set_role(frame.role)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -230,12 +294,8 @@ class TTSService(AIService):
                 await self.push_frame(frame, direction)
         elif isinstance(frame, TTSSpeakFrame):
             await self._push_tts_frames(frame.text)
-        elif isinstance(frame, TTSModelUpdateFrame):
-            await self.set_model(frame.model)
-        elif isinstance(frame, TTSVoiceUpdateFrame):
-            await self.set_voice(frame.voice)
-        elif isinstance(frame, TTSLanguageUpdateFrame):
-            await self.set_language(frame.language)
+        elif isinstance(frame, TTSUpdateSettingsFrame):
+            await self._update_tts_settings(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -397,6 +457,12 @@ class STTService(AIService):
         """Returns transcript as a string"""
         pass
 
+    async def _update_stt_settings(self, frame: STTUpdateSettingsFrame):
+        if frame.model is not None:
+            await self.set_model(frame.model)
+        if frame.language is not None:
+            await self.set_language(frame.language)
+
     async def process_audio_frame(self, frame: AudioRawFrame):
         await self.process_generator(self.run_stt(frame.audio))
 
@@ -408,10 +474,8 @@ class STTService(AIService):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We don't really want to push audio frames down.
             await self.process_audio_frame(frame)
-        elif isinstance(frame, STTModelUpdateFrame):
-            await self.set_model(frame.model)
-        elif isinstance(frame, STTLanguageUpdateFrame):
-            await self.set_language(frame.language)
+        elif isinstance(frame, STTUpdateSettingsFrame):
+            await self._update_stt_settings(frame)
         else:
             await self.push_frame(frame, direction)
 

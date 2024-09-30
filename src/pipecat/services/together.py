@@ -7,37 +7,36 @@
 import json
 import re
 import uuid
-from pydantic import BaseModel, Field
-
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
 from asyncio import CancelledError
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+from loguru import logger
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     Frame,
-    LLMModelUpdateFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMessagesFrame,
+    LLMUpdateSettingsFrame,
+    StartInterruptionFrame,
     TextFrame,
     UserImageRequestFrame,
-    LLMMessagesFrame,
-    LLMFullResponseStartFrame,
-    LLMFullResponseEndFrame,
-    FunctionCallResultFrame,
-    FunctionCallInProgressFrame,
-    StartInterruptionFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantContextAggregator,
+    LLMUserContextAggregator,
+)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
-from pipecat.processors.aggregators.llm_response import (
-    LLMUserContextAggregator,
-    LLMAssistantContextAggregator,
-)
-
-from loguru import logger
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import LLMService
 
 try:
     from together import AsyncTogether
@@ -129,6 +128,25 @@ class TogetherLLMService(LLMService):
         logger.debug(f"Switching LLM extra to: [{extra}]")
         self._extra = extra
 
+    async def _update_settings(self, frame: LLMUpdateSettingsFrame):
+        if frame.model is not None:
+            logger.debug(f"Switching LLM model to: [{frame.model}]")
+            self.set_model_name(frame.model)
+        if frame.frequency_penalty is not None:
+            await self.set_frequency_penalty(frame.frequency_penalty)
+        if frame.max_tokens is not None:
+            await self.set_max_tokens(frame.max_tokens)
+        if frame.presence_penalty is not None:
+            await self.set_presence_penalty(frame.presence_penalty)
+        if frame.temperature is not None:
+            await self.set_temperature(frame.temperature)
+        if frame.top_k is not None:
+            await self.set_top_k(frame.top_k)
+        if frame.top_p is not None:
+            await self.set_top_p(frame.top_p)
+        if frame.extra:
+            await self.set_extra(frame.extra)
+
     async def _process_context(self, context: OpenAILLMContext):
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -188,7 +206,7 @@ class TogetherLLMService(LLMService):
                 if chunk.choices[0].finish_reason == "eos" and accumulating_function_call:
                     await self._extract_function_call(context, function_call_accumulator)
 
-        except CancelledError as e:
+        except CancelledError:
             # todo: implement token counting estimates for use when the user interrupts a long generation
             # we do this in the anthropic.py service
             raise
@@ -206,9 +224,8 @@ class TogetherLLMService(LLMService):
             context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
             context = TogetherLLMContext.from_messages(frame.messages)
-        elif isinstance(frame, LLMModelUpdateFrame):
-            logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self.set_model_name(frame.model)
+        elif isinstance(frame, LLMUpdateSettingsFrame):
+            await self._update_settings(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -338,7 +355,7 @@ class TogetherAssistantContextAggregator(LLMAssistantContextAggregator):
                 await self._push_aggregation()
             else:
                 logger.warning(
-                    f"FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id"
+                    "FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id"
                 )
                 self._function_call_in_progress = None
                 self._function_call_result = None

@@ -5,47 +5,47 @@
 #
 
 import base64
-import json
-import io
 import copy
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
-from PIL import Image
-from asyncio import CancelledError
+import io
+import json
 import re
+from asyncio import CancelledError
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+from loguru import logger
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     Frame,
-    LLMEnablePromptCachingFrame,
-    LLMModelUpdateFrame,
-    TextFrame,
-    VisionImageRawFrame,
-    UserImageRequestFrame,
-    UserImageRawFrame,
-    LLMMessagesFrame,
-    LLMFullResponseStartFrame,
-    LLMFullResponseEndFrame,
-    FunctionCallResultFrame,
     FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    LLMEnablePromptCachingFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMessagesFrame,
+    LLMUpdateSettingsFrame,
     StartInterruptionFrame,
+    TextFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
+    VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantContextAggregator,
+    LLMUserContextAggregator,
+)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
-from pipecat.processors.aggregators.llm_response import (
-    LLMUserContextAggregator,
-    LLMAssistantContextAggregator,
-)
-
-from loguru import logger
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import LLMService
 
 try:
-    from anthropic import AsyncAnthropic, NOT_GIVEN, NotGiven
+    from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -279,6 +279,21 @@ class AnthropicLLMService(LLMService):
                 cache_read_input_tokens=cache_read_input_tokens,
             )
 
+    async def _update_settings(self, frame: LLMUpdateSettingsFrame):
+        if frame.model is not None:
+            logger.debug(f"Switching LLM model to: [{frame.model}]")
+            self.set_model_name(frame.model)
+        if frame.max_tokens is not None:
+            await self.set_max_tokens(frame.max_tokens)
+        if frame.temperature is not None:
+            await self.set_temperature(frame.temperature)
+        if frame.top_k is not None:
+            await self.set_top_k(frame.top_k)
+        if frame.top_p is not None:
+            await self.set_top_p(frame.top_p)
+        if frame.extra:
+            await self.set_extra(frame.extra)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -293,9 +308,8 @@ class AnthropicLLMService(LLMService):
             # UserImageRawFrames coming through the pipeline and add them
             # to the context.
             context = AnthropicLLMContext.from_image_frame(frame)
-        elif isinstance(frame, LLMModelUpdateFrame):
-            logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self.set_model_name(frame.model)
+        elif isinstance(frame, LLMUpdateSettingsFrame):
+            await self._update_settings(frame)
         elif isinstance(frame, LLMEnablePromptCachingFrame):
             logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
             self._enable_prompt_caching_beta = frame.enable
