@@ -86,12 +86,12 @@ async def main():
             ),
         )
 
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+
         tts = CartesiaHttpTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
-
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         imagegen = FalImageGenService(
             params=FalImageGenService.InputParams(image_size="square_hd"),
@@ -107,8 +107,10 @@ async def main():
         # that, each pipeline runs concurrently and `SyncParallelPipeline` will
         # wait for the input frame to be processed.
         #
-        # Note that `SyncParallelPipeline` requires all processors in it to be
-        # synchronous (which is the default for most processors).
+        # Note that `SyncParallelPipeline` requires the last processor in each
+        # of the pipelines to be synchronous. In this case, we use
+        # `CartesiaHttpTTSService` and `FalImageGenService` which make HTTP
+        # requests and wait for the response.
         pipeline = Pipeline(
             [
                 llm,  # LLM
