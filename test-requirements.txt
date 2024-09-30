@@ -7,6 +7,7 @@ deepgram-sdk~=3.5.0
 fal-client~=0.4.1
 fastapi~=0.112.1
 faster-whisper~=1.0.3
+google-cloud-texttospeech~=2.17.2
 google-generativeai~=0.7.2
 langchain~=0.2.14
 livekit~=0.13.1
