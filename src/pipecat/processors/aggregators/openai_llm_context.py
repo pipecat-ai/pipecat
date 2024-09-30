@@ -133,6 +133,7 @@ class OpenAILLMContext:
         tool_call_id: str,
         arguments: str,
         llm: FrameProcessor,
+        run_llm: bool = True,
     ) -> None:
         # Push a SystemFrame downstream. This frame will let our assistant context aggregator
         # know that we are in the middle of a function call. Some contexts/aggregators may
@@ -153,6 +154,7 @@ class OpenAILLMContext:
                     tool_call_id=tool_call_id,
                     arguments=arguments,
                     result=result,
+                    run_llm=run_llm,
                 )
             )
 
