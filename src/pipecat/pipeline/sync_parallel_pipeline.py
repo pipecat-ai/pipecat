@@ -9,12 +9,18 @@ import asyncio
 from itertools import chain
 from typing import List
 
+from pipecat.frames.frames import ControlFrame, Frame, SystemFrame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.frames.frames import Frame
 
 from loguru import logger
+
+
+class SyncFrame(ControlFrame):
+    """This frame is used to know when the internal pipelines have finished."""
+
+    pass
 
 
 class Source(FrameProcessor):
@@ -67,13 +73,16 @@ class SyncParallelPipeline(BasePipeline):
                 raise TypeError(f"SyncParallelPipeline argument {processors} is not a list")
 
             # We add a source at the beginning of the pipeline and a sink at the end.
-            source = Source(self._up_queue)
-            sink = Sink(self._down_queue)
+            up_queue = asyncio.Queue()
+            down_queue = asyncio.Queue()
+            source = Source(up_queue)
+            sink = Sink(down_queue)
             processors: List[FrameProcessor] = [source] + processors + [sink]
 
-            # Keep track of sources and sinks.
-            self._sources.append(source)
-            self._sinks.append(sink)
+            # Keep track of sources and sinks. We also keep the output queue of
+            # the source and the sinks so we can use it later.
+            self._sources.append({"processor": source, "queue": down_queue})
+            self._sinks.append({"processor": sink, "queue": up_queue})
 
             # Create pipeline
             pipeline = Pipeline(processors)
@@ -94,17 +103,46 @@ class SyncParallelPipeline(BasePipeline):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
+        # The last processor of each pipeline needs to be synchronous otherwise
+        # this element won't work. Since, we know it should be synchronous we
+        # push a SyncFrame. Since frames are ordered we know this frame will be
+        # pushed after the synchronous processor has pushed its data allowing us
+        # to synchrnonize all the internal pipelines by waiting for the
+        # SyncFrame in all of them.
+        async def wait_for_sync(
+            obj, main_queue: asyncio.Queue, frame: Frame, direction: FrameDirection
+        ):
+            processor = obj["processor"]
+            queue = obj["queue"]
+            await processor.process_frame(frame, direction)
+
+            # If we have a system frame we don't need to synchrnonize anything.
+            if isinstance(frame, SystemFrame):
+                await main_queue.put(frame)
+            else:
+                await processor.process_frame(SyncFrame(), direction)
+
+                frame = await queue.get()
+                while not isinstance(frame, SyncFrame):
+                    await main_queue.put(frame)
+                    queue.task_done()
+                    frame = await queue.get()
+
         if direction == FrameDirection.UPSTREAM:
             # If we get an upstream frame we process it in each sink.
-            await asyncio.gather(*[s.process_frame(frame, direction) for s in self._sinks])
+            await asyncio.gather(
+                *[wait_for_sync(s, self._up_queue, frame, direction) for s in self._sinks]
+            )
         elif direction == FrameDirection.DOWNSTREAM:
             # If we get a downstream frame we process it in each source.
-            await asyncio.gather(*[s.process_frame(frame, direction) for s in self._sources])
+            await asyncio.gather(
+                *[wait_for_sync(s, self._down_queue, frame, direction) for s in self._sources]
+            )
 
         seen_ids = set()
         while not self._up_queue.empty():
             frame = await self._up_queue.get()
-            if frame and frame.id not in seen_ids:
+            if frame.id not in seen_ids:
                 await self.push_frame(frame, FrameDirection.UPSTREAM)
                 seen_ids.add(frame.id)
             self._up_queue.task_done()
@@ -112,7 +150,7 @@ class SyncParallelPipeline(BasePipeline):
         seen_ids = set()
         while not self._down_queue.empty():
             frame = await self._down_queue.get()
-            if frame and frame.id not in seen_ids:
+            if frame.id not in seen_ids:
                 await self.push_frame(frame, FrameDirection.DOWNSTREAM)
                 seen_ids.add(frame.id)
             self._down_queue.task_done()
