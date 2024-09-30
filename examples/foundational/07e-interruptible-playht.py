@@ -14,7 +14,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
+)
 from pipecat.services.playht import PlayHTTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -25,6 +27,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -44,8 +47,8 @@ async def main():
                 audio_out_sample_rate=16000,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         tts = PlayHTTTSService(
@@ -54,9 +57,7 @@ async def main():
             voice_url="s3://voice-cloning-zero-shot/801a663f-efd0-4254-98d0-5c175514c3e8/jennifer/manifest.json",
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         messages = [
             {
@@ -68,14 +69,16 @@ async def main():
         tma_in = LLMUserResponseAggregator(messages)
         tma_out = LLMAssistantResponseAggregator(messages)
 
-        pipeline = Pipeline([
-            transport.input(),   # Transport user input
-            tma_in,              # User responses
-            llm,                 # LLM
-            tts,                 # TTS
-            transport.output(),  # Transport bot output
-            tma_out              # Assistant spoken responses
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                tma_in,  # User responses
+                llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                tma_out,  # Assistant spoken responses
+            ]
+        )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
@@ -83,8 +86,7 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            messages.append(
-                {"role": "system", "content": "Please introduce yourself to the user."})
+            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()

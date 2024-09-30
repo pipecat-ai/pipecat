@@ -10,13 +10,13 @@ from typing import AsyncGenerator
 
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
     StartInterruptionFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -30,23 +30,24 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use LMNT, you need to `pip install pipecat-ai[lmnt]`. Also, set `LMNT_API_KEY` environment variable.")
+        "In order to use LMNT, you need to `pip install pipecat-ai[lmnt]`. Also, set `LMNT_API_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 
 class LmntTTSService(AsyncTTSService):
-
     def __init__(
-            self,
-            *,
-            api_key: str,
-            voice_id: str,
-            sample_rate: int = 24000,
-            language: str = "en",
-            **kwargs):
+        self,
+        *,
+        api_key: str,
+        voice_id: str,
+        sample_rate: int = 24000,
+        language: str = "en",
+        **kwargs,
+    ):
         # Let TTSService produce TTSStoppedFrames after a short delay of
         # no activity.
-        super().__init__(push_stop_frames=True, **kwargs)
+        super().__init__(sync=False, push_stop_frames=True, sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._voice_id = voice_id
@@ -92,7 +93,8 @@ class LmntTTSService(AsyncTTSService):
         try:
             self._speech = Speech()
             self._connection = await self._speech.synthesize_streaming(
-                self._voice_id, format="raw", sample_rate=self._output_format["sample_rate"])
+                self._voice_id, format="raw", sample_rate=self._output_format["sample_rate"]
+            )
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
         except Exception as e:
             logger.exception(f"{self} initialization error: {e}")
@@ -126,10 +128,10 @@ class LmntTTSService(AsyncTTSService):
                     await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
                 elif "audio" in msg:
                     await self.stop_ttfb_metrics()
-                    frame = AudioRawFrame(
+                    frame = TTSAudioRawFrame(
                         audio=msg["audio"],
                         sample_rate=self._output_format["sample_rate"],
-                        num_channels=1
+                        num_channels=1,
                     )
                     await self.push_frame(frame)
                 else:

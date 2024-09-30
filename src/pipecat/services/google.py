@@ -15,11 +15,14 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
     LLMMessagesFrame,
     LLMFullResponseStartFrame,
-    LLMFullResponseEndFrame
+    LLMFullResponseEndFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 
 from loguru import logger
 
@@ -29,7 +32,8 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_API_KEY` environment variable.")
+        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_API_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 
@@ -50,10 +54,10 @@ class GoogleLLMService(LLMService):
         return True
 
     def _create_client(self, model: str):
+        self.set_model_name(model)
         self._client = gai.GenerativeModel(model)
 
-    def _get_messages_from_openai_context(
-            self, context: OpenAILLMContext) -> List[glm.Content]:
+    def _get_messages_from_openai_context(self, context: OpenAILLMContext) -> List[glm.Content]:
         openai_messages = context.get_messages()
         google_messages = []
 
@@ -68,10 +72,12 @@ class GoogleLLMService(LLMService):
             parts = [glm.Part(text=content)]
             if "mime_type" in message:
                 parts.append(
-                    glm.Part(inline_data=glm.Blob(
-                        mime_type=message["mime_type"],
-                        data=message["data"].getvalue()
-                    )))
+                    glm.Part(
+                        inline_data=glm.Blob(
+                            mime_type=message["mime_type"], data=message["data"].getvalue()
+                        )
+                    )
+                )
             google_messages.append({"role": role, "parts": parts})
 
         return google_messages
@@ -102,7 +108,8 @@ class GoogleLLMService(LLMService):
                     # Google LLMs seem to flag safety issues a lot!
                     if chunk.candidates[0].finish_reason == 3:
                         logger.debug(
-                            f"LLM refused to generate content for safety reasons - {messages}.")
+                            f"LLM refused to generate content for safety reasons - {messages}."
+                        )
                     else:
                         logger.exception(f"{self} error: {e}")
 

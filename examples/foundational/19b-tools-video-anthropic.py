@@ -23,6 +23,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -55,8 +56,8 @@ async def main():
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         tts = CartesiaTTSService(
@@ -67,7 +68,7 @@ async def main():
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY"),
             model="claude-3-5-sonnet-20240620",
-            enable_prompt_caching_beta=True
+            enable_prompt_caching_beta=True,
         )
         llm.register_function("get_weather", get_weather)
         llm.register_function("get_image", get_image)
@@ -100,7 +101,7 @@ async def main():
                     },
                     "required": ["question"],
                 },
-            }
+            },
         ]
 
         # todo: test with very short initial user message
@@ -134,28 +135,28 @@ If you need to use a tool, simply use the tool. Do not tell the user the tool yo
                         "type": "text",
                         "text": system_prompt,
                     }
-                ]
+                ],
             },
-            {
-                "role": "user",
-                "content": "Start the conversation by introducing yourself."
-            }]
+            {"role": "user", "content": "Start the conversation by introducing yourself."},
+        ]
 
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
-        pipeline = Pipeline([
-            transport.input(),               # Transport user input
-            context_aggregator.user(),       # User speech to text
-            llm,                             # LLM
-            tts,                             # TTS
-            transport.output(),              # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses and tool context
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                context_aggregator.user(),  # User speech to text
+                llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                context_aggregator.assistant(),  # Assistant spoken responses and tool context
+            ]
+        )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
 
-        @ transport.event_handler("on_first_participant_joined")
+        @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             global video_participant_id
             video_participant_id = participant["id"]

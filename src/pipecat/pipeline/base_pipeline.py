@@ -12,7 +12,6 @@ from pipecat.processors.frame_processor import FrameProcessor
 
 
 class BasePipeline(FrameProcessor):
-
     def __init__(self):
         super().__init__()
 

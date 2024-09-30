@@ -10,7 +10,7 @@ import os
 import sys
 import wave
 
-from pipecat.frames.frames import AudioRawFrame
+from pipecat.frames.frames import OutputAudioRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -26,6 +26,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -49,40 +50,44 @@ for file in sound_files:
     filename = os.path.splitext(os.path.basename(full_path))[0]
     # Open the sound and convert it to bytes
     with wave.open(full_path) as audio_file:
-        sounds[file] = AudioRawFrame(audio_file.readframes(-1),
-                                     audio_file.getframerate(), audio_file.getnchannels())
+        sounds[file] = OutputAudioRawFrame(
+            audio_file.readframes(-1), audio_file.getframerate(), audio_file.getnchannels()
+        )
 
 
 class IntakeProcessor:
-
     def __init__(self, context: OpenAILLMContext):
         print(f"Initializing context from IntakeProcessor")
-        context.add_message({"role": "system", "content": "You are Jessica, an agent for a company called Tri-County Health Services. Your job is to collect important information from the user before their doctor visit. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor. Don't make assumptions about what values to plug into functions. Ask for clarification if a user response is ambiguous. Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday, including the year. When they answer with their birthday, call the verify_birthday function."})
-        context.set_tools([
+        context.add_message(
             {
-                "type": "function",
-                "function": {
-                    "name": "verify_birthday",
-                    "description": "Use this function to verify the user has provided their correct birthday.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "birthday": {
-                                "type": "string",
-                                "description": "The user's birthdate, including the year. The user can provide it in any format, but convert it to YYYY-MM-DD format to call this function.",
-                            }},
+                "role": "system",
+                "content": "You are Jessica, an agent for a company called Tri-County Health Services. Your job is to collect important information from the user before their doctor visit. You're talking to Chad Bailey. You should address the user by their first name and be polite and professional. You're not a medical professional, so you shouldn't provide any advice. Keep your responses short. Your job is to collect information to give to a doctor. Don't make assumptions about what values to plug into functions. Ask for clarification if a user response is ambiguous. Start by introducing yourself. Then, ask the user to confirm their identity by telling you their birthday, including the year. When they answer with their birthday, call the verify_birthday function.",
+            }
+        )
+        context.set_tools(
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "verify_birthday",
+                        "description": "Use this function to verify the user has provided their correct birthday.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "birthday": {
+                                    "type": "string",
+                                    "description": "The user's birthdate, including the year. The user can provide it in any format, but convert it to YYYY-MM-DD format to call this function.",
+                                }
+                            },
+                        },
                     },
-                },
-            }])
+                }
+            ]
+        )
 
     async def verify_birthday(
-            self,
-            function_name,
-            tool_call_id,
-            args,
-            llm,
-            context,
-            result_callback):
+        self, function_name, tool_call_id, args, llm, context, result_callback
+    ):
         if args["birthday"] == "1983-01-01":
             context.set_tools(
                 [
@@ -109,18 +114,35 @@ class IntakeProcessor:
                                                 },
                                             },
                                         },
-                                    }},
+                                    }
+                                },
                             },
                         },
-                    }])
+                    }
+                ]
+            )
             # It's a bit weird to push this to the LLM, but it gets it into the pipeline
             # await llm.push_frame(sounds["ding2.wav"], FrameDirection.DOWNSTREAM)
             # We don't need the function call in the context, so just return a new
             # system message and let the framework re-prompt
-            await result_callback([{"role": "system", "content": "Next, thank the user for confirming their identity, then ask the user to list their current prescriptions. Each prescription needs to have a medication name and a dosage. Do not call the list_prescriptions function with any unknown dosages."}])
+            await result_callback(
+                [
+                    {
+                        "role": "system",
+                        "content": "Next, thank the user for confirming their identity, then ask the user to list their current prescriptions. Each prescription needs to have a medication name and a dosage. Do not call the list_prescriptions function with any unknown dosages.",
+                    }
+                ]
+            )
         else:
             # The user provided an incorrect birthday; ask them to try again
-            await result_callback([{"role": "system", "content": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function."}])
+            await result_callback(
+                [
+                    {
+                        "role": "system",
+                        "content": "The user provided an incorrect birthday. Ask them for their birthday again. When they answer, call the verify_birthday function.",
+                    }
+                ]
+            )
 
     async def start_prescriptions(self, function_name, llm, context):
         print(f"!!! doing start prescriptions")
@@ -143,16 +165,22 @@ class IntakeProcessor:
                                             "name": {
                                                 "type": "string",
                                                 "description": "What the user is allergic to",
-                                            }},
+                                            }
+                                        },
                                     },
-                                }},
+                                }
+                            },
                         },
                     },
-                }])
+                }
+            ]
+        )
         context.add_message(
             {
                 "role": "system",
-                "content": "Next, ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function."})
+                "content": "Next, ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function.",
+            }
+        )
         print(f"!!! about to await llm process frame in start prescrpitions")
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
         print(f"!!! past await process frame in start prescriptions")
@@ -178,17 +206,22 @@ class IntakeProcessor:
                                             "name": {
                                                 "type": "string",
                                                 "description": "The user's medical condition",
-                                            }},
+                                            }
+                                        },
                                     },
-                                }},
+                                }
+                            },
                         },
                     },
                 },
-            ])
+            ]
+        )
         context.add_message(
             {
                 "role": "system",
-                "content": "Now ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function."})
+                "content": "Now ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function.",
+            }
+        )
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
     async def start_conditions(self, function_name, llm, context):
@@ -212,24 +245,31 @@ class IntakeProcessor:
                                             "name": {
                                                 "type": "string",
                                                 "description": "The user's reason for visiting the doctor",
-                                            }},
+                                            }
+                                        },
                                     },
-                                }},
+                                }
+                            },
                         },
                     },
-                }])
+                }
+            ]
+        )
         context.add_message(
             {
                 "role": "system",
-                "content": "Finally, ask the user the reason for their doctor visit today. Once they answer, call the list_visit_reasons function."})
+                "content": "Finally, ask the user the reason for their doctor visit today. Once they answer, call the list_visit_reasons function.",
+            }
+        )
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
     async def start_visit_reasons(self, function_name, llm, context):
         print("!!! doing start visit reasons")
         # move to finish call
         context.set_tools([])
-        context.add_message({"role": "system",
-                             "content": "Now, thank the user and end the conversation."})
+        context.add_message(
+            {"role": "system", "content": "Now, thank the user and end the conversation."}
+        )
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
     async def save_data(self, function_name, tool_call_id, args, llm, context, result_callback):
@@ -260,7 +300,7 @@ async def main():
                 #     tier="nova",
                 #     model="2-general"
                 # )
-            )
+            ),
         )
 
         tts = CartesiaTTSService(
@@ -273,9 +313,7 @@ async def main():
         #     voice_id="846d6cb0-2301-48b6-9683-48f5618ea2f6",  # Spanish-speaking Lady
         # )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         messages = []
         context = OpenAILLMContext(messages=messages)
@@ -284,33 +322,31 @@ async def main():
         intake = IntakeProcessor(context)
         llm.register_function("verify_birthday", intake.verify_birthday)
         llm.register_function(
-            "list_prescriptions",
-            intake.save_data,
-            start_callback=intake.start_prescriptions)
+            "list_prescriptions", intake.save_data, start_callback=intake.start_prescriptions
+        )
         llm.register_function(
-            "list_allergies",
-            intake.save_data,
-            start_callback=intake.start_allergies)
+            "list_allergies", intake.save_data, start_callback=intake.start_allergies
+        )
         llm.register_function(
-            "list_conditions",
-            intake.save_data,
-            start_callback=intake.start_conditions)
+            "list_conditions", intake.save_data, start_callback=intake.start_conditions
+        )
         llm.register_function(
-            "list_visit_reasons",
-            intake.save_data,
-            start_callback=intake.start_visit_reasons)
+            "list_visit_reasons", intake.save_data, start_callback=intake.start_visit_reasons
+        )
 
         fl = FrameLogger("LLM Output")
 
-        pipeline = Pipeline([
-            transport.input(),   # Transport input
-            context_aggregator.user(),  # User responses
-            llm,                 # LLM
-            fl,                  # Frame logger
-            tts,                 # TTS
-            transport.output(),  # Transport output
-            context_aggregator.assistant(),  # Assistant responses
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport input
+                context_aggregator.user(),  # User responses
+                llm,  # LLM
+                fl,  # Frame logger
+                tts,  # TTS
+                transport.output(),  # Transport output
+                context_aggregator.assistant(),  # Assistant responses
+            ]
+        )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=False))
 

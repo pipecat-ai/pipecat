@@ -25,6 +25,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -32,12 +33,8 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def get_current_weather(
-        function_name,
-        tool_call_id,
-        arguments,
-        llm,
-        context,
-        result_callback):
+    function_name, tool_call_id, arguments, llm, context, result_callback
+):
     logger.debug("IN get_current_weather")
     location = arguments["location"]
     await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
@@ -55,8 +52,8 @@ async def main():
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         tts = CartesiaTTSService(
@@ -104,26 +101,28 @@ Reminder:
 
 """
 
-        messages = [{"role": "system",
-                     "content": system_prompt},
-                    {"role": "user",
-                     "content": "Wait for the user to say something."}]
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": "Wait for the user to say something."},
+        ]
 
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
-        pipeline = Pipeline([
-            transport.input(),               # Transport user input
-            context_aggregator.user(),       # User speech to text
-            llm,                             # LLM
-            tts,                             # TTS
-            transport.output(),              # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses and tool context
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),  # Transport user input
+                context_aggregator.user(),  # User speech to text
+                llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                context_aggregator.assistant(),  # Assistant spoken responses and tool context
+            ]
+        )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
 
-        @ transport.event_handler("on_first_participant_joined")
+        @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.

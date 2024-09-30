@@ -17,7 +17,8 @@ class GatedAggregator(FrameProcessor):
     Yields gate-opening frame before any accumulated frames, then ensuing frames
     until and not including the gate-closed frame.
 
-    >>> from pipecat.pipeline.frames import ImageFrame
+    Doctest: FIXME to work with asyncio
+    >>> from pipecat.frames.frames import ImageRawFrame
 
     >>> async def print_frames(aggregator, frame):
     ...     async for frame in aggregator.process_frame(frame):
@@ -28,20 +29,25 @@ class GatedAggregator(FrameProcessor):
 
     >>> aggregator = GatedAggregator(
     ...     gate_close_fn=lambda x: isinstance(x, LLMResponseStartFrame),
-    ...     gate_open_fn=lambda x: isinstance(x, ImageFrame),
+    ...     gate_open_fn=lambda x: isinstance(x, ImageRawFrame),
     ...     start_open=False)
     >>> asyncio.run(print_frames(aggregator, TextFrame("Hello")))
     >>> asyncio.run(print_frames(aggregator, TextFrame("Hello again.")))
-    >>> asyncio.run(print_frames(aggregator, ImageFrame(image=bytes([]), size=(0, 0))))
-    ImageFrame
+    >>> asyncio.run(print_frames(aggregator, ImageRawFrame(image=bytes([]), size=(0, 0))))
+    ImageRawFrame
     Hello
     Hello again.
     >>> asyncio.run(print_frames(aggregator, TextFrame("Goodbye.")))
     Goodbye.
     """
 
-    def __init__(self, gate_open_fn, gate_close_fn, start_open,
-                 direction: FrameDirection = FrameDirection.DOWNSTREAM):
+    def __init__(
+        self,
+        gate_open_fn,
+        gate_close_fn,
+        start_open,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+    ):
         super().__init__()
         self._gate_open_fn = gate_open_fn
         self._gate_close_fn = gate_close_fn
@@ -74,7 +80,7 @@ class GatedAggregator(FrameProcessor):
 
         if self._gate_open:
             await self.push_frame(frame, direction)
-            for (f, d) in self._accumulator:
+            for f, d in self._accumulator:
                 await self.push_frame(f, d)
             self._accumulator = []
         else:

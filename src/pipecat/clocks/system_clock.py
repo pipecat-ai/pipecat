@@ -10,7 +10,6 @@ from pipecat.clocks.base_clock import BaseClock
 
 
 class SystemClock(BaseClock):
-
     def __init__(self):
         self._time = 0
 

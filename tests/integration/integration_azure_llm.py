@@ -1,14 +1,20 @@
+import unittest
+
 import asyncio
 import os
-from pipecat.pipeline.openai_frames import OpenAILLMContextFrame
-from pipecat.services.azure_ai_services import AzureLLMService
-from pipecat.services.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
+from pipecat.services.azure import AzureLLMService
 
 from openai.types.chat import (
     ChatCompletionSystemMessageParam,
 )
 
 if __name__ == "__main__":
+
+    @unittest.skip("Skip azure integration test")
     async def test_chat():
         llm = AzureLLMService(
             api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
@@ -17,7 +23,8 @@ if __name__ == "__main__":
         )
         context = OpenAILLMContext()
         message: ChatCompletionSystemMessageParam = ChatCompletionSystemMessageParam(
-            content="Please tell the world hello.", name="system", role="system")
+            content="Please tell the world hello.", name="system", role="system"
+        )
         context.add_message(message)
         frame = OpenAILLMContextFrame(context)
         async for s in llm.process_frame(frame):
