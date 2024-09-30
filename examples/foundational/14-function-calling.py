@@ -5,9 +5,14 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from openai.types.chat import ChatCompletionToolParam
+from runner import configure
 
 from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -18,14 +23,6 @@ from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-
-from openai.types.chat import ChatCompletionToolParam
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -38,7 +35,7 @@ async def start_fetch_weather(function_name, llm, context):
     # can interrupt itself and/or cause audio overlapping glitches.
     # possible question for Aleix and Chad about what the right way
     # to trigger speech is, now, with the new queues/async/sync refactors.
-    # await llm.push_frame(TextFrame("Let me check on that."))
+    await llm.push_frame(TextFrame("Let me check on that.  "))
     logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
 
 
