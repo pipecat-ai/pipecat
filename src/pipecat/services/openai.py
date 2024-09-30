@@ -183,7 +183,7 @@ class BaseOpenAILLMService(LLMService):
             tool_id_list.append(tool_call_id)
             for function_name,arguments,tool_id in zip(functions_list,arguments_list,tool_id_list):
                 if self.has_function(function_name):
-                    await self._handle_function_call(context, tool_call_id, function_name, arguments)
+                    await self._handle_function_call(context, tool_id, function_name, arguments)
                 else:
                     raise OpenAIUnhandledFunctionException(
                         f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function.")
