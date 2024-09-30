@@ -144,6 +144,10 @@ class TTSService(AIService):
         # if True, TTSService will push TextFrames and LLMFullResponseEndFrames,
         # otherwise subclass must do it
         push_text_frames: bool = True,
+        # if True, TTSService will push TTSStoppedFrames, otherwise subclass must do it
+        push_stop_frames: bool = False,
+        # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
+        stop_frame_timeout_s: float = 1.0,
         # TTS output sample rate
         sample_rate: int = 16000,
         **kwargs,
@@ -151,8 +155,14 @@ class TTSService(AIService):
         super().__init__(**kwargs)
         self._aggregate_sentences: bool = aggregate_sentences
         self._push_text_frames: bool = push_text_frames
-        self._current_sentence: str = ""
+        self._push_stop_frames: bool = push_stop_frames
+        self._stop_frame_timeout_s: float = stop_frame_timeout_s
         self._sample_rate: int = sample_rate
+
+        self._stop_frame_task: Optional[asyncio.Task] = None
+        self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
+
+        self._current_sentence: str = ""
 
     @property
     def sample_rate(self) -> int:
@@ -210,13 +220,72 @@ class TTSService(AIService):
     async def set_role(self, role: str):
         pass
 
+    @abstractmethod
+    async def flush_audio(self):
+        pass
+
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         pass
 
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        if self._push_stop_frames:
+            self._stop_frame_task = self.get_event_loop().create_task(self._stop_frame_handler())
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        if self._stop_frame_task:
+            self._stop_frame_task.cancel()
+            await self._stop_frame_task
+            self._stop_frame_task = None
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        if self._stop_frame_task:
+            self._stop_frame_task.cancel()
+            await self._stop_frame_task
+            self._stop_frame_task = None
+
     async def say(self, text: str):
         await self.process_frame(TextFrame(text=text), FrameDirection.DOWNSTREAM)
+        await self.flush_audio()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TextFrame):
+            await self._process_text_frame(frame)
+        elif isinstance(frame, StartInterruptionFrame):
+            await self._handle_interruption(frame, direction)
+        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
+            sentence = self._current_sentence
+            self._current_sentence = ""
+            await self._push_tts_frames(sentence)
+            if isinstance(frame, LLMFullResponseEndFrame):
+                if self._push_text_frames:
+                    await self.push_frame(frame, direction)
+            else:
+                await self.push_frame(frame, direction)
+        elif isinstance(frame, TTSSpeakFrame):
+            await self._push_tts_frames(frame.text)
+            await self.flush_audio()
+        elif isinstance(frame, TTSUpdateSettingsFrame):
+            await self._update_tts_settings(frame)
+        else:
+            await self.push_frame(frame, direction)
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        await super().push_frame(frame, direction)
+
+        if self._push_stop_frames and (
+            isinstance(frame, StartInterruptionFrame)
+            or isinstance(frame, TTSStartedFrame)
+            or isinstance(frame, TTSAudioRawFrame)
+            or isinstance(frame, TTSStoppedFrame)
+        ):
+            await self._stop_frame_queue.put(frame)
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         self._current_sentence = ""
@@ -276,88 +345,6 @@ class TTSService(AIService):
         if frame.role is not None:
             await self.set_role(frame.role)
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, TextFrame):
-            await self._process_text_frame(frame)
-        elif isinstance(frame, StartInterruptionFrame):
-            await self._handle_interruption(frame, direction)
-        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
-            sentence = self._current_sentence
-            self._current_sentence = ""
-            await self._push_tts_frames(sentence)
-            if isinstance(frame, LLMFullResponseEndFrame):
-                if self._push_text_frames:
-                    await self.push_frame(frame, direction)
-            else:
-                await self.push_frame(frame, direction)
-        elif isinstance(frame, TTSSpeakFrame):
-            await self._push_tts_frames(frame.text)
-        elif isinstance(frame, TTSUpdateSettingsFrame):
-            await self._update_tts_settings(frame)
-        else:
-            await self.push_frame(frame, direction)
-
-
-class AsyncTTSService(TTSService):
-    def __init__(
-        self,
-        # if True, TTSService will push TTSStoppedFrames, otherwise subclass must do it
-        push_stop_frames: bool = False,
-        # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
-        stop_frame_timeout_s: float = 1.0,
-        **kwargs,
-    ):
-        super().__init__(sync=False, **kwargs)
-        self._push_stop_frames: bool = push_stop_frames
-        self._stop_frame_timeout_s: float = stop_frame_timeout_s
-        self._stop_frame_task: Optional[asyncio.Task] = None
-        self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
-
-    @abstractmethod
-    async def flush_audio(self):
-        pass
-
-    async def say(self, text: str):
-        await super().say(text)
-        await self.flush_audio()
-
-    async def start(self, frame: StartFrame):
-        await super().start(frame)
-        if self._push_stop_frames:
-            self._stop_frame_task = self.get_event_loop().create_task(self._stop_frame_handler())
-
-    async def stop(self, frame: EndFrame):
-        await super().stop(frame)
-        if self._stop_frame_task:
-            self._stop_frame_task.cancel()
-            await self._stop_frame_task
-            self._stop_frame_task = None
-
-    async def cancel(self, frame: CancelFrame):
-        await super().cancel(frame)
-        if self._stop_frame_task:
-            self._stop_frame_task.cancel()
-            await self._stop_frame_task
-            self._stop_frame_task = None
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-        if isinstance(frame, TTSSpeakFrame):
-            await self.flush_audio()
-
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        await super().push_frame(frame, direction)
-
-        if self._push_stop_frames and (
-            isinstance(frame, StartInterruptionFrame)
-            or isinstance(frame, TTSStartedFrame)
-            or isinstance(frame, TTSAudioRawFrame)
-            or isinstance(frame, TTSStoppedFrame)
-        ):
-            await self._stop_frame_queue.put(frame)
-
     async def _stop_frame_handler(self):
         try:
             has_started = False
@@ -378,7 +365,7 @@ class AsyncTTSService(TTSService):
             pass
 
 
-class AsyncWordTTSService(AsyncTTSService):
+class WordTTSService(TTSService):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._initial_word_timestamp = -1

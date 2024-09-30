@@ -37,7 +37,6 @@ class FrameProcessor:
         *,
         name: str | None = None,
         metrics: FrameProcessorMetrics | None = None,
-        sync: bool = True,
         loop: asyncio.AbstractEventLoop | None = None,
         **kwargs,
     ):
@@ -47,7 +46,6 @@ class FrameProcessor:
         self._prev: "FrameProcessor" | None = None
         self._next: "FrameProcessor" | None = None
         self._loop: asyncio.AbstractEventLoop = loop or asyncio.get_running_loop()
-        self._sync = sync
 
         self._event_handlers: dict = {}
 
@@ -66,11 +64,8 @@ class FrameProcessor:
 
         # Every processor in Pipecat should only output frames from a single
         # task. This avoid problems like audio overlapping. System frames are
-        # the exception to this rule.
-        #
-        # This create this task.
-        if not self._sync:
-            self.__create_push_task()
+        # the exception to this rule. This create this task.
+        self.__create_push_task()
 
     @property
     def interruptions_allowed(self):
@@ -167,7 +162,7 @@ class FrameProcessor:
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        if self._sync or isinstance(frame, SystemFrame):
+        if isinstance(frame, SystemFrame):
             await self.__internal_push_frame(frame, direction)
         else:
             await self.__push_queue.put((frame, direction))
@@ -194,13 +189,12 @@ class FrameProcessor:
     #
 
     async def _start_interruption(self):
-        if not self._sync:
-            # Cancel the task. This will stop pushing frames downstream.
-            self.__push_frame_task.cancel()
-            await self.__push_frame_task
+        # Cancel the task. This will stop pushing frames downstream.
+        self.__push_frame_task.cancel()
+        await self.__push_frame_task
 
-            # Create a new queue and task.
-            self.__create_push_task()
+        # Create a new queue and task.
+        self.__create_push_task()
 
     async def _stop_interruption(self):
         # Nothing to do right now.

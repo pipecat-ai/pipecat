@@ -44,7 +44,7 @@ class GStreamerPipelineSource(FrameProcessor):
         clock_sync: bool = True
 
     def __init__(self, *, pipeline: str, out_params: OutputParams = OutputParams(), **kwargs):
-        super().__init__(sync=False, **kwargs)
+        super().__init__(**kwargs)
 
         self._out_params = out_params
 
