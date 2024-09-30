@@ -115,7 +115,7 @@ class LLMResponseAggregator(FrameProcessor):
                 if self._expect_stripped_words:
                     self._aggregation += f" {frame.text}" if self._aggregation else frame.text
                 else:
-                    self._aggregation += frame.text if self._aggregation else frame.text
+                    self._aggregation += frame.text
                 # We have recevied a complete sentence, so if we have seen the
                 # end frame and we were still aggregating, it means we should
                 # send the aggregation.
