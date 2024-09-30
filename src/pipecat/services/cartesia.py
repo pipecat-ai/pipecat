@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
-from pipecat.services.ai_services import AsyncWordTTSService, TTSService
+from pipecat.services.ai_services import WordTTSService, TTSService
 
 from loguru import logger
 
@@ -61,7 +61,7 @@ def language_to_cartesia_language(language: Language) -> str | None:
     return None
 
 
-class CartesiaTTSService(AsyncWordTTSService):
+class CartesiaTTSService(WordTTSService):
     class InputParams(BaseModel):
         encoding: Optional[str] = "pcm_s16le"
         sample_rate: Optional[int] = 16000

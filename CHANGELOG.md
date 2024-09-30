@@ -48,15 +48,10 @@ async def on_connected(processor):
   frames. To achieve that, each frame processor should only output frames from a
   single task.
 
-  In this version we introduce synchronous and asynchronous frame
-  processors. The synchronous processors push output frames from the same task
-  that they receive input frames, and therefore only pushing frames from one
-  task. Asynchronous frame processors can have internal tasks to perform things
-  asynchronously (e.g. receiving data from a websocket) but they also have a
-  single task where they push frames from.
-
-  By default, frame processors are synchronous. To change a frame processor to
-  asynchronous you only need to pass `sync=False` to the base class constructor.
+  In this version all the frame processors have their own task to push
+  frames. That is, when `push_frame()` is called the given frame will be put
+  into an internal queue (with the exception of system frames) and a frame
+  processor task will push it out.
 
 - Added pipeline clocks. A pipeline clock is used by the output transport to
   know when a frame needs to be presented. For that, all frames now have an
@@ -68,9 +63,7 @@ async def on_connected(processor):
   `SystemClock`). This clock will be passed to each frame processor via the
   `StartFrame`.
 
-- Added `CartesiaHttpTTSService`. This is a synchronous frame processor
-  (i.e. given an input text frame it will wait for the whole output before
-  returning).
+- Added `CartesiaHttpTTSService`.
 
 - `DailyTransport` now supports setting the audio bitrate to improve audio
   quality through the `DailyParams.audio_out_bitrate` parameter. The new
@@ -110,8 +103,9 @@ async def on_connected(processor):
   pipelines to be executed concurrently. The difference between a
   `SyncParallelPipeline` and a `ParallelPipeline` is that, given an input frame,
   the `SyncParallelPipeline` will wait for all the internal pipelines to
-  complete. This is achieved by ensuring all the processors in each of the
-  internal pipelines are synchronous.
+  complete. This is achieved by making sure the last processor in each of the
+  pipelines is synchronous (e.g. an HTTP-based service that waits for the
+  response).
 
 - `StartFrame` is back a system frame so we make sure it's processed immediately
   by all processors. `EndFrame` stays a control frame since it needs to be

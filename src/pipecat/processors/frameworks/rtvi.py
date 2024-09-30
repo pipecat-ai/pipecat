@@ -516,7 +516,7 @@ class RTVIProcessor(FrameProcessor):
         params: RTVIProcessorParams = RTVIProcessorParams(),
         **kwargs,
     ):
-        super().__init__(sync=False, **kwargs)
+        super().__init__(**kwargs)
         self._config = config
         self._params = params
 
