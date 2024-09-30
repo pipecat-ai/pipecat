@@ -66,7 +66,7 @@ async def on_connected(processor):
   `SystemClock`). This clock will be passed to each frame processor via the
   `StartFrame`.
 
-- Added `CartesiaHttpTTSService`. This is a synchronous frame processor
+- Added `CartesiaTTSService`. This is a synchronous frame processor
   (i.e. given an input text frame it will wait for the whole output before
   returning).
 

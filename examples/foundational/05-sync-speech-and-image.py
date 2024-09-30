@@ -24,7 +24,7 @@ from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.aggregators.sentence import SentenceAggregator
-from pipecat.services.cartesia import CartesiaHttpTTSService
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.fal import FalImageGenService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -86,7 +86,7 @@ async def main():
             ),
         )
 
-        tts = CartesiaHttpTTSService(
+        tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
