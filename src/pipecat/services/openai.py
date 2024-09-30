@@ -273,6 +273,23 @@ class BaseOpenAILLMService(LLMService):
             arguments=arguments,
         )
 
+    async def _update_settings(self, frame: LLMUpdateSettingsFrame):
+        if frame.model is not None:
+            logger.debug(f"Switching LLM model to: [{frame.model}]")
+            self.set_model_name(frame.model)
+        if frame.frequency_penalty is not None:
+            await self.set_frequency_penalty(frame.frequency_penalty)
+        if frame.presence_penalty is not None:
+            await self.set_presence_penalty(frame.presence_penalty)
+        if frame.seed is not None:
+            await self.set_seed(frame.seed)
+        if frame.temperature is not None:
+            await self.set_temperature(frame.temperature)
+        if frame.top_p is not None:
+            await self.set_top_p(frame.top_p)
+        if frame.extra:
+            await self.set_extra(frame.extra)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -284,21 +301,7 @@ class BaseOpenAILLMService(LLMService):
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMUpdateSettingsFrame):
-            if frame.model is not None:
-                logger.debug(f"Switching LLM model to: [{frame.model}]")
-                self.set_model_name(frame.model)
-            if frame.frequency_penalty is not None:
-                await self.set_frequency_penalty(frame.frequency_penalty)
-            if frame.presence_penalty is not None:
-                await self.set_presence_penalty(frame.presence_penalty)
-            if frame.seed is not None:
-                await self.set_seed(frame.seed)
-            if frame.temperature is not None:
-                await self.set_temperature(frame.temperature)
-            if frame.top_p is not None:
-                await self.set_top_p(frame.top_p)
-            if frame.extra:
-                await self.set_extra(frame.extra)
+            await self._update_settings(frame)
         else:
             await self.push_frame(frame, direction)
 

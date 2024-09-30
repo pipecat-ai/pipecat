@@ -248,6 +248,34 @@ class TTSService(AIService):
             # interrupted, the text is not added to the assistant context.
             await self.push_frame(TextFrame(text))
 
+    async def _update_tts_settings(self, frame: TTSUpdateSettingsFrame):
+        if frame.model is not None:
+            await self.set_model(frame.model)
+        if frame.voice is not None:
+            await self.set_voice(frame.voice)
+        if frame.language is not None:
+            await self.set_language(frame.language)
+        if frame.speed is not None:
+            await self.set_speed(frame.speed)
+        if frame.emotion is not None:
+            await self.set_emotion(frame.emotion)
+        if frame.engine is not None:
+            await self.set_engine(frame.engine)
+        if frame.pitch is not None:
+            await self.set_pitch(frame.pitch)
+        if frame.rate is not None:
+            await self.set_rate(frame.rate)
+        if frame.volume is not None:
+            await self.set_volume(frame.volume)
+        if frame.emphasis is not None:
+            await self.set_emphasis(frame.emphasis)
+        if frame.style is not None:
+            await self.set_style(frame.style)
+        if frame.style_degree is not None:
+            await self.set_style_degree(frame.style_degree)
+        if frame.role is not None:
+            await self.set_role(frame.role)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -267,32 +295,7 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             await self._push_tts_frames(frame.text)
         elif isinstance(frame, TTSUpdateSettingsFrame):
-            if frame.model is not None:
-                await self.set_model(frame.model)
-            if frame.voice is not None:
-                await self.set_voice(frame.voice)
-            if frame.language is not None:
-                await self.set_language(frame.language)
-            if frame.speed is not None:
-                await self.set_speed(frame.speed)
-            if frame.emotion is not None:
-                await self.set_emotion(frame.emotion)
-            if frame.engine is not None:
-                await self.set_engine(frame.engine)
-            if frame.pitch is not None:
-                await self.set_pitch(frame.pitch)
-            if frame.rate is not None:
-                await self.set_rate(frame.rate)
-            if frame.volume is not None:
-                await self.set_volume(frame.volume)
-            if frame.emphasis is not None:
-                await self.set_emphasis(frame.emphasis)
-            if frame.style is not None:
-                await self.set_style(frame.style)
-            if frame.style_degree is not None:
-                await self.set_style_degree(frame.style_degree)
-            if frame.role is not None:
-                await self.set_role(frame.role)
+            await self._update_tts_settings(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -454,6 +457,12 @@ class STTService(AIService):
         """Returns transcript as a string"""
         pass
 
+    async def _update_stt_settings(self, frame: STTUpdateSettingsFrame):
+        if frame.model is not None:
+            await self.set_model(frame.model)
+        if frame.language is not None:
+            await self.set_language(frame.language)
+
     async def process_audio_frame(self, frame: AudioRawFrame):
         await self.process_generator(self.run_stt(frame.audio))
 
@@ -466,10 +475,7 @@ class STTService(AIService):
             # push a TextFrame. We don't really want to push audio frames down.
             await self.process_audio_frame(frame)
         elif isinstance(frame, STTUpdateSettingsFrame):
-            if frame.model is not None:
-                await self.set_model(frame.model)
-            if frame.language is not None:
-                await self.set_language(frame.language)
+            await self._update_stt_settings(frame)
         else:
             await self.push_frame(frame, direction)
 
