@@ -297,16 +297,18 @@ class TTSService(AIService):
             text = frame.text
         else:
             self._current_sentence += frame.text
-            if match_endofsentence(self._current_sentence):
-                text = self._current_sentence
-                self._current_sentence = ""
+            eos_end_marker = match_endofsentence(self._current_sentence)
+            if eos_end_marker:
+                text = self._current_sentence[:eos_end_marker]
+                self._current_sentence = self._current_sentence[eos_end_marker:]
 
         if text:
             await self._push_tts_frames(text)
 
     async def _push_tts_frames(self, text: str):
-        text = text.strip()
-        if not text:
+        # Don't send only whitespace. This causes problems for some TTS models. But also don't
+        # strip all whitespace, as whitespace can influence prosody.
+        if not text.strip():
             return
 
         await self.start_processing_metrics()
