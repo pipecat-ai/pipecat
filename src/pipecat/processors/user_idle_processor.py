@@ -31,7 +31,7 @@ class UserIdleProcessor(FrameProcessor):
         timeout: float,
         **kwargs,
     ):
-        super().__init__(sync=False, **kwargs)
+        super().__init__(**kwargs)
 
         self._callback = callback
         self._timeout = timeout
