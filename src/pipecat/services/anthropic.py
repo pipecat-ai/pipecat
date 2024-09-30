@@ -110,9 +110,13 @@ class AnthropicLLMService(LLMService):
         return self._enable_prompt_caching_beta
 
     @staticmethod
-    def create_context_aggregator(context: OpenAILLMContext) -> AnthropicContextAggregatorPair:
+    def create_context_aggregator(
+        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+    ) -> AnthropicContextAggregatorPair:
         user = AnthropicUserContextAggregator(context)
-        assistant = AnthropicAssistantContextAggregator(user)
+        assistant = AnthropicAssistantContextAggregator(
+            user, expect_stripped_words=assistant_expect_stripped_words
+        )
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
     async def set_enable_prompt_caching_beta(self, enable_prompt_caching_beta: bool):
@@ -541,8 +545,8 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
 
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, user_context_aggregator: AnthropicUserContextAggregator):
-        super().__init__(context=user_context_aggregator._context)
+    def __init__(self, user_context_aggregator: AnthropicUserContextAggregator, **kwargs):
+        super().__init__(context=user_context_aggregator._context, **kwargs)
         self._user_context_aggregator = user_context_aggregator
         self._function_call_in_progress = None
         self._function_call_result = None
@@ -579,7 +583,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         run_llm = False
 
         aggregation = self._aggregation
-        self._aggregation = ""
+        self._reset()
 
         try:
             if self._function_call_result:
@@ -629,6 +633,9 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
+
+            frame = OpenAILLMContextFrame(self._context)
+            await self.push_frame(frame)
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
