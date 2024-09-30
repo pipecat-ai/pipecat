@@ -288,6 +288,10 @@ class BaseOpenAILLMService(LLMService):
                         tool_call_id=tool_id,
                         run_llm=run_llm,
                     )
+                else:
+                    raise OpenAIUnhandledFunctionException(
+                        f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
+                    )
 
     async def _update_settings(self, frame: LLMUpdateSettingsFrame):
         if frame.model is not None:
