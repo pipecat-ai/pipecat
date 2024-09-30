@@ -110,7 +110,13 @@ class LLMService(AIService):
         return function_name in self._callbacks.keys()
 
     async def call_function(
-        self, *, context: OpenAILLMContext, tool_call_id: str, function_name: str, arguments: str
+        self,
+        *,
+        context: OpenAILLMContext,
+        tool_call_id: str,
+        function_name: str,
+        arguments: str,
+        run_llm: bool,
     ) -> None:
         f = None
         if function_name in self._callbacks.keys():
@@ -120,7 +126,12 @@ class LLMService(AIService):
         else:
             return None
         await context.call_function(
-            f, function_name=function_name, tool_call_id=tool_call_id, arguments=arguments, llm=self
+            f,
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+            llm=self,
+            run_llm=run_llm,
         )
 
     # QUESTION FOR CB: maybe this isn't needed anymore?

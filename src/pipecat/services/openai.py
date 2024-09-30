@@ -205,6 +205,10 @@ class BaseOpenAILLMService(LLMService):
         return chunks
 
     async def _process_context(self, context: OpenAILLMContext):
+        functions_list = []
+        arguments_list = []
+        tool_id_list = []
+        func_idx = 0
         function_name = ""
         arguments = ""
         tool_call_id = ""
@@ -242,6 +246,14 @@ class BaseOpenAILLMService(LLMService):
                 # yield a frame containing the function name and the arguments.
 
                 tool_call = chunk.choices[0].delta.tool_calls[0]
+                if tool_call.index != func_idx:
+                    functions_list.append(function_name)
+                    arguments_list.append(arguments)
+                    tool_id_list.append(tool_call_id)
+                    function_name = ""
+                    arguments = ""
+                    tool_call_id = ""
+                    func_idx += 1
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
                     tool_call_id = tool_call.id
@@ -257,21 +269,29 @@ class BaseOpenAILLMService(LLMService):
         # the context, and re-prompt to get a chat answer. If we don't have a registered
         # handler, raise an exception.
         if function_name and arguments:
-            if self.has_function(function_name):
-                await self._handle_function_call(context, tool_call_id, function_name, arguments)
-            else:
-                raise OpenAIUnhandledFunctionException(
-                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
-                )
+            # added to the list as last function name and arguments not added to the list
+            functions_list.append(function_name)
+            arguments_list.append(arguments)
+            tool_id_list.append(tool_call_id)
 
-    async def _handle_function_call(self, context, tool_call_id, function_name, arguments):
-        arguments = json.loads(arguments)
-        await self.call_function(
-            context=context,
-            tool_call_id=tool_call_id,
-            function_name=function_name,
-            arguments=arguments,
-        )
+            total_items = len(functions_list)
+            for index, (function_name, arguments, tool_id) in enumerate(
+                zip(functions_list, arguments_list, tool_id_list), start=1
+            ):
+                if self.has_function(function_name):
+                    run_llm = index == total_items
+                    arguments = json.loads(arguments)
+                    await self.call_function(
+                        context=context,
+                        function_name=function_name,
+                        arguments=arguments,
+                        tool_call_id=tool_id,
+                        run_llm=run_llm,
+                    )
+                else:
+                    raise OpenAIUnhandledFunctionException(
+                        f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
+                    )
 
     async def _update_settings(self, frame: LLMUpdateSettingsFrame):
         if frame.model is not None:
@@ -465,31 +485,27 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
     def __init__(self, user_context_aggregator: OpenAIUserContextAggregator, **kwargs):
         super().__init__(context=user_context_aggregator._context, **kwargs)
         self._user_context_aggregator = user_context_aggregator
-        self._function_call_in_progress = None
+        self._function_calls_in_progress = {}
         self._function_call_result = None
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
         # See note above about not calling push_frame() here.
         if isinstance(frame, StartInterruptionFrame):
-            self._function_call_in_progress = None
+            self._function_calls_in_progress.clear()
             self._function_call_finished = None
         elif isinstance(frame, FunctionCallInProgressFrame):
-            self._function_call_in_progress = frame
+            self._function_calls_in_progress[frame.tool_call_id] = frame
         elif isinstance(frame, FunctionCallResultFrame):
-            if (
-                self._function_call_in_progress
-                and self._function_call_in_progress.tool_call_id == frame.tool_call_id
-            ):
-                self._function_call_in_progress = None
+            if frame.tool_call_id in self._function_calls_in_progress:
+                del self._function_calls_in_progress[frame.tool_call_id]
                 self._function_call_result = frame
                 # TODO-CB: Kwin wants us to refactor this out of here but I REFUSE
                 await self._push_aggregation()
             else:
                 logger.warning(
-                    "FunctionCallResultFrame tool_call_id does not match FunctionCallInProgressFrame tool_call_id"
+                    "FunctionCallResultFrame tool_call_id does not match any function call in progress"
                 )
-                self._function_call_in_progress = None
                 self._function_call_result = None
 
     async def _push_aggregation(self):
@@ -528,7 +544,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                             "tool_call_id": frame.tool_call_id,
                         }
                     )
-                    run_llm = True
+                    run_llm = frame.run_llm
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 

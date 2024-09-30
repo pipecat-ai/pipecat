@@ -34,7 +34,12 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def start_fetch_weather(function_name, llm, context):
-    await llm.push_frame(TextFrame("Let me check on that."))
+    # note: we can't push a frame to the LLM here. the bot
+    # can interrupt itself and/or cause audio overlapping glitches.
+    # possible question for Aleix and Chad about what the right way
+    # to trigger speech is, now, with the new queues/async/sync refactors.
+    # await llm.push_frame(TextFrame("Let me check on that."))
+    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
 
 
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
@@ -106,11 +111,11 @@ async def main():
 
         pipeline = Pipeline(
             [
-                fl_in,
+                # fl_in,
                 transport.input(),
                 context_aggregator.user(),
                 llm,
-                fl_out,
+                # fl_out,
                 tts,
                 transport.output(),
                 context_aggregator.assistant(),
