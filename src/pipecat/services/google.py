@@ -272,7 +272,7 @@ class GoogleTTSService(TTSService):
         logger.debug(f"Switch TTS gender to [{gender}]")
         self._params.gender = gender
 
-    async def google_style(
+    async def set_google_style(
         self, google_style: Literal["apologetic", "calm", "empathetic", "firm", "lively"]
     ) -> None:
         logger.debug(f"Switching TTS google style to: [{google_style}]")

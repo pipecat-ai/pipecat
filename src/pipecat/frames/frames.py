@@ -558,6 +558,8 @@ class TTSUpdateSettingsFrame(ControlFrame):
     style: Optional[str] = None
     style_degree: Optional[str] = None
     role: Optional[str] = None
+    gender: Optional[str] = None
+    google_style: Optional[str] = None
 
 
 @dataclass

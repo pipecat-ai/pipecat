@@ -235,6 +235,14 @@ class TTSService(AIService):
     async def flush_audio(self):
         pass
 
+    @abstractmethod
+    async def set_gender(self, gender: str):
+        pass
+
+    @abstractmethod
+    async def set_google_style(self, google_style: str):
+        pass
+
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
