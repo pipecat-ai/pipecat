@@ -490,16 +490,9 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         if isinstance(frame, StartInterruptionFrame):
             self._function_calls_in_progress.clear()
             self._function_call_finished = None
-            logger.debug("clearing function calls in progress")
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._function_calls_in_progress[frame.tool_call_id] = frame
-            logger.debug(
-                f"FunctionCallInProgressFrame: {frame.tool_call_id} {self._function_calls_in_progress}"
-            )
         elif isinstance(frame, FunctionCallResultFrame):
-            logger.debug(
-                f"FunctionCallResultFrame: {frame.tool_call_id} {self._function_calls_in_progress}"
-            )
             if frame.tool_call_id in self._function_calls_in_progress:
                 del self._function_calls_in_progress[frame.tool_call_id]
                 self._function_call_result = frame
