@@ -336,9 +336,13 @@ class OpenAILLMService(BaseOpenAILLMService):
         super().__init__(model=model, params=params, **kwargs)
 
     @staticmethod
-    def create_context_aggregator(context: OpenAILLMContext) -> OpenAIContextAggregatorPair:
+    def create_context_aggregator(
+        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+    ) -> OpenAIContextAggregatorPair:
         user = OpenAIUserContextAggregator(context)
-        assistant = OpenAIAssistantContextAggregator(user)
+        assistant = OpenAIAssistantContextAggregator(
+            user, expect_stripped_words=assistant_expect_stripped_words
+        )
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
 
@@ -458,8 +462,8 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
 
 
 class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, user_context_aggregator: OpenAIUserContextAggregator):
-        super().__init__(context=user_context_aggregator._context)
+    def __init__(self, user_context_aggregator: OpenAIUserContextAggregator, **kwargs):
+        super().__init__(context=user_context_aggregator._context, **kwargs)
         self._user_context_aggregator = user_context_aggregator
         self._function_call_in_progress = None
         self._function_call_result = None
@@ -495,7 +499,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         run_llm = False
 
         aggregation = self._aggregation
-        self._aggregation = ""
+        self._reset()
 
         try:
             if self._function_call_result:
@@ -530,6 +534,9 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
+
+            frame = OpenAILLMContextFrame(self._context)
+            await self.push_frame(frame)
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
