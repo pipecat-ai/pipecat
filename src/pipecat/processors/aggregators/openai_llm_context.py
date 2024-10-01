@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import base64
+import copy
 import io
 import json
 
@@ -60,6 +62,7 @@ class OpenAILLMContext:
         self._messages: List[ChatCompletionMessageParam] = messages if messages else []
         self._tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
         self._tools: List[ChatCompletionToolParam] | NotGiven = tools
+        self._user_image_request_context = {}
 
     @staticmethod
     def from_messages(messages: List[dict]) -> "OpenAILLMContext":
@@ -114,6 +117,19 @@ class OpenAILLMContext:
     def get_messages_json(self) -> str:
         return json.dumps(self._messages, cls=CustomEncoder)
 
+    def get_messages_for_logging(self) -> str:
+        msgs = []
+        for message in self.messages:
+            msg = copy.deepcopy(message)
+            if "content" in msg:
+                if isinstance(msg["content"], list):
+                    for item in msg["content"]:
+                        if item["type"] == "image_url":
+                            if item["image_url"]["url"].startswith("data:image/"):
+                                item["image_url"]["url"] = "data:image/..."
+            msgs.append(msg)
+        return json.dumps(msgs)
+
     def set_tool_choice(self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven):
         self._tool_choice = tool_choice
 
@@ -121,6 +137,21 @@ class OpenAILLMContext:
         if tools != NOT_GIVEN and len(tools) == 0:
             tools = NOT_GIVEN
         self._tools = tools
+
+    def add_image_frame_message(
+        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
+    ):
+        buffer = io.BytesIO()
+        Image.frombytes(format, size, image).save(buffer, format="JPEG")
+        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+        content = [
+            {"type": "text", "text": text},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
+        ]
+        if text:
+            content.append({"type": "text", "text": text})
+        self.add_message({"role": "user", "content": content})
 
     async def call_function(
         self,
