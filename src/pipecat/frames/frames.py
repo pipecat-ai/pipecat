@@ -530,8 +530,22 @@ class UserImageRequestFrame(ControlFrame):
 class ServiceUpdateSettingsFrame(ControlFrame):
     """A control frame containing a request to update service settings."""
 
-    service_type: str
     settings: Dict[str, Any]
+
+
+@dataclass
+class LLMUpdateSettingsFrame(ServiceUpdateSettingsFrame):
+    pass
+
+
+@dataclass
+class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame):
+    pass
+
+
+@dataclass
+class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame):
+    pass
 
 
 @dataclass
