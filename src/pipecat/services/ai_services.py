@@ -116,7 +116,7 @@ class LLMService(AIService):
         tool_call_id: str,
         function_name: str,
         arguments: str,
-        run_llm: bool,
+        run_llm: bool = True,
     ) -> None:
         f = None
         if function_name in self._callbacks.keys():
