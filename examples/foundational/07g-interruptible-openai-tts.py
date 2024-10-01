@@ -4,10 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import os
 import sys
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -17,16 +21,9 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator,
 )
-from pipecat.services.openai import OpenAITTSService
-from pipecat.services.openai import OpenAILLMService
+from pipecat.services.openai import OpenAILLMService, OpenAITTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -51,7 +48,7 @@ async def main():
             ),
         )
 
-        tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), voice="alloy")
+        tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), voice_id="alloy")
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 

@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import WordTTSService
+from pipecat.transcriptions.language import Language
 
 # See .env.example for ElevenLabs configuration needed
 try:
@@ -72,7 +73,7 @@ def calculate_word_times(
 
 class ElevenLabsTTSService(WordTTSService):
     class InputParams(BaseModel):
-        language: Optional[str] = None
+        language: Optional[Language] = Language.EN
         output_format: Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"] = "pcm_16000"
         optimize_streaming_latency: Optional[str] = None
         stability: Optional[float] = None
@@ -124,10 +125,19 @@ class ElevenLabsTTSService(WordTTSService):
         )
 
         self._api_key = api_key
-        self._voice_id = voice_id
-        self.set_model_name(model)
         self._url = url
-        self._params = params
+        self._settings = {
+            "sample_rate": sample_rate_from_output_format(params.output_format),
+            "language": params.language,
+            "output_format": params.output_format,
+            "optimize_streaming_latency": params.optimize_streaming_latency,
+            "stability": params.stability,
+            "similarity_boost": params.similarity_boost,
+            "style": params.style,
+            "use_speaker_boost": params.use_speaker_boost,
+        }
+        self.set_model_name(model)
+        self.set_voice(voice_id)
         self._voice_settings = self._set_voice_settings()
 
         # Websocket connection to ElevenLabs.
@@ -142,19 +152,22 @@ class ElevenLabsTTSService(WordTTSService):
 
     def _set_voice_settings(self):
         voice_settings = {}
-        if self._params.stability is not None and self._params.similarity_boost is not None:
-            voice_settings["stability"] = self._params.stability
-            voice_settings["similarity_boost"] = self._params.similarity_boost
-            if self._params.style is not None:
-                voice_settings["style"] = self._params.style
-            if self._params.use_speaker_boost is not None:
-                voice_settings["use_speaker_boost"] = self._params.use_speaker_boost
+        if (
+            self._settings["stability"] is not None
+            and self._settings["similarity_boost"] is not None
+        ):
+            voice_settings["stability"] = self._settings["stability"]
+            voice_settings["similarity_boost"] = self._settings["similarity_boost"]
+            if self._settings["style"] is not None:
+                voice_settings["style"] = self._settings["style"]
+            if self._settings["use_speaker_boost"] is not None:
+                voice_settings["use_speaker_boost"] = self._settings["use_speaker_boost"]
         else:
-            if self._params.style is not None:
+            if self._settings["style"] is not None:
                 logger.warning(
                     "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
                 )
-            if self._params.use_speaker_boost is not None:
+            if self._settings["use_speaker_boost"] is not None:
                 logger.warning(
                     "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
                 )
@@ -167,33 +180,13 @@ class ElevenLabsTTSService(WordTTSService):
         await self._disconnect()
         await self._connect()
 
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice_id = voice
-        await self._disconnect()
-        await self._connect()
-
-    async def set_voice_settings(
-        self,
-        stability: Optional[float] = None,
-        similarity_boost: Optional[float] = None,
-        style: Optional[float] = None,
-        use_speaker_boost: Optional[bool] = None,
-    ):
-        self._params.stability = stability if stability is not None else self._params.stability
-        self._params.similarity_boost = (
-            similarity_boost if similarity_boost is not None else self._params.similarity_boost
-        )
-        self._params.style = style if style is not None else self._params.style
-        self._params.use_speaker_boost = (
-            use_speaker_boost if use_speaker_boost is not None else self._params.use_speaker_boost
-        )
-
-        self._set_voice_settings()
-
-        if self._websocket:
-            msg = {"voice_settings": self._voice_settings}
-            await self._websocket.send(json.dumps(msg))
+    async def _update_settings(self, settings: Dict[str, Any]):
+        prev_voice = self._voice_id
+        await super()._update_settings(settings)
+        if not prev_voice == self._voice_id:
+            await self._disconnect()
+            await self._connect()
+            logger.debug(f"Switching TTS voice to: [{self._voice_id}]")
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -223,19 +216,19 @@ class ElevenLabsTTSService(WordTTSService):
         try:
             voice_id = self._voice_id
             model = self.model_name
-            output_format = self._params.output_format
+            output_format = self._settings["output_format"]
             url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}"
 
-            if self._params.optimize_streaming_latency:
-                url += f"&optimize_streaming_latency={self._params.optimize_streaming_latency}"
+            if self._settings["optimize_streaming_latency"]:
+                url += f"&optimize_streaming_latency={self._settings["optimize_streaming_latency"]}"
 
             # language can only be used with the 'eleven_turbo_v2_5' model
-            if self._params.language:
+            if self._settings["language"]:
                 if model == "eleven_turbo_v2_5":
-                    url += f"&language_code={self._params.language}"
+                    url += f"&language_code={self._settings["language"]}"
                 else:
                     logger.debug(
-                        f"Language code [{self._params.language}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
+                        f"Language code [{self._settings["language"]}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
                     )
 
             self._websocket = await websockets.connect(url)
@@ -286,7 +279,7 @@ class ElevenLabsTTSService(WordTTSService):
                     self.start_word_timestamps()
 
                     audio = base64.b64decode(msg["audio"])
-                    frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+                    frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
                     await self.push_frame(frame)
 
                 if msg.get("alignment"):

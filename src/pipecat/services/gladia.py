@@ -6,8 +6,9 @@
 
 import base64
 import json
-
 from typing import AsyncGenerator, Optional
+
+from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
@@ -20,8 +21,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.ai_services import STTService
 from pipecat.utils.time import time_now_iso8601
-
-from loguru import logger
 
 # See .env.example for Gladia configuration needed
 try:
@@ -55,7 +54,13 @@ class GladiaSTTService(STTService):
 
         self._api_key = api_key
         self._url = url
-        self._params = params
+        self._settings = {
+            "sample_rate": params.sample_rate,
+            "language": params.language,
+            "transcription_hint": params.transcription_hint,
+            "endpointing": params.endpointing,
+            "prosody": params.prosody,
+        }
         self._confidence = confidence
 
     async def start(self, frame: StartFrame):
@@ -84,7 +89,11 @@ class GladiaSTTService(STTService):
             "encoding": "WAV/PCM",
             "model_type": "fast",
             "language_behaviour": "manual",
-            **self._params.model_dump(exclude_none=True),
+            "sample_rate": self._settings["sample_rate"],
+            "language": self._settings["language"],
+            "transcription_hint": self._settings["transcription_hint"],
+            "endpointing": self._settings["endpointing"],
+            "prosody": self._settings["prosody"],
         }
 
         await self._websocket.send(json.dumps(configuration))

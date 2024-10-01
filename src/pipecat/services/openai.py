@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    ServiceUpdateSettingsFrame,
+    LLMUpdateSettingsFrame,
     StartInterruptionFrame,
     TextFrame,
     TTSAudioRawFrame,
@@ -111,14 +111,16 @@ class BaseOpenAILLMService(LLMService):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self._settings = {
+            "frequency_penalty": params.frequency_penalty,
+            "presence_penalty": params.presence_penalty,
+            "seed": params.seed,
+            "temperature": params.temperature,
+            "top_p": params.top_p,
+            "extra": params.extra if isinstance(params.extra, dict) else {},
+        }
         self.set_model_name(model)
         self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
-        self._frequency_penalty = params.frequency_penalty
-        self._presence_penalty = params.presence_penalty
-        self._seed = params.seed
-        self._temperature = params.temperature
-        self._top_p = params.top_p
-        self._extra = params.extra if isinstance(params.extra, dict) else {}
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(
@@ -134,30 +136,6 @@ class BaseOpenAILLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    async def set_frequency_penalty(self, frequency_penalty: float):
-        logger.debug(f"Switching LLM frequency_penalty to: [{frequency_penalty}]")
-        self._frequency_penalty = frequency_penalty
-
-    async def set_presence_penalty(self, presence_penalty: float):
-        logger.debug(f"Switching LLM presence_penalty to: [{presence_penalty}]")
-        self._presence_penalty = presence_penalty
-
-    async def set_seed(self, seed: int):
-        logger.debug(f"Switching LLM seed to: [{seed}]")
-        self._seed = seed
-
-    async def set_temperature(self, temperature: float):
-        logger.debug(f"Switching LLM temperature to: [{temperature}]")
-        self._temperature = temperature
-
-    async def set_top_p(self, top_p: float):
-        logger.debug(f"Switching LLM top_p to: [{top_p}]")
-        self._top_p = top_p
-
-    async def set_extra(self, extra: Dict[str, Any]):
-        logger.debug(f"Switching LLM extra to: [{extra}]")
-        self._extra = extra
-
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
     ) -> AsyncStream[ChatCompletionChunk]:
@@ -168,14 +146,14 @@ class BaseOpenAILLMService(LLMService):
             "tools": context.tools,
             "tool_choice": context.tool_choice,
             "stream_options": {"include_usage": True},
-            "frequency_penalty": self._frequency_penalty,
-            "presence_penalty": self._presence_penalty,
-            "seed": self._seed,
-            "temperature": self._temperature,
-            "top_p": self._top_p,
+            "frequency_penalty": self._settings["frequency_penalty"],
+            "presence_penalty": self._settings["presence_penalty"],
+            "seed": self._settings["seed"],
+            "temperature": self._settings["temperature"],
+            "top_p": self._settings["top_p"],
         }
 
-        params.update(self._extra)
+        params.update(self._settings["extra"])
 
         chunks = await self._client.chat.completions.create(**params)
         return chunks
@@ -295,17 +273,6 @@ class BaseOpenAILLMService(LLMService):
                         f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
                     )
 
-    async def _update_settings(self, settings: Dict[str, Any]):
-        for key, value in settings.items():
-            setter = getattr(self, f"set_{key}", None)
-            if setter and callable(setter):
-                try:
-                    await setter(value)
-                except Exception as e:
-                    logger.warning(f"Error setting {key}: {e}")
-            else:
-                logger.warning(f"Unknown setting for OpenAI LLM service: {key}")
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -316,7 +283,7 @@ class BaseOpenAILLMService(LLMService):
             context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
-        elif isinstance(frame, ServiceUpdateSettingsFrame) and frame.service_type == "llm":
+        elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
@@ -414,29 +381,27 @@ class OpenAITTSService(TTSService):
         self,
         *,
         api_key: str | None = None,
-        voice: str = "alloy",
+        voice_id: str = "alloy",
         model: Literal["tts-1", "tts-1-hd"] = "tts-1",
         sample_rate: int = 24000,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        self._voice: ValidVoice = VALID_VOICES.get(voice, "alloy")
+        self._settings = {
+            "sample_rate": sample_rate,
+        }
         self.set_model_name(model)
-        self._sample_rate = sample_rate
+        self.set_voice(voice_id)
 
         self._client = AsyncOpenAI(api_key=api_key)
 
     def can_generate_metrics(self) -> bool:
         return True
 
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice = VALID_VOICES.get(voice, self._voice)
-
     async def set_model(self, model: str):
         logger.debug(f"Switching TTS model to: [{model}]")
-        self._model = model
+        self.set_model_name(model)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -446,7 +411,7 @@ class OpenAITTSService(TTSService):
             async with self._client.audio.speech.with_streaming_response.create(
                 input=text,
                 model=self.model_name,
-                voice=self._voice,
+                voice=VALID_VOICES[self._voice_id],
                 response_format="pcm",
             ) as r:
                 if r.status_code != 200:
@@ -465,7 +430,7 @@ class OpenAITTSService(TTSService):
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                        frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
                         yield frame
                 await self.push_frame(TTSStoppedFrame())
         except BadRequestError as e:

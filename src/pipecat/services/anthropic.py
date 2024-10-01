@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    ServiceUpdateSettingsFrame,
+    LLMUpdateSettingsFrame,
     StartInterruptionFrame,
     TextFrame,
     UserImageRawFrame,
@@ -96,12 +96,14 @@ class AnthropicLLMService(LLMService):
         super().__init__(**kwargs)
         self._client = AsyncAnthropic(api_key=api_key)
         self.set_model_name(model)
-        self._max_tokens = params.max_tokens
-        self._enable_prompt_caching_beta: bool = params.enable_prompt_caching_beta or False
-        self._temperature = params.temperature
-        self._top_k = params.top_k
-        self._top_p = params.top_p
-        self._extra = params.extra if isinstance(params.extra, dict) else {}
+        self._settings = {
+            "max_tokens": params.max_tokens,
+            "enable_prompt_caching_beta": params.enable_prompt_caching_beta or False,
+            "temperature": params.temperature,
+            "top_k": params.top_k,
+            "top_p": params.top_p,
+            "extra": params.extra if isinstance(params.extra, dict) else {},
+        }
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -119,30 +121,6 @@ class AnthropicLLMService(LLMService):
             user, expect_stripped_words=assistant_expect_stripped_words
         )
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
-
-    async def set_enable_prompt_caching_beta(self, enable_prompt_caching_beta: bool):
-        logger.debug(f"Switching LLM enable_prompt_caching_beta to: [{enable_prompt_caching_beta}]")
-        self._enable_prompt_caching_beta = enable_prompt_caching_beta
-
-    async def set_max_tokens(self, max_tokens: int):
-        logger.debug(f"Switching LLM max_tokens to: [{max_tokens}]")
-        self._max_tokens = max_tokens
-
-    async def set_temperature(self, temperature: float):
-        logger.debug(f"Switching LLM temperature to: [{temperature}]")
-        self._temperature = temperature
-
-    async def set_top_k(self, top_k: float):
-        logger.debug(f"Switching LLM top_k to: [{top_k}]")
-        self._top_k = top_k
-
-    async def set_top_p(self, top_p: float):
-        logger.debug(f"Switching LLM top_p to: [{top_p}]")
-        self._top_p = top_p
-
-    async def set_extra(self, extra: Dict[str, Any]):
-        logger.debug(f"Switching LLM extra to: [{extra}]")
-        self._extra = extra
 
     async def _process_context(self, context: OpenAILLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
@@ -165,11 +143,11 @@ class AnthropicLLMService(LLMService):
             )
 
             messages = context.messages
-            if self._enable_prompt_caching_beta:
+            if self._settings["enable_prompt_caching_beta"]:
                 messages = context.get_messages_with_cache_control_markers()
 
             api_call = self._client.messages.create
-            if self._enable_prompt_caching_beta:
+            if self._settings["enable_prompt_caching_beta"]:
                 api_call = self._client.beta.prompt_caching.messages.create
 
             await self.start_ttfb_metrics()
@@ -179,14 +157,14 @@ class AnthropicLLMService(LLMService):
                 "system": context.system,
                 "messages": messages,
                 "model": self.model_name,
-                "max_tokens": self._max_tokens,
+                "max_tokens": self._settings["max_tokens"],
                 "stream": True,
-                "temperature": self._temperature,
-                "top_k": self._top_k,
-                "top_p": self._top_p,
+                "temperature": self._settings["temperature"],
+                "top_k": self._settings["top_k"],
+                "top_p": self._settings["top_p"],
             }
 
-            params.update(self._extra)
+            params.update(self._settings["extra"])
 
             response = await api_call(**params)
 
@@ -284,17 +262,6 @@ class AnthropicLLMService(LLMService):
                 cache_read_input_tokens=cache_read_input_tokens,
             )
 
-    async def _update_settings(self, settings: Dict[str, Any]):
-        for key, value in settings.items():
-            setter = getattr(self, f"set_{key}", None)
-            if setter and callable(setter):
-                try:
-                    await setter(value)
-                except Exception as e:
-                    logger.warning(f"Error setting {key}: {e}")
-            else:
-                logger.warning(f"Unknown setting for Anthropic LLM service: {key}")
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -309,11 +276,11 @@ class AnthropicLLMService(LLMService):
             # UserImageRawFrames coming through the pipeline and add them
             # to the context.
             context = AnthropicLLMContext.from_image_frame(frame)
-        elif isinstance(frame, ServiceUpdateSettingsFrame) and frame.service_type == "llm":
+        elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, LLMEnablePromptCachingFrame):
             logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
-            self._enable_prompt_caching_beta = frame.enable
+            self._settings["enable_prompt_caching_beta"] = frame.enable
         else:
             await self.push_frame(frame, direction)
 

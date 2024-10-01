@@ -5,10 +5,10 @@
 #
 
 import asyncio
-
 from typing import AsyncGenerator
 
-from pipecat.processors.frame_processor import FrameDirection
+from loguru import logger
+
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -20,9 +20,8 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService
-
-from loguru import logger
 
 # See .env.example for LMNT configuration needed
 try:
@@ -50,13 +49,16 @@ class LmntTTSService(TTSService):
         super().__init__(push_stop_frames=True, sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
-        self._voice_id = voice_id
-        self._output_format = {
-            "container": "raw",
-            "encoding": "pcm_s16le",
-            "sample_rate": sample_rate,
+        self._settings = {
+            "output_format": {
+                "container": "raw",
+                "encoding": "pcm_s16le",
+                "sample_rate": sample_rate,
+            },
+            "language": language,
         }
-        self._language = language
+
+        self.set_voice(voice_id)
 
         self._speech = None
         self._connection = None
@@ -67,10 +69,6 @@ class LmntTTSService(TTSService):
 
     def can_generate_metrics(self) -> bool:
         return True
-
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice_id = voice
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -93,7 +91,9 @@ class LmntTTSService(TTSService):
         try:
             self._speech = Speech()
             self._connection = await self._speech.synthesize_streaming(
-                self._voice_id, format="raw", sample_rate=self._output_format["sample_rate"]
+                self._voice_id,
+                format="raw",
+                sample_rate=self._settings["output_format"]["sample_rate"],
             )
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
         except Exception as e:
@@ -130,7 +130,7 @@ class LmntTTSService(TTSService):
                     await self.stop_ttfb_metrics()
                     frame = TTSAudioRawFrame(
                         audio=msg["audio"],
-                        sample_rate=self._output_format["sample_rate"],
+                        sample_rate=self._settings["output_format"]["sample_rate"],
                         num_channels=1,
                     )
                     await self.push_frame(frame)

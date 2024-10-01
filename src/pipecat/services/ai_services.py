@@ -8,7 +8,7 @@ import asyncio
 import io
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from loguru import logger
 
@@ -19,14 +19,15 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
-    ServiceUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
+    STTUpdateSettingsFrame,
     TextFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSUpdateSettingsFrame,
     UserImageRequestFrame,
     VisionImageRawFrame,
 )
@@ -44,6 +45,7 @@ class AIService(FrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._model_name: str = ""
+        self._settings: Dict[str, Any] = {}
 
     @property
     def model_name(self) -> str:
@@ -61,6 +63,16 @@ class AIService(FrameProcessor):
 
     async def cancel(self, frame: CancelFrame):
         pass
+
+    async def _update_settings(self, settings: Dict[str, Any]):
+        for key, value in settings.items():
+            if key in self._settings:
+                logger.debug(f"Updating setting {key} to: [{value}] for {self.name}")
+                self._settings[key] = value
+            elif key == "model":
+                self.set_model_name(value)
+            else:
+                logger.warning(f"Unknown setting for {self.name} service: {key}")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -168,6 +180,7 @@ class TTSService(AIService):
         self._push_stop_frames: bool = push_stop_frames
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
         self._sample_rate: int = sample_rate
+        self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
 
         self._stop_frame_task: Optional[asyncio.Task] = None
@@ -184,60 +197,8 @@ class TTSService(AIService):
         self.set_model_name(model)
 
     @abstractmethod
-    async def set_voice(self, voice: str):
-        pass
-
-    @abstractmethod
-    async def set_language(self, language: Language):
-        pass
-
-    @abstractmethod
-    async def set_speed(self, speed: Union[str, float]):
-        pass
-
-    @abstractmethod
-    async def set_emotion(self, emotion: List[str]):
-        pass
-
-    @abstractmethod
-    async def set_engine(self, engine: str):
-        pass
-
-    @abstractmethod
-    async def set_pitch(self, pitch: str):
-        pass
-
-    @abstractmethod
-    async def set_rate(self, rate: str):
-        pass
-
-    @abstractmethod
-    async def set_volume(self, volume: str):
-        pass
-
-    @abstractmethod
-    async def set_emphasis(self, emphasis: str):
-        pass
-
-    @abstractmethod
-    async def set_style(self, style: str):
-        pass
-
-    @abstractmethod
-    async def set_style_degree(self, style_degree: str):
-        pass
-
-    @abstractmethod
-    async def set_role(self, role: str):
-        pass
-
-    @abstractmethod
-    async def set_gender(self, gender: str):
-        pass
-
-    @abstractmethod
-    async def set_google_style(self, google_style: str):
-        pass
+    def set_voice(self, voice: str):
+        self._voice_id = voice
 
     @abstractmethod
     async def flush_audio(self):
@@ -269,19 +230,17 @@ class TTSService(AIService):
 
     async def _update_settings(self, settings: Dict[str, Any]):
         for key, value in settings.items():
-            setter = getattr(self, f"set_{key}", None)
-            if setter and callable(setter):
-                try:
-                    if key == "language":
-                        await setter(Language(value))
-                    else:
-                        await setter(value)
-                except Exception as e:
-                    logger.warning(f"Error setting {key}: {e}")
+            if key in self._settings:
+                logger.debug(f"Updating TTS setting {key} to: [{value}]")
+                self._settings[key] = value
+                if key == "language":
+                    self._settings[key] = Language(value)
+            elif key == "model":
+                self.set_model_name(value)
+            elif key == "voice":
+                self.set_voice(value)
             else:
                 logger.warning(f"Unknown setting for TTS service: {key}")
-
-        self._settings.update(settings)
 
     async def say(self, text: str):
         aggregate_sentences = self._aggregate_sentences
@@ -309,7 +268,7 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             await self._push_tts_frames(frame.text)
             await self.flush_audio()
-        elif isinstance(frame, ServiceUpdateSettingsFrame) and frame.service_type == "tts":
+        elif isinstance(frame, TTSUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
@@ -449,29 +408,22 @@ class STTService(AIService):
         self.set_model_name(model)
 
     @abstractmethod
-    async def set_language(self, language: Language):
-        pass
-
-    @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Returns transcript as a string"""
         pass
 
     async def _update_settings(self, settings: Dict[str, Any]):
+        logger.debug(f"Updating STT settings: {self._settings}")
         for key, value in settings.items():
-            setter = getattr(self, f"set_{key}", None)
-            if setter and callable(setter):
-                try:
-                    if key == "language":
-                        await setter(Language(value))
-                    else:
-                        await setter(value)
-                except Exception as e:
-                    logger.warning(f"Error setting {key}: {e}")
+            if key in self._settings:
+                logger.debug(f"Updating STT setting {key} to: [{value}]")
+                self._settings[key] = value
+                if key == "language":
+                    self._settings[key] = Language(value)
+            elif key == "model":
+                self.set_model_name(value)
             else:
                 logger.warning(f"Unknown setting for STT service: {key}")
-
-        self._settings.update(settings)
 
     async def process_audio_frame(self, frame: AudioRawFrame):
         await self.process_generator(self.run_stt(frame.audio))
@@ -484,7 +436,7 @@ class STTService(AIService):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We don't really want to push audio frames down.
             await self.process_audio_frame(frame)
-        elif isinstance(frame, ServiceUpdateSettingsFrame) and frame.service_type == "stt":
+        elif isinstance(frame, STTUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)

@@ -50,13 +50,15 @@ class TogetherLLMService(OpenAILLMService):
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model, params=params, **kwargs)
         self.set_model_name(model)
-        self._max_tokens = params.max_tokens
-        self._frequency_penalty = params.frequency_penalty
-        self._presence_penalty = params.presence_penalty
-        self._temperature = params.temperature
-        self._top_k = params.top_k
-        self._top_p = params.top_p
-        self._extra = params.extra if isinstance(params.extra, dict) else {}
+        self._settings = {
+            "max_tokens": params.max_tokens,
+            "frequency_penalty": params.frequency_penalty,
+            "presence_penalty": params.presence_penalty,
+            "seed": params.seed,
+            "temperature": params.temperature,
+            "top_p": params.top_p,
+            "extra": params.extra if isinstance(params.extra, dict) else {},
+        }
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -72,42 +74,3 @@ class TogetherLLMService(OpenAILLMService):
                 )
             ),
         )
-
-    async def set_frequency_penalty(self, frequency_penalty: float):
-        logger.debug(f"Switching LLM frequency_penalty to: [{frequency_penalty}]")
-        self._frequency_penalty = frequency_penalty
-
-    async def set_max_tokens(self, max_tokens: int):
-        logger.debug(f"Switching LLM max_tokens to: [{max_tokens}]")
-        self._max_tokens = max_tokens
-
-    async def set_presence_penalty(self, presence_penalty: float):
-        logger.debug(f"Switching LLM presence_penalty to: [{presence_penalty}]")
-        self._presence_penalty = presence_penalty
-
-    async def set_temperature(self, temperature: float):
-        logger.debug(f"Switching LLM temperature to: [{temperature}]")
-        self._temperature = temperature
-
-    async def set_top_k(self, top_k: float):
-        logger.debug(f"Switching LLM top_k to: [{top_k}]")
-        self._top_k = top_k
-
-    async def set_top_p(self, top_p: float):
-        logger.debug(f"Switching LLM top_p to: [{top_p}]")
-        self._top_p = top_p
-
-    async def set_extra(self, extra: Dict[str, Any]):
-        logger.debug(f"Switching LLM extra to: [{extra}]")
-        self._extra = extra
-
-    async def _update_settings(self, settings: Dict[str, Any]):
-        for key, value in settings.items():
-            setter = getattr(self, f"set_{key}", None)
-            if setter and callable(setter):
-                try:
-                    await setter(value)
-                except Exception as e:
-                    logger.warning(f"Error setting {key}: {e}")
-            else:
-                logger.warning(f"Unknown setting for Together LLM service: {key}")
