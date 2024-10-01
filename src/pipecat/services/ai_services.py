@@ -260,7 +260,10 @@ class TTSService(AIService):
             self._stop_frame_task = None
 
     async def say(self, text: str):
+        aggregate_sentences = self._aggregate_sentences
+        self._aggregate_sentences = False
         await self.process_frame(TextFrame(text=text), FrameDirection.DOWNSTREAM)
+        self._aggregate_sentences = aggregate_sentences
         await self.flush_audio()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
