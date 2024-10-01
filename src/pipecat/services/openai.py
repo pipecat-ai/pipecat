@@ -31,6 +31,8 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     URLImageRawFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -181,7 +183,7 @@ class BaseOpenAILLMService(LLMService):
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
-        logger.debug(f"Generating chat: {context.get_messages_json()}")
+        logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
 
@@ -476,9 +478,48 @@ class OpenAITTSService(TTSService):
             logger.exception(f"{self} error generating TTS: {e}")
 
 
+# internal use only -- todo: refactor
+@dataclass
+class OpenAIImageMessageFrame(Frame):
+    user_image_raw_frame: UserImageRawFrame
+    text: Optional[str] = None
+
+
 class OpenAIUserContextAggregator(LLMUserContextAggregator):
     def __init__(self, context: OpenAILLMContext):
         super().__init__(context=context)
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+        # Our parent method has already called push_frame(). So we can't interrupt the
+        # flow here and we don't need to call push_frame() ourselves.
+        try:
+            if isinstance(frame, UserImageRequestFrame):
+                # The LLM sends a UserImageRequestFrame upstream. Cache any context provided with
+                # that frame so we can use it when we assemble the image message in the assistant
+                # context aggregator.
+                if frame.context:
+                    if isinstance(frame.context, str):
+                        self._context._user_image_request_context[frame.user_id] = frame.context
+                    else:
+                        logger.error(
+                            f"Unexpected UserImageRequestFrame context type: {type(frame.context)}"
+                        )
+                        del self._context._user_image_request_context[frame.user_id]
+                else:
+                    if frame.user_id in self._context._user_image_request_context:
+                        del self._context._user_image_request_context[frame.user_id]
+            elif isinstance(frame, UserImageRawFrame):
+                # Push a new AnthropicImageMessageFrame with the text context we cached
+                # downstream to be handled by our assistant context aggregator. This is
+                # necessary so that we add the message to the context in the right order.
+                text = self._context._user_image_request_context.get(frame.user_id) or ""
+                if text:
+                    del self._context._user_image_request_context[frame.user_id]
+                frame = OpenAIImageMessageFrame(user_image_raw_frame=frame, text=text)
+                await self.push_frame(frame)
+        except Exception as e:
+            logger.error(f"Error processing frame: {e}")
 
 
 class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
@@ -487,6 +528,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         self._user_context_aggregator = user_context_aggregator
         self._function_calls_in_progress = {}
         self._function_call_result = None
+        self._pending_image_frame_message = None
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
@@ -507,9 +549,14 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     "FunctionCallResultFrame tool_call_id does not match any function call in progress"
                 )
                 self._function_call_result = None
+        elif isinstance(frame, OpenAIImageMessageFrame):
+            self._pending_image_frame_message = frame
+            await self._push_aggregation()
 
     async def _push_aggregation(self):
-        if not (self._aggregation or self._function_call_result):
+        if not (
+            self._aggregation or self._function_call_result or self._pending_image_frame_message
+        ):
             return
 
         run_llm = False
@@ -547,6 +594,17 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     run_llm = frame.run_llm
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
+
+            if self._pending_image_frame_message:
+                frame = self._pending_image_frame_message
+                self._pending_image_frame_message = None
+                self._context.add_image_frame_message(
+                    format=frame.user_image_raw_frame.format,
+                    size=frame.user_image_raw_frame.size,
+                    image=frame.user_image_raw_frame.image,
+                    text=frame.text,
+                )
+                run_llm = True
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
