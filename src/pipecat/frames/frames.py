@@ -5,7 +5,7 @@
 #
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.metrics.metrics import MetricsData
@@ -527,47 +527,11 @@ class UserImageRequestFrame(ControlFrame):
 
 
 @dataclass
-class LLMUpdateSettingsFrame(ControlFrame):
-    """A control frame containing a request to update LLM settings."""
+class ServiceUpdateSettingsFrame(ControlFrame):
+    """A control frame containing a request to update service settings."""
 
-    model: Optional[str] = None
-    temperature: Optional[float] = None
-    top_k: Optional[int] = None
-    top_p: Optional[float] = None
-    frequency_penalty: Optional[float] = None
-    presence_penalty: Optional[float] = None
-    max_tokens: Optional[int] = None
-    seed: Optional[int] = None
-    extra: dict = field(default_factory=dict)
-
-
-@dataclass
-class TTSUpdateSettingsFrame(ControlFrame):
-    """A control frame containing a request to update TTS settings."""
-
-    model: Optional[str] = None
-    voice: Optional[str] = None
-    language: Optional[Language] = None
-    speed: Optional[Union[str, float]] = None
-    emotion: Optional[List[str]] = None
-    engine: Optional[str] = None
-    pitch: Optional[str] = None
-    rate: Optional[str] = None
-    volume: Optional[str] = None
-    emphasis: Optional[str] = None
-    style: Optional[str] = None
-    style_degree: Optional[str] = None
-    role: Optional[str] = None
-    gender: Optional[str] = None
-    google_style: Optional[str] = None
-
-
-@dataclass
-class STTUpdateSettingsFrame(ControlFrame):
-    """A control frame containing a request to update STT settings."""
-
-    model: Optional[str] = None
-    language: Optional[Language] = None
+    service_type: str
+    settings: Dict[str, Any]
 
 
 @dataclass

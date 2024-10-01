@@ -6,7 +6,7 @@
 
 import asyncio
 import json
-from typing import AsyncGenerator, List, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -17,7 +17,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
-    LLMUpdateSettingsFrame,
+    ServiceUpdateSettingsFrame,
     TextFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -63,6 +63,21 @@ class GoogleLLMService(LLMService):
     def _create_client(self, model: str):
         self.set_model_name(model)
         self._client = gai.GenerativeModel(model)
+
+    async def set_model(self, model: str):
+        logger.debug(f"Switching LLM model to: [{model}]")
+        self._create_client(model)
+
+    async def _update_settings(self, settings: Dict[str, Any]):
+        for key, value in settings.items():
+            setter = getattr(self, f"set_{key}", None)
+            if setter and callable(setter):
+                try:
+                    await setter(value)
+                except Exception as e:
+                    logger.warning(f"Error setting {key}: {e}")
+            else:
+                logger.warning(f"Unknown setting for Google LLM service: {key}")
 
     def _get_messages_from_openai_context(self, context: OpenAILLMContext) -> List[glm.Content]:
         openai_messages = context.get_messages()
@@ -136,10 +151,8 @@ class GoogleLLMService(LLMService):
             context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            if frame.model is not None:
-                logger.debug(f"Switching LLM model to: [{frame.model}]")
-                self.set_model_name(frame.model)
+        elif isinstance(frame, ServiceUpdateSettingsFrame) and frame.service_type == "llm":
+            await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
 

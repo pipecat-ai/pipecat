@@ -5,15 +5,12 @@
 #
 
 from typing import Any, Dict, Optional
+
 import httpx
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.frames.frames import (
-    LLMUpdateSettingsFrame,
-)
 from pipecat.services.openai import OpenAILLMService
-
 
 try:
     # Together.ai is recommending OpenAI-compatible function calling, so we've switched over
@@ -104,21 +101,13 @@ class TogetherLLMService(OpenAILLMService):
         logger.debug(f"Switching LLM extra to: [{extra}]")
         self._extra = extra
 
-    async def _update_settings(self, frame: LLMUpdateSettingsFrame):
-        if frame.model is not None:
-            logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self.set_model_name(frame.model)
-        if frame.frequency_penalty is not None:
-            await self.set_frequency_penalty(frame.frequency_penalty)
-        if frame.max_tokens is not None:
-            await self.set_max_tokens(frame.max_tokens)
-        if frame.presence_penalty is not None:
-            await self.set_presence_penalty(frame.presence_penalty)
-        if frame.temperature is not None:
-            await self.set_temperature(frame.temperature)
-        if frame.top_k is not None:
-            await self.set_top_k(frame.top_k)
-        if frame.top_p is not None:
-            await self.set_top_p(frame.top_p)
-        if frame.extra:
-            await self.set_extra(frame.extra)
+    async def _update_settings(self, settings: Dict[str, Any]):
+        for key, value in settings.items():
+            setter = getattr(self, f"set_{key}", None)
+            if setter and callable(setter):
+                try:
+                    await setter(value)
+                except Exception as e:
+                    logger.warning(f"Error setting {key}: {e}")
+            else:
+                logger.warning(f"Unknown setting for Together LLM service: {key}")

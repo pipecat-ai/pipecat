@@ -8,7 +8,7 @@ import asyncio
 import io
 import wave
 from abc import abstractmethod
-from typing import AsyncGenerator, List, Optional, Tuple, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 from loguru import logger
 
@@ -19,15 +19,14 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
+    ServiceUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
-    STTUpdateSettingsFrame,
     TextFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TTSUpdateSettingsFrame,
     UserImageRequestFrame,
     VisionImageRawFrame,
 )
@@ -169,6 +168,7 @@ class TTSService(AIService):
         self._push_stop_frames: bool = push_stop_frames
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
         self._sample_rate: int = sample_rate
+        self._settings: Dict[str, Any] = {}
 
         self._stop_frame_task: Optional[asyncio.Task] = None
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
@@ -232,15 +232,15 @@ class TTSService(AIService):
         pass
 
     @abstractmethod
-    async def flush_audio(self):
-        pass
-
-    @abstractmethod
     async def set_gender(self, gender: str):
         pass
 
     @abstractmethod
     async def set_google_style(self, google_style: str):
+        pass
+
+    @abstractmethod
+    async def flush_audio(self):
         pass
 
     # Converts the text to audio.
@@ -266,6 +266,22 @@ class TTSService(AIService):
             self._stop_frame_task.cancel()
             await self._stop_frame_task
             self._stop_frame_task = None
+
+    async def _update_settings(self, settings: Dict[str, Any]):
+        for key, value in settings.items():
+            setter = getattr(self, f"set_{key}", None)
+            if setter and callable(setter):
+                try:
+                    if key == "language":
+                        await setter(Language(value))
+                    else:
+                        await setter(value)
+                except Exception as e:
+                    logger.warning(f"Error setting {key}: {e}")
+            else:
+                logger.warning(f"Unknown setting for TTS service: {key}")
+
+        self._settings.update(settings)
 
     async def say(self, text: str):
         aggregate_sentences = self._aggregate_sentences
@@ -293,8 +309,8 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             await self._push_tts_frames(frame.text)
             await self.flush_audio()
-        elif isinstance(frame, TTSUpdateSettingsFrame):
-            await self._update_tts_settings(frame)
+        elif isinstance(frame, ServiceUpdateSettingsFrame) and frame.service_type == "tts":
+            await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
 
@@ -340,34 +356,6 @@ class TTSService(AIService):
             # We send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
             await self.push_frame(TextFrame(text))
-
-    async def _update_tts_settings(self, frame: TTSUpdateSettingsFrame):
-        if frame.model is not None:
-            await self.set_model(frame.model)
-        if frame.voice is not None:
-            await self.set_voice(frame.voice)
-        if frame.language is not None:
-            await self.set_language(frame.language)
-        if frame.speed is not None:
-            await self.set_speed(frame.speed)
-        if frame.emotion is not None:
-            await self.set_emotion(frame.emotion)
-        if frame.engine is not None:
-            await self.set_engine(frame.engine)
-        if frame.pitch is not None:
-            await self.set_pitch(frame.pitch)
-        if frame.rate is not None:
-            await self.set_rate(frame.rate)
-        if frame.volume is not None:
-            await self.set_volume(frame.volume)
-        if frame.emphasis is not None:
-            await self.set_emphasis(frame.emphasis)
-        if frame.style is not None:
-            await self.set_style(frame.style)
-        if frame.style_degree is not None:
-            await self.set_style_degree(frame.style_degree)
-        if frame.role is not None:
-            await self.set_role(frame.role)
 
     async def _stop_frame_handler(self):
         try:
@@ -454,6 +442,7 @@ class STTService(AIService):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._settings: Dict[str, Any] = {}
 
     @abstractmethod
     async def set_model(self, model: str):
@@ -468,11 +457,21 @@ class STTService(AIService):
         """Returns transcript as a string"""
         pass
 
-    async def _update_stt_settings(self, frame: STTUpdateSettingsFrame):
-        if frame.model is not None:
-            await self.set_model(frame.model)
-        if frame.language is not None:
-            await self.set_language(frame.language)
+    async def _update_settings(self, settings: Dict[str, Any]):
+        for key, value in settings.items():
+            setter = getattr(self, f"set_{key}", None)
+            if setter and callable(setter):
+                try:
+                    if key == "language":
+                        await setter(Language(value))
+                    else:
+                        await setter(value)
+                except Exception as e:
+                    logger.warning(f"Error setting {key}: {e}")
+            else:
+                logger.warning(f"Unknown setting for STT service: {key}")
+
+        self._settings.update(settings)
 
     async def process_audio_frame(self, frame: AudioRawFrame):
         await self.process_generator(self.run_stt(frame.audio))
@@ -485,8 +484,8 @@ class STTService(AIService):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We don't really want to push audio frames down.
             await self.process_audio_frame(frame)
-        elif isinstance(frame, STTUpdateSettingsFrame):
-            await self._update_stt_settings(frame)
+        elif isinstance(frame, ServiceUpdateSettingsFrame) and frame.service_type == "stt":
+            await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
 
