@@ -55,6 +55,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+# internal use only -- todo: refactor
 @dataclass
 class AnthropicImageMessageFrame(Frame):
     user_image_raw_frame: UserImageRawFrame
@@ -359,7 +360,6 @@ class AnthropicLLMContext(OpenAILLMContext):
         system: str | NotGiven = NOT_GIVEN,
     ):
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
-        self._user_image_request_context = {}
 
         # For beta prompt caching. This is a counter that tracks the number of turns
         # we've seen above the cache threshold. We reset this when we reset the
