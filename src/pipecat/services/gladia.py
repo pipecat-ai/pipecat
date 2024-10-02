@@ -37,17 +37,17 @@ except ModuleNotFoundError as e:
 def language_to_gladia_language(language: Language) -> str | None:
     match language:
         case Language.BG:
-            return "bg"
+            return "bulgarian"
         case Language.CA:
-            return "ca"
+            return "catalan"
         case Language.ZH:
-            return "zh"
+            return "chinese"
         case Language.CS:
-            return "cs"
+            return "czech"
         case Language.DA:
-            return "da"
+            return "danish"
         case Language.NL:
-            return "nl"
+            return "dutch"
         case (
             Language.EN
             | Language.EN_US
@@ -56,59 +56,59 @@ def language_to_gladia_language(language: Language) -> str | None:
             | Language.EN_NZ
             | Language.EN_IN
         ):
-            return "en"
+            return "english"
         case Language.ET:
-            return "et"
+            return "estonian"
         case Language.FI:
-            return "fi"
+            return "finnish"
         case Language.FR | Language.FR_CA:
-            return "fr"
+            return "french"
         case Language.DE | Language.DE_CH:
-            return "de"
+            return "german"
         case Language.EL:
-            return "el"
+            return "greek"
         case Language.HI:
-            return "hi"
+            return "hindi"
         case Language.HU:
-            return "hu"
+            return "hungarian"
         case Language.ID:
-            return "id"
+            return "indonesian"
         case Language.IT:
-            return "it"
+            return "italian"
         case Language.JA:
-            return "ja"
+            return "japanese"
         case Language.KO:
-            return "ko"
+            return "korean"
         case Language.LV:
-            return "lv"
+            return "latvian"
         case Language.LT:
-            return "lt"
+            return "lithuanian"
         case Language.MS:
-            return "ms"
+            return "malay"
         case Language.NO:
-            return "no"
+            return "norwegian"
         case Language.PL:
-            return "pl"
+            return "polish"
         case Language.PT | Language.PT_BR:
-            return "pt"
+            return "portuguese"
         case Language.RO:
-            return "ro"
+            return "romanian"
         case Language.RU:
-            return "ru"
+            return "russian"
         case Language.SK:
-            return "sk"
+            return "slovak"
         case Language.ES:
-            return "es"
+            return "spanish"
         case Language.SV:
-            return "sv"
+            return "slovenian"
         case Language.TH:
-            return "th"
+            return "thai"
         case Language.TR:
-            return "tr"
+            return "turkish"
         case Language.UK:
-            return "uk"
+            return "ukrainian"
         case Language.VI:
-            return "vi"
+            return "vietnamese"
     return None
 
 
