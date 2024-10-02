@@ -15,7 +15,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.logger import FrameLogger
-from pipecat.services.openai import OpenAILLMServiceRealtimeBeta
+from pipecat.services.openai_realtime_beta import OpenAILLMServiceRealtimeBeta
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -40,10 +40,14 @@ async def main():
             token,
             "Respond bot",
             DailyParams(
+                audio_in_enabled=True,
+                audio_in_sample_rate=24000,
                 audio_out_enabled=True,
+                audio_out_sample_rate=24000,
                 transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
         )
 
@@ -61,9 +65,9 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                fl1,
+                # fl1,
                 llm,  # LLM
-                fl2,
+                # fl2,
                 transport.output(),  # Transport bot output
             ]
         )
