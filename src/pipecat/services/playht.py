@@ -75,7 +75,7 @@ class PlayHTTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
             async for chunk in playht_gen:
                 # skip the RIFF header.
                 if in_header:
@@ -95,6 +95,6 @@ class PlayHTTTSService(TTSService):
                         await self.stop_ttfb_metrics()
                         frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
                         yield frame
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()
         except Exception as e:
             logger.exception(f"{self} error generating TTS: {e}")

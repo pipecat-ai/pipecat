@@ -106,7 +106,7 @@ class CartesiaTTSService(WordTTSService):
                 "encoding": params.encoding,
                 "sample_rate": params.sample_rate,
             },
-            "language": language_to_cartesia_language(params.language) if params.language else "en",
+            "language": params.language if params.language else Language.EN,
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -146,7 +146,7 @@ class CartesiaTTSService(WordTTSService):
             "model_id": self.model_name,
             "voice": voice_config,
             "output_format": self._settings["output_format"],
-            "language": self._settings["language"],
+            "language": language_to_cartesia_language(self._settings["language"]),
             "add_timestamps": add_timestamps,
         }
         return json.dumps(msg)
@@ -255,8 +255,8 @@ class CartesiaTTSService(WordTTSService):
                 await self._connect()
 
             if not self._context_id:
-                await self.push_frame(TTSStartedFrame())
                 await self.start_ttfb_metrics()
+                yield TTSStartedFrame()
                 self._context_id = str(uuid.uuid4())
 
             msg = self._build_msg(text=text)
@@ -266,7 +266,7 @@ class CartesiaTTSService(WordTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
-                await self.push_frame(TTSStoppedFrame())
+                yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
@@ -303,7 +303,7 @@ class CartesiaHttpTTSService(TTSService):
                 "encoding": params.encoding,
                 "sample_rate": params.sample_rate,
             },
-            "language": language_to_cartesia_language(params.language) if params.language else None,
+            "language": params.language if params.language else Language.EN,
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -314,11 +314,6 @@ class CartesiaHttpTTSService(TTSService):
 
     def can_generate_metrics(self) -> bool:
         return True
-
-    async def set_model(self, model: str):
-        logger.debug(f"Switching TTS model to: [{model}]")
-        self._model_id = model
-        await super().set_model(model)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -331,8 +326,8 @@ class CartesiaHttpTTSService(TTSService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
-        await self.push_frame(TTSStartedFrame())
         await self.start_ttfb_metrics()
+        yield TTSStartedFrame()
 
         try:
             voice_controls = None
@@ -344,11 +339,11 @@ class CartesiaHttpTTSService(TTSService):
                     voice_controls["emotion"] = self._settings["emotion"]
 
             output = await self._client.tts.sse(
-                model_id=self._model_id,
+                model_id=self._model_name,
                 transcript=text,
                 voice_id=self._voice_id,
                 output_format=self._settings["output_format"],
-                language=self._settings["language"],
+                language=language_to_cartesia_language(self._settings["language"]),
                 stream=False,
                 _experimental_voice_controls=voice_controls,
             )
@@ -365,4 +360,4 @@ class CartesiaHttpTTSService(TTSService):
             logger.error(f"{self} exception: {e}")
 
         await self.start_tts_usage_metrics(text)
-        await self.push_frame(TTSStoppedFrame())
+        yield TTSStoppedFrame()

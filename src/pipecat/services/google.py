@@ -40,7 +40,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_API_KEY` environment variable."
+        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set the environment variable GOOGLE_API_KEY for the GoogleLLMService and GOOGLE_APPLICATION_CREDENTIALS for the GoogleTTSService`."
     )
     raise Exception(f"Missing module: {e}")
 
@@ -261,9 +261,7 @@ class GoogleTTSService(TTSService):
             "rate": params.rate,
             "volume": params.volume,
             "emphasis": params.emphasis,
-            "language": language_to_google_language(params.language)
-            if params.language
-            else "en-US",
+            "language": params.language if params.language else Language.EN,
             "gender": params.gender,
             "google_style": params.google_style,
         }
@@ -287,8 +285,6 @@ class GoogleTTSService(TTSService):
         elif credentials_path:
             # Use service account JSON file if provided
             creds = service_account.Credentials.from_service_account_file(credentials_path)
-        else:
-            raise ValueError("Either 'credentials' or 'credentials_path' must be provided.")
 
         return texttospeech_v1.TextToSpeechAsyncClient(credentials=creds)
 
@@ -300,8 +296,10 @@ class GoogleTTSService(TTSService):
 
         # Voice tag
         voice_attrs = [f"name='{self._voice_id}'"]
-        if self._settings["language"]:
-            voice_attrs.append(f"language='{self._settings['language']}'")
+
+        language = language_to_google_language(self._settings["language"])
+        voice_attrs.append(f"language='{language}'")
+
         if self._settings["gender"]:
             voice_attrs.append(f"gender='{self._settings['gender']}'")
         ssml += f"<voice {' '.join(voice_attrs)}>"
@@ -363,7 +361,7 @@ class GoogleTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
 
             # Skip the first 44 bytes to remove the WAV header
             audio_content = response.audio_content[44:]
@@ -379,11 +377,11 @@ class GoogleTTSService(TTSService):
                 yield frame
                 await asyncio.sleep(0)  # Allow other tasks to run
 
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()
 
         except Exception as e:
             logger.exception(f"{self} error generating TTS: {e}")
             error_message = f"TTS generation error: {str(e)}"
             yield ErrorFrame(error=error_message)
         finally:
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()

@@ -127,6 +127,8 @@ class OpenAILLMContext:
                         if item["type"] == "image_url":
                             if item["image_url"]["url"].startswith("data:image/"):
                                 item["image_url"]["url"] = "data:image/..."
+            if "mime_type" in msg and msg["mime_type"].startswith("image/"):
+                msg["data"] = "..."
             msgs.append(msg)
         return json.dumps(msgs)
 
