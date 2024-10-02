@@ -387,8 +387,8 @@ class ElevenLabsTTSService(WordTTSService):
 
             try:
                 if not self._started:
-                    await self.push_frame(TTSStartedFrame())
                     await self.start_ttfb_metrics()
+                    yield TTSStartedFrame()
                     self._started = True
                     self._cumulative_time = 0
 
@@ -396,7 +396,7 @@ class ElevenLabsTTSService(WordTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
-                await self.push_frame(TTSStoppedFrame())
+                yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return

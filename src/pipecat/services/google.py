@@ -361,7 +361,7 @@ class GoogleTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
 
             # Skip the first 44 bytes to remove the WAV header
             audio_content = response.audio_content[44:]
@@ -377,11 +377,11 @@ class GoogleTTSService(TTSService):
                 yield frame
                 await asyncio.sleep(0)  # Allow other tasks to run
 
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()
 
         except Exception as e:
             logger.exception(f"{self} error generating TTS: {e}")
             error_message = f"TTS generation error: {str(e)}"
             yield ErrorFrame(error=error_message)
         finally:
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()

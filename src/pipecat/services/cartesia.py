@@ -255,8 +255,8 @@ class CartesiaTTSService(WordTTSService):
                 await self._connect()
 
             if not self._context_id:
-                await self.push_frame(TTSStartedFrame())
                 await self.start_ttfb_metrics()
+                yield TTSStartedFrame()
                 self._context_id = str(uuid.uuid4())
 
             msg = self._build_msg(text=text)
@@ -266,7 +266,7 @@ class CartesiaTTSService(WordTTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
-                await self.push_frame(TTSStoppedFrame())
+                yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return
@@ -331,8 +331,8 @@ class CartesiaHttpTTSService(TTSService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
-        await self.push_frame(TTSStartedFrame())
         await self.start_ttfb_metrics()
+        yield TTSStartedFrame()
 
         try:
             voice_controls = None
@@ -365,4 +365,4 @@ class CartesiaHttpTTSService(TTSService):
             logger.error(f"{self} exception: {e}")
 
         await self.start_tts_usage_metrics(text)
-        await self.push_frame(TTSStoppedFrame())
+        yield TTSStoppedFrame()

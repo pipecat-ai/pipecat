@@ -190,7 +190,7 @@ class AWSTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
 
             if "AudioStream" in response:
                 with response["AudioStream"] as stream:
@@ -203,7 +203,7 @@ class AWSTTSService(TTSService):
                             frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
                             yield frame
 
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()
 
         except (BotoCoreError, ClientError) as error:
             logger.exception(f"{self} error generating TTS: {error}")
@@ -211,4 +211,4 @@ class AWSTTSService(TTSService):
             yield ErrorFrame(error=error_message)
 
         finally:
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()

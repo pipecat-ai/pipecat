@@ -151,7 +151,7 @@ class XTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
 
             buffer = bytearray()
             async for chunk in r.content.iter_chunked(1024):
@@ -187,4 +187,4 @@ class XTTSService(TTSService):
                 frame = TTSAudioRawFrame(resampled_audio_bytes, 16000, 1)
                 yield frame
 
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()
