@@ -55,7 +55,7 @@ async def main():
         tts = DeepgramTTSService(
             aiohttp_session=session,
             api_key=os.getenv("DEEPGRAM_API_KEY"),
-            voice_id="aura-asteria-en",
+            voice="aura-asteria-en",
             base_url="http://0.0.0.0:8080/v1/speak",
         )
 

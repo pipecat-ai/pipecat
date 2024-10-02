@@ -50,7 +50,7 @@ async def main():
 
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice_id="aura-helios-en")
+        tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 

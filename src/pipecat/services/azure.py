@@ -178,7 +178,7 @@ class AzureTTSService(TTSService):
         *,
         api_key: str,
         region: str,
-        voice_id="en-US-SaraNeural",
+        voice="en-US-SaraNeural",
         sample_rate: int = 16000,
         params: InputParams = InputParams(),
         **kwargs,
@@ -200,7 +200,7 @@ class AzureTTSService(TTSService):
             "volume": params.volume,
         }
 
-        self.set_voice(voice_id)
+        self.set_voice(voice)
 
     def can_generate_metrics(self) -> bool:
         return True

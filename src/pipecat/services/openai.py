@@ -381,7 +381,7 @@ class OpenAITTSService(TTSService):
         self,
         *,
         api_key: str | None = None,
-        voice_id: str = "alloy",
+        voice: str = "alloy",
         model: Literal["tts-1", "tts-1-hd"] = "tts-1",
         sample_rate: int = 24000,
         **kwargs,
@@ -392,7 +392,7 @@ class OpenAITTSService(TTSService):
             "sample_rate": sample_rate,
         }
         self.set_model_name(model)
-        self.set_voice(voice_id)
+        self.set_voice(voice)
 
         self._client = AsyncOpenAI(api_key=api_key)
 

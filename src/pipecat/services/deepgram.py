@@ -49,7 +49,7 @@ class DeepgramTTSService(TTSService):
         self,
         *,
         api_key: str,
-        voice_id: str = "aura-helios-en",
+        voice: str = "aura-helios-en",
         sample_rate: int = 16000,
         encoding: str = "linear16",
         **kwargs,
@@ -60,7 +60,7 @@ class DeepgramTTSService(TTSService):
             "sample_rate": sample_rate,
             "encoding": encoding,
         }
-        self.set_voice(voice_id)
+        self.set_voice(voice)
         self._deepgram_client = DeepgramClient(api_key=api_key)
 
     def can_generate_metrics(self) -> bool:
