@@ -121,7 +121,7 @@ class AWSTTSService(TTSService):
         self._settings = {
             "sample_rate": sample_rate,
             "engine": params.engine,
-            "language": language_to_aws_language(params.language) if params.language else "en-US",
+            "language": params.language if params.language else Language.EN,
             "pitch": params.pitch,
             "rate": params.rate,
             "volume": params.volume,
@@ -135,8 +135,8 @@ class AWSTTSService(TTSService):
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
 
-        if self._settings["language"]:
-            ssml += f"<lang xml:lang='{self._settings['language']}'>"
+        language = language_to_aws_language(self._settings["language"])
+        ssml += f"<lang xml:lang='{language}'>"
 
         prosody_attrs = []
         # Prosody tags are only supported for standard and neural engines
@@ -158,8 +158,7 @@ class AWSTTSService(TTSService):
         if prosody_attrs:
             ssml += "</prosody>"
 
-        if self._settings["language"]:
-            ssml += "</lang>"
+        ssml += "</lang>"
 
         ssml += "</speak>"
 

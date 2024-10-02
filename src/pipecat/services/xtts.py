@@ -94,7 +94,7 @@ class XTTSService(TTSService):
         super().__init__(**kwargs)
 
         self._settings = {
-            "language": language_to_xtts_language(language) if language else "en",
+            "language": language,
             "base_url": base_url,
         }
         self.set_voice(voice_id)
@@ -131,9 +131,11 @@ class XTTSService(TTSService):
 
         url = self._settings["base_url"] + "/tts_stream"
 
+        language = language_to_xtts_language(self._settings["language"])
+
         payload = {
             "text": text.replace(".", "").replace("*", ""),
-            "language": self._settings["language"],
+            "language": language,
             "speaker_embedding": embeddings["speaker_embedding"],
             "gpt_cond_latent": embeddings["gpt_cond_latent"],
             "add_wav_header": False,

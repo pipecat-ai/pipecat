@@ -198,9 +198,7 @@ class ElevenLabsTTSService(WordTTSService):
         self._url = url
         self._settings = {
             "sample_rate": sample_rate_from_output_format(params.output_format),
-            "language": language_to_elevenlabs_language(params.language)
-            if params.language
-            else "en",
+            "language": params.language if params.language else Language.EN,
             "output_format": params.output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
@@ -294,14 +292,14 @@ class ElevenLabsTTSService(WordTTSService):
             if self._settings["optimize_streaming_latency"]:
                 url += f"&optimize_streaming_latency={self._settings['optimize_streaming_latency']}"
 
-            # language can only be used with the 'eleven_turbo_v2_5' model
-            if self._settings["language"]:
-                if model == "eleven_turbo_v2_5":
-                    url += f"&language_code={self._settings['language']}"
-                else:
-                    logger.debug(
-                        f"Language code [{self._settings['language']}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
-                    )
+            # Language can only be used with the 'eleven_turbo_v2_5' model
+            language = language_to_elevenlabs_language(self._settings["language"])
+            if model == "eleven_turbo_v2_5":
+                url += f"&language_code={language}"
+            else:
+                logger.debug(
+                    f"Language code [{language}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
+                )
 
             self._websocket = await websockets.connect(url)
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())

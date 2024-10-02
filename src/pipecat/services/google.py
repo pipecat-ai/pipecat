@@ -40,7 +40,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_APPLICATION_CREDENTIALS` environment variable."
+        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set the environment variable GOOGLE_API_KEY for the GoogleLLMService and GOOGLE_APPLICATION_CREDENTIALS for the GoogleTTSService`."
     )
     raise Exception(f"Missing module: {e}")
 
@@ -261,9 +261,7 @@ class GoogleTTSService(TTSService):
             "rate": params.rate,
             "volume": params.volume,
             "emphasis": params.emphasis,
-            "language": language_to_google_language(params.language)
-            if params.language
-            else "en-US",
+            "language": params.language if params.language else Language.EN,
             "gender": params.gender,
             "google_style": params.google_style,
         }
@@ -298,8 +296,10 @@ class GoogleTTSService(TTSService):
 
         # Voice tag
         voice_attrs = [f"name='{self._voice_id}'"]
-        if self._settings["language"]:
-            voice_attrs.append(f"language='{self._settings['language']}'")
+
+        language = language_to_google_language(self._settings["language"])
+        voice_attrs.append(f"language='{language}'")
+
         if self._settings["gender"]:
             voice_attrs.append(f"gender='{self._settings['gender']}'")
         ssml += f"<voice {' '.join(voice_attrs)}>"

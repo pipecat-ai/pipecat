@@ -82,7 +82,7 @@ class LmntTTSService(TTSService):
                 "encoding": "pcm_s16le",
                 "sample_rate": sample_rate,
             },
-            "language": language_to_lmnt_language(language) if language else "en",
+            "language": language,
         }
 
         self.set_voice(voice_id)
