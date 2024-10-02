@@ -426,13 +426,13 @@ class OpenAITTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                await self.push_frame(TTSStartedFrame())
+                yield TTSStartedFrame()
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
                         frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
                         yield frame
-                await self.push_frame(TTSStoppedFrame())
+                yield TTSStoppedFrame()
         except BadRequestError as e:
             logger.exception(f"{self} error generating TTS: {e}")
 

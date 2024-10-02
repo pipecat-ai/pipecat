@@ -84,7 +84,7 @@ class DeepgramTTSService(TTSService):
             )
 
             await self.start_tts_usage_metrics(text)
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
 
             # The response.stream_memory is already a BytesIO object
             audio_buffer = response.stream_memory
@@ -105,7 +105,7 @@ class DeepgramTTSService(TTSService):
                 )
                 yield frame
 
-            await self.push_frame(TTSStoppedFrame())
+                yield TTSStoppedFrame()
 
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
