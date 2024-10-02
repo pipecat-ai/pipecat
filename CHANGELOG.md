@@ -86,8 +86,8 @@ async def on_connected(processor):
 
 ### Changed
 
-- Updated individual update settings frame classes into a single UpdateSettingsFrame
-  class for STT, LLM, and TTS.
+- Updated individual update settings frame classes into a single
+  ServiceUpdateSettingsFrame class.
 
 - We now distinguish between input and output audio and image frames. We
   introduce `InputAudioRawFrame`, `OutputAudioRawFrame`, `InputImageRawFrame`

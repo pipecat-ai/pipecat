@@ -5,8 +5,9 @@
 #
 
 import asyncio
-
 from typing import AsyncGenerator
+
+from loguru import logger
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -23,8 +24,6 @@ from pipecat.frames.frames import (
 from pipecat.services.ai_services import STTService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-
-from loguru import logger
 
 # See .env.example for Deepgram configuration needed
 try:
@@ -57,25 +56,23 @@ class DeepgramTTSService(TTSService):
     ):
         super().__init__(**kwargs)
 
-        self._voice = voice
-        self._sample_rate = sample_rate
-        self._encoding = encoding
+        self._settings = {
+            "sample_rate": sample_rate,
+            "encoding": encoding,
+        }
+        self.set_voice(voice)
         self._deepgram_client = DeepgramClient(api_key=api_key)
 
     def can_generate_metrics(self) -> bool:
         return True
 
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice = voice
-
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
         options = SpeakOptions(
-            model=self._voice,
-            encoding=self._encoding,
-            sample_rate=self._sample_rate,
+            model=self._voice_id,
+            encoding=self._settings["encoding"],
+            sample_rate=self._settings["sample_rate"],
             container="none",
         )
 
@@ -103,7 +100,9 @@ class DeepgramTTSService(TTSService):
                 chunk = audio_buffer.read(chunk_size)
                 if not chunk:
                     break
-                frame = TTSAudioRawFrame(audio=chunk, sample_rate=self._sample_rate, num_channels=1)
+                frame = TTSAudioRawFrame(
+                    audio=chunk, sample_rate=self._settings["sample_rate"], num_channels=1
+                )
                 yield frame
 
             await self.push_frame(TTSStoppedFrame())
@@ -121,7 +120,7 @@ class DeepgramSTTService(STTService):
         url: str = "",
         live_options: LiveOptions = LiveOptions(
             encoding="linear16",
-            language="en-US",
+            language=Language.EN,
             model="nova-2-conversationalai",
             sample_rate=16000,
             channels=1,
@@ -135,7 +134,7 @@ class DeepgramSTTService(STTService):
     ):
         super().__init__(**kwargs)
 
-        self._live_options = live_options
+        self._settings = vars(live_options)
 
         self._client = DeepgramClient(
             api_key, config=DeepgramClientOptions(url=url, options={"keepalive": "true"})
@@ -147,7 +146,7 @@ class DeepgramSTTService(STTService):
 
     @property
     def vad_enabled(self):
-        return self._live_options.vad_events
+        return self._settings["vad_events"]
 
     def can_generate_metrics(self) -> bool:
         return self.vad_enabled
@@ -155,13 +154,7 @@ class DeepgramSTTService(STTService):
     async def set_model(self, model: str):
         await super().set_model(model)
         logger.debug(f"Switching STT model to: [{model}]")
-        self._live_options.model = model
-        await self._disconnect()
-        await self._connect()
-
-    async def set_language(self, language: Language):
-        logger.debug(f"Switching STT language to: [{language}]")
-        self._live_options.language = language
+        self._settings["model"] = model
         await self._disconnect()
         await self._connect()
 
@@ -182,7 +175,7 @@ class DeepgramSTTService(STTService):
         yield None
 
     async def _connect(self):
-        if await self._connection.start(self._live_options):
+        if await self._connection.start(self._settings):
             logger.debug(f"{self}: Connected to Deepgram")
         else:
             logger.error(f"{self}: Unable to connect to Deepgram")

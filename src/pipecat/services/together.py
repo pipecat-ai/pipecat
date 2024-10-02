@@ -5,15 +5,12 @@
 #
 
 from typing import Any, Dict, Optional
+
 import httpx
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.frames.frames import (
-    LLMUpdateSettingsFrame,
-)
 from pipecat.services.openai import OpenAILLMService
-
 
 try:
     # Together.ai is recommending OpenAI-compatible function calling, so we've switched over
@@ -53,13 +50,15 @@ class TogetherLLMService(OpenAILLMService):
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model, params=params, **kwargs)
         self.set_model_name(model)
-        self._max_tokens = params.max_tokens
-        self._frequency_penalty = params.frequency_penalty
-        self._presence_penalty = params.presence_penalty
-        self._temperature = params.temperature
-        self._top_k = params.top_k
-        self._top_p = params.top_p
-        self._extra = params.extra if isinstance(params.extra, dict) else {}
+        self._settings = {
+            "max_tokens": params.max_tokens,
+            "frequency_penalty": params.frequency_penalty,
+            "presence_penalty": params.presence_penalty,
+            "seed": params.seed,
+            "temperature": params.temperature,
+            "top_p": params.top_p,
+            "extra": params.extra if isinstance(params.extra, dict) else {},
+        }
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -75,50 +74,3 @@ class TogetherLLMService(OpenAILLMService):
                 )
             ),
         )
-
-    async def set_frequency_penalty(self, frequency_penalty: float):
-        logger.debug(f"Switching LLM frequency_penalty to: [{frequency_penalty}]")
-        self._frequency_penalty = frequency_penalty
-
-    async def set_max_tokens(self, max_tokens: int):
-        logger.debug(f"Switching LLM max_tokens to: [{max_tokens}]")
-        self._max_tokens = max_tokens
-
-    async def set_presence_penalty(self, presence_penalty: float):
-        logger.debug(f"Switching LLM presence_penalty to: [{presence_penalty}]")
-        self._presence_penalty = presence_penalty
-
-    async def set_temperature(self, temperature: float):
-        logger.debug(f"Switching LLM temperature to: [{temperature}]")
-        self._temperature = temperature
-
-    async def set_top_k(self, top_k: float):
-        logger.debug(f"Switching LLM top_k to: [{top_k}]")
-        self._top_k = top_k
-
-    async def set_top_p(self, top_p: float):
-        logger.debug(f"Switching LLM top_p to: [{top_p}]")
-        self._top_p = top_p
-
-    async def set_extra(self, extra: Dict[str, Any]):
-        logger.debug(f"Switching LLM extra to: [{extra}]")
-        self._extra = extra
-
-    async def _update_settings(self, frame: LLMUpdateSettingsFrame):
-        if frame.model is not None:
-            logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self.set_model_name(frame.model)
-        if frame.frequency_penalty is not None:
-            await self.set_frequency_penalty(frame.frequency_penalty)
-        if frame.max_tokens is not None:
-            await self.set_max_tokens(frame.max_tokens)
-        if frame.presence_penalty is not None:
-            await self.set_presence_penalty(frame.presence_penalty)
-        if frame.temperature is not None:
-            await self.set_temperature(frame.temperature)
-        if frame.top_k is not None:
-            await self.set_top_k(frame.top_k)
-        if frame.top_p is not None:
-            await self.set_top_p(frame.top_p)
-        if frame.extra:
-            await self.set_extra(frame.extra)

@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
-
 from typing import Any, AsyncGenerator, Dict
+
+import aiohttp
+import numpy as np
+from loguru import logger
 
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -17,10 +19,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.ai_services import TTSService
-
-import numpy as np
-
-from loguru import logger
+from pipecat.transcriptions.language import Language
 
 try:
     import resampy
@@ -38,21 +37,67 @@ except ModuleNotFoundError as e:
 # https://github.com/coqui-ai/xtts-streaming-server
 
 
+def language_to_xtts_language(language: Language) -> str | None:
+    match language:
+        case Language.CS:
+            return "cs"
+        case Language.DE:
+            return "de"
+        case (
+            Language.EN
+            | Language.EN_US
+            | Language.EN_AU
+            | Language.EN_GB
+            | Language.EN_NZ
+            | Language.EN_IN
+        ):
+            return "en"
+        case Language.ES:
+            return "es"
+        case Language.FR:
+            return "fr"
+        case Language.HI:
+            return "hi"
+        case Language.HU:
+            return "hu"
+        case Language.IT:
+            return "it"
+        case Language.JA:
+            return "ja"
+        case Language.KO:
+            return "ko"
+        case Language.NL:
+            return "nl"
+        case Language.PL:
+            return "pl"
+        case Language.PT | Language.PT_BR:
+            return "pt"
+        case Language.RU:
+            return "ru"
+        case Language.TR:
+            return "tr"
+        case Language.ZH:
+            return "zh-cn"
+    return None
+
+
 class XTTSService(TTSService):
     def __init__(
         self,
         *,
         voice_id: str,
-        language: str,
+        language: Language,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
         **kwargs,
     ):
         super().__init__(**kwargs)
 
-        self._voice_id = voice_id
-        self._language = language
-        self._base_url = base_url
+        self._settings = {
+            "language": language_to_xtts_language(language) if language else "en",
+            "base_url": base_url,
+        }
+        self.set_voice(voice_id)
         self._studio_speakers: Dict[str, Any] | None = None
         self._aiohttp_session = aiohttp_session
 
@@ -61,7 +106,7 @@ class XTTSService(TTSService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        async with self._aiohttp_session.get(self._base_url + "/studio_speakers") as r:
+        async with self._aiohttp_session.get(self._settings["base_url"] + "/studio_speakers") as r:
             if r.status != 200:
                 text = await r.text()
                 logger.error(
@@ -75,10 +120,6 @@ class XTTSService(TTSService):
                 return
             self._studio_speakers = await r.json()
 
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice_id = voice
-
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
@@ -88,11 +129,11 @@ class XTTSService(TTSService):
 
         embeddings = self._studio_speakers[self._voice_id]
 
-        url = self._base_url + "/tts_stream"
+        url = self._settings["base_url"] + "/tts_stream"
 
         payload = {
             "text": text.replace(".", "").replace("*", ""),
-            "language": self._language,
+            "language": self._settings["language"],
             "speaker_embedding": embeddings["speaker_embedding"],
             "gpt_cond_latent": embeddings["gpt_cond_latent"],
             "add_wav_header": False,
