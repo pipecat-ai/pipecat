@@ -292,15 +292,15 @@ class ElevenLabsTTSService(WordTTSService):
             url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}"
 
             if self._settings["optimize_streaming_latency"]:
-                url += f"&optimize_streaming_latency={self._settings["optimize_streaming_latency"]}"
+                url += f"&optimize_streaming_latency={self._settings['optimize_streaming_latency']}"
 
             # language can only be used with the 'eleven_turbo_v2_5' model
             if self._settings["language"]:
                 if model == "eleven_turbo_v2_5":
-                    url += f"&language_code={self._settings["language"]}"
+                    url += f"&language_code={self._settings['language']}"
                 else:
                     logger.debug(
-                        f"Language code [{self._settings["language"]}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
+                        f"Language code [{self._settings['language']}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
                     )
 
             self._websocket = await websockets.connect(url)

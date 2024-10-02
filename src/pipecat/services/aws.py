@@ -136,17 +136,17 @@ class AWSTTSService(TTSService):
         ssml = "<speak>"
 
         if self._settings["language"]:
-            ssml += f"<lang xml:lang='{self._settings["language"]}'>"
+            ssml += f"<lang xml:lang='{self._settings['language']}'>"
 
         prosody_attrs = []
         # Prosody tags are only supported for standard and neural engines
         if self._settings["engine"] != "generative":
             if self._settings["rate"]:
-                prosody_attrs.append(f"rate='{self._settings["rate"]}'")
+                prosody_attrs.append(f"rate='{self._settings['rate']}'")
             if self._settings["pitch"]:
-                prosody_attrs.append(f"pitch='{self._settings["pitch"]}'")
+                prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
             if self._settings["volume"]:
-                prosody_attrs.append(f"volume='{self._settings["volume"]}'")
+                prosody_attrs.append(f"volume='{self._settings['volume']}'")
 
             if prosody_attrs:
                 ssml += f"<prosody {' '.join(prosody_attrs)}>"
