@@ -120,7 +120,7 @@ class DeepgramSTTService(STTService):
         url: str = "",
         live_options: LiveOptions = LiveOptions(
             encoding="linear16",
-            language="en-US",
+            language=Language.EN,
             model="nova-2-conversationalai",
             sample_rate=16000,
             channels=1,

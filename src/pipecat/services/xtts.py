@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.ai_services import TTSService
+from pipecat.transcriptions.language import Language
 
 try:
     import resampy
@@ -36,12 +37,56 @@ except ModuleNotFoundError as e:
 # https://github.com/coqui-ai/xtts-streaming-server
 
 
+def language_to_xtts_language(language: Language) -> str | None:
+    match language:
+        case Language.CS:
+            return "cs"
+        case Language.DE:
+            return "de"
+        case (
+            Language.EN
+            | Language.EN_US
+            | Language.EN_AU
+            | Language.EN_GB
+            | Language.EN_NZ
+            | Language.EN_IN
+        ):
+            return "en"
+        case Language.ES:
+            return "es"
+        case Language.FR:
+            return "fr"
+        case Language.HI:
+            return "hi"
+        case Language.HU:
+            return "hu"
+        case Language.IT:
+            return "it"
+        case Language.JA:
+            return "ja"
+        case Language.KO:
+            return "ko"
+        case Language.NL:
+            return "nl"
+        case Language.PL:
+            return "pl"
+        case Language.PT | Language.PT_BR:
+            return "pt"
+        case Language.RU:
+            return "ru"
+        case Language.TR:
+            return "tr"
+        case Language.ZH:
+            return "zh-cn"
+    return None
+
+
 class XTTSService(TTSService):
     def __init__(
         self,
         *,
         voice_id: str,
-        language: str,
+        language: Language,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
         **kwargs,
@@ -49,7 +94,7 @@ class XTTSService(TTSService):
         super().__init__(**kwargs)
 
         self._settings = {
-            "language": language,
+            "language": language_to_xtts_language(language) if language else "en",
             "base_url": base_url,
         }
         self.set_voice(voice_id)

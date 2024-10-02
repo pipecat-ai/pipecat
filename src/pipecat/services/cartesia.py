@@ -106,7 +106,7 @@ class CartesiaTTSService(WordTTSService):
                 "encoding": params.encoding,
                 "sample_rate": params.sample_rate,
             },
-            "language": language_to_cartesia_language(params.language) if params.language else None,
+            "language": language_to_cartesia_language(params.language) if params.language else "en",
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -280,7 +280,7 @@ class CartesiaHttpTTSService(TTSService):
         encoding: Optional[str] = "pcm_s16le"
         sample_rate: Optional[int] = 16000
         container: Optional[str] = "raw"
-        language: Optional[str] = "en"
+        language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
 
@@ -303,7 +303,7 @@ class CartesiaHttpTTSService(TTSService):
                 "encoding": params.encoding,
                 "sample_rate": params.sample_rate,
             },
-            "language": params.language,
+            "language": language_to_cartesia_language(params.language) if params.language else None,
             "speed": params.speed,
             "emotion": params.emotion,
         }

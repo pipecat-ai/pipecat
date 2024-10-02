@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService
+from pipecat.transcriptions.language import Language
 
 # See .env.example for LMNT configuration needed
 try:
@@ -34,6 +35,32 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+def language_to_lmnt_language(language: Language) -> str | None:
+    match language:
+        case Language.DE:
+            return "de"
+        case (
+            Language.EN
+            | Language.EN_US
+            | Language.EN_AU
+            | Language.EN_GB
+            | Language.EN_NZ
+            | Language.EN_IN
+        ):
+            return "en"
+        case Language.ES:
+            return "es"
+        case Language.FR | Language.FR_CA:
+            return "fr"
+        case Language.PT | Language.PT_BR:
+            return "pt"
+        case Language.ZH | Language.ZH_TW:
+            return "zh"
+        case Language.KO:
+            return "ko"
+    return None
+
+
 class LmntTTSService(TTSService):
     def __init__(
         self,
@@ -41,7 +68,7 @@ class LmntTTSService(TTSService):
         api_key: str,
         voice_id: str,
         sample_rate: int = 24000,
-        language: str = "en",
+        language: Language = Language.EN,
         **kwargs,
     ):
         # Let TTSService produce TTSStoppedFrames after a short delay of
@@ -55,7 +82,7 @@ class LmntTTSService(TTSService):
                 "encoding": "pcm_s16le",
                 "sample_rate": sample_rate,
             },
-            "language": language,
+            "language": language_to_lmnt_language(language) if language else "en",
         }
 
         self.set_voice(voice_id)
