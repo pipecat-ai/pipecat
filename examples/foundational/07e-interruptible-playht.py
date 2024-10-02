@@ -52,7 +52,7 @@ async def main():
         tts = PlayHTTTSService(
             user_id=os.getenv("PLAYHT_USER_ID"),
             api_key=os.getenv("PLAYHT_API_KEY"),
-            voice_id="s3://voice-cloning-zero-shot/801a663f-efd0-4254-98d0-5c175514c3e8/jennifer/manifest.json",
+            voice_url="s3://voice-cloning-zero-shot/801a663f-efd0-4254-98d0-5c175514c3e8/jennifer/manifest.json",
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")

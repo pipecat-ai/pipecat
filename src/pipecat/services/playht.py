@@ -32,7 +32,7 @@ except ModuleNotFoundError as e:
 
 class PlayHTTTSService(TTSService):
     def __init__(
-        self, *, api_key: str, user_id: str, voice_id: str, sample_rate: int = 16000, **kwargs
+        self, *, api_key: str, user_id: str, voice_url: str, sample_rate: int = 16000, **kwargs
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
@@ -49,7 +49,7 @@ class PlayHTTTSService(TTSService):
             "format": Format.FORMAT_WAV,
             "voice_engine": "PlayHT2.0-turbo",
         }
-        self.set_voice(voice_id)
+        self.set_voice(voice_url)
         self._options = TTSOptions(
             voice=self._voice_id,
             sample_rate=self._settings["sample_rate"],

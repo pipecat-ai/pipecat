@@ -48,7 +48,7 @@ async def main():
             ),
         )
 
-        tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), voice_id="alloy")
+        tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), voice="alloy")
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
