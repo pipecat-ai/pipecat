@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -186,7 +187,9 @@ class AWSTTSService(TTSService):
             # Filter out None values
             filtered_params = {k: v for k, v in params.items() if v is not None}
 
-            response = self._polly_client.synthesize_speech(**filtered_params)
+            response = await asyncio.to_thread(
+                self._polly_client.synthesize_speech, **filtered_params
+            )
 
             await self.start_tts_usage_metrics(text)
 
