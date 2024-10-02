@@ -6,8 +6,9 @@
 
 import base64
 import json
-
 from typing import AsyncGenerator, Optional
+
+from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
@@ -19,9 +20,8 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.ai_services import STTService
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-
-from loguru import logger
 
 # See .env.example for Gladia configuration needed
 try:
@@ -34,10 +34,88 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+def language_to_gladia_language(language: Language) -> str | None:
+    match language:
+        case Language.BG:
+            return "bg"
+        case Language.CA:
+            return "ca"
+        case Language.ZH:
+            return "zh"
+        case Language.CS:
+            return "cs"
+        case Language.DA:
+            return "da"
+        case Language.NL:
+            return "nl"
+        case (
+            Language.EN
+            | Language.EN_US
+            | Language.EN_AU
+            | Language.EN_GB
+            | Language.EN_NZ
+            | Language.EN_IN
+        ):
+            return "en"
+        case Language.ET:
+            return "et"
+        case Language.FI:
+            return "fi"
+        case Language.FR | Language.FR_CA:
+            return "fr"
+        case Language.DE | Language.DE_CH:
+            return "de"
+        case Language.EL:
+            return "el"
+        case Language.HI:
+            return "hi"
+        case Language.HU:
+            return "hu"
+        case Language.ID:
+            return "id"
+        case Language.IT:
+            return "it"
+        case Language.JA:
+            return "ja"
+        case Language.KO:
+            return "ko"
+        case Language.LV:
+            return "lv"
+        case Language.LT:
+            return "lt"
+        case Language.MS:
+            return "ms"
+        case Language.NO:
+            return "no"
+        case Language.PL:
+            return "pl"
+        case Language.PT | Language.PT_BR:
+            return "pt"
+        case Language.RO:
+            return "ro"
+        case Language.RU:
+            return "ru"
+        case Language.SK:
+            return "sk"
+        case Language.ES:
+            return "es"
+        case Language.SV:
+            return "sv"
+        case Language.TH:
+            return "th"
+        case Language.TR:
+            return "tr"
+        case Language.UK:
+            return "uk"
+        case Language.VI:
+            return "vi"
+    return None
+
+
 class GladiaSTTService(STTService):
     class InputParams(BaseModel):
         sample_rate: Optional[int] = 16000
-        language: Optional[str] = "english"
+        language: Optional[Language] = Language.EN
         transcription_hint: Optional[str] = None
         endpointing: Optional[int] = 200
         prosody: Optional[bool] = None
@@ -55,7 +133,13 @@ class GladiaSTTService(STTService):
 
         self._api_key = api_key
         self._url = url
-        self._params = params
+        self._settings = {
+            "sample_rate": params.sample_rate,
+            "language": language_to_gladia_language(params.language) if params.language else "en",
+            "transcription_hint": params.transcription_hint,
+            "endpointing": params.endpointing,
+            "prosody": params.prosody,
+        }
         self._confidence = confidence
 
     async def start(self, frame: StartFrame):
@@ -84,7 +168,11 @@ class GladiaSTTService(STTService):
             "encoding": "WAV/PCM",
             "model_type": "fast",
             "language_behaviour": "manual",
-            **self._params.model_dump(exclude_none=True),
+            "sample_rate": self._settings["sample_rate"],
+            "language": self._settings["language"],
+            "transcription_hint": self._settings["transcription_hint"],
+            "endpointing": self._settings["endpointing"],
+            "prosody": self._settings["prosody"],
         }
 
         await self._websocket.send(json.dumps(configuration))

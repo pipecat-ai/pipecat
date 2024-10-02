@@ -4,36 +4,35 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+import base64
 import json
 import uuid
-import base64
-import asyncio
+from typing import AsyncGenerator, List, Optional, Union
 
-from typing import AsyncGenerator, Optional, Union, List
+from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
-    StartInterruptionFrame,
+    LLMFullResponseEndFrame,
     StartFrame,
-    EndFrame,
+    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    LLMFullResponseEndFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import TTSService, WordTTSService
 from pipecat.transcriptions.language import Language
-from pipecat.services.ai_services import WordTTSService, TTSService
-
-from loguru import logger
 
 # See .env.example for Cartesia configuration needed
 try:
-    from cartesia import AsyncCartesia
     import websockets
+    from cartesia import AsyncCartesia
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -66,7 +65,7 @@ class CartesiaTTSService(WordTTSService):
         encoding: Optional[str] = "pcm_s16le"
         sample_rate: Optional[int] = 16000
         container: Optional[str] = "raw"
-        language: Optional[str] = "en"
+        language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
 
@@ -77,7 +76,7 @@ class CartesiaTTSService(WordTTSService):
         voice_id: str,
         cartesia_version: str = "2024-06-10",
         url: str = "wss://api.cartesia.ai/tts/websocket",
-        model_id: str = "sonic-english",
+        model: str = "sonic-english",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -101,17 +100,18 @@ class CartesiaTTSService(WordTTSService):
         self._api_key = api_key
         self._cartesia_version = cartesia_version
         self._url = url
-        self._voice_id = voice_id
-        self._model_id = model_id
-        self.set_model_name(model_id)
-        self._output_format = {
-            "container": params.container,
-            "encoding": params.encoding,
-            "sample_rate": params.sample_rate,
+        self._settings = {
+            "output_format": {
+                "container": params.container,
+                "encoding": params.encoding,
+                "sample_rate": params.sample_rate,
+            },
+            "language": language_to_cartesia_language(params.language) if params.language else "en",
+            "speed": params.speed,
+            "emotion": params.emotion,
         }
-        self._language = params.language
-        self._speed = params.speed
-        self._emotion = params.emotion
+        self.set_model_name(model)
+        self.set_voice(voice_id)
 
         self._websocket = None
         self._context_id = None
@@ -125,42 +125,28 @@ class CartesiaTTSService(WordTTSService):
         await super().set_model(model)
         logger.debug(f"Switching TTS model to: [{model}]")
 
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice_id = voice
-
-    async def set_speed(self, speed: str):
-        logger.debug(f"Switching TTS speed to: [{speed}]")
-        self._speed = speed
-
-    async def set_emotion(self, emotion: list[str]):
-        logger.debug(f"Switching TTS emotion to: [{emotion}]")
-        self._emotion = emotion
-
-    async def set_language(self, language: Language):
-        logger.debug(f"Switching TTS language to: [{language}]")
-        self._language = language_to_cartesia_language(language)
-
     def _build_msg(
         self, text: str = "", continue_transcript: bool = True, add_timestamps: bool = True
     ):
-        voice_config = {"mode": "id", "id": self._voice_id}
+        voice_config = {}
+        voice_config["mode"] = "id"
+        voice_config["id"] = self._voice_id
 
-        if self._speed or self._emotion:
+        if self._settings["speed"] or self._settings["emotion"]:
             voice_config["__experimental_controls"] = {}
-            if self._speed:
-                voice_config["__experimental_controls"]["speed"] = self._speed
-            if self._emotion:
-                voice_config["__experimental_controls"]["emotion"] = self._emotion
+            if self._settings["speed"]:
+                voice_config["__experimental_controls"]["speed"] = self._settings["speed"]
+            if self._settings["emotion"]:
+                voice_config["__experimental_controls"]["emotion"] = self._settings["emotion"]
 
         msg = {
             "transcript": text,
             "continue": continue_transcript,
             "context_id": self._context_id,
-            "model_id": self._model_name,
+            "model_id": self.model_name,
             "voice": voice_config,
-            "output_format": self._output_format,
-            "language": self._language,
+            "output_format": self._settings["output_format"],
+            "language": self._settings["language"],
             "add_timestamps": add_timestamps,
         }
         return json.dumps(msg)
@@ -245,7 +231,7 @@ class CartesiaTTSService(WordTTSService):
                     self.start_word_timestamps()
                     frame = TTSAudioRawFrame(
                         audio=base64.b64decode(msg["data"]),
-                        sample_rate=self._output_format["sample_rate"],
+                        sample_rate=self._settings["output_format"]["sample_rate"],
                         num_channels=1,
                     )
                     await self.push_frame(frame)
@@ -294,7 +280,7 @@ class CartesiaHttpTTSService(TTSService):
         encoding: Optional[str] = "pcm_s16le"
         sample_rate: Optional[int] = 16000
         container: Optional[str] = "raw"
-        language: Optional[str] = "en"
+        language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
 
@@ -303,7 +289,7 @@ class CartesiaHttpTTSService(TTSService):
         *,
         api_key: str,
         voice_id: str,
-        model_id: str = "sonic-english",
+        model: str = "sonic-english",
         base_url: str = "https://api.cartesia.ai",
         params: InputParams = InputParams(),
         **kwargs,
@@ -311,17 +297,18 @@ class CartesiaHttpTTSService(TTSService):
         super().__init__(**kwargs)
 
         self._api_key = api_key
-        self._voice_id = voice_id
-        self._model_id = model_id
-        self.set_model_name(model_id)
-        self._output_format = {
-            "container": params.container,
-            "encoding": params.encoding,
-            "sample_rate": params.sample_rate,
+        self._settings = {
+            "output_format": {
+                "container": params.container,
+                "encoding": params.encoding,
+                "sample_rate": params.sample_rate,
+            },
+            "language": language_to_cartesia_language(params.language) if params.language else None,
+            "speed": params.speed,
+            "emotion": params.emotion,
         }
-        self._language = params.language
-        self._speed = params.speed
-        self._emotion = params.emotion
+        self.set_voice(voice_id)
+        self.set_model_name(model)
 
         self._client = AsyncCartesia(api_key=api_key, base_url=base_url)
 
@@ -332,22 +319,6 @@ class CartesiaHttpTTSService(TTSService):
         logger.debug(f"Switching TTS model to: [{model}]")
         self._model_id = model
         await super().set_model(model)
-
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice_id = voice
-
-    async def set_speed(self, speed: str):
-        logger.debug(f"Switching TTS speed to: [{speed}]")
-        self._speed = speed
-
-    async def set_emotion(self, emotion: list[str]):
-        logger.debug(f"Switching TTS emotion to: [{emotion}]")
-        self._emotion = emotion
-
-    async def set_language(self, language: Language):
-        logger.debug(f"Switching TTS language to: [{language}]")
-        self._language = language_to_cartesia_language(language)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -365,19 +336,19 @@ class CartesiaHttpTTSService(TTSService):
 
         try:
             voice_controls = None
-            if self._speed or self._emotion:
+            if self._settings["speed"] or self._settings["emotion"]:
                 voice_controls = {}
-                if self._speed:
-                    voice_controls["speed"] = self._speed
-                if self._emotion:
-                    voice_controls["emotion"] = self._emotion
+                if self._settings["speed"]:
+                    voice_controls["speed"] = self._settings["speed"]
+                if self._settings["emotion"]:
+                    voice_controls["emotion"] = self._settings["emotion"]
 
             output = await self._client.tts.sse(
                 model_id=self._model_id,
                 transcript=text,
                 voice_id=self._voice_id,
-                output_format=self._output_format,
-                language=self._language,
+                output_format=self._settings["output_format"],
+                language=self._settings["language"],
                 stream=False,
                 _experimental_voice_controls=voice_controls,
             )
@@ -386,7 +357,7 @@ class CartesiaHttpTTSService(TTSService):
 
             frame = TTSAudioRawFrame(
                 audio=output["audio"],
-                sample_rate=self._output_format["sample_rate"],
+                sample_rate=self._settings["output_format"]["sample_rate"],
                 num_channels=1,
             )
             yield frame

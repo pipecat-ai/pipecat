@@ -4,12 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import io
-
 from typing import AsyncGenerator, Optional
 
+import aiohttp
+from loguru import logger
+from PIL import Image
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
@@ -26,11 +27,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.ai_services import ImageGenService, STTService, TTSService
 from pipecat.services.openai import BaseOpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-
-from PIL import Image
-
-from loguru import logger
 
 # See .env.example for Azure configuration needed
 try:
@@ -73,10 +71,101 @@ class AzureLLMService(BaseOpenAILLMService):
         )
 
 
+def language_to_azure_language(language: Language) -> str | None:
+    match language:
+        case Language.BG:
+            return "bg-BG"
+        case Language.CA:
+            return "ca-ES"
+        case Language.ZH:
+            return "zh-CN"
+        case Language.ZH_TW:
+            return "zh-TW"
+        case Language.CS:
+            return "cs-CZ"
+        case Language.DA:
+            return "da-DK"
+        case Language.NL:
+            return "nl-NL"
+        case Language.EN:
+            return "en-US"
+        case Language.EN_US:
+            return "en-US"
+        case Language.EN_AU:
+            return "en-AU"
+        case Language.EN_GB:
+            return "en-GB"
+        case Language.EN_NZ:
+            return "en-NZ"
+        case Language.EN_IN:
+            return "en-IN"
+        case Language.ET:
+            return "et-EE"
+        case Language.FI:
+            return "fi-FI"
+        case Language.NL_BE:
+            return "nl-BE"
+        case Language.FR:
+            return "fr-FR"
+        case Language.FR_CA:
+            return "fr-CA"
+        case Language.DE:
+            return "de-DE"
+        case Language.DE_CH:
+            return "de-CH"
+        case Language.EL:
+            return "el-GR"
+        case Language.HI:
+            return "hi-IN"
+        case Language.HU:
+            return "hu-HU"
+        case Language.ID:
+            return "id-ID"
+        case Language.IT:
+            return "it-IT"
+        case Language.JA:
+            return "ja-JP"
+        case Language.KO:
+            return "ko-KR"
+        case Language.LV:
+            return "lv-LV"
+        case Language.LT:
+            return "lt-LT"
+        case Language.MS:
+            return "ms-MY"
+        case Language.NO:
+            return "nb-NO"
+        case Language.PL:
+            return "pl-PL"
+        case Language.PT:
+            return "pt-PT"
+        case Language.PT_BR:
+            return "pt-BR"
+        case Language.RO:
+            return "ro-RO"
+        case Language.RU:
+            return "ru-RU"
+        case Language.SK:
+            return "sk-SK"
+        case Language.ES:
+            return "es-ES"
+        case Language.SV:
+            return "sv-SE"
+        case Language.TH:
+            return "th-TH"
+        case Language.TR:
+            return "tr-TR"
+        case Language.UK:
+            return "uk-UA"
+        case Language.VI:
+            return "vi-VN"
+    return None
+
+
 class AzureTTSService(TTSService):
     class InputParams(BaseModel):
         emphasis: Optional[str] = None
-        language: Optional[str] = "en-US"
+        language: Optional[Language] = Language.EN
         pitch: Optional[str] = None
         rate: Optional[str] = "1.05"
         role: Optional[str] = None
@@ -99,113 +188,66 @@ class AzureTTSService(TTSService):
         speech_config = SpeechConfig(subscription=api_key, region=region)
         self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
 
-        self._voice = voice
-        self._sample_rate = sample_rate
-        self._params = params
+        self._settings = {
+            "sample_rate": sample_rate,
+            "emphasis": params.emphasis,
+            "language": language_to_azure_language(params.language) if params.language else "en-US",
+            "pitch": params.pitch,
+            "rate": params.rate,
+            "role": params.role,
+            "style": params.style,
+            "style_degree": params.style_degree,
+            "volume": params.volume,
+        }
+
+        self.set_voice(voice)
 
     def can_generate_metrics(self) -> bool:
         return True
 
     def _construct_ssml(self, text: str) -> str:
         ssml = (
-            f"<speak version='1.0' xml:lang='{self._params.language}' "
+            f"<speak version='1.0' xml:lang='{self._settings['language']}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
-            f"<voice name='{self._voice}'>"
+            f"<voice name='{self._voice_id}'>"
             "<mstts:silence type='Sentenceboundary' value='20ms' />"
         )
 
-        if self._params.style:
-            ssml += f"<mstts:express-as style='{self._params.style}'"
-            if self._params.style_degree:
-                ssml += f" styledegree='{self._params.style_degree}'"
-            if self._params.role:
-                ssml += f" role='{self._params.role}'"
+        if self._settings["style"]:
+            ssml += f"<mstts:express-as style='{self._settings['style']}'"
+            if self._settings["style_degree"]:
+                ssml += f" styledegree='{self._settings['style_degree']}'"
+            if self._settings["role"]:
+                ssml += f" role='{self._settings['role']}'"
             ssml += ">"
 
         prosody_attrs = []
-        if self._params.rate:
-            prosody_attrs.append(f"rate='{self._params.rate}'")
-        if self._params.pitch:
-            prosody_attrs.append(f"pitch='{self._params.pitch}'")
-        if self._params.volume:
-            prosody_attrs.append(f"volume='{self._params.volume}'")
+        if self._settings["rate"]:
+            prosody_attrs.append(f"rate='{self._settings['rate']}'")
+        if self._settings["pitch"]:
+            prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
+        if self._settings["volume"]:
+            prosody_attrs.append(f"volume='{self._settings['volume']}'")
 
         ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
-        if self._params.emphasis:
-            ssml += f"<emphasis level='{self._params.emphasis}'>"
+        if self._settings["emphasis"]:
+            ssml += f"<emphasis level='{self._settings['emphasis']}'>"
 
         ssml += text
 
-        if self._params.emphasis:
+        if self._settings["emphasis"]:
             ssml += "</emphasis>"
 
         ssml += "</prosody>"
 
-        if self._params.style:
+        if self._settings["style"]:
             ssml += "</mstts:express-as>"
 
         ssml += "</voice></speak>"
 
         return ssml
-
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice = voice
-
-    async def set_emphasis(self, emphasis: str):
-        logger.debug(f"Setting TTS emphasis to: [{emphasis}]")
-        self._params.emphasis = emphasis
-
-    async def set_language(self, language: str):
-        logger.debug(f"Setting TTS language code to: [{language}]")
-        self._params.language = language
-
-    async def set_pitch(self, pitch: str):
-        logger.debug(f"Setting TTS pitch to: [{pitch}]")
-        self._params.pitch = pitch
-
-    async def set_rate(self, rate: str):
-        logger.debug(f"Setting TTS rate to: [{rate}]")
-        self._params.rate = rate
-
-    async def set_role(self, role: str):
-        logger.debug(f"Setting TTS role to: [{role}]")
-        self._params.role = role
-
-    async def set_style(self, style: str):
-        logger.debug(f"Setting TTS style to: [{style}]")
-        self._params.style = style
-
-    async def set_style_degree(self, style_degree: str):
-        logger.debug(f"Setting TTS style degree to: [{style_degree}]")
-        self._params.style_degree = style_degree
-
-    async def set_volume(self, volume: str):
-        logger.debug(f"Setting TTS volume to: [{volume}]")
-        self._params.volume = volume
-
-    async def set_params(self, **kwargs):
-        valid_params = {
-            "voice": self.set_voice,
-            "emphasis": self.set_emphasis,
-            "language_code": self.set_language,
-            "pitch": self.set_pitch,
-            "rate": self.set_rate,
-            "role": self.set_role,
-            "style": self.set_style,
-            "style_degree": self.set_style_degree,
-            "volume": self.set_volume,
-        }
-
-        for param, value in kwargs.items():
-            if param in valid_params:
-                await valid_params[param](value)
-            else:
-                logger.warning(f"Ignoring unknown parameter: {param}")
-
-        logger.debug(f"Updated TTS parameters: {', '.join(kwargs.keys())}")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -222,7 +264,9 @@ class AzureTTSService(TTSService):
             await self.push_frame(TTSStartedFrame())
             # Azure always sends a 44-byte header. Strip it off.
             yield TTSAudioRawFrame(
-                audio=result.audio_data[44:], sample_rate=self._sample_rate, num_channels=1
+                audio=result.audio_data[44:],
+                sample_rate=self._settings["sample_rate"],
+                num_channels=1,
             )
             await self.push_frame(TTSStoppedFrame())
         elif result.reason == ResultReason.Canceled:
