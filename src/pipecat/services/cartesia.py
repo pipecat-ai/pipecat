@@ -315,11 +315,6 @@ class CartesiaHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    async def set_model(self, model: str):
-        logger.debug(f"Switching TTS model to: [{model}]")
-        self._model_id = model
-        await super().set_model(model)
-
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
         await self._client.close()
@@ -344,7 +339,7 @@ class CartesiaHttpTTSService(TTSService):
                     voice_controls["emotion"] = self._settings["emotion"]
 
             output = await self._client.tts.sse(
-                model_id=self._model_id,
+                model_id=self._model_name,
                 transcript=text,
                 voice_id=self._voice_id,
                 output_format=self._settings["output_format"],
