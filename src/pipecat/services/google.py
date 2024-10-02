@@ -40,7 +40,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_API_KEY` environment variable."
+        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_APPLICATION_CREDENTIALS` environment variable."
     )
     raise Exception(f"Missing module: {e}")
 
@@ -287,8 +287,6 @@ class GoogleTTSService(TTSService):
         elif credentials_path:
             # Use service account JSON file if provided
             creds = service_account.Credentials.from_service_account_file(credentials_path)
-        else:
-            raise ValueError("Either 'credentials' or 'credentials_path' must be provided.")
 
         return texttospeech_v1.TextToSpeechAsyncClient(credentials=creds)
 
