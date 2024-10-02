@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.ai_services import TTSService
+from pipecat.transcriptions.language import Language
 
 try:
     import boto3
@@ -29,10 +30,71 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+def language_to_aws_language(language: Language) -> str | None:
+    match language:
+        case Language.CA:
+            return "ca-ES"
+        case Language.ZH:
+            return "cmn-CN"
+        case Language.DA:
+            return "da-DK"
+        case Language.NL:
+            return "nl-NL"
+        case Language.NL_BE:
+            return "nl-BE"
+        case Language.EN:
+            return "en-US"
+        case Language.EN_US:
+            return "en-US"
+        case Language.EN_AU:
+            return "en-AU"
+        case Language.EN_GB:
+            return "en-GB"
+        case Language.EN_NZ:
+            return "en-NZ"
+        case Language.EN_IN:
+            return "en-IN"
+        case Language.FI:
+            return "fi-FI"
+        case Language.FR:
+            return "fr-FR"
+        case Language.FR_CA:
+            return "fr-CA"
+        case Language.DE:
+            return "de-DE"
+        case Language.HI:
+            return "hi-IN"
+        case Language.IT:
+            return "it-IT"
+        case Language.JA:
+            return "ja-JP"
+        case Language.KO:
+            return "ko-KR"
+        case Language.NO:
+            return "nb-NO"
+        case Language.PL:
+            return "pl-PL"
+        case Language.PT:
+            return "pt-PT"
+        case Language.PT_BR:
+            return "pt-BR"
+        case Language.RO:
+            return "ro-RO"
+        case Language.RU:
+            return "ru-RU"
+        case Language.ES:
+            return "es-ES"
+        case Language.SV:
+            return "sv-SE"
+        case Language.TR:
+            return "tr-TR"
+    return None
+
+
 class AWSTTSService(TTSService):
     class InputParams(BaseModel):
         engine: Optional[str] = None
-        language: Optional[str] = None
+        language: Optional[Language] = Language.EN
         pitch: Optional[str] = None
         rate: Optional[str] = None
         volume: Optional[str] = None
@@ -59,7 +121,7 @@ class AWSTTSService(TTSService):
         self._settings = {
             "sample_rate": sample_rate,
             "engine": params.engine,
-            "language": params.language,
+            "language": language_to_aws_language(params.language) if params.language else "en-US",
             "pitch": params.pitch,
             "rate": params.rate,
             "volume": params.volume,
