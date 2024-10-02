@@ -82,7 +82,7 @@ class LmntTTSService(TTSService):
                 "encoding": "pcm_s16le",
                 "sample_rate": sample_rate,
             },
-            "language": language_to_lmnt_language(language) if language else "en",
+            "language": language,
         }
 
         self.set_voice(voice_id)
@@ -176,8 +176,8 @@ class LmntTTSService(TTSService):
                 await self._connect()
 
             if not self._started:
-                await self.push_frame(TTSStartedFrame())
                 await self.start_ttfb_metrics()
+                yield TTSStartedFrame()
                 self._started = True
 
             try:
@@ -186,7 +186,7 @@ class LmntTTSService(TTSService):
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
-                await self.push_frame(TTSStoppedFrame())
+                yield TTSStoppedFrame()
                 await self._disconnect()
                 await self._connect()
                 return

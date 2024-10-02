@@ -94,7 +94,7 @@ class XTTSService(TTSService):
         super().__init__(**kwargs)
 
         self._settings = {
-            "language": language_to_xtts_language(language) if language else "en",
+            "language": language,
             "base_url": base_url,
         }
         self.set_voice(voice_id)
@@ -131,9 +131,11 @@ class XTTSService(TTSService):
 
         url = self._settings["base_url"] + "/tts_stream"
 
+        language = language_to_xtts_language(self._settings["language"])
+
         payload = {
             "text": text.replace(".", "").replace("*", ""),
-            "language": self._settings["language"],
+            "language": language,
             "speaker_embedding": embeddings["speaker_embedding"],
             "gpt_cond_latent": embeddings["gpt_cond_latent"],
             "add_wav_header": False,
@@ -151,7 +153,7 @@ class XTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
 
             buffer = bytearray()
             async for chunk in r.content.iter_chunked(1024):
@@ -187,4 +189,4 @@ class XTTSService(TTSService):
                 frame = TTSAudioRawFrame(resampled_audio_bytes, 16000, 1)
                 yield frame
 
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()
