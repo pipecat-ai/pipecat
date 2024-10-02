@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import io
 import json
@@ -17,6 +18,8 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
     FunctionCallInProgressFrame,
@@ -25,6 +28,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMUpdateSettingsFrame,
+    StartFrame,
     StartInterruptionFrame,
     TextFrame,
     TTSAudioRawFrame,
@@ -56,12 +60,22 @@ try:
         DefaultAsyncHttpxClient,
     )
     from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+    import websockets
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
         "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
     )
     raise Exception(f"Missing module: {e}")
+
+# websocket logger
+import logging
+
+logging.basicConfig(
+    format="%(message)s",
+    level=logging.DEBUG,
+)
+
 
 ValidVoice = Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
 
@@ -573,3 +587,91 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
+
+
+class OpenAILLMServiceRealtimeBeta(LLMService):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url="wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01",
+        **kwargs,
+    ):
+        super().__init__(base_url=base_url, **kwargs)
+        self.api_key = api_key
+        self.base_url = base_url
+        self._websocket = None
+        self._receive_task = None
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self._disconnect()
+
+    async def _connect(self):
+        try:
+            logger.debug(f"connecting to {self.base_url} with api_key {self.api_key}")
+            self._websocket = await websockets.connect(
+                uri=self.base_url,
+                extra_headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "OpenAI-Beta": "realtime=v1",
+                },
+            )
+            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+        except Exception as e:
+            logger.error(f"{self} initialization error: {e}")
+            self._websocket = None
+
+    async def _disconnect(self):
+        pass
+
+    async def _receive_task_handler(self):
+        try:
+            async for message in self._get_websocket():
+                msg = json.loads(message)
+                logger.debug(f"Received message: {msg}")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+
+        # if isinstance(frame, TranscriptionFrame):
+        #     self._websocket.send(
+        #         json.dumps(
+        #             {
+        #                 {
+        #                     "type": "response.create",
+        #                     "response": {
+        #                         "modalities": ["text"],
+        #                         "instructions": frame.text,
+        #                     },
+        #                 }
+        #             }
+        #         )
+        #     )
+
+    # async def get_chat_completions(
+    #     self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
+    # ) -> AsyncStream[ChatCompletionChunk]:
+    #     async def _empty_async_generator() -> AsyncGenerator[str, None]:
+    #         try:
+    #             if False:
+    #                 yield ""
+    #         except asyncio.CancelledError:
+    #             return
+    #         except Exception as e:
+    #             logger.error(f"{self} exception: {e}")
+
+    #     return _empty_async_generator()
