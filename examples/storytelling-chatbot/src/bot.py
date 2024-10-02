@@ -143,7 +143,7 @@ async def main(room_url, token=None):
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            intro_task.queue_frame(EndFrame())
+            await intro_task.queue_frame(EndFrame())
             await main_task.queue_frame(EndFrame())
 
         @transport.event_handler("on_call_state_updated")
