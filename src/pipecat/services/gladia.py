@@ -135,7 +135,7 @@ class GladiaSTTService(STTService):
         self._url = url
         self._settings = {
             "sample_rate": params.sample_rate,
-            "language": language_to_gladia_language(params.language) if params.language else "en",
+            "language": params.language if params.language else Language.EN,
             "transcription_hint": params.transcription_hint,
             "endpointing": params.endpointing,
             "prosody": params.prosody,
@@ -169,7 +169,7 @@ class GladiaSTTService(STTService):
             "model_type": "fast",
             "language_behaviour": "manual",
             "sample_rate": self._settings["sample_rate"],
-            "language": self._settings["language"],
+            "language": language_to_gladia_language(self._settings["language"]),
             "transcription_hint": self._settings["transcription_hint"],
             "endpointing": self._settings["endpointing"],
             "prosody": self._settings["prosody"],

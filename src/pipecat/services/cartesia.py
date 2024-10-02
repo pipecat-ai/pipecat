@@ -106,7 +106,7 @@ class CartesiaTTSService(WordTTSService):
                 "encoding": params.encoding,
                 "sample_rate": params.sample_rate,
             },
-            "language": language_to_cartesia_language(params.language) if params.language else "en",
+            "language": params.language if params.language else Language.EN,
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -146,7 +146,7 @@ class CartesiaTTSService(WordTTSService):
             "model_id": self.model_name,
             "voice": voice_config,
             "output_format": self._settings["output_format"],
-            "language": self._settings["language"],
+            "language": language_to_cartesia_language(self._settings["language"]),
             "add_timestamps": add_timestamps,
         }
         return json.dumps(msg)
@@ -303,7 +303,7 @@ class CartesiaHttpTTSService(TTSService):
                 "encoding": params.encoding,
                 "sample_rate": params.sample_rate,
             },
-            "language": language_to_cartesia_language(params.language) if params.language else None,
+            "language": params.language if params.language else Language.EN,
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -343,7 +343,7 @@ class CartesiaHttpTTSService(TTSService):
                 transcript=text,
                 voice_id=self._voice_id,
                 output_format=self._settings["output_format"],
-                language=self._settings["language"],
+                language=language_to_cartesia_language(self._settings["language"]),
                 stream=False,
                 _experimental_voice_controls=voice_controls,
             )

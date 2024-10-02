@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.ai_services import ImageGenService, STTService, TTSService
 from pipecat.services.openai import BaseOpenAILLMService
+from pipecat.transcriptions import language
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
@@ -191,7 +192,7 @@ class AzureTTSService(TTSService):
         self._settings = {
             "sample_rate": sample_rate,
             "emphasis": params.emphasis,
-            "language": language_to_azure_language(params.language) if params.language else "en-US",
+            "language": params.language if params.language else Language.EN,
             "pitch": params.pitch,
             "rate": params.rate,
             "role": params.role,
@@ -206,8 +207,9 @@ class AzureTTSService(TTSService):
         return True
 
     def _construct_ssml(self, text: str) -> str:
+        language = language_to_azure_language(self._settings["language"])
         ssml = (
-            f"<speak version='1.0' xml:lang='{self._settings['language']}' "
+            f"<speak version='1.0' xml:lang='{language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
             f"<voice name='{self._voice_id}'>"
