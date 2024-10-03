@@ -19,6 +19,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -38,20 +39,22 @@ async def main():
                 camera_out_width=1280,
                 camera_out_height=720,
                 camera_out_is_live=True,
-            )
+            ),
         )
 
         gst = GStreamerPipelineSource(
-            pipeline="videotestsrc ! capsfilter caps=\"video/x-raw,width=1280,height=720,framerate=30/1\"",
+            pipeline='videotestsrc ! capsfilter caps="video/x-raw,width=1280,height=720,framerate=30/1"',
             out_params=GStreamerPipelineSource.OutputParams(
-                video_width=1280,
-                video_height=720,
-                clock_sync=False))
+                video_width=1280, video_height=720, clock_sync=False
+            ),
+        )
 
-        pipeline = Pipeline([
-            gst,                 # GStreamer file source
-            transport.output(),  # Transport bot output
-        ])
+        pipeline = Pipeline(
+            [
+                gst,  # GStreamer file source
+                transport.output(),  # Transport bot output
+            ]
+        )
 
         task = PipelineTask(pipeline)
 

@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import base64
+import copy
 import io
 import json
 
@@ -13,7 +15,12 @@ from typing import Any, Awaitable, Callable, List
 
 from PIL import Image
 
-from pipecat.frames.frames import Frame, VisionImageRawFrame, FunctionCallInProgressFrame, FunctionCallResultFrame
+from pipecat.frames.frames import (
+    Frame,
+    VisionImageRawFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+)
 from pipecat.processors.frame_processor import FrameProcessor
 
 from loguru import logger
@@ -24,12 +31,13 @@ try:
     from openai.types.chat import (
         ChatCompletionToolParam,
         ChatCompletionToolChoiceOptionParam,
-        ChatCompletionMessageParam
+        ChatCompletionMessageParam,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable.")
+        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 # JSON custom encoder to handle bytes arrays so that we can log contexts
@@ -40,22 +48,21 @@ class CustomEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, io.BytesIO):
             # Convert the first 8 bytes to an ASCII hex string
-            return (f"{obj.getbuffer()[0:8].hex()}...")
+            return f"{obj.getbuffer()[0:8].hex()}..."
         return super().default(obj)
 
 
 class OpenAILLMContext:
-
     def __init__(
         self,
         messages: List[ChatCompletionMessageParam] | None = None,
         tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN,
-        tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN
+        tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN,
     ):
-        self._messages: List[ChatCompletionMessageParam] = messages if messages else [
-        ]
+        self._messages: List[ChatCompletionMessageParam] = messages if messages else []
         self._tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
         self._tools: List[ChatCompletionToolParam] | NotGiven = tools
+        self._user_image_request_context = {}
 
     @staticmethod
     def from_messages(messages: List[dict]) -> "OpenAILLMContext":
@@ -77,19 +84,10 @@ class OpenAILLMContext:
         """
         context = OpenAILLMContext()
         buffer = io.BytesIO()
-        Image.frombytes(
-            frame.format,
-            frame.size,
-            frame.image
-        ).save(
-            buffer,
-            format="JPEG")
-        context.add_message({
-            "content": frame.text,
-            "role": "user",
-            "data": buffer,
-            "mime_type": "image/jpeg"
-        })
+        Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
+        context.add_message(
+            {"content": frame.text, "role": "user", "data": buffer, "mime_type": "image/jpeg"}
+        )
         return context
 
     @property
@@ -119,9 +117,22 @@ class OpenAILLMContext:
     def get_messages_json(self) -> str:
         return json.dumps(self._messages, cls=CustomEncoder)
 
-    def set_tool_choice(
-        self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven
-    ):
+    def get_messages_for_logging(self) -> str:
+        msgs = []
+        for message in self.messages:
+            msg = copy.deepcopy(message)
+            if "content" in msg:
+                if isinstance(msg["content"], list):
+                    for item in msg["content"]:
+                        if item["type"] == "image_url":
+                            if item["image_url"]["url"].startswith("data:image/"):
+                                item["image_url"]["url"] = "data:image/..."
+            if "mime_type" in msg and msg["mime_type"].startswith("image/"):
+                msg["data"] = "..."
+            msgs.append(msg)
+        return json.dumps(msgs)
+
+    def set_tool_choice(self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven):
         self._tool_choice = tool_choice
 
     def set_tools(self, tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN):
@@ -129,37 +140,57 @@ class OpenAILLMContext:
             tools = NOT_GIVEN
         self._tools = tools
 
-    async def call_function(self,
-                            f: Callable[[str,
-                                         str,
-                                         Any,
-                                         FrameProcessor,
-                                         'OpenAILLMContext',
-                                         Callable[[Any],
-                                                  Awaitable[None]]],
-                                        Awaitable[None]],
-                            *,
-                            function_name: str,
-                            tool_call_id: str,
-                            arguments: str,
-                            llm: FrameProcessor) -> None:
+    def add_image_frame_message(
+        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
+    ):
+        buffer = io.BytesIO()
+        Image.frombytes(format, size, image).save(buffer, format="JPEG")
+        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
+        content = [
+            {"type": "text", "text": text},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
+        ]
+        if text:
+            content.append({"type": "text", "text": text})
+        self.add_message({"role": "user", "content": content})
+
+    async def call_function(
+        self,
+        f: Callable[
+            [str, str, Any, FrameProcessor, "OpenAILLMContext", Callable[[Any], Awaitable[None]]],
+            Awaitable[None],
+        ],
+        *,
+        function_name: str,
+        tool_call_id: str,
+        arguments: str,
+        llm: FrameProcessor,
+        run_llm: bool = True,
+    ) -> None:
         # Push a SystemFrame downstream. This frame will let our assistant context aggregator
         # know that we are in the middle of a function call. Some contexts/aggregators may
         # not need this. But some definitely do (Anthropic, for example).
-        await llm.push_frame(FunctionCallInProgressFrame(
-            function_name=function_name,
-            tool_call_id=tool_call_id,
-            arguments=arguments,
-        ))
-
-        # Define a callback function that pushes a FunctionCallResultFrame downstream.
-        async def function_call_result_callback(result):
-            await llm.push_frame(FunctionCallResultFrame(
+        await llm.push_frame(
+            FunctionCallInProgressFrame(
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
-                result=result))
+            )
+        )
+
+        # Define a callback function that pushes a FunctionCallResultFrame downstream.
+        async def function_call_result_callback(result):
+            await llm.push_frame(
+                FunctionCallResultFrame(
+                    function_name=function_name,
+                    tool_call_id=tool_call_id,
+                    arguments=arguments,
+                    result=result,
+                    run_llm=run_llm,
+                )
+            )
+
         await f(function_name, tool_call_id, arguments, llm, self, function_call_result_callback)
 
 
@@ -170,4 +201,5 @@ class OpenAILLMContextFrame(Frame):
     OpenAIContextAggregator frame processor.
 
     """
+
     context: OpenAILLMContext

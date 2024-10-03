@@ -6,16 +6,22 @@
 
 import unittest
 
-from pipecat.frames.frames import (LLMFullResponseEndFrame,
-                                   LLMFullResponseStartFrame, StopTaskFrame,
-                                   TextFrame, TranscriptionFrame,
-                                   UserStartedSpeakingFrame,
-                                   UserStoppedSpeakingFrame)
+from pipecat.frames.frames import (
+    EndFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    TextFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
+)
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.processors.frameworks.langchain import LangchainProcessor
 
@@ -24,9 +30,9 @@ from langchain_core.language_models import FakeStreamingListLLM
 
 
 class TestLangchain(unittest.IsolatedAsyncioTestCase):
-
     class MockProcessor(FrameProcessor):
         def __init__(self, name):
+            super().__init__()
             self.name = name
             self.token: list[str] = []
             # Start collecting tokens when we see the start frame
@@ -50,14 +56,13 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.expected_response = "Hello dear human"
         self.fake_llm = FakeStreamingListLLM(responses=[self.expected_response])
-        self.mock_proc = self.MockProcessor("token_collector")
 
     async def test_langchain(self):
-
         messages = [("system", "Say hello to {name}"), ("human", "{input}")]
         prompt = ChatPromptTemplate.from_messages(messages).partial(name="Thomas")
         chain = prompt | self.fake_llm
         proc = LangchainProcessor(chain=chain)
+        self.mock_proc = self.MockProcessor("token_collector")
 
         tma_in = LLMUserResponseAggregator(messages)
         tma_out = LLMAssistantResponseAggregator(messages)
@@ -77,7 +82,7 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
                 UserStartedSpeakingFrame(),
                 TranscriptionFrame(text="Hi World", user_id="user", timestamp="now"),
                 UserStoppedSpeakingFrame(),
-                StopTaskFrame(),
+                EndFrame(),
             ]
         )
 

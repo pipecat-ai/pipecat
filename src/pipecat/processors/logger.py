@@ -8,6 +8,7 @@ from pipecat.frames.frames import BotSpeakingFrame, Frame, AudioRawFrame, Transp
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from loguru import logger
 from typing import Optional
+
 logger = logger.opt(ansi=True)
 
 
@@ -19,7 +20,9 @@ class FrameLogger(FrameProcessor):
         ignored_frame_types: Optional[list] = [
             BotSpeakingFrame,
             AudioRawFrame,
-            TransportMessageFrame]):
+            TransportMessageFrame,
+        ],
+    ):
         super().__init__()
         self._prefix = prefix
         self._color = color
