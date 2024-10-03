@@ -9,11 +9,11 @@ import aiohttp
 import os
 import sys
 
-
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.services.openai import OpenAILLMContext
 from pipecat.services.openai_realtime_beta import (
     OpenAILLMServiceRealtimeBeta,
     OpenAITurnDetection,
@@ -32,6 +32,34 @@ load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+
+async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
+    await result_callback({"conditions": "nice", "temperature": "75"})
+
+
+tools = [
+    {
+        "type": "function",
+        "name": "get_current_weather",
+        "description": "Get the current weather",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["celsius", "fahrenheit"],
+                    "description": "The temperature unit to use. Infer this from the users location.",
+                },
+            },
+            "required": ["location", "format"],
+        },
+    }
+]
 
 
 async def main():
@@ -55,7 +83,8 @@ async def main():
         )
 
         session_properties = RealtimeSessionProperties(
-            turn_detection=OpenAITurnDetection(silence_duration_ms=800),
+            turn_detection=OpenAITurnDetection(silence_duration_ms=1000),
+            tools=tools,
             instructions="""
 Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
 
@@ -79,18 +108,16 @@ Start by suggesting that you have a conversation about space exploration.
         llm = OpenAILLMServiceRealtimeBeta(
             api_key=os.getenv("OPENAI_API_KEY"), session_properties=session_properties
         )
-
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
-            },
-        ]
+        llm.register_function(None, fetch_weather_from_api)
+        context = OpenAILLMContext([], tools)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                context_aggregator.user(),
                 llm,  # LLM
+                context_aggregator.assistant(),
                 transport.output(),  # Transport bot output
             ]
         )
@@ -109,8 +136,15 @@ Start by suggesting that you have a conversation about space exploration.
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames(
+                [
+                    TranscriptionFrame(
+                        user_id="foo",
+                        timestamp=0,
+                        text="What's the weather like in San Francisco right now?",
+                    )
+                ]
+            )
 
         runner = PipelineRunner()
 
