@@ -20,6 +20,7 @@ from pipecat.transports.local.audio import LocalAudioTransport
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)

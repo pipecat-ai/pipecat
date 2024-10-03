@@ -4,27 +4,26 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
-
+import asyncio
 from typing import AsyncGenerator
 
+from loguru import logger
+
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    TranscriptionFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TranscriptionFrame)
+)
 from pipecat.services.ai_services import STTService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-
-from loguru import logger
-
 
 # See .env.example for Deepgram configuration needed
 try:
@@ -32,117 +31,130 @@ try:
         AsyncListenWebSocketClient,
         DeepgramClient,
         DeepgramClientOptions,
-        LiveTranscriptionEvents,
         LiveOptions,
-        LiveResultResponse
+        LiveResultResponse,
+        LiveTranscriptionEvents,
+        SpeakOptions,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Deepgram, you need to `pip install pipecat-ai[deepgram]`. Also, set `DEEPGRAM_API_KEY` environment variable.")
+        "In order to use Deepgram, you need to `pip install pipecat-ai[deepgram]`. Also, set `DEEPGRAM_API_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 
 class DeepgramTTSService(TTSService):
-
     def __init__(
-            self,
-            *,
-            api_key: str,
-            aiohttp_session: aiohttp.ClientSession,
-            voice: str = "aura-helios-en",
-            base_url: str = "https://api.deepgram.com/v1/speak",
-            sample_rate: int = 16000,
-            encoding: str = "linear16",
-            **kwargs):
+        self,
+        *,
+        api_key: str,
+        voice: str = "aura-helios-en",
+        sample_rate: int = 16000,
+        encoding: str = "linear16",
+        **kwargs,
+    ):
         super().__init__(**kwargs)
 
-        self._voice = voice
-        self._api_key = api_key
-        self._base_url = base_url
-        self._sample_rate = sample_rate
-        self._encoding = encoding
-        self._aiohttp_session = aiohttp_session
+        self._settings = {
+            "sample_rate": sample_rate,
+            "encoding": encoding,
+        }
+        self.set_voice(voice)
+        self._deepgram_client = DeepgramClient(api_key=api_key)
 
     def can_generate_metrics(self) -> bool:
         return True
 
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice = voice
-
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
-        base_url = self._base_url
-        request_url = f"{base_url}?model={self._voice}&encoding={self._encoding}&container=none&sample_rate={self._sample_rate}"
-        headers = {"authorization": f"token {self._api_key}"}
-        body = {"text": text}
+        options = SpeakOptions(
+            model=self._voice_id,
+            encoding=self._settings["encoding"],
+            sample_rate=self._settings["sample_rate"],
+            container="none",
+        )
 
         try:
             await self.start_ttfb_metrics()
-            async with self._aiohttp_session.post(request_url, headers=headers, json=body) as r:
-                if r.status != 200:
-                    response_text = await r.text()
-                    # If we get a a "Bad Request: Input is unutterable", just print out a debug log.
-                    # All other unsuccesful requests should emit an error frame. If not specifically
-                    # handled by the running PipelineTask, the ErrorFrame will cancel the task.
-                    if "unutterable" in response_text:
-                        logger.debug(f"Unutterable text: [{text}]")
-                        return
 
-                    logger.error(
-                        f"{self} error getting audio (status: {r.status}, error: {response_text})")
-                    yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {response_text})")
-                    return
+            response = await asyncio.to_thread(
+                self._deepgram_client.speak.v("1").stream, {"text": text}, options
+            )
 
-                await self.start_tts_usage_metrics(text)
+            await self.start_tts_usage_metrics(text)
+            yield TTSStartedFrame()
 
-                await self.push_frame(TTSStartedFrame())
-                async for data in r.content:
-                    await self.stop_ttfb_metrics()
-                    frame = AudioRawFrame(audio=data, sample_rate=self._sample_rate, num_channels=1)
-                    yield frame
-                await self.push_frame(TTSStoppedFrame())
+            # The response.stream_memory is already a BytesIO object
+            audio_buffer = response.stream_memory
+
+            if audio_buffer is None:
+                raise ValueError("No audio data received from Deepgram")
+
+            # Read and yield the audio data in chunks
+            audio_buffer.seek(0)  # Ensure we're at the start of the buffer
+            chunk_size = 8192  # Use a fixed buffer size
+            while True:
+                await self.stop_ttfb_metrics()
+                chunk = audio_buffer.read(chunk_size)
+                if not chunk:
+                    break
+                frame = TTSAudioRawFrame(
+                    audio=chunk, sample_rate=self._settings["sample_rate"], num_channels=1
+                )
+                yield frame
+
+                yield TTSStoppedFrame()
+
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
+            yield ErrorFrame(f"Error getting audio: {str(e)}")
 
 
 class DeepgramSTTService(STTService):
-    def __init__(self,
-                 *,
-                 api_key: str,
-                 url: str = "",
-                 live_options: LiveOptions = LiveOptions(
-                     encoding="linear16",
-                     language="en-US",
-                     model="nova-2-conversationalai",
-                     sample_rate=16000,
-                     channels=1,
-                     interim_results=True,
-                     smart_format=True,
-                     punctuate=True,
-                     profanity_filter=True,
-                 ),
-                 **kwargs):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        url: str = "",
+        live_options: LiveOptions = LiveOptions(
+            encoding="linear16",
+            language=Language.EN,
+            model="nova-2-conversationalai",
+            sample_rate=16000,
+            channels=1,
+            interim_results=True,
+            smart_format=True,
+            punctuate=True,
+            profanity_filter=True,
+            vad_events=False,
+        ),
+        **kwargs,
+    ):
         super().__init__(**kwargs)
 
-        self._live_options = live_options
+        self._settings = vars(live_options)
 
         self._client = DeepgramClient(
-            api_key, config=DeepgramClientOptions(url=url, options={"keepalive": "true"}))
+            api_key, config=DeepgramClientOptions(url=url, options={"keepalive": "true"})
+        )
         self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
+        if self.vad_enabled:
+            self._connection.on(LiveTranscriptionEvents.SpeechStarted, self._on_speech_started)
+
+    @property
+    def vad_enabled(self):
+        return self._settings["vad_events"]
+
+    def can_generate_metrics(self) -> bool:
+        return self.vad_enabled
 
     async def set_model(self, model: str):
+        await super().set_model(model)
         logger.debug(f"Switching STT model to: [{model}]")
-        self._live_options.model = model
-        await self._disconnect()
-        await self._connect()
-
-    async def set_language(self, language: Language):
-        logger.debug(f"Switching STT language to: [{language}]")
-        self._live_options.language = language
+        self._settings["model"] = model
         await self._disconnect()
         await self._connect()
 
@@ -159,13 +171,11 @@ class DeepgramSTTService(STTService):
         await self._disconnect()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        await self.start_processing_metrics()
         await self._connection.send(audio)
         yield None
-        await self.stop_processing_metrics()
 
     async def _connect(self):
-        if await self._connection.start(self._live_options):
+        if await self._connection.start(self._settings):
             logger.debug(f"{self}: Connected to Deepgram")
         else:
             logger.error(f"{self}: Unable to connect to Deepgram")
@@ -174,6 +184,10 @@ class DeepgramSTTService(STTService):
         if self._connection.is_connected:
             await self._connection.finish()
             logger.debug(f"{self}: Disconnected from Deepgram")
+
+    async def _on_speech_started(self, *args, **kwargs):
+        await self.start_ttfb_metrics()
+        await self.start_processing_metrics()
 
     async def _on_message(self, *args, **kwargs):
         result: LiveResultResponse = kwargs["result"]
@@ -186,7 +200,13 @@ class DeepgramSTTService(STTService):
             language = result.channel.alternatives[0].languages[0]
             language = Language(language)
         if len(transcript) > 0:
+            await self.stop_ttfb_metrics()
             if is_final:
-                await self.push_frame(TranscriptionFrame(transcript, "", time_now_iso8601(), language))
+                await self.push_frame(
+                    TranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                )
+                await self.stop_processing_metrics()
             else:
-                await self.push_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language))
+                await self.push_frame(
+                    InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                )

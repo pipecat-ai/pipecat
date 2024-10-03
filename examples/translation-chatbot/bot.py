@@ -22,13 +22,15 @@ from pipecat.transports.services.daily import (
     DailyParams,
     DailyTranscriptionSettings,
     DailyTransport,
-    DailyTransportMessageFrame)
+    DailyTransportMessageFrame,
+)
 
 from runner import configure
 
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -44,7 +46,6 @@ It also isn't saving what the user or bot says into the context object for use i
 # We need to use a custom service here to yield LLM frames without saving
 # any context
 class TranslationProcessor(FrameProcessor):
-
     def __init__(self, language):
         super().__init__()
         self._language = language
@@ -80,10 +81,7 @@ class TranslationSubtitles(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TextFrame):
-            message = {
-                "language": self._language,
-                "text": frame.text
-            }
+            message = {"language": self._language, "text": frame.text}
             await self.push_frame(DailyTransportMessageFrame(message))
 
         await self.push_frame(frame)
@@ -100,10 +98,8 @@ async def main():
             DailyParams(
                 audio_out_enabled=True,
                 transcription_enabled=True,
-                transcription_settings=DailyTranscriptionSettings(extra={
-                    "interim_results": False
-                })
-            )
+                transcription_settings=DailyTranscriptionSettings(extra={"interim_results": False}),
+            ),
         )
 
         tts = AzureTTSService(
@@ -112,26 +108,14 @@ async def main():
             voice="es-ES-AlvaroNeural",
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o"
-        )
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         sa = SentenceAggregator()
         tp = TranslationProcessor("Spanish")
         lfra = LLMFullResponseAggregator()
         ts = TranslationSubtitles("spanish")
 
-        pipeline = Pipeline([
-            transport.input(),
-            sa,
-            tp,
-            llm,
-            lfra,
-            ts,
-            tts,
-            transport.output()
-        ])
+        pipeline = Pipeline([transport.input(), sa, tp, llm, lfra, ts, tts, transport.output()])
 
         task = PipelineTask(pipeline)
 
