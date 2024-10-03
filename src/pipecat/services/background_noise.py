@@ -1,7 +1,10 @@
 import asyncio
 import json
+import time
 from asyncio import sleep
 from io import BytesIO
+
+import loguru
 
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 from pydub import AudioSegment
@@ -20,19 +23,24 @@ class BackgroundNoiseEffect(FrameProcessor):
         self.websocket_client = websocket_client
         self.music_path = music_path
         self.get_music_part_gen = self._get_music_part()
+        self.emptied = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, BotStartedSpeakingFrame):
             self._speaking = True
-            buffer_clear_message = {"event": "clear", "streamSid": self.stream_sid}
-            await self.websocket_client.send_text(json.dumps(buffer_clear_message))
 
         if isinstance(frame, BotStoppedSpeakingFrame):
             self._speaking = False
+            self.emptied = False
 
         if isinstance(frame, AudioRawFrame) and self._speaking:
+            if not self.emptied:
+                self.emptied = True
+                buffer_clear_message = {"event": "clear", "streamSid": self.stream_sid}
+                await self.websocket_client.send_text(json.dumps(buffer_clear_message))
+
             frame.audio = self._combine_with_music(frame)
 
         if isinstance(frame, EndFrame):
@@ -102,7 +110,7 @@ class BackgroundNoiseEffect(FrameProcessor):
 
     async def _audio_task_handler(self):
         while True:
-            await sleep(0.2)
+            await sleep(0.005)
             if self._stop:
                 break
 
