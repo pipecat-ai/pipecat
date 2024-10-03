@@ -6,6 +6,7 @@
 
 from typing import AsyncGenerator, Optional
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
@@ -16,8 +17,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.ai_services import TTSService
-
-from loguru import logger
+from pipecat.transcriptions.language import Language
 
 try:
     import boto3
@@ -30,10 +30,71 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+def language_to_aws_language(language: Language) -> str | None:
+    match language:
+        case Language.CA:
+            return "ca-ES"
+        case Language.ZH:
+            return "cmn-CN"
+        case Language.DA:
+            return "da-DK"
+        case Language.NL:
+            return "nl-NL"
+        case Language.NL_BE:
+            return "nl-BE"
+        case Language.EN:
+            return "en-US"
+        case Language.EN_US:
+            return "en-US"
+        case Language.EN_AU:
+            return "en-AU"
+        case Language.EN_GB:
+            return "en-GB"
+        case Language.EN_NZ:
+            return "en-NZ"
+        case Language.EN_IN:
+            return "en-IN"
+        case Language.FI:
+            return "fi-FI"
+        case Language.FR:
+            return "fr-FR"
+        case Language.FR_CA:
+            return "fr-CA"
+        case Language.DE:
+            return "de-DE"
+        case Language.HI:
+            return "hi-IN"
+        case Language.IT:
+            return "it-IT"
+        case Language.JA:
+            return "ja-JP"
+        case Language.KO:
+            return "ko-KR"
+        case Language.NO:
+            return "nb-NO"
+        case Language.PL:
+            return "pl-PL"
+        case Language.PT:
+            return "pt-PT"
+        case Language.PT_BR:
+            return "pt-BR"
+        case Language.RO:
+            return "ro-RO"
+        case Language.RU:
+            return "ru-RU"
+        case Language.ES:
+            return "es-ES"
+        case Language.SV:
+            return "sv-SE"
+        case Language.TR:
+            return "tr-TR"
+    return None
+
+
 class AWSTTSService(TTSService):
     class InputParams(BaseModel):
         engine: Optional[str] = None
-        language: Optional[str] = None
+        language: Optional[Language] = Language.EN
         pitch: Optional[str] = None
         rate: Optional[str] = None
         volume: Optional[str] = None
@@ -57,9 +118,16 @@ class AWSTTSService(TTSService):
             aws_secret_access_key=api_key,
             region_name=region,
         )
-        self._voice_id = voice_id
-        self._sample_rate = sample_rate
-        self._params = params
+        self._settings = {
+            "sample_rate": sample_rate,
+            "engine": params.engine,
+            "language": params.language if params.language else Language.EN,
+            "pitch": params.pitch,
+            "rate": params.rate,
+            "volume": params.volume,
+        }
+
+        self.set_voice(voice_id)
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -67,18 +135,18 @@ class AWSTTSService(TTSService):
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
 
-        if self._params.language:
-            ssml += f"<lang xml:lang='{self._params.language}'>"
+        language = language_to_aws_language(self._settings["language"])
+        ssml += f"<lang xml:lang='{language}'>"
 
         prosody_attrs = []
         # Prosody tags are only supported for standard and neural engines
-        if self._params.engine != "generative":
-            if self._params.rate:
-                prosody_attrs.append(f"rate='{self._params.rate}'")
-            if self._params.pitch:
-                prosody_attrs.append(f"pitch='{self._params.pitch}'")
-            if self._params.volume:
-                prosody_attrs.append(f"volume='{self._params.volume}'")
+        if self._settings["engine"] != "generative":
+            if self._settings["rate"]:
+                prosody_attrs.append(f"rate='{self._settings['rate']}'")
+            if self._settings["pitch"]:
+                prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
+            if self._settings["volume"]:
+                prosody_attrs.append(f"volume='{self._settings['volume']}'")
 
             if prosody_attrs:
                 ssml += f"<prosody {' '.join(prosody_attrs)}>"
@@ -90,40 +158,11 @@ class AWSTTSService(TTSService):
         if prosody_attrs:
             ssml += "</prosody>"
 
-        if self._params.language:
-            ssml += "</lang>"
+        ssml += "</lang>"
 
         ssml += "</speak>"
 
         return ssml
-
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice_id = voice
-
-    async def set_engine(self, engine: str):
-        logger.debug(f"Switching TTS engine to: [{engine}]")
-        self._params.engine = engine
-
-    async def set_language(self, language: str):
-        logger.debug(f"Switching TTS language to: [{language}]")
-        self._params.language = language
-
-    async def set_pitch(self, pitch: str):
-        logger.debug(f"Switching TTS pitch to: [{pitch}]")
-        self._params.pitch = pitch
-
-    async def set_rate(self, rate: str):
-        logger.debug(f"Switching TTS rate to: [{rate}]")
-        self._params.rate = rate
-
-    async def set_volume(self, volume: str):
-        logger.debug(f"Switching TTS volume to: [{volume}]")
-        self._params.volume = volume
-
-    async def set_params(self, params: InputParams):
-        logger.debug(f"Switching TTS params to: [{params}]")
-        self._params = params
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -139,8 +178,8 @@ class AWSTTSService(TTSService):
                 "TextType": "ssml",
                 "OutputFormat": "pcm",
                 "VoiceId": self._voice_id,
-                "Engine": self._params.engine,
-                "SampleRate": str(self._sample_rate),
+                "Engine": self._settings["engine"],
+                "SampleRate": str(self._settings["sample_rate"]),
             }
 
             # Filter out None values
@@ -150,7 +189,7 @@ class AWSTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
 
             if "AudioStream" in response:
                 with response["AudioStream"] as stream:
@@ -160,10 +199,10 @@ class AWSTTSService(TTSService):
                         chunk = audio_data[i : i + chunk_size]
                         if len(chunk) > 0:
                             await self.stop_ttfb_metrics()
-                            frame = TTSAudioRawFrame(chunk, self._sample_rate, 1)
+                            frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
                             yield frame
 
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()
 
         except (BotoCoreError, ClientError) as error:
             logger.exception(f"{self} error generating TTS: {error}")
@@ -171,4 +210,4 @@ class AWSTTSService(TTSService):
             yield ErrorFrame(error=error_message)
 
         finally:
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()

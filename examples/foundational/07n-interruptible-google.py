@@ -53,7 +53,6 @@ async def main():
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = GoogleTTSService(
-            credentials=os.getenv("GOOGLE_CREDENTIALS"),
             voice_id="en-US-Neural2-J",
             params=GoogleTTSService.InputParams(language="en-US", rate="1.05"),
         )

@@ -6,17 +6,21 @@
 
 import io
 import struct
-
 from typing import AsyncGenerator
-
-from pipecat.frames.frames import Frame, TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
-from pipecat.services.ai_services import TTSService
 
 from loguru import logger
 
+from pipecat.frames.frames import (
+    Frame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+)
+from pipecat.services.ai_services import TTSService
+
 try:
-    from pyht.client import TTSOptions
     from pyht.async_client import AsyncClient
+    from pyht.client import TTSOptions
     from pyht.protos.api_pb2 import Format
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -39,16 +43,22 @@ class PlayHTTTSService(TTSService):
             user_id=self._user_id,
             api_key=self._speech_key,
         )
+        self._settings = {
+            "sample_rate": sample_rate,
+            "quality": "higher",
+            "format": Format.FORMAT_WAV,
+            "voice_engine": "PlayHT2.0-turbo",
+        }
+        self.set_voice(voice_url)
         self._options = TTSOptions(
-            voice=voice_url, sample_rate=sample_rate, quality="higher", format=Format.FORMAT_WAV
+            voice=self._voice_id,
+            sample_rate=self._settings["sample_rate"],
+            quality=self._settings["quality"],
+            format=self._settings["format"],
         )
 
     def can_generate_metrics(self) -> bool:
         return True
-
-    async def set_voice(self, voice: str):
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._options.voice = voice
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -60,12 +70,12 @@ class PlayHTTTSService(TTSService):
             await self.start_ttfb_metrics()
 
             playht_gen = self._client.tts(
-                text, voice_engine="PlayHT2.0-turbo", options=self._options
+                text, voice_engine=self._settings["voice_engine"], options=self._options
             )
 
             await self.start_tts_usage_metrics(text)
 
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
             async for chunk in playht_gen:
                 # skip the RIFF header.
                 if in_header:
@@ -83,8 +93,8 @@ class PlayHTTTSService(TTSService):
                 else:
                     if len(chunk):
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, 16000, 1)
+                        frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
                         yield frame
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()
         except Exception as e:
             logger.exception(f"{self} error generating TTS: {e}")
