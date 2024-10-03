@@ -408,6 +408,10 @@ class STTService(AIService):
         self.set_model_name(model)
 
     @abstractmethod
+    async def set_language(self, language: Language):
+        pass
+
+    @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Returns transcript as a string"""
         pass
@@ -419,7 +423,7 @@ class STTService(AIService):
                 logger.debug(f"Updating STT setting {key} to: [{value}]")
                 self._settings[key] = value
                 if key == "language":
-                    self._settings[key] = Language(value)
+                    await self.set_language(value)
             elif key == "model":
                 self.set_model_name(value)
             else:
