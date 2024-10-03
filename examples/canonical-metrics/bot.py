@@ -22,7 +22,6 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
 from pipecat.processors.audio.audio_buffer_processor import \
     AudioBufferProcessor
-from pipecat.processors.user_marker_processor import UserMarkerProcessor
 from pipecat.services.canonical import CanonicalMetricsService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
@@ -115,14 +114,12 @@ async def main():
             assistant="pipecat-chatbot",
             assistant_speaks_first=True,
         )
-        usermarker = UserMarkerProcessor()
         pipeline = Pipeline([
             transport.input(),  # microphone
-            usermarker,
             user_response,
             llm,
             tts,
-            audio_buffer_processor, # captures audio into a buffer
+            audio_buffer_processor,  # captures audio into a buffer
             canonical,  # uploads audio buffer to Canonical AI for metrics
             transport.output(),
             assistant_response,

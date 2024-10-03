@@ -285,15 +285,6 @@ class AppFrame(Frame):
     pass
 
 
-@dataclass
-class UserAudioFrame(AudioRawFrame):
-    """
-    Indicates user audio in the pipeline.
-    """
-
-    def __init__(self, frame: AudioRawFrame):
-        super().__init__(frame.audio, frame.sample_rate, frame.num_channels)
-
 #
 # System frames
 #
