@@ -19,8 +19,8 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
-from pipecat.processors.user_marker_processor import UserMarkerProcessor
+from pipecat.processors.audio.audio_buffer_processor import \
+    AudioBufferProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -98,10 +98,8 @@ async def main():
         assistant_response = LLMAssistantResponseAggregator()
 
         audiobuffer = AudioBufferProcessor()
-        usermarker = UserMarkerProcessor()
         pipeline = Pipeline([
             transport.input(),  # microphone
-            usermarker,  # used to mark the user's audio in the pipeline
             user_response,
             llm,
             tts,

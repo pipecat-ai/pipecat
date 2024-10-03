@@ -1,8 +1,6 @@
 import os
 import uuid
-import wave
 from datetime import datetime
-from io import BytesIO
 from typing import Dict, List, Tuple
 
 import aiohttp
@@ -92,19 +90,13 @@ class CanonicalMetricsService(AIService):
         if pipeline._has_audio():
             os.makedirs(self._output_dir, exist_ok=True)
             filename = self._get_output_filename()
-            with BytesIO() as buffer:
-                with wave.open(buffer, 'wb') as wf:
-                    wf.setnchannels(pipeline._num_channels)
-                    wf.setsampwidth(pipeline._sample_rate // 8000)
-                    wf.setframerate(pipeline._sample_rate)
-                    wf.writeframes(pipeline._audio_buffer)
-                wave_data = buffer.getvalue()
+            wave_data = pipeline._merge_audio_buffers()
 
             async with aiofiles.open(filename, 'wb') as file:
                 await file.write(wave_data)
 
             try:
-                await self._multipart_upload(filename)
+                # await self._multipart_upload(filename)
                 pipeline._reset_audio_buffer()
                 # await aiofiles.os.remove(filename)
             except FileNotFoundError:
@@ -209,4 +201,3 @@ class CanonicalMetricsService(AIService):
         if not response.ok:
             logger.error(f"Failed to complete upload: {await response.text()}")
             return
-
