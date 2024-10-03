@@ -96,9 +96,9 @@ class CanonicalMetricsService(AIService):
                 await file.write(wave_data)
 
             try:
-                # await self._multipart_upload(filename)
+                await self._multipart_upload(filename)
                 pipeline._reset_audio_buffer()
-                # await aiofiles.os.remove(filename)
+                await aiofiles.os.remove(filename)
             except FileNotFoundError:
                 pass
             except Exception as e:
