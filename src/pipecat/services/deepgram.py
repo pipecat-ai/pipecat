@@ -158,6 +158,12 @@ class DeepgramSTTService(STTService):
         await self._disconnect()
         await self._connect()
 
+    async def set_language(self, language: Language):
+        logger.debug(f"Switching STT language to: [{language}]")
+        self._settings["language"] = language
+        await self._disconnect()
+        await self._connect()
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._connect()
