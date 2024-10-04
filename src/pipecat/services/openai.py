@@ -470,7 +470,7 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
                     if frame.user_id in self._context._user_image_request_context:
                         del self._context._user_image_request_context[frame.user_id]
             elif isinstance(frame, UserImageRawFrame):
-                # Push a new AnthropicImageMessageFrame with the text context we cached
+                # Push a new OpenAIImageMessageFrame with the text context we cached
                 # downstream to be handled by our assistant context aggregator. This is
                 # necessary so that we add the message to the context in the right order.
                 text = self._context._user_image_request_context.get(frame.user_id) or ""

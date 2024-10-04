@@ -14,7 +14,6 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
-    OpenAILLMContextFrame,
 )
 from pipecat.services.openai_realtime_beta import (
     OpenAILLMServiceRealtimeBeta,
@@ -140,7 +139,7 @@ Remember, your responses should be short. Just one or two sentences, usually.
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            await task.queue_frames([OpenAILLMContextFrame(context=context)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
 
