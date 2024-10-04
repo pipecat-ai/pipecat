@@ -21,6 +21,8 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.frame_processor import FrameDirection
@@ -84,9 +86,6 @@ class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
 class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator):
     async def _push_aggregation(self):
         await super()._push_aggregation()
-        logger.debug(
-            f"!!! AFTER ASSISTANT PUSH AGGREGATION {self._context.get_messages_for_logging()}"
-        )
 
 
 class OpenAIInputTranscription(BaseModel):
@@ -147,6 +146,11 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         self._session_properties = session_properties
         self._context = None
 
+        self._bot_speaking = False
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._connect()
@@ -161,9 +165,8 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
 
     async def _ws_send(self, realtime_message):
         try:
-            if realtime_message.get("type") != "input_audio_buffer.append":
-                logger.debug(f"!!! Sending message to websocket: {realtime_message}")
-
+            # if realtime_message.get("type") != "input_audio_buffer.append":
+            #    logger.debug(f"!!! Sending message to websocket: {realtime_message}")
             await self._websocket.send(json.dumps(realtime_message))
         except Exception as e:
             logger.error(f"Error sending message to websocket: {e}")
@@ -228,7 +231,8 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                     pass
                 elif msg["type"] == "input_audio_buffer.speech_stopped":
                     # user stopped speaking
-                    pass
+                    await self.start_processing_metrics()
+                    await self.start_ttfb_metrics()
                 elif msg["type"] == "conversation.item.created":
                     # for input, this will get sent from the server whether the
                     # conversation item is created by audio transcription or by
@@ -237,7 +241,12 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                     # logger.debug(f"Received {msg}")
                     pass
                 elif msg["type"] == "response.created":
-                    # could use for processing metrics
+                    # todo: 1. figure out TTS started/stopped frame semantics better
+                    #       2. do not push these frames in text-only mode
+                    logger.debug(f"Received response created: {msg}")
+                    if not self._bot_speaking:
+                        self._bot_speaking = True
+                        await self.push_frame(TTSStartedFrame())
                     pass
                 elif msg["type"] == "conversation.item.input_audio_transcription.completed":
                     # or here maybe (possible send upstream to user context aggregator)
@@ -252,8 +261,11 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                     pass
                 elif msg["type"] == "response.audio_transcript.delta":
                     # openai playground app uses this, not "text"
+                    if msg["delta"]:
+                        await self.push_frame(TextFrame(msg["delta"]))
                     pass
                 elif msg["type"] == "response.audio.delta":
+                    await self.stop_ttfb_metrics()
                     frame = TTSAudioRawFrame(
                         audio=base64.b64decode(msg["delta"]),
                         sample_rate=24000,
@@ -261,7 +273,9 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                     )
                     await self.push_frame(frame)
                 elif msg["type"] == "response.audio.done":
-                    # bot stopped speaking - or do that at the end of the response?
+                    if self._bot_speaking:
+                        self._bot_speaking = False
+                        await self.push_frame(TTSStoppedFrame())
                     pass
                 elif msg["type"] == "response.audio_transcript.done":
                     # probably ignore for now
@@ -275,11 +289,11 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                         for item in item["content"]:
                             # output text
                             if item["type"] == "audio" and item["transcript"] is not None:
-                                logger.debug(f"!!! >{item['transcript']}")
-                                await self.push_frame(TextFrame(item["transcript"]))
+                                # could send full transcript here instead of streaming chunks
+                                # logger.debug(f"!!! >{item['transcript']}")
+                                pass
                 elif msg["type"] == "response.done":
                     # logger.debug(f"Received response done: {msg}")
-                    await self.stop_processing_metrics()
                     # usage metrics
                     # example.
                     # response.usage.total_tokens:592
@@ -290,13 +304,14 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                     # response.usage.input_token_details.audio_tokens:115
                     # response.usage.output_token_details.text_tokens:32
                     # response.usage.output_token_details.audio_tokens:135
-                    logger.debug("!!! Response done PPUSHING METRICS")
                     tokens = LLMTokenUsage(
                         prompt_tokens=msg["response"]["usage"]["input_tokens"],
                         completion_tokens=msg["response"]["usage"]["output_tokens"],
                         total_tokens=msg["response"]["usage"]["total_tokens"],
                     )
                     await self.start_llm_usage_metrics(tokens)
+                    # question for mrkb: don't seem to be getting processing time on the console except the first inference
+                    await self.stop_processing_metrics()
                     # function calls
                     items = msg["response"]["output"]
                     function_calls = [item for item in items if item.get("type") == "function_call"]
@@ -398,9 +413,9 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         )
 
     async def _handle_interruption(self, frame):
-        logger.debug("!!! Handling interruption")
         await self.stop_all_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
+        await self.push_frame(TTSStoppedFrame())
         # todo: do this but only when there's a response in progress?
         # await self._ws_send(
         #     {
