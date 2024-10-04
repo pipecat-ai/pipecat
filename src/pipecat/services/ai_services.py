@@ -204,6 +204,9 @@ class TTSService(AIService):
     async def flush_audio(self):
         pass
 
+    def language_to_service_language(self, language: Language) -> str | None:
+        return Language(language)
+
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -234,7 +237,7 @@ class TTSService(AIService):
                 logger.debug(f"Updating TTS setting {key} to: [{value}]")
                 self._settings[key] = value
                 if key == "language":
-                    self._settings[key] = Language(value)
+                    self._settings[key] = self.language_to_service_language(value)
             elif key == "model":
                 self.set_model_name(value)
             elif key == "voice":
