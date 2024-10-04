@@ -45,17 +45,24 @@ def language_to_cartesia_language(language: Language) -> str | None:
     match language:
         case Language.DE:
             return "de"
-        case Language.EN:
+        case (
+            Language.EN
+            | Language.EN_US
+            | Language.EN_GB
+            | Language.EN_AU
+            | Language.EN_NZ
+            | Language.EN_IN
+        ):
             return "en"
         case Language.ES:
             return "es"
-        case Language.FR:
+        case Language.FR | Language.FR_CA:
             return "fr"
         case Language.JA:
             return "ja"
-        case Language.PT:
+        case Language.PT | Language.PT_BR:
             return "pt"
-        case Language.ZH:
+        case Language.ZH | Language.ZH_TW:
             return "zh"
     return None
 
@@ -106,7 +113,9 @@ class CartesiaTTSService(WordTTSService):
                 "encoding": params.encoding,
                 "sample_rate": params.sample_rate,
             },
-            "language": params.language if params.language else Language.EN,
+            "language": self.language_to_service_language(params.language)
+            if params.language
+            else Language.EN,
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -124,6 +133,9 @@ class CartesiaTTSService(WordTTSService):
         self._model_id = model
         await super().set_model(model)
         logger.debug(f"Switching TTS model to: [{model}]")
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        return language_to_cartesia_language(language)
 
     def _build_msg(
         self, text: str = "", continue_transcript: bool = True, add_timestamps: bool = True
@@ -146,7 +158,7 @@ class CartesiaTTSService(WordTTSService):
             "model_id": self.model_name,
             "voice": voice_config,
             "output_format": self._settings["output_format"],
-            "language": language_to_cartesia_language(self._settings["language"]),
+            "language": self._settings["language"],
             "add_timestamps": add_timestamps,
         }
         return json.dumps(msg)
@@ -303,7 +315,9 @@ class CartesiaHttpTTSService(TTSService):
                 "encoding": params.encoding,
                 "sample_rate": params.sample_rate,
             },
-            "language": params.language if params.language else Language.EN,
+            "language": self.language_to_service_language(params.language)
+            if params.language
+            else Language.EN,
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -314,6 +328,9 @@ class CartesiaHttpTTSService(TTSService):
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        return language_to_cartesia_language(language)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -343,7 +360,7 @@ class CartesiaHttpTTSService(TTSService):
                 transcript=text,
                 voice_id=self._voice_id,
                 output_format=self._settings["output_format"],
-                language=language_to_cartesia_language(self._settings["language"]),
+                language=self._settings["language"],
                 stream=False,
                 _experimental_voice_controls=voice_controls,
             )
