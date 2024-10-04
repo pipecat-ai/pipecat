@@ -34,84 +34,6 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_gladia_language(language: Language) -> str | None:
-    match language:
-        case Language.BG:
-            return "bulgarian"
-        case Language.CA:
-            return "catalan"
-        case Language.ZH:
-            return "chinese"
-        case Language.CS:
-            return "czech"
-        case Language.DA:
-            return "danish"
-        case Language.NL:
-            return "dutch"
-        case (
-            Language.EN
-            | Language.EN_US
-            | Language.EN_AU
-            | Language.EN_GB
-            | Language.EN_NZ
-            | Language.EN_IN
-        ):
-            return "english"
-        case Language.ET:
-            return "estonian"
-        case Language.FI:
-            return "finnish"
-        case Language.FR | Language.FR_CA:
-            return "french"
-        case Language.DE | Language.DE_CH:
-            return "german"
-        case Language.EL:
-            return "greek"
-        case Language.HI:
-            return "hindi"
-        case Language.HU:
-            return "hungarian"
-        case Language.ID:
-            return "indonesian"
-        case Language.IT:
-            return "italian"
-        case Language.JA:
-            return "japanese"
-        case Language.KO:
-            return "korean"
-        case Language.LV:
-            return "latvian"
-        case Language.LT:
-            return "lithuanian"
-        case Language.MS:
-            return "malay"
-        case Language.NO:
-            return "norwegian"
-        case Language.PL:
-            return "polish"
-        case Language.PT | Language.PT_BR:
-            return "portuguese"
-        case Language.RO:
-            return "romanian"
-        case Language.RU:
-            return "russian"
-        case Language.SK:
-            return "slovak"
-        case Language.ES:
-            return "spanish"
-        case Language.SV:
-            return "slovenian"
-        case Language.TH:
-            return "thai"
-        case Language.TR:
-            return "turkish"
-        case Language.UK:
-            return "ukrainian"
-        case Language.VI:
-            return "vietnamese"
-    return None
-
-
 class GladiaSTTService(STTService):
     class InputParams(BaseModel):
         sample_rate: Optional[int] = 16000
@@ -135,12 +57,91 @@ class GladiaSTTService(STTService):
         self._url = url
         self._settings = {
             "sample_rate": params.sample_rate,
-            "language": params.language if params.language else Language.EN,
+            "language": self.language_to_service_language(params.language)
+            if params.language
+            else Language.EN,
             "transcription_hint": params.transcription_hint,
             "endpointing": params.endpointing,
             "prosody": params.prosody,
         }
         self._confidence = confidence
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        match language:
+            case Language.BG:
+                return "bulgarian"
+            case Language.CA:
+                return "catalan"
+            case Language.ZH:
+                return "chinese"
+            case Language.CS:
+                return "czech"
+            case Language.DA:
+                return "danish"
+            case Language.NL:
+                return "dutch"
+            case (
+                Language.EN
+                | Language.EN_US
+                | Language.EN_AU
+                | Language.EN_GB
+                | Language.EN_NZ
+                | Language.EN_IN
+            ):
+                return "english"
+            case Language.ET:
+                return "estonian"
+            case Language.FI:
+                return "finnish"
+            case Language.FR | Language.FR_CA:
+                return "french"
+            case Language.DE | Language.DE_CH:
+                return "german"
+            case Language.EL:
+                return "greek"
+            case Language.HI:
+                return "hindi"
+            case Language.HU:
+                return "hungarian"
+            case Language.ID:
+                return "indonesian"
+            case Language.IT:
+                return "italian"
+            case Language.JA:
+                return "japanese"
+            case Language.KO:
+                return "korean"
+            case Language.LV:
+                return "latvian"
+            case Language.LT:
+                return "lithuanian"
+            case Language.MS:
+                return "malay"
+            case Language.NO:
+                return "norwegian"
+            case Language.PL:
+                return "polish"
+            case Language.PT | Language.PT_BR:
+                return "portuguese"
+            case Language.RO:
+                return "romanian"
+            case Language.RU:
+                return "russian"
+            case Language.SK:
+                return "slovak"
+            case Language.ES:
+                return "spanish"
+            case Language.SV:
+                return "slovenian"
+            case Language.TH:
+                return "thai"
+            case Language.TR:
+                return "turkish"
+            case Language.UK:
+                return "ukrainian"
+            case Language.VI:
+                return "vietnamese"
+        return None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -169,7 +170,7 @@ class GladiaSTTService(STTService):
             "model_type": "fast",
             "language_behaviour": "manual",
             "sample_rate": self._settings["sample_rate"],
-            "language": language_to_gladia_language(self._settings["language"]),
+            "language": self._settings["language"],
             "transcription_hint": self._settings["transcription_hint"],
             "endpointing": self._settings["endpointing"],
             "prosody": self._settings["prosody"],

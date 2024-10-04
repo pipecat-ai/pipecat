@@ -7,11 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.43] - 2024-10-03
 
+### Changed
+
+- For TTS services, convert inputted languages to match each service's language
+  format
+
 ### Fixed
 
 - Fixed an issue where changing a language with the Deepgram STT service
   wouldn't apply the change. This was fixed by disconnecting and reconnecting
-  when the language changes
+  when the language changes.
 
 ## [0.0.42] - 2024-10-02
 
