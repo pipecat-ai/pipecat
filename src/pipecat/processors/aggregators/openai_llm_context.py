@@ -168,6 +168,7 @@ class OpenAILLMContext:
         llm: FrameProcessor,
         run_llm: bool = True,
     ) -> None:
+        logger.debug(f"Calling function {function_name} with arguments {arguments}")
         # Push a SystemFrame downstream. This frame will let our assistant context aggregator
         # know that we are in the middle of a function call. Some contexts/aggregators may
         # not need this. But some definitely do (Anthropic, for example).

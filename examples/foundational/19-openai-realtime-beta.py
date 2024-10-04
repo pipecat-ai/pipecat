@@ -9,11 +9,13 @@ import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.openai import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.services.openai_realtime_beta import (
     OpenAILLMServiceRealtimeBeta,
     OpenAITurnDetection,
@@ -100,8 +102,6 @@ You are participating in a voice conversation. Keep your responses concise, shor
 unless specifically asked to elaborate on a topic.
 
 Remember, your responses should be short. Just one or two sentences, usually.
-
-Start by suggesting that you have a conversation about space exploration.
 """,
         )
 
@@ -109,7 +109,11 @@ Start by suggesting that you have a conversation about space exploration.
             api_key=os.getenv("OPENAI_API_KEY"), session_properties=session_properties
         )
         llm.register_function(None, fetch_weather_from_api)
-        context = OpenAILLMContext([], tools)
+        context = OpenAILLMContext(
+            # [{"role": "user", "content": "What's the weather right now in San Francisco?"}], tools
+            [{"role": "user", "content": "Say 'hello'."}],
+            tools,
+        )
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
@@ -136,15 +140,7 @@ Start by suggesting that you have a conversation about space exploration.
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            await task.queue_frames(
-                [
-                    TranscriptionFrame(
-                        user_id="foo",
-                        timestamp=0,
-                        text="What's the weather like in San Francisco right now?",
-                    )
-                ]
-            )
+            await task.queue_frames([OpenAILLMContextFrame(context=context)])
 
         runner = PipelineRunner()
 
