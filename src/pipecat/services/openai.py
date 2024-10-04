@@ -497,8 +497,10 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             self._function_calls_in_progress.clear()
             self._function_call_finished = None
         elif isinstance(frame, FunctionCallInProgressFrame):
+            logger.debug(f"FunctionCallInProgressFrame: {frame}")
             self._function_calls_in_progress[frame.tool_call_id] = frame
         elif isinstance(frame, FunctionCallResultFrame):
+            logger.debug(f"FunctionCallResultFrame: {frame}")
             if frame.tool_call_id in self._function_calls_in_progress:
                 del self._function_calls_in_progress[frame.tool_call_id]
                 self._function_call_result = frame
@@ -514,6 +516,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             await self._push_aggregation()
 
     async def _push_aggregation(self):
+        logger.debug("!!! Pushing aggregation")
         if not (
             self._aggregation or self._function_call_result or self._pending_image_frame_message
         ):
