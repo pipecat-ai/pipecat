@@ -70,24 +70,22 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
         return self._unsent_messages
 
     def update_all_messages_sent(self):
-        logger.debug("!!! Updating all messages sent")
         self._unsent_messages = []
 
 
 class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
     async def _push_aggregation(self):
+        # for the moment, ignore all user input coming into the pipeline.
+        # todo: fix this to allow text prompting
         pass
-        # idx = len(self._context.messages)
-        # logger.debug(f"!!! 1 {idx}")
-
-        # await super()._push_aggregation()
-        # self._context._unsent_messages.extend(self._context.messages[idx:])
-        # logger.debug(f"!!! 2 {self._context._unsent_messages}")
 
 
 class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator):
     async def _push_aggregation(self):
         await super()._push_aggregation()
+        logger.debug(
+            f"!!! AFTER ASSISTANT PUSH AGGREGATION {self._context.get_messages_for_logging()}"
+        )
 
 
 class OpenAIInputTranscription(BaseModel):
@@ -170,7 +168,6 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             logger.error(f"Error sending message to websocket: {e}")
 
     async def update_session_properties(self):
-        logger.debug(f"Updating session properties: {self._session_properties.dict()}")
         await self._ws_send(
             {
                 "type": "session.update",
@@ -224,7 +221,6 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 if msg["type"] == "session.created":
                     await self.update_session_properties()
                 elif msg["type"] == "session.updated":
-                    logger.debug(f"Received session configuration: {msg}")
                     self._session_properties = msg["session"]
                 elif msg["type"] == "input_audio_buffer.speech_started":
                     # user started speaking
@@ -237,14 +233,14 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                     # conversation item is created by audio transcription or by
                     # sending a client conversation.item.create message.
                     # for function calls
-                    logger.debug(f"Received {msg}")
+                    # logger.debug(f"Received {msg}")
                     pass
                 elif msg["type"] == "response.created":
                     # could use for processing metrics
                     pass
                 elif msg["type"] == "conversation.item.input_audio_transcription.completed":
                     # or here maybe (possible send upstream to user context aggregator)
-                    logger.debug(f"Received {msg}")
+                    # logger.debug(f"Received {msg}")
                     if msg.get("transcript"):
                         self._context.add_message({"role": "user", "content": msg["transcript"]})
                 elif msg["type"] == "response.output_item.added":
@@ -272,7 +268,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 elif msg["type"] == "response.content_part.done":
                     pass
                 elif msg["type"] == "response.output_item.done":
-                    logger.debug(f"Received response item done: {msg}")
+                    # logger.debug(f"Received response item done: {msg}")
                     item = msg["item"]
                     if item["type"] == "message" and item["status"] == "completed":
                         for item in item["content"]:
@@ -281,7 +277,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                                 logger.debug(f"!!! >{item['transcript']}")
                                 await self.push_frame(TextFrame(item["transcript"]))
                 elif msg["type"] == "response.done":
-                    logger.debug(f"Received response done: {msg}")
+                    # logger.debug(f"Received response done: {msg}")
                     await self.stop_processing_metrics()
                     # send usage metrics from here
                     # ...
@@ -302,11 +298,8 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             logger.error(f"{self} exception: {e}")
 
     async def _handle_function_call_items(self, items):
-        logger.debug(f"Handling function call items: {items}")
         total_items = len(items)
-        logger.debug("!!!!!")
         for index, item in enumerate(items):
-            logger.debug(f"!!! function call item: {item}")
             function_name = item["name"]
             tool_id = item["call_id"]
             arguments = json.loads(item["arguments"])
@@ -367,9 +360,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
             for item in items:
-                logger.debug(f"||| {item}")
                 await self._ws_send({"type": "conversation.item.create", "item": item})
-            logger.debug("||| RESPONSE.CREATE")
             await self._ws_send(
                 {
                     "type": "response.create",
@@ -391,9 +382,9 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         )
 
     async def _handle_interruption(self, frame):
-        logger.debug(f"Handling interruption: {frame}")
         await self.stop_all_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
+        # todo: do this but only when there's a response in progress?
         # await self._ws_send(
         #     {
         #         "type": "response.cancel",

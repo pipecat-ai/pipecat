@@ -516,7 +516,6 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             await self._push_aggregation()
 
     async def _push_aggregation(self):
-        logger.debug("!!! Pushing aggregation")
         if not (
             self._aggregation or self._function_call_result or self._pending_image_frame_message
         ):
