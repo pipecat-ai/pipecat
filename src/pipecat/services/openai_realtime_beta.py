@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TTSAudioRawFrame,
 )
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.services.openai import (
@@ -279,9 +280,24 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 elif msg["type"] == "response.done":
                     # logger.debug(f"Received response done: {msg}")
                     await self.stop_processing_metrics()
-                    # send usage metrics from here
-                    # ...
-                    # function calls - do all calls here to support parallel function calls
+                    # usage metrics
+                    # example.
+                    # response.usage.total_tokens:592
+                    # response.usage.input_tokens:425
+                    # response.usage.output_tokens:167
+                    # response.usage.input_token_details.cached_tokens:0
+                    # response.usage.input_token_details.text_tokens:310
+                    # response.usage.input_token_details.audio_tokens:115
+                    # response.usage.output_token_details.text_tokens:32
+                    # response.usage.output_token_details.audio_tokens:135
+                    logger.debug("!!! Response done PPUSHING METRICS")
+                    tokens = LLMTokenUsage(
+                        prompt_tokens=msg["response"]["usage"]["input_tokens"],
+                        completion_tokens=msg["response"]["usage"]["output_tokens"],
+                        total_tokens=msg["response"]["usage"]["total_tokens"],
+                    )
+                    await self.start_llm_usage_metrics(tokens)
+                    # function calls
                     items = msg["response"]["output"]
                     function_calls = [item for item in items if item.get("type") == "function_call"]
                     if function_calls:
@@ -382,6 +398,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         )
 
     async def _handle_interruption(self, frame):
+        logger.debug("!!! Handling interruption")
         await self.stop_all_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
         # todo: do this but only when there's a response in progress?
