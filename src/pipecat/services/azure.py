@@ -79,6 +79,9 @@ class AzureLLMService(BaseOpenAILLMService):
 class AzureTTSService(TTSService):
     class InputParams(BaseModel):
         emphasis: Optional[str] = None
+        language_code: Optional[str] = (
+            "en-US"  # USE THIS!! necessary for compatibility with languages supported by azure but not by other service
+        )
         language: Optional[Language] = Language.EN_US
         pitch: Optional[str] = None
         rate: Optional[str] = "1.05"
@@ -119,6 +122,7 @@ class AzureTTSService(TTSService):
             "style_degree": params.style_degree,
             "volume": params.volume,
         }
+        self._params = params
 
         self.set_voice(voice)
 
@@ -216,7 +220,7 @@ class AzureTTSService(TTSService):
     def _construct_ssml(self, text: str) -> str:
         language = self._settings["language"]
         ssml = (
-            f"<speak version='1.0' xml:lang='{language}' "
+            f"<speak version='1.0' xml:lang='{self._params.language_code}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
             f"<voice name='{self._voice_id}'>"
@@ -291,6 +295,9 @@ class AzureSTTService(STTService):
         *,
         api_key: str,
         region: str,
+        language_code: Optional[str] = (
+            "en-US"  # USE THIS!! necessary for compatibility with languages supported by azure but not by other service
+        ),
         language=Language.EN_US,
         sample_rate=16000,
         channels=1,
@@ -299,7 +306,7 @@ class AzureSTTService(STTService):
         super().__init__(**kwargs)
 
         speech_config = SpeechConfig(subscription=api_key, region=region)
-        speech_config.speech_recognition_language = language
+        speech_config.speech_recognition_language = language_code
 
         stream_format = AudioStreamFormat(
             samples_per_second=sample_rate, channels=channels
