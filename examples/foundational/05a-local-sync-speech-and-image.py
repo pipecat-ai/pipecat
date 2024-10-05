@@ -82,6 +82,7 @@ async def main():
                         self.frame = OutputAudioRawFrame(
                             bytes(self.audio), frame.sample_rate, frame.num_channels
                         )
+                    await self.push_frame(frame, direction)
 
             class ImageGrabber(FrameProcessor):
                 def __init__(self):
@@ -93,6 +94,7 @@ async def main():
 
                     if isinstance(frame, URLImageRawFrame):
                         self.frame = frame
+                    await self.push_frame(frame, direction)
 
             llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
@@ -121,8 +123,10 @@ async def main():
             # `SyncParallelPipeline` will wait for the input frame to be
             # processed.
             #
-            # Note that `SyncParallelPipeline` requires all processors in it to
-            # be synchronous (which is the default for most processors).
+            # Note that `SyncParallelPipeline` requires the last processor in
+            # each of the pipelines to be synchronous. In this case, we use
+            # `CartesiaHttpTTSService` and `FalImageGenService` which make HTTP
+            # requests and wait for the response.
             pipeline = Pipeline(
                 [
                     llm,  # LLM

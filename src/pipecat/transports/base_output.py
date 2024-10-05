@@ -43,7 +43,7 @@ from pipecat.utils.time import nanoseconds_to_seconds
 
 class BaseOutputTransport(FrameProcessor):
     def __init__(self, params: TransportParams, **kwargs):
-        super().__init__(sync=False, **kwargs)
+        super().__init__(**kwargs)
 
         self._params = params
 
