@@ -5,17 +5,17 @@
 #
 
 import asyncio
-
 from concurrent.futures import ThreadPoolExecutor
 
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from loguru import logger
+
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     CancelFrame,
-    InputAudioRawFrame,
-    StartFrame,
     EndFrame,
     Frame,
+    InputAudioRawFrame,
+    StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
@@ -23,15 +23,14 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
-
-from loguru import logger
 
 
 class BaseInputTransport(FrameProcessor):
     def __init__(self, params: TransportParams, **kwargs):
-        super().__init__(sync=False, **kwargs)
+        super().__init__(**kwargs)
 
         self._params = params
 
@@ -87,6 +86,7 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, BotInterruptionFrame):
             logger.debug("Bot interruption")
             await self._start_interruption()
+            await self.push_frame(StartInterruptionFrame())
         # All other system frames
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
