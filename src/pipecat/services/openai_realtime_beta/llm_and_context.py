@@ -149,6 +149,9 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         await super().cancel(frame)
         await self._disconnect()
 
+    async def send_client_event(self, event: events.ClientEvent):
+        await self._ws_send(event.dict())
+
     async def _ws_send(self, realtime_message):
         try:
             # if realtime_message.get("type") != "input_audio_buffer.append":
@@ -204,112 +207,94 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
     async def _receive_task_handler(self):
         try:
             async for message in self._get_websocket():
-                msg = json.loads(message)
-                # logger.debug(f"Received message: {msg}")
-                if not msg:
-                    continue
-                if msg["type"] == "session.created":
+                evt = events.parse_server_event(message)
+                # logger.debug(f"Received event: {evt}")
+                if evt.type == "session.created":
                     # session.created is received right after connecting. send a message
                     # to configure the session properties.
                     await self.update_session_properties()
-                elif msg["type"] == "session.updated":
-                    self._session_properties = msg["session"]
-                elif msg["type"] == "input_audio_buffer.speech_started":
+                elif evt.type == "session.updated":
+                    self._session_properties = evt.session
+                elif evt.type == "input_audio_buffer.speech_started":
                     # user started speaking
+                    # todo: send user started speaking if configured
                     pass
-                elif msg["type"] == "input_audio_buffer.speech_stopped":
+                elif evt.type == "input_audio_buffer.speech_stopped":
                     # user stopped speaking
+                    # todo: send user stopped speaking if configured
                     await self.start_processing_metrics()
                     await self.start_ttfb_metrics()
-                elif msg["type"] == "conversation.item.created":
+                elif evt.type == "conversation.item.created":
                     # for input, this will get sent from the server whether the
                     # conversation item is created by audio transcription or by
                     # sending a client conversation.item.create message.
-                    # for function calls
-                    # logger.debug(f"Received {msg}")
+                    # we could listen to this event and track conversation item IDs to
+                    # help with context bookkeeping.
                     pass
-                elif msg["type"] == "response.created":
+                elif evt.type == "response.created":
                     # todo: 1. figure out TTS started/stopped frame semantics better
                     #       2. do not push these frames in text-only mode
-                    logger.debug(f"Received response created: {msg}")
                     if not self._bot_speaking:
                         self._bot_speaking = True
                         await self.push_frame(TTSStartedFrame())
                     pass
-                elif msg["type"] == "conversation.item.input_audio_transcription.completed":
+                elif evt.type == "conversation.item.input_audio_transcription.completed":
                     # or here maybe (possible send upstream to user context aggregator)
-                    # logger.debug(f"Received {msg}")
-                    if msg.get("transcript"):
-                        self._context.add_message({"role": "user", "content": msg["transcript"]})
-                elif msg["type"] == "response.output_item.added":
-                    # maybe ignore for now but could be useful for UI updates
+                    if evt.transcript:
+                        self._context.add_message({"role": "user", "content": evt.transcript})
+                elif evt.type == "response.output_item.added":
+                    # todo: think about adding a frame for this (generally, in Pipecat/RTVI), as
+                    # it could be useful for managing UI state
                     pass
-                elif msg["type"] == "response.content_part.added":
-                    # same thing, ignore for now until we think more about UI updates
+                elif evt.type == "response.content_part.added":
+                    # todo: same thing — possibly a useful event for client-side UI
                     pass
-                elif msg["type"] == "response.audio_transcript.delta":
-                    # openai playground app uses this, not "text"
-                    if msg["delta"]:
-                        await self.push_frame(TextFrame(msg["delta"]))
-                    pass
-                elif msg["type"] == "response.audio.delta":
+                elif evt.type == "response.audio_transcript.delta":
+                    # note: the openai playground app uses this, not "response.text.delta"
+                    if evt.delta:
+                        await self.push_frame(TextFrame(evt.delta))
+                elif evt.type == "response.audio.delta":
                     await self.stop_ttfb_metrics()
                     frame = TTSAudioRawFrame(
-                        audio=base64.b64decode(msg["delta"]),
+                        audio=base64.b64decode(evt.delta),
                         sample_rate=24000,
                         num_channels=1,
                     )
                     await self.push_frame(frame)
-                elif msg["type"] == "response.audio.done":
+                elif evt.type == "response.audio.done":
                     if self._bot_speaking:
                         self._bot_speaking = False
                         await self.push_frame(TTSStoppedFrame())
+                elif evt.type == "response.audio_transcript.done":
+                    # this doesn't map to any Pipecat frame types
                     pass
-                elif msg["type"] == "response.audio_transcript.done":
-                    # probably ignore for now
+                elif evt.type == "response.content_part.done":
+                    # this doesn't map to any Pipecat frame types
                     pass
-                elif msg["type"] == "response.content_part.done":
+                elif evt.type == "response.output_item.done":
+                    # this doesn't map to any Pipecat frame types
                     pass
-                elif msg["type"] == "response.output_item.done":
-                    # logger.debug(f"Received response item done: {msg}")
-                    item = msg["item"]
-                    if item["type"] == "message" and item["status"] == "completed":
-                        for item in item["content"]:
-                            # output text
-                            if item["type"] == "audio" and item["transcript"] is not None:
-                                # could send full transcript here instead of streaming chunks
-                                # logger.debug(f"!!! >{item['transcript']}")
-                                pass
-                elif msg["type"] == "response.done":
-                    # logger.debug(f"Received response done: {msg}")
+                elif evt.type == "response.done":
                     # usage metrics
-                    # example.
-                    # response.usage.total_tokens:592
-                    # response.usage.input_tokens:425
-                    # response.usage.output_tokens:167
-                    # response.usage.input_token_details.cached_tokens:0
-                    # response.usage.input_token_details.text_tokens:310
-                    # response.usage.input_token_details.audio_tokens:115
-                    # response.usage.output_token_details.text_tokens:32
-                    # response.usage.output_token_details.audio_tokens:135
                     tokens = LLMTokenUsage(
-                        prompt_tokens=msg["response"]["usage"]["input_tokens"],
-                        completion_tokens=msg["response"]["usage"]["output_tokens"],
-                        total_tokens=msg["response"]["usage"]["total_tokens"],
+                        prompt_tokens=evt.response.usage.input_tokens,
+                        completion_tokens=evt.response.usage.output_tokens,
+                        total_tokens=evt.response.usage.total_tokens,
                     )
                     await self.start_llm_usage_metrics(tokens)
-                    # question for mrkb: don't seem to be getting processing time on the console except the first inference
                     await self.stop_processing_metrics()
                     # function calls
-                    items = msg["response"]["output"]
-                    function_calls = [item for item in items if item.get("type") == "function_call"]
+                    items = evt.response.output
+                    function_calls = [item for item in items if item.type == "function_call"]
                     if function_calls:
                         await self._handle_function_call_items(function_calls)
                     await self.push_frame(LLMFullResponseEndFrame())
-                elif msg["type"] == "rate_limits.updated":
+                elif evt.type == "rate_limits.updated":
+                    # todo: add a Pipecat frame for this. (maybe?)
                     pass
-                elif msg["type"] == "error":
-                    raise Exception(f"Error: {msg}")
+                elif evt.type == "error":
+                    # These errors seem to be fatal to this connection. So, close and send an ErrorFrame.
+                    raise Exception(f"Error: {evt}")
 
         except asyncio.CancelledError:
             pass
@@ -319,9 +304,9 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
     async def _handle_function_call_items(self, items):
         total_items = len(items)
         for index, item in enumerate(items):
-            function_name = item["name"]
-            tool_id = item["call_id"]
-            arguments = json.loads(item["arguments"])
+            function_name = item.name
+            tool_id = item.call_id
+            arguments = json.loads(item.arguments)
             if self.has_function(function_name):
                 run_llm = index == total_items - 1
                 if function_name in self._callbacks.keys():
