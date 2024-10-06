@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TransportMessageFrame,
+    TransportMessageUrgentFrame,
     UserStartedSpeakingFrame,
     FunctionCallResultFrame,
     UserStoppedSpeakingFrame,
@@ -349,9 +350,11 @@ class RTVIFrameProcessor(FrameProcessor):
         self._direction = direction
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        frame = TransportMessageFrame(
-            message=model.model_dump(exclude_none=exclude_none), urgent=True
-        )
+        frame = TransportMessageFrame(message=model.model_dump(exclude_none=exclude_none))
+        await self.push_frame(frame, self._direction)
+
+    async def _push_transport_message_urgent(self, model: BaseModel, exclude_none: bool = True):
+        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
         await self.push_frame(frame, self._direction)
 
 
@@ -377,7 +380,7 @@ class RTVISpeakingProcessor(RTVIFrameProcessor):
             message = RTVIUserStoppedSpeakingMessage()
 
         if message:
-            await self._push_transport_message(message)
+            await self._push_transport_message_urgent(message)
 
     async def _handle_bot_speaking(self, frame: Frame):
         message = None
@@ -387,7 +390,7 @@ class RTVISpeakingProcessor(RTVIFrameProcessor):
             message = RTVIBotStoppedSpeakingMessage()
 
         if message:
-            await self._push_transport_message(message)
+            await self._push_transport_message_urgent(message)
 
 
 class RTVIUserTranscriptionProcessor(RTVIFrameProcessor):
@@ -418,7 +421,7 @@ class RTVIUserTranscriptionProcessor(RTVIFrameProcessor):
             )
 
         if message:
-            await self._push_transport_message(message)
+            await self._push_transport_message_urgent(message)
 
 
 class RTVIUserLLMTextProcessor(RTVIFrameProcessor):
@@ -439,7 +442,7 @@ class RTVIUserLLMTextProcessor(RTVIFrameProcessor):
             message = messages[-1]
             if message["role"] == "user":
                 message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=message["content"]))
-                await self._push_transport_message(message)
+                await self._push_transport_message_urgent(message)
 
 
 class RTVIBotLLMProcessor(RTVIFrameProcessor):
@@ -452,9 +455,9 @@ class RTVIBotLLMProcessor(RTVIFrameProcessor):
         await self.push_frame(frame, direction)
 
         if isinstance(frame, LLMFullResponseStartFrame):
-            await self._push_transport_message(RTVIBotLLMStartedMessage())
+            await self._push_transport_message_urgent(RTVIBotLLMStartedMessage())
         elif isinstance(frame, LLMFullResponseEndFrame):
-            await self._push_transport_message(RTVIBotLLMStoppedMessage())
+            await self._push_transport_message_urgent(RTVIBotLLMStoppedMessage())
 
 
 class RTVIBotTTSProcessor(RTVIFrameProcessor):
@@ -467,9 +470,9 @@ class RTVIBotTTSProcessor(RTVIFrameProcessor):
         await self.push_frame(frame, direction)
 
         if isinstance(frame, TTSStartedFrame):
-            await self._push_transport_message(RTVIBotTTSStartedMessage())
+            await self._push_transport_message_urgent(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame):
-            await self._push_transport_message(RTVIBotTTSStoppedMessage())
+            await self._push_transport_message_urgent(RTVIBotTTSStoppedMessage())
 
 
 class RTVIBotLLMTextProcessor(RTVIFrameProcessor):
@@ -486,7 +489,7 @@ class RTVIBotLLMTextProcessor(RTVIFrameProcessor):
 
     async def _handle_text(self, frame: TextFrame):
         message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self._push_transport_message(message)
+        await self._push_transport_message_urgent(message)
 
 
 class RTVIBotTTSTextProcessor(RTVIFrameProcessor):
