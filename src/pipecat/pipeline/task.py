@@ -5,9 +5,9 @@
 #
 
 import asyncio
-
 from typing import AsyncIterable, Iterable
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.clocks.base_clock import BaseClock
@@ -23,12 +23,10 @@ from pipecat.frames.frames import (
     StartFrame,
     StopTaskFrame,
 )
-from pipecat.metrics.metrics import TTFBMetricsData, ProcessingMetricsData
+from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
-
-from loguru import logger
 
 
 class PipelineParams(BaseModel):
@@ -46,6 +44,7 @@ class Source(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+        logger.debug(f"Processing frame {frame}")
 
         match direction:
             case FrameDirection.UPSTREAM:
@@ -175,7 +174,9 @@ class PipelineTask:
                 await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
                 if isinstance(frame, EndFrame):
                     await self._wait_for_endframe()
-                running = not (isinstance(frame, StopTaskFrame) or isinstance(frame, EndFrame))
+                running = not (
+                    isinstance(frame, StopTaskFrame) or isinstance(frame, EndFrame)
+                )
                 should_cleanup = not isinstance(frame, StopTaskFrame)
                 self._push_queue.task_done()
             except asyncio.CancelledError:
