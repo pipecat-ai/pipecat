@@ -30,18 +30,18 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-
-async def start_fetch_weather(function_name, llm, context):
-    # note: we can't push a frame to the LLM here. the bot
-    # can interrupt itself and/or cause audio overlapping glitches.
-    # possible question for Aleix and Chad about what the right way
-    # to trigger speech is, now, with the new queues/async/sync refactors.
-    # await llm.push_frame(TextFrame("Let me check on that."))
-    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
+video_participant_id = None
 
 
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await result_callback({"conditions": "nice", "temperature": "75"})
+async def get_weather(function_name, tool_call_id, arguments, llm, context, result_callback):
+    location = arguments["location"]
+    await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
+
+
+async def get_image(function_name, tool_call_id, arguments, llm, context, result_callback):
+    logger.debug(f"!!! IN get_image {video_participant_id}, {arguments}")
+    question = arguments["question"]
+    await llm.request_image_frame(user_id=video_participant_id, text_content=question)
 
 
 async def main():
@@ -66,15 +66,14 @@ async def main():
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
-        # Register a function_name of None to get all functions
-        # sent to the same callback with an additional function_name parameter.
-        llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
+        llm.register_function("get_weather", get_weather)
+        llm.register_function("get_image", get_image)
 
         tools = [
             ChatCompletionToolParam(
                 type="function",
                 function={
-                    "name": "get_current_weather",
+                    "name": "get_weather",
                     "description": "Get the current weather",
                     "parameters": {
                         "type": "object",
@@ -92,13 +91,46 @@ async def main():
                         "required": ["location", "format"],
                     },
                 },
-            )
+            ),
+            ChatCompletionToolParam(
+                type="function",
+                function={
+                    "name": "get_image",
+                    "description": "Get an image from the video stream.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "The question to ask the AI to generate an image of",
+                            },
+                        },
+                        "required": ["question"],
+                    },
+                },
+            ),
         ]
+
+        system_prompt = """\
+You are a helpful assistant who converses with a user and answers questions. Respond concisely to general questions.
+
+Your response will be turned into speech so use only simple words and punctuation.
+
+You have access to two tools: get_weather and get_image.
+
+You can respond to questions about the weather using the get_weather tool.
+
+You can answer questions about the user's video stream using the get_image tool. Some examples of phrases that \
+indicate you should use the get_image tool are:
+  - What do you see?
+  - What's in the video?
+  - Can you describe the video?
+  - Tell me about what you see.
+  - Tell me something interesting about what you see.
+  - What's happening in the video?
+"""
         messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
-            },
+            {"role": "system", "content": system_prompt},
         ]
 
         context = OpenAILLMContext(messages, tools)
@@ -119,7 +151,10 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
+            global video_participant_id
+            video_participant_id = participant["id"]
             transport.capture_participant_transcription(participant["id"])
+            transport.capture_participant_video(video_participant_id, framerate=0)
             # Kick off the conversation.
             await tts.say("Hi! Ask me about the weather in San Francisco.")
 

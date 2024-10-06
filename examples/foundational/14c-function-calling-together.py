@@ -13,7 +13,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.openai import OpenAILLMContext, OpenAILLMService
+from pipecat.services.openai import OpenAILLMContext
+from pipecat.services.together import TogetherLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -65,7 +66,10 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = TogetherLLMService(
+            api_key=os.getenv("TOGETHER_API_KEY"),
+            model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+        )
         # Register a function_name of None to get all functions
         # sent to the same callback with an additional function_name parameter.
         llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
@@ -121,7 +125,7 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            await tts.say("Hi! Ask me about the weather in San Francisco.")
+            # await tts.say("Hi! Ask me about the weather in San Francisco.")
 
         runner = PipelineRunner()
 

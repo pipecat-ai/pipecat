@@ -5,47 +5,47 @@
 #
 
 import base64
-import json
-import io
 import copy
-from typing import Any, Dict, List, Optional
-from dataclasses import dataclass
-from PIL import Image
-from asyncio import CancelledError
+import io
+import json
 import re
+from asyncio import CancelledError
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+from loguru import logger
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     Frame,
-    LLMEnablePromptCachingFrame,
-    LLMModelUpdateFrame,
-    TextFrame,
-    VisionImageRawFrame,
-    UserImageRequestFrame,
-    UserImageRawFrame,
-    LLMMessagesFrame,
-    LLMFullResponseStartFrame,
-    LLMFullResponseEndFrame,
-    FunctionCallResultFrame,
     FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    LLMEnablePromptCachingFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMessagesFrame,
+    LLMUpdateSettingsFrame,
     StartInterruptionFrame,
+    TextFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
+    VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantContextAggregator,
+    LLMUserContextAggregator,
+)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
-from pipecat.processors.aggregators.llm_response import (
-    LLMUserContextAggregator,
-    LLMAssistantContextAggregator,
-)
-
-from loguru import logger
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import LLMService
 
 try:
-    from anthropic import AsyncAnthropic, NOT_GIVEN, NotGiven
+    from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -55,6 +55,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+# internal use only -- todo: refactor
 @dataclass
 class AnthropicImageMessageFrame(Frame):
     user_image_raw_frame: UserImageRawFrame
@@ -95,12 +96,14 @@ class AnthropicLLMService(LLMService):
         super().__init__(**kwargs)
         self._client = AsyncAnthropic(api_key=api_key)
         self.set_model_name(model)
-        self._max_tokens = params.max_tokens
-        self._enable_prompt_caching_beta: bool = params.enable_prompt_caching_beta or False
-        self._temperature = params.temperature
-        self._top_k = params.top_k
-        self._top_p = params.top_p
-        self._extra = params.extra if isinstance(params.extra, dict) else {}
+        self._settings = {
+            "max_tokens": params.max_tokens,
+            "enable_prompt_caching_beta": params.enable_prompt_caching_beta or False,
+            "temperature": params.temperature,
+            "top_k": params.top_k,
+            "top_p": params.top_p,
+            "extra": params.extra if isinstance(params.extra, dict) else {},
+        }
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -110,34 +113,14 @@ class AnthropicLLMService(LLMService):
         return self._enable_prompt_caching_beta
 
     @staticmethod
-    def create_context_aggregator(context: OpenAILLMContext) -> AnthropicContextAggregatorPair:
+    def create_context_aggregator(
+        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+    ) -> AnthropicContextAggregatorPair:
         user = AnthropicUserContextAggregator(context)
-        assistant = AnthropicAssistantContextAggregator(user)
+        assistant = AnthropicAssistantContextAggregator(
+            user, expect_stripped_words=assistant_expect_stripped_words
+        )
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
-
-    async def set_enable_prompt_caching_beta(self, enable_prompt_caching_beta: bool):
-        logger.debug(f"Switching LLM enable_prompt_caching_beta to: [{enable_prompt_caching_beta}]")
-        self._enable_prompt_caching_beta = enable_prompt_caching_beta
-
-    async def set_max_tokens(self, max_tokens: int):
-        logger.debug(f"Switching LLM max_tokens to: [{max_tokens}]")
-        self._max_tokens = max_tokens
-
-    async def set_temperature(self, temperature: float):
-        logger.debug(f"Switching LLM temperature to: [{temperature}]")
-        self._temperature = temperature
-
-    async def set_top_k(self, top_k: float):
-        logger.debug(f"Switching LLM top_k to: [{top_k}]")
-        self._top_k = top_k
-
-    async def set_top_p(self, top_p: float):
-        logger.debug(f"Switching LLM top_p to: [{top_p}]")
-        self._top_p = top_p
-
-    async def set_extra(self, extra: Dict[str, Any]):
-        logger.debug(f"Switching LLM extra to: [{extra}]")
-        self._extra = extra
 
     async def _process_context(self, context: OpenAILLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
@@ -160,11 +143,11 @@ class AnthropicLLMService(LLMService):
             )
 
             messages = context.messages
-            if self._enable_prompt_caching_beta:
+            if self._settings["enable_prompt_caching_beta"]:
                 messages = context.get_messages_with_cache_control_markers()
 
             api_call = self._client.messages.create
-            if self._enable_prompt_caching_beta:
+            if self._settings["enable_prompt_caching_beta"]:
                 api_call = self._client.beta.prompt_caching.messages.create
 
             await self.start_ttfb_metrics()
@@ -174,14 +157,14 @@ class AnthropicLLMService(LLMService):
                 "system": context.system,
                 "messages": messages,
                 "model": self.model_name,
-                "max_tokens": self._max_tokens,
+                "max_tokens": self._settings["max_tokens"],
                 "stream": True,
-                "temperature": self._temperature,
-                "top_k": self._top_k,
-                "top_p": self._top_p,
+                "temperature": self._settings["temperature"],
+                "top_k": self._settings["top_k"],
+                "top_p": self._settings["top_p"],
             }
 
-            params.update(self._extra)
+            params.update(self._settings["extra"])
 
             response = await api_call(**params)
 
@@ -293,12 +276,11 @@ class AnthropicLLMService(LLMService):
             # UserImageRawFrames coming through the pipeline and add them
             # to the context.
             context = AnthropicLLMContext.from_image_frame(frame)
-        elif isinstance(frame, LLMModelUpdateFrame):
-            logger.debug(f"Switching LLM model to: [{frame.model}]")
-            self.set_model_name(frame.model)
+        elif isinstance(frame, LLMUpdateSettingsFrame):
+            await self._update_settings(frame.settings)
         elif isinstance(frame, LLMEnablePromptCachingFrame):
             logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
-            self._enable_prompt_caching_beta = frame.enable
+            self._settings["enable_prompt_caching_beta"] = frame.enable
         else:
             await self.push_frame(frame, direction)
 
@@ -341,7 +323,6 @@ class AnthropicLLMContext(OpenAILLMContext):
         system: str | NotGiven = NOT_GIVEN,
     ):
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
-        self._user_image_request_context = {}
 
         # For beta prompt caching. This is a counter that tracks the number of turns
         # we've seen above the cache threshold. We reset this when we reset the
@@ -527,8 +508,8 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
 
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, user_context_aggregator: AnthropicUserContextAggregator):
-        super().__init__(context=user_context_aggregator._context)
+    def __init__(self, user_context_aggregator: AnthropicUserContextAggregator, **kwargs):
+        super().__init__(context=user_context_aggregator._context, **kwargs)
         self._user_context_aggregator = user_context_aggregator
         self._function_call_in_progress = None
         self._function_call_result = None
@@ -565,7 +546,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         run_llm = False
 
         aggregation = self._aggregation
-        self._aggregation = ""
+        self._reset()
 
         try:
             if self._function_call_result:
@@ -615,6 +596,9 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
+
+            frame = OpenAILLMContextFrame(self._context)
+            await self.push_frame(frame)
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
