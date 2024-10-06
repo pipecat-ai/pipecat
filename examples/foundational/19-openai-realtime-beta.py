@@ -17,8 +17,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.services.openai_realtime_beta import (
     OpenAILLMServiceRealtimeBeta,
-    OpenAITurnDetection,
-    RealtimeSessionProperties,
+    TurnDetection,
+    SessionProperties,
 )
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
@@ -83,8 +83,8 @@ async def main():
             ),
         )
 
-        session_properties = RealtimeSessionProperties(
-            turn_detection=OpenAITurnDetection(silence_duration_ms=1000),
+        session_properties = SessionProperties(
+            turn_detection=TurnDetection(silence_duration_ms=1000),
             tools=tools,
             instructions="""
 Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
