@@ -35,7 +35,10 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from loguru import logger
@@ -297,16 +300,6 @@ class RTVIBotAudioMessage(BaseModel):
     data: RTVIAudioMessageData
 
 
-class RTVIBotTranscriptionMessageData(BaseModel):
-    text: str
-
-
-class RTVIBotTranscriptionMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
-    type: Literal["bot-transcription"] = "bot-transcription"
-    data: RTVIBotTranscriptionMessageData
-
-
 class RTVIUserTranscriptionMessageData(BaseModel):
     text: str
     user_id: str
@@ -318,6 +311,12 @@ class RTVIUserTranscriptionMessage(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
     type: Literal["user-transcription"] = "user-transcription"
     data: RTVIUserTranscriptionMessageData
+
+
+class RTVIUserLLMTextMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["user-llm-text"] = "user-llm-text"
+    data: RTVITextMessageData
 
 
 class RTVIUserStartedSpeakingMessage(BaseModel):
@@ -420,6 +419,27 @@ class RTVIUserTranscriptionProcessor(RTVIFrameProcessor):
 
         if message:
             await self._push_transport_message(message)
+
+
+class RTVIUserLLMTextProcessor(RTVIFrameProcessor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        await self.push_frame(frame, direction)
+
+        if isinstance(frame, OpenAILLMContextFrame):
+            await self._handle_context(frame)
+
+    async def _handle_context(self, frame: OpenAILLMContextFrame):
+        messages = frame.context.messages
+        if len(messages) > 0:
+            message = messages[-1]
+            if message["role"] == "user":
+                message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=message["content"]))
+                await self._push_transport_message(message)
 
 
 class RTVIBotLLMProcessor(RTVIFrameProcessor):
