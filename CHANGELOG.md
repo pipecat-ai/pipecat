@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `TransportMessageFrame` doesn't have an `urgent` field anymore, instead
+  there's now a `TransportMessageUrgentFrame` which is a `SystemFrame` and
+  therefore skip all internal queuing.
+
 - For TTS services, convert inputted languages to match each service's language
   format
 
