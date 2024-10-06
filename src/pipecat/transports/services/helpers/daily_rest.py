@@ -11,13 +11,12 @@ Methods that wrap the Daily API to create rooms, check room URLs, and get meetin
 
 """
 
-import aiohttp
 import time
-
+from typing import Literal, Optional
 from urllib.parse import urlparse
 
-from pydantic import Field, BaseModel, ValidationError
-from typing import Literal, Optional
+import aiohttp
+from pydantic import BaseModel, Field, ValidationError
 
 
 class DailyRoomSipParams(BaseModel):
@@ -36,7 +35,6 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     sip: Optional[DailyRoomSipParams] = None
     sip_uri: Optional[dict] = None
 
-
     # additional options for Prebuilt UI and non prebuilt both
     enable_people_ui: bool = True
     enable_pip_ui: bool = True
@@ -53,8 +51,8 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     enable_chat: bool = True
     enable_shared_chat_history: bool = True
     enable_advanced_chat: bool = True
-    enable_recording: str = 'cloud'
-    
+    enable_recording: str = "cloud"
+
     @property
     def sip_endpoint(self) -> str:
         if not self.sip_uri:
