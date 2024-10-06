@@ -1,11 +1,11 @@
 import asyncio
 import base64
 import random
+import traceback
 import json
 import websockets
 
 from copy import deepcopy
-from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -36,6 +36,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
+
+from . import client_events as events
 
 from loguru import logger
 
@@ -112,29 +114,13 @@ class OpenAITurnDetection(BaseModel):
     )
 
 
-class RealtimeSessionProperties(BaseModel):
-    modalities: List[str] = Field(default=["text", "audio"])
-    instructions: str = Field(default="")
-    voice: str = Field(default="alloy")
-    input_audio_format: str = Field(default="pcm16")
-    output_audio_format: str = Field(default="pcm16")
-    input_audio_transcription: Optional[OpenAIInputTranscription] = Field(
-        default=OpenAIInputTranscription()
-    )
-    turn_detection: Optional[OpenAITurnDetection] = Field(default=None)
-    tools: List[dict] = Field(default=[])
-    tool_choice: str = Field(default="auto")
-    temperature: float = Field(default=0.8)
-    max_response_output_tokens: int = Field(default=4096)
-
-
 class OpenAILLMServiceRealtimeBeta(LLMService):
     def __init__(
         self,
         *,
         api_key: str,
         base_url="wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01",
-        session_properties: RealtimeSessionProperties = RealtimeSessionProperties(),
+        session_properties: events.SessionProperties = events.SessionProperties(),
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
@@ -175,7 +161,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         await self._ws_send(
             {
                 "type": "session.update",
-                "session": self._session_properties.dict(),
+                "session": self._session_properties.dict(exclude_none=True),
             }
         )
 
@@ -223,6 +209,8 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 if not msg:
                     continue
                 if msg["type"] == "session.created":
+                    # session.created is received right after connecting. send a message
+                    # to configure the session properties.
                     await self.update_session_properties()
                 elif msg["type"] == "session.updated":
                     self._session_properties = msg["session"]
@@ -326,7 +314,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            logger.error(f"{self} exception: {e}\n\nStack trace:\n{traceback.format_exc()}")
 
     async def _handle_function_call_items(self, items):
         total_items = len(items)
