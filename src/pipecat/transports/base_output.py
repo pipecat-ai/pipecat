@@ -180,7 +180,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
+        elif isinstance(frame, (StartInterruptionFrame, StopInterruptionFrame)):
             await self.push_frame(frame, direction)
             await self._handle_interruptions(frame)
         elif isinstance(frame, MetricsFrame):
@@ -196,7 +196,7 @@ class BaseOutputTransport(FrameProcessor):
         # Other frames.
         elif isinstance(frame, OutputAudioRawFrame):
             await self._handle_audio(frame)
-        elif isinstance(frame, OutputImageRawFrame) or isinstance(frame, SpriteFrame):
+        elif isinstance(frame, (OutputImageRawFrame, SpriteFrame)):
             await self._handle_image(frame)
         elif isinstance(frame, TransportMessageFrame) and frame.urgent:
             await self.send_message(frame)

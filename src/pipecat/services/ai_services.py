@@ -259,7 +259,7 @@ class TTSService(AIService):
             await self._process_text_frame(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame, direction)
-        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
+        elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             sentence = self._current_sentence
             self._current_sentence = ""
             await self._push_tts_frames(sentence)
@@ -369,7 +369,7 @@ class WordTTSService(TTSService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
+        if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
