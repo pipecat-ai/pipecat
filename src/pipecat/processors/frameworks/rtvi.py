@@ -295,9 +295,9 @@ class RTVIAudioMessageData(BaseModel):
     num_channels: int
 
 
-class RTVIBotAudioMessage(BaseModel):
+class RTVIBotTTSAudioMessage(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
-    type: Literal["bot-audio"] = "bot-audio"
+    type: Literal["bot-tts-audio"] = "bot-tts-audio"
     data: RTVIAudioMessageData
 
 
@@ -509,7 +509,7 @@ class RTVIBotTTSTextProcessor(RTVIFrameProcessor):
         await self._push_transport_message(message)
 
 
-class RTVIBotAudioProcessor(RTVIFrameProcessor):
+class RTVIBotTTSAudioProcessor(RTVIFrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -523,7 +523,7 @@ class RTVIBotAudioProcessor(RTVIFrameProcessor):
 
     async def _handle_audio(self, frame: OutputAudioRawFrame):
         encoded = base64.b64encode(frame.audio).decode("utf-8")
-        message = RTVIBotAudioMessage(
+        message = RTVIBotTTSAudioMessage(
             data=RTVIAudioMessageData(
                 audio=encoded, sample_rate=frame.sample_rate, num_channels=frame.num_channels
             )
