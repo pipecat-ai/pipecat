@@ -40,6 +40,7 @@ from pipecat.services.openai import (
     OpenAIContextAggregatorPair,
     OpenAIUserContextAggregator,
 )
+from pipecat.utils.time import time_now_iso8601
 
 from . import events
 
@@ -118,6 +119,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         base_url="wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01",
         session_properties: events.SessionProperties = events.SessionProperties(),
         start_audio_paused: bool = False,
+        send_transcription_frames: bool = True,
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
@@ -126,6 +128,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
 
         self._session_properties = session_properties
         self._audio_input_paused = start_audio_paused
+        self._send_transcription_frames = send_transcription_frames
         self._websocket = None
         self._receive_task = None
         self._context = None
@@ -237,6 +240,11 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                             self._context.add_message({"role": "user", "content": evt.transcript})
                         else:
                             logger.error("Context is None, cannot add message")
+                        if self._send_transcription_frames:
+                            await self.push_frame(
+                                # no way to get a language code?
+                                TranscriptionFrame(evt.transcript, "", time_now_iso8601())
+                            )
                 elif evt.type == "response.output_item.added":
                     # todo: think about adding a frame for this (generally, in Pipecat/RTVI), as
                     # it could be useful for managing UI state
@@ -306,7 +314,13 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             if self.has_function(function_name):
                 run_llm = index == total_items - 1
                 if function_name in self._callbacks.keys():
-                    f = self._callbacks[function_name]
+                    await self.call_function(
+                        context=self._context,
+                        tool_call_id=tool_id,
+                        function_name=function_name,
+                        arguments=arguments,
+                        run_llm=run_llm,
+                    )
                 elif None in self._callbacks.keys():
                     await self.call_function(
                         context=self._context,
