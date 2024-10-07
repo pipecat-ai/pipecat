@@ -21,9 +21,8 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator,
 )
-from pipecat.processors.frameworks.dify import DifyProcessor
-from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.dify import DifyLLMService
+from pipecat.services.google import GoogleTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
 
@@ -49,18 +48,17 @@ async def main():
             ),
         )
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+        tts = GoogleTTSService(
+            voice_id="en-US-Neural2-J",
+            sample_rate=16000,
+            params=GoogleTTSService.InputParams(language="en-US", rate="1.05"),
         )
 
-        dify_service = DifyLLMService(
+        llm = DifyLLMService(
             api_key=os.getenv("DIFY_API_KEY"),
-            user=os.getenv("DIFY_USER_ID", "123"),
             inputs=None,
+            api_base="https://localhost/v1",
         )
-
-        dify_processor = DifyProcessor(dify_service)
 
         tma_in = LLMUserResponseAggregator()
         tma_out = LLMAssistantResponseAggregator()
@@ -69,7 +67,7 @@ async def main():
             [
                 transport.input(),
                 tma_in,
-                dify_processor,
+                llm,
                 tts,
                 transport.output(),
                 tma_out,
@@ -80,16 +78,13 @@ async def main():
             pipeline,
             PipelineParams(
                 allow_interruptions=True,
-                enable_metrics=True,
-                enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
             ),
         )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
-            dify_processor.set_participant_id(participant["id"])
+            llm.set_user(participant["id"])
             messages = [{"content": "Please briefly introduce yourself to the user."}]
             await task.queue_frames([LLMMessagesFrame(messages)])
 
