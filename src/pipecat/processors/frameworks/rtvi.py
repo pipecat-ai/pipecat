@@ -676,7 +676,7 @@ class RTVIProcessor(FrameProcessor):
             self._message_task = None
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        frame = TransportMessageFrame(message=model.model_dump(exclude_none=exclude_none))
+        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
         await self.push_frame(frame)
 
     async def _action_task_handler(self):
