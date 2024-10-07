@@ -439,8 +439,16 @@ class RTVIUserLLMTextProcessor(RTVIFrameProcessor):
         if len(messages) > 0:
             message = messages[-1]
             if message["role"] == "user":
-                message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=message["content"]))
-                await self._push_transport_message_urgent(message)
+                content = message["content"]
+                if isinstance(content, list):
+                    print("LIST")
+                    text = " ".join(item["text"] for item in content if "text" in item)
+                else:
+                    print("STRING")
+                    text = content
+
+                rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
+                await self._push_transport_message_urgent(rtvi_message)
 
 
 class RTVIBotLLMProcessor(RTVIFrameProcessor):
