@@ -6,16 +6,16 @@ import json
 import websockets
 
 from copy import deepcopy
-from pydantic import BaseModel, Field
 
 
 from pipecat.frames.frames import (
     CancelFrame,
+    EndFrame,
+    ErrorFrame,
+    Frame,
+    InputAudioRawFrame,
     LLMFullResponseStartFrame,
     LLMFullResponseEndFrame,
-    Frame,
-    EndFrame,
-    InputAudioRawFrame,
     StartFrame,
     StartInterruptionFrame,
     TextFrame,
@@ -37,7 +37,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 
-from . import client_events as events
+from . import events
 
 from loguru import logger
 
@@ -90,30 +90,6 @@ class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator)
         await super()._push_aggregation()
 
 
-class OpenAIInputTranscription(BaseModel):
-    # enabled: bool = Field(description="Whether to enable input audio transcription.", default=True)
-    model: str = Field(
-        description="The model to use for transcription (e.g., 'whisper-1').", default="whisper-1"
-    )
-
-
-class OpenAITurnDetection(BaseModel):
-    type: str = Field(
-        default="server_vad",
-        description="Type of turn detection, only 'server_vad' is currently supported.",
-    )
-    threshold: float = Field(
-        ge=0.0, le=1.0, default=0.5, description="Activation threshold for VAD (0.0 to 1.0)."
-    )
-    prefix_padding_ms: int = Field(
-        default=300,
-        description="Amount of audio to include before speech starts (in milliseconds).",
-    )
-    silence_duration_ms: int = Field(
-        default=200, description="Duration of silence to detect speech stop (in milliseconds)."
-    )
-
-
 class OpenAILLMServiceRealtimeBeta(LLMService):
     def __init__(
         self,
@@ -150,23 +126,14 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         await self._disconnect()
 
     async def send_client_event(self, event: events.ClientEvent):
-        await self._ws_send(event.dict())
+        await self._ws_send(event.dict(exclude_none=True))
 
     async def _ws_send(self, realtime_message):
         try:
-            # if realtime_message.get("type") != "input_audio_buffer.append":
-            #    logger.debug(f"!!! Sending message to websocket: {realtime_message}")
             await self._websocket.send(json.dumps(realtime_message))
         except Exception as e:
             logger.error(f"Error sending message to websocket: {e}")
-
-    async def update_session_properties(self):
-        await self._ws_send(
-            {
-                "type": "session.update",
-                "session": self._session_properties.dict(exclude_none=True),
-            }
-        )
+            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}", fatal=True))
 
     async def _connect(self):
         try:
@@ -212,7 +179,9 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 if evt.type == "session.created":
                     # session.created is received right after connecting. send a message
                     # to configure the session properties.
-                    await self.update_session_properties()
+                    await self.send_client_event(
+                        events.SessionUpdateEvent(session=self._session_properties)
+                    )
                 elif evt.type == "session.updated":
                     self._session_properties = evt.session
                 elif evt.type == "input_audio_buffer.speech_started":
@@ -300,6 +269,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             pass
         except Exception as e:
             logger.error(f"{self} exception: {e}\n\nStack trace:\n{traceback.format_exc()}")
+            await self.push_error(ErrorFrame(error=f"Error receiving: {e}", fatal=True))
 
     async def _handle_function_call_items(self, items):
         total_items = len(items)
@@ -343,63 +313,40 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                     content = m.get("content")
                     if isinstance(content, str):
                         items.append(
-                            {
-                                "type": "message",
-                                "status": "completed",
-                                "role": "user",
-                                "content": [{"type": "input_text", "text": content}],
-                            }
+                            events.ConversationItem(
+                                type="message",
+                                status="completed",
+                                role="user",
+                                content=[events.ItemContent(type="input_text", text=content)],
+                            )
                         )
                     else:
                         raise Exception(f"Invalid message content {m}")
                 elif m and m.get("role") == "tool":
                     items.append(
-                        {
-                            "type": "function_call_output",
-                            "call_id": m.get("tool_call_id"),
-                            "output": m["content"],
-                        }
+                        events.ConversationItem(
+                            type="function_call_output",
+                            call_id=m.get("tool_call_id"),
+                            output=m["content"],
+                        )
                     )
-
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
             for item in items:
-                await self._ws_send({"type": "conversation.item.create", "item": item})
-            await self._ws_send(
-                {
-                    "type": "response.create",
-                    "response": {
-                        "modalities": ["audio", "text"],
-                    },
-                },
-            )
+                await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+                await self.send_client_event(events.ResponseCreateEvent())
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
     async def _send_user_audio(self, frame):
         payload = base64.b64encode(frame.audio).decode("utf-8")
-        await self._ws_send(
-            {
-                "type": "input_audio_buffer.append",
-                "audio": payload,
-            },
-        )
+        await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
     async def _handle_interruption(self, frame):
         await self.stop_all_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
         await self.push_frame(TTSStoppedFrame())
-        # todo: do this but only when there's a response in progress?
-        # await self._ws_send(
-        #     {
-        #         "type": "response.cancel",
-        #     },
-        # )
-        # await self._ws_send(
-        #     {
-        #         "type": "input_audio_buffer.clear",
-        #     },
-        # )
+        # todo: track whether a response is in progress and cancel it with a response.cancela nd input_audio_buffer.clear (?)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
