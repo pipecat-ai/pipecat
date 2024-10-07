@@ -117,21 +117,25 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         api_key: str,
         base_url="wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01",
         session_properties: events.SessionProperties = events.SessionProperties(),
+        start_audio_paused: bool = False,
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
         self.api_key = api_key
         self.base_url = base_url
-        self._websocket = None
-        self._receive_task = None
 
         self._session_properties = session_properties
+        self._audio_input_paused = start_audio_paused
+        self._websocket = None
+        self._receive_task = None
         self._context = None
-
         self._bot_speaking = False
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    def set_audio_input_paused(self, paused: bool):
+        self._audio_input_paused = paused
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -386,7 +390,8 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             self._context = context
             await self._create_response()
         elif isinstance(frame, InputAudioRawFrame):
-            await self._send_user_audio(frame)
+            if not self._audio_input_paused:
+                await self._send_user_audio(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame)
         elif isinstance(frame, _InternalMessagesUpdateFrame):
