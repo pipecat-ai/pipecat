@@ -5,9 +5,13 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -16,18 +20,13 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
 )
 from pipecat.services.openai_realtime_beta import (
+    InputAudioTranscription,
     OpenAILLMServiceRealtimeBeta,
-    TurnDetection,
     SessionProperties,
+    TurnDetection,
 )
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -76,7 +75,7 @@ async def main():
                 audio_in_sample_rate=24000,
                 audio_out_enabled=True,
                 audio_out_sample_rate=24000,
-                transcription_enabled=True,
+                transcription_enabled=False,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True,
@@ -84,6 +83,7 @@ async def main():
         )
 
         session_properties = SessionProperties(
+            input_audio_transcription=InputAudioTranscription(),
             turn_detection=TurnDetection(silence_duration_ms=1000),
             tools=tools,
             instructions="""
@@ -107,7 +107,11 @@ Remember, your responses should be short. Just one or two sentences, usually.
         llm = OpenAILLMServiceRealtimeBeta(
             api_key=os.getenv("OPENAI_API_KEY"), session_properties=session_properties
         )
-        llm.register_function(None, fetch_weather_from_api)
+
+        # you can either register a single function for all function calls, or specific functions
+        # llm.register_function(None, fetch_weather_from_api)
+        llm.register_function("get_current_weather", fetch_weather_from_api)
+
         context = OpenAILLMContext(
             # [{"role": "user", "content": "What's the weather right now in San Francisco?"}], tools
             [{"role": "user", "content": "Say 'hello'."}],
