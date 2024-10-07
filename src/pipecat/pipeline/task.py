@@ -44,7 +44,6 @@ class Source(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        logger.debug(f"Processing frame {frame}")
 
         match direction:
             case FrameDirection.UPSTREAM:
