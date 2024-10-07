@@ -1,21 +1,24 @@
 import asyncio
 import base64
+import json
 import random
 import traceback
-import json
-import websockets
-
 from copy import deepcopy
+from dataclasses import dataclass
 
+import websockets
+from loguru import logger
 
 from pipecat.frames.frames import (
     CancelFrame,
+    DataFrame,
     EndFrame,
     ErrorFrame,
     Frame,
     InputAudioRawFrame,
-    LLMFullResponseStartFrame,
     LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMMessagesUpdateFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -26,21 +29,19 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService
-from pipecat.services.openai import (
-    OpenAIAssistantContextAggregator,
-    OpenAIUserContextAggregator,
-    OpenAIContextAggregatorPair,
-)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import LLMService
+from pipecat.services.openai import (
+    OpenAIAssistantContextAggregator,
+    OpenAIContextAggregatorPair,
+    OpenAIUserContextAggregator,
+)
 
 from . import events
-
-from loguru import logger
 
 # temp: websocket logger
 # import logging
@@ -48,6 +49,11 @@ from loguru import logger
 #     format="%(message)s",
 #     level=logging.DEBUG,
 # )
+
+
+@dataclass
+class _InternalMessagesUpdateFrame(DataFrame):
+    context: "OpenAIRealtimeLLMContext"
 
 
 class OpenAIUnhandledFunctionException(Exception):
@@ -62,6 +68,8 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
             obj._unsent_messages = deepcopy(obj._messages)
             obj._marker = random.randint(1, 1000)
         return obj
+
+    # todo: do we need to also override add_messages() ?
 
     def add_message(self, message):
         super().add_message(message)
@@ -80,6 +88,17 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
 
 
 class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
+    async def process_frame(
+        self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+    ):
+        await super().process_frame(frame, direction)
+        # Parent does not push LLMMessagesUpdateFrame. This ensures that in a typical pipeline,
+        # messages are only processed by the user context aggregator, which is generally what we want. But
+        # we also need to send new messages over the websocket, in case audio mode triggers a response before
+        # we get any other context frames through the pipeline.
+        if isinstance(frame, LLMMessagesUpdateFrame):
+            await self.push_frame(_InternalMessagesUpdateFrame(context=self._context))
+
     async def _push_aggregation(self):
         # for the moment, ignore all user input coming into the pipeline.
         # todo: fix this to allow text prompting
@@ -162,8 +181,6 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 self._receive_task.cancel()
                 await self._receive_task
                 self._receive_task = None
-
-            self._context_id = None
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
@@ -171,6 +188,9 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         if self._websocket:
             return self._websocket
         raise Exception("Websocket not connected")
+
+    async def _update_settings(self, settings: events.SessionProperties):
+        await self.send_client_event(events.SessionUpdateEvent(session=settings))
 
     async def _receive_task_handler(self):
         try:
@@ -180,9 +200,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 if evt.type == "session.created":
                     # session.created is received right after connecting. send a message
                     # to configure the session properties.
-                    await self.send_client_event(
-                        events.SessionUpdateEvent(session=self._session_properties)
-                    )
+                    await self._update_settings(self._session_properties)
                 elif evt.type == "session.updated":
                     self._session_properties = evt.session
                 elif evt.type == "input_audio_buffer.speech_started":
@@ -303,44 +321,48 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         # used with the HTTP API
         pass
 
-    async def _create_response(self, context: OpenAIRealtimeLLMContext):
-        try:
-            messages = context.get_unsent_messages()
-            context.update_all_messages_sent()
-            logger.debug(
-                f"Creating response: {context._marker} {context.get_messages_for_logging()}"
-            )
+    async def _send_messages_context_update(self):
+        if not self._context:
+            return
+        context = self._context
+        messages = context.get_unsent_messages()
+        context.update_all_messages_sent()
+        logger.debug(
+            f"Sending message context updates: {context._marker} {context.get_messages_for_logging()}"
+        )
 
-            items = []
-            for m in messages:
-                if m and m.get("role") == "user":
-                    content = m.get("content")
-                    if isinstance(content, str):
-                        items.append(
-                            events.ConversationItem(
-                                type="message",
-                                status="completed",
-                                role="user",
-                                content=[events.ItemContent(type="input_text", text=content)],
-                            )
-                        )
-                    else:
-                        raise Exception(f"Invalid message content {m}")
-                elif m and m.get("role") == "tool":
+        items = []
+        for m in messages:
+            if m and (m.get("role") == "user" or m.get("role") == "system"):
+                content = m.get("content")
+                if isinstance(content, str):
                     items.append(
                         events.ConversationItem(
-                            type="function_call_output",
-                            call_id=m.get("tool_call_id"),
-                            output=m["content"],
+                            type="message",
+                            status="completed",
+                            role="user",
+                            content=[events.ItemContent(type="input_text", text=content)],
                         )
                     )
-            await self.push_frame(LLMFullResponseStartFrame())
-            await self.start_processing_metrics()
-            for item in items:
-                await self.send_client_event(events.ConversationItemCreateEvent(item=item))
-                await self.send_client_event(events.ResponseCreateEvent())
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
+                else:
+                    raise Exception(f"Invalid message content {m}")
+            elif m and m.get("role") == "tool":
+                items.append(
+                    events.ConversationItem(
+                        type="function_call_output",
+                        call_id=m.get("tool_call_id"),
+                        output=m["content"],
+                    )
+                )
+        for item in items:
+            await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+
+    async def _create_response(self):
+        await self._send_messages_context_update()
+        logger.debug(f"Creating response: {self._context.get_messages_for_logging()}")
+        await self.push_frame(LLMFullResponseStartFrame())
+        await self.start_processing_metrics()
+        await self.send_client_event(events.ResponseCreateEvent())
 
     async def _send_user_audio(self, frame):
         payload = base64.b64encode(frame.audio).decode("utf-8")
@@ -362,11 +384,14 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 frame.context
             )
             self._context = context
-            await self._create_response(context)
+            await self._create_response()
         elif isinstance(frame, InputAudioRawFrame):
             await self._send_user_audio(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame)
+        elif isinstance(frame, _InternalMessagesUpdateFrame):
+            self._context = frame.context
+            await self._send_messages_context_update()
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
 
