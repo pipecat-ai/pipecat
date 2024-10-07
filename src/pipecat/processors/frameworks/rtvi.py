@@ -6,10 +6,11 @@
 
 import asyncio
 import base64
-
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
+
+from loguru import logger
+from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -20,20 +21,20 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    FunctionCallResultFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     OutputAudioRawFrame,
     StartFrame,
     SystemFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
     TextFrame,
     TranscriptionFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     UserStartedSpeakingFrame,
-    FunctionCallResultFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
@@ -41,9 +42,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-from loguru import logger
-
 
 RTVI_PROTOCOL_VERSION = "0.2"
 
@@ -670,9 +668,7 @@ class RTVIProcessor(FrameProcessor):
             self._message_task = None
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        frame = TransportMessageFrame(
-            message=model.model_dump(exclude_none=exclude_none), urgent=True
-        )
+        frame = TransportMessageFrame(message=model.model_dump(exclude_none=exclude_none))
         await self.push_frame(frame)
 
     async def _action_task_handler(self):
