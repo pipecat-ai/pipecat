@@ -47,8 +47,8 @@ class ItemContent(BaseModel):
 
 
 class ConversationItem(BaseModel):
-    id: str
-    object: Literal["realtime.item"]
+    id: str = Field(default_factory=lambda: str(uuid.uuid4().hex))
+    object: Optional[Literal["realtime.item"]] = None
     type: Literal["message", "function_call", "function_call_output"]
     status: Optional[Literal["completed", "in_progress", "incomplete"]] = None
     # role and content are present for message items
@@ -58,12 +58,23 @@ class ConversationItem(BaseModel):
     call_id: Optional[str] = None
     name: Optional[str] = None
     arguments: Optional[str] = None
-    Output: Optional[str] = None
+    output: Optional[str] = None
 
 
 class RealtimeConversation(BaseModel):
     id: str
     object: Literal["realtime.conversation"]
+
+
+class ResponseProperties(BaseModel):
+    modalities: Optional[List[Literal["text", "audio"]]] = ["audio", "text"]
+    instructions: Optional[str] = None
+    voice: Optional[str] = None
+    output_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
+    tools: Optional[List[Dict]] = []
+    tool_choice: Optional[Literal["auto", "none", "required"]] = None
+    temperature: Optional[float] = None
+    max_response_output_tokens: Optional[Union[int, Literal["inf"]]] = None
 
 
 #
@@ -86,7 +97,48 @@ class ClientEvent(BaseModel):
 
 
 class SessionUpdateEvent(ClientEvent):
-    session_properties: Optional[SessionProperties] = None
+    type: Literal["session.update"] = "session.update"
+    session: SessionProperties
+
+
+class InputAudioBufferAppendEvent(ClientEvent):
+    type: Literal["input_audio_buffer.append"] = "input_audio_buffer.append"
+    audio: str  # base64-encoded audio
+
+
+class InputAudioBufferCommitEvent(ClientEvent):
+    type: Literal["input_audio_buffer.commit"] = "input_audio_buffer.commit"
+
+
+class InputAudioBufferClearEvent(ClientEvent):
+    type: Literal["input_audio_buffer.clear"] = "input_audio_buffer.clear"
+
+
+class ConversationItemCreateEvent(ClientEvent):
+    type: Literal["conversation.item.create"] = "conversation.item.create"
+    previous_item_id: Optional[str] = None
+    item: ConversationItem
+
+
+class ConversationItemTruncateEvent(ClientEvent):
+    type: Literal["conversation.item.truncate"] = "conversation.item.truncate"
+    item_id: str
+    content_index: int
+    audio_end_ms: int
+
+
+class ConversationItemDeleteEvent(ClientEvent):
+    type: Literal["conversation.item.delete"] = "conversation.item.delete"
+    item_id: str
+
+
+class ResponseCreateEvent(ClientEvent):
+    type: Literal["response.create"] = "response.create"
+    response: Optional[ResponseProperties] = ResponseProperties()
+
+
+class ResponseCancelEvent(ClientEvent):
+    type: Literal["response.cancel"] = "response.cancel"
 
 
 #
@@ -314,7 +366,7 @@ class Usage(BaseModel):
 class Response(BaseModel):
     id: str
     object: Literal["realtime.response"]
-    status: Literal["completed", "in_progress", "incomplete"]
+    status: Literal["completed", "in_progress", "incomplete", "canceled"]
     status_details: Any
     output: List[ConversationItem]
     usage: Optional[Usage] = None
