@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     LLMFullResponseStartFrame,
     LLMFullResponseEndFrame,
+    LLMUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
     TextFrame,
@@ -363,6 +364,8 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             await self._send_user_audio(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame)
+        elif isinstance(frame, LLMUpdateSettingsFrame):
+            await self._update_settings(frame.settings)
 
         await self.push_frame(frame, direction)
 
