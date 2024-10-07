@@ -1,8 +1,8 @@
 import json
 import uuid
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Literal, Optional, Union
 
 #
 # session properties
@@ -21,17 +21,17 @@ class TurnDetection(BaseModel):
 
 
 class SessionProperties(BaseModel):
-    modalities: Optional[List[Literal["text", "audio"]]] = ["text", "audio"]
+    modalities: Optional[List[Literal["text", "audio"]]] = None
     instructions: Optional[str] = None
-    voice: Optional[str] = "alloy"
-    input_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = "pcm16"
-    output_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = "pcm16"
-    input_audio_transcription: Optional[InputAudioTranscription] = InputAudioTranscription()
-    turn_detection: Optional[TurnDetection] = TurnDetection()
-    tools: Optional[List[Dict]] = []
-    tool_choice: Optional[Literal["auto", "none", "required"]] = "auto"
-    temperature: Optional[float] = 0.8
-    max_response_output_tokens: Optional[Union[int, Literal["inf"]]] = Field(default=4096)
+    voice: Optional[str] = None
+    input_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
+    output_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
+    input_audio_transcription: Optional[InputAudioTranscription] = None
+    turn_detection: Optional[TurnDetection] = None
+    tools: Optional[List[Dict]] = None
+    tool_choice: Optional[Literal["auto", "none", "required"]] = None
+    temperature: Optional[float] = None
+    max_response_output_tokens: Optional[Union[int, Literal["inf"]]] = None
 
 
 #
@@ -366,7 +366,7 @@ class Usage(BaseModel):
 class Response(BaseModel):
     id: str
     object: Literal["realtime.response"]
-    status: Literal["completed", "in_progress", "incomplete", "canceled"]
+    status: Literal["completed", "in_progress", "incomplete", "cancelled"]
     status_details: Any
     output: List[ConversationItem]
     usage: Optional[Usage] = None
