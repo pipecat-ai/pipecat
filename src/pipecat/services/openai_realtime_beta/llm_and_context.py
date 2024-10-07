@@ -211,7 +211,10 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 elif evt.type == "conversation.item.input_audio_transcription.completed":
                     # or here maybe (possible send upstream to user context aggregator)
                     if evt.transcript:
-                        self._context.add_message({"role": "user", "content": evt.transcript})
+                        if self._context:
+                            self._context.add_message({"role": "user", "content": evt.transcript})
+                        else:
+                            logger.error("Context is None, cannot add message")
                 elif evt.type == "response.output_item.added":
                     # todo: think about adding a frame for this (generally, in Pipecat/RTVI), as
                     # it could be useful for managing UI state
