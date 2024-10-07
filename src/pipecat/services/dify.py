@@ -89,9 +89,7 @@ class DifyLLMService(LLMService):
                 if not self._conversation_id and chat_response.conversation_id:
                     self._conversation_id = chat_response.conversation_id
             else:
-                async for chunk in await self.client.achat_messages(
-                    chat_req, timeout=60.0
-                ):
+                async for chunk in await self.client.achat_messages(chat_req, timeout=60.0):
                     if chunk.event == models.StreamEvent.MESSAGE:
                         await self.push_frame(TextFrame(chunk.answer))
                         if not self._conversation_id and chunk.conversation_id:
