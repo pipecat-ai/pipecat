@@ -76,7 +76,7 @@ async def main():
                 audio_out_enabled=True,
                 audio_out_sample_rate=24000,
                 transcription_enabled=False,
-                vad_enabled=True,
+                vad_enabled=False,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True,
             ),
