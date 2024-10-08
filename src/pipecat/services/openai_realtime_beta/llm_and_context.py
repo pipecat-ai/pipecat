@@ -22,11 +22,14 @@ from pipecat.frames.frames import (
     LLMUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
+    StopInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import (
@@ -120,6 +123,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         session_properties: events.SessionProperties = events.SessionProperties(),
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
+        send_user_started_speaking_frames: bool = True,
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
@@ -129,6 +133,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         self._session_properties = session_properties
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
+        self._send_user_started_speaking_frames = send_user_started_speaking_frames
         self._websocket = None
         self._receive_task = None
         self._context = None
@@ -213,10 +218,19 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 elif evt.type == "input_audio_buffer.speech_started":
                     # user started speaking
                     # todo: send user started speaking if configured
+                    if self._send_user_started_speaking_frames:
+                        await self.push_frame(UserStartedSpeakingFrame())
+                        await self.push_frame(StartInterruptionFrame())
+                        logger.debug("User started speaking")
                     pass
                 elif evt.type == "input_audio_buffer.speech_stopped":
                     # user stopped speaking
                     # todo: send user stopped speaking if configured
+                    if self._send_user_started_speaking_frames:
+                        await self.push_frame(UserStoppedSpeakingFrame())
+                        await self.push_frame(StopInterruptionFrame())
+
+                        logger.debug("User stopped speaking")
                     await self.start_processing_metrics()
                     await self.start_ttfb_metrics()
                 elif evt.type == "conversation.item.created":
