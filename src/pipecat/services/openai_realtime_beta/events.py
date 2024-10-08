@@ -2,6 +2,7 @@ import json
 import uuid
 from typing import Any, Dict, List, Literal, Optional, Union
 
+from loguru import logger
 from pydantic import BaseModel, Field
 
 #
@@ -27,7 +28,8 @@ class SessionProperties(BaseModel):
     input_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
     output_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
     input_audio_transcription: Optional[InputAudioTranscription] = None
-    turn_detection: Optional[TurnDetection] = None
+    # set turn_detection to False to disable turn detection
+    turn_detection: Optional[Union[TurnDetection, bool]] = Field(default=None)
     tools: Optional[List[Dict]] = None
     tool_choice: Optional[Literal["auto", "none", "required"]] = None
     temperature: Optional[float] = None
@@ -99,6 +101,17 @@ class ClientEvent(BaseModel):
 class SessionUpdateEvent(ClientEvent):
     type: Literal["session.update"] = "session.update"
     session: SessionProperties
+
+    def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
+        logger.debug(f"!!! SessionUpdateEvent.model_dump: {self}")
+        dump = super().model_dump(*args, **kwargs)
+
+        # Handle turn_detection so that False is serialized as null
+        if "turn_detection" in dump["session"]:
+            if dump["session"]["turn_detection"] is False:
+                dump["session"]["turn_detection"] = None
+
+        return dump
 
 
 class InputAudioBufferAppendEvent(ClientEvent):

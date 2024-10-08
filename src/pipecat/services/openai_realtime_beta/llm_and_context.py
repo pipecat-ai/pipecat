@@ -123,7 +123,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         session_properties: events.SessionProperties = events.SessionProperties(),
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
-        send_user_started_speaking_frames: bool = True,
+        send_user_started_speaking_frames: bool = False,
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
@@ -133,6 +133,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         self._session_properties = session_properties
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
+        # todo: wire _send_user_started_speaking_frames up correctly
         self._send_user_started_speaking_frames = send_user_started_speaking_frames
         self._websocket = None
         self._receive_task = None
@@ -158,7 +159,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         await self._disconnect()
 
     async def send_client_event(self, event: events.ClientEvent):
-        await self._ws_send(event.dict(exclude_none=True))
+        await self._ws_send(event.model_dump(exclude_none=True))
 
     async def _ws_send(self, realtime_message):
         try:
@@ -359,9 +360,6 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         context = self._context
         messages = context.get_unsent_messages()
         context.update_all_messages_sent()
-        logger.debug(
-            f"Sending message context updates: {context._marker} {context.get_messages_for_logging()}"
-        )
 
         items = []
         for m in messages:
@@ -401,10 +399,20 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
 
     async def _handle_interruption(self, frame):
+        await self.send_client_event(events.InputAudioBufferClearEvent())
+        await self.send_client_event(events.ResponseCancelEvent())
         await self.stop_all_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
         await self.push_frame(TTSStoppedFrame())
-        # todo: track whether a response is in progress and cancel it with a response.cancela nd input_audio_buffer.clear (?)
+
+    async def _handle_user_started_speaking(self, frame):
+        pass
+
+    async def _handle_user_stopped_speaking(self, frame):
+        if self._session_properties.turn_detection is None:
+            await self.send_client_event(events.InputAudioBufferCommitEvent())
+            await self.send_client_event(events.ResponseCreateEvent())
+        pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -422,6 +430,10 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 await self._send_user_audio(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame)
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            await self._handle_user_started_speaking(frame)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_user_stopped_speaking(frame)
         elif isinstance(frame, _InternalMessagesUpdateFrame):
             self._context = frame.context
             await self._send_messages_context_update()

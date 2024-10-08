@@ -20,13 +20,12 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
 )
 from pipecat.services.openai_realtime_beta import (
-    InputAudioTranscription,
     OpenAILLMServiceRealtimeBeta,
     SessionProperties,
-    TurnDetection,
 )
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.vad.vad_analyzer import VADParams
 
 load_dotenv(override=True)
 
@@ -76,15 +75,19 @@ async def main():
                 audio_out_enabled=True,
                 audio_out_sample_rate=24000,
                 transcription_enabled=False,
-                vad_enabled=False,
-                vad_analyzer=SileroVADAnalyzer(),
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
                 vad_audio_passthrough=True,
             ),
         )
 
         session_properties = SessionProperties(
-            input_audio_transcription=InputAudioTranscription(),
-            turn_detection=TurnDetection(silence_duration_ms=1000),
+            # input_audio_transcription=InputAudioTranscription(),
+            # Set openai TurnDetection parameters. Not setting this at all will turn it
+            # on by default
+            # turn_detection=TurnDetection(silence_duration_ms=1000),
+            # Or set to False to disable openai turn detection and use transport VAD
+            turn_detection=False,
             tools=tools,
             instructions="""
 Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
