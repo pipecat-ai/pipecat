@@ -490,7 +490,7 @@ class RTVIBotLLMTextProcessor(RTVIFrameProcessor):
 
         await self.push_frame(frame, direction)
 
-        if isinstance(frame, TextFrame):
+        if type(frame) is TextFrame:
             await self._handle_text(frame)
 
     async def _handle_text(self, frame: TextFrame):
@@ -507,7 +507,7 @@ class RTVIBotTTSTextProcessor(RTVIFrameProcessor):
 
         await self.push_frame(frame, direction)
 
-        if isinstance(frame, TextFrame):
+        if type(frame) is TextFrame:
             await self._handle_text(frame)
 
     async def _handle_text(self, frame: TextFrame):
