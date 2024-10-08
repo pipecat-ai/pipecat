@@ -366,7 +366,7 @@ class Usage(BaseModel):
 class Response(BaseModel):
     id: str
     object: Literal["realtime.response"]
-    status: Literal["completed", "in_progress", "incomplete", "cancelled"]
+    status: Literal["completed", "in_progress", "incomplete", "cancelled", "failed"]
     status_details: Any
     output: List[ConversationItem]
     usage: Optional[Usage] = None
