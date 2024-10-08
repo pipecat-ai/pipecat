@@ -6,8 +6,9 @@
 
 import base64
 import json
-
 from typing import AsyncGenerator, Optional
+
+from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
@@ -19,9 +20,8 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.services.ai_services import STTService
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-
-from loguru import logger
 
 # See .env.example for Gladia configuration needed
 try:
@@ -37,7 +37,7 @@ except ModuleNotFoundError as e:
 class GladiaSTTService(STTService):
     class InputParams(BaseModel):
         sample_rate: Optional[int] = 16000
-        language: Optional[str] = "english"
+        language: Optional[Language] = Language.EN
         transcription_hint: Optional[str] = None
         endpointing: Optional[int] = 200
         prosody: Optional[bool] = None
@@ -55,8 +55,93 @@ class GladiaSTTService(STTService):
 
         self._api_key = api_key
         self._url = url
-        self._params = params
+        self._settings = {
+            "sample_rate": params.sample_rate,
+            "language": self.language_to_service_language(params.language)
+            if params.language
+            else Language.EN,
+            "transcription_hint": params.transcription_hint,
+            "endpointing": params.endpointing,
+            "prosody": params.prosody,
+        }
         self._confidence = confidence
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        match language:
+            case Language.BG:
+                return "bulgarian"
+            case Language.CA:
+                return "catalan"
+            case Language.ZH:
+                return "chinese"
+            case Language.CS:
+                return "czech"
+            case Language.DA:
+                return "danish"
+            case Language.NL:
+                return "dutch"
+            case (
+                Language.EN
+                | Language.EN_US
+                | Language.EN_AU
+                | Language.EN_GB
+                | Language.EN_NZ
+                | Language.EN_IN
+            ):
+                return "english"
+            case Language.ET:
+                return "estonian"
+            case Language.FI:
+                return "finnish"
+            case Language.FR | Language.FR_CA:
+                return "french"
+            case Language.DE | Language.DE_CH:
+                return "german"
+            case Language.EL:
+                return "greek"
+            case Language.HI:
+                return "hindi"
+            case Language.HU:
+                return "hungarian"
+            case Language.ID:
+                return "indonesian"
+            case Language.IT:
+                return "italian"
+            case Language.JA:
+                return "japanese"
+            case Language.KO:
+                return "korean"
+            case Language.LV:
+                return "latvian"
+            case Language.LT:
+                return "lithuanian"
+            case Language.MS:
+                return "malay"
+            case Language.NO:
+                return "norwegian"
+            case Language.PL:
+                return "polish"
+            case Language.PT | Language.PT_BR:
+                return "portuguese"
+            case Language.RO:
+                return "romanian"
+            case Language.RU:
+                return "russian"
+            case Language.SK:
+                return "slovak"
+            case Language.ES:
+                return "spanish"
+            case Language.SV:
+                return "slovenian"
+            case Language.TH:
+                return "thai"
+            case Language.TR:
+                return "turkish"
+            case Language.UK:
+                return "ukrainian"
+            case Language.VI:
+                return "vietnamese"
+        return None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -84,7 +169,11 @@ class GladiaSTTService(STTService):
             "encoding": "WAV/PCM",
             "model_type": "fast",
             "language_behaviour": "manual",
-            **self._params.model_dump(exclude_none=True),
+            "sample_rate": self._settings["sample_rate"],
+            "language": self._settings["language"],
+            "transcription_hint": self._settings["transcription_hint"],
+            "endpointing": self._settings["endpointing"],
+            "prosody": self._settings["prosody"],
         }
 
         await self._websocket.send(json.dumps(configuration))

@@ -30,6 +30,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService, TTSService
+from pipecat.transcriptions.language import Language
 
 try:
     import google.ai.generativelanguage as glm
@@ -39,7 +40,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set `GOOGLE_API_KEY` environment variable."
+        "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set the environment variable GOOGLE_API_KEY for the GoogleLLMService and GOOGLE_APPLICATION_CREDENTIALS for the GoogleTTSService`."
     )
     raise Exception(f"Missing module: {e}")
 
@@ -137,9 +138,7 @@ class GoogleLLMService(LLMService):
         elif isinstance(frame, VisionImageRawFrame):
             context = OpenAILLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMUpdateSettingsFrame):
-            if frame.model is not None:
-                logger.debug(f"Switching LLM model to: [{frame.model}]")
-                self.set_model_name(frame.model)
+            await self._update_settings(frame.settings)
         else:
             await self.push_frame(frame, direction)
 
@@ -153,7 +152,7 @@ class GoogleTTSService(TTSService):
         rate: Optional[str] = None
         volume: Optional[str] = None
         emphasis: Optional[Literal["strong", "moderate", "reduced", "none"]] = None
-        language: Optional[str] = "en-US"
+        language: Optional[Language] = Language.EN
         gender: Optional[Literal["male", "female", "neutral"]] = None
         google_style: Optional[Literal["apologetic", "calm", "empathetic", "firm", "lively"]] = None
 
@@ -169,8 +168,19 @@ class GoogleTTSService(TTSService):
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        self._voice_id: str = voice_id
-        self._params = params
+        self._settings = {
+            "sample_rate": sample_rate,
+            "pitch": params.pitch,
+            "rate": params.rate,
+            "volume": params.volume,
+            "emphasis": params.emphasis,
+            "language": self.language_to_service_language(params.language)
+            if params.language
+            else Language.EN,
+            "gender": params.gender,
+            "google_style": params.google_style,
+        }
+        self.set_voice(voice_id)
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
             credentials, credentials_path
         )
@@ -190,97 +200,141 @@ class GoogleTTSService(TTSService):
         elif credentials_path:
             # Use service account JSON file if provided
             creds = service_account.Credentials.from_service_account_file(credentials_path)
-        else:
-            raise ValueError("Either 'credentials' or 'credentials_path' must be provided.")
 
         return texttospeech_v1.TextToSpeechAsyncClient(credentials=creds)
 
     def can_generate_metrics(self) -> bool:
         return True
 
+    def language_to_service_language(self, language: Language) -> str | None:
+        match language:
+            case Language.BG:
+                return "bg-BG"
+            case Language.CA:
+                return "ca-ES"
+            case Language.ZH:
+                return "cmn-CN"
+            case Language.ZH_TW:
+                return "cmn-TW"
+            case Language.CS:
+                return "cs-CZ"
+            case Language.DA:
+                return "da-DK"
+            case Language.NL:
+                return "nl-NL"
+            case Language.EN | Language.EN_US:
+                return "en-US"
+            case Language.EN_AU:
+                return "en-AU"
+            case Language.EN_GB:
+                return "en-GB"
+            case Language.EN_IN:
+                return "en-IN"
+            case Language.ET:
+                return "et-EE"
+            case Language.FI:
+                return "fi-FI"
+            case Language.NL_BE:
+                return "nl-BE"
+            case Language.FR:
+                return "fr-FR"
+            case Language.FR_CA:
+                return "fr-CA"
+            case Language.DE:
+                return "de-DE"
+            case Language.EL:
+                return "el-GR"
+            case Language.HI:
+                return "hi-IN"
+            case Language.HU:
+                return "hu-HU"
+            case Language.ID:
+                return "id-ID"
+            case Language.IT:
+                return "it-IT"
+            case Language.JA:
+                return "ja-JP"
+            case Language.KO:
+                return "ko-KR"
+            case Language.LV:
+                return "lv-LV"
+            case Language.LT:
+                return "lt-LT"
+            case Language.MS:
+                return "ms-MY"
+            case Language.NO:
+                return "nb-NO"
+            case Language.PL:
+                return "pl-PL"
+            case Language.PT:
+                return "pt-PT"
+            case Language.PT_BR:
+                return "pt-BR"
+            case Language.RO:
+                return "ro-RO"
+            case Language.RU:
+                return "ru-RU"
+            case Language.SK:
+                return "sk-SK"
+            case Language.ES:
+                return "es-ES"
+            case Language.SV:
+                return "sv-SE"
+            case Language.TH:
+                return "th-TH"
+            case Language.TR:
+                return "tr-TR"
+            case Language.UK:
+                return "uk-UA"
+            case Language.VI:
+                return "vi-VN"
+        return None
+
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
 
         # Voice tag
         voice_attrs = [f"name='{self._voice_id}'"]
-        if self._params.language:
-            voice_attrs.append(f"language='{self._params.language}'")
-        if self._params.gender:
-            voice_attrs.append(f"gender='{self._params.gender}'")
+
+        language = self._settings["language"]
+        voice_attrs.append(f"language='{language}'")
+
+        if self._settings["gender"]:
+            voice_attrs.append(f"gender='{self._settings['gender']}'")
         ssml += f"<voice {' '.join(voice_attrs)}>"
 
         # Prosody tag
         prosody_attrs = []
-        if self._params.pitch:
-            prosody_attrs.append(f"pitch='{self._params.pitch}'")
-        if self._params.rate:
-            prosody_attrs.append(f"rate='{self._params.rate}'")
-        if self._params.volume:
-            prosody_attrs.append(f"volume='{self._params.volume}'")
+        if self._settings["pitch"]:
+            prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
+        if self._settings["rate"]:
+            prosody_attrs.append(f"rate='{self._settings['rate']}'")
+        if self._settings["volume"]:
+            prosody_attrs.append(f"volume='{self._settings['volume']}'")
 
         if prosody_attrs:
             ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
         # Emphasis tag
-        if self._params.emphasis:
-            ssml += f"<emphasis level='{self._params.emphasis}'>"
+        if self._settings["emphasis"]:
+            ssml += f"<emphasis level='{self._settings['emphasis']}'>"
 
         # Google style tag
-        if self._params.google_style:
-            ssml += f"<google:style name='{self._params.google_style}'>"
+        if self._settings["google_style"]:
+            ssml += f"<google:style name='{self._settings['google_style']}'>"
 
         ssml += text
 
         # Close tags
-        if self._params.google_style:
+        if self._settings["google_style"]:
             ssml += "</google:style>"
-        if self._params.emphasis:
+        if self._settings["emphasis"]:
             ssml += "</emphasis>"
         if prosody_attrs:
             ssml += "</prosody>"
         ssml += "</voice></speak>"
 
         return ssml
-
-    async def set_voice(self, voice: str) -> None:
-        logger.debug(f"Switching TTS voice to: [{voice}]")
-        self._voice_id = voice
-
-    async def set_language(self, language: str) -> None:
-        logger.debug(f"Switching TTS language to: [{language}]")
-        self._params.language = language
-
-    async def set_pitch(self, pitch: str) -> None:
-        logger.debug(f"Switching TTS pitch to: [{pitch}]")
-        self._params.pitch = pitch
-
-    async def set_rate(self, rate: str) -> None:
-        logger.debug(f"Switching TTS rate to: [{rate}]")
-        self._params.rate = rate
-
-    async def set_volume(self, volume: str) -> None:
-        logger.debug(f"Switching TTS volume to: [{volume}]")
-        self._params.volume = volume
-
-    async def set_emphasis(
-        self, emphasis: Literal["strong", "moderate", "reduced", "none"]
-    ) -> None:
-        logger.debug(f"Switching TTS emphasis to: [{emphasis}]")
-        self._params.emphasis = emphasis
-
-    async def set_gender(self, gender: Literal["male", "female", "neutral"]) -> None:
-        logger.debug(f"Switch TTS gender to [{gender}]")
-        self._params.gender = gender
-
-    async def google_style(
-        self, google_style: Literal["apologetic", "calm", "empathetic", "firm", "lively"]
-    ) -> None:
-        logger.debug(f"Switching TTS google style to: [{google_style}]")
-        self._params.google_style = google_style
-
-    async def set_params(self, params: InputParams) -> None:
-        logger.debug(f"Switching TTS params to: [{params}]")
-        self._params = params
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -291,11 +345,11 @@ class GoogleTTSService(TTSService):
             ssml = self._construct_ssml(text)
             synthesis_input = texttospeech_v1.SynthesisInput(ssml=ssml)
             voice = texttospeech_v1.VoiceSelectionParams(
-                language_code=self._params.language, name=self._voice_id
+                language_code=self._settings["language"], name=self._voice_id
             )
             audio_config = texttospeech_v1.AudioConfig(
                 audio_encoding=texttospeech_v1.AudioEncoding.LINEAR16,
-                sample_rate_hertz=self.sample_rate,
+                sample_rate_hertz=self._settings["sample_rate"],
             )
 
             request = texttospeech_v1.SynthesizeSpeechRequest(
@@ -306,7 +360,7 @@ class GoogleTTSService(TTSService):
 
             await self.start_tts_usage_metrics(text)
 
-            await self.push_frame(TTSStartedFrame())
+            yield TTSStartedFrame()
 
             # Skip the first 44 bytes to remove the WAV header
             audio_content = response.audio_content[44:]
@@ -318,15 +372,15 @@ class GoogleTTSService(TTSService):
                 if not chunk:
                     break
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
                 yield frame
                 await asyncio.sleep(0)  # Allow other tasks to run
 
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()
 
         except Exception as e:
             logger.exception(f"{self} error generating TTS: {e}")
             error_message = f"TTS generation error: {str(e)}"
             yield ErrorFrame(error=error_message)
         finally:
-            await self.push_frame(TTSStoppedFrame())
+            yield TTSStoppedFrame()

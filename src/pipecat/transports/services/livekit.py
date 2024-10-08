@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     MetricsFrame,
     StartFrame,
     TransportMessageFrame,
+    TransportMessageUrgentFrame,
 )
 from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
@@ -48,6 +49,11 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class LiveKitTransportMessageFrame(TransportMessageFrame):
+    participant_id: str | None = None
+
+
+@dataclass
+class LiveKitTransportMessageUrgentFrame(TransportMessageUrgentFrame):
     participant_id: str | None = None
 
 
@@ -420,8 +426,8 @@ class LiveKitOutputTransport(BaseOutputTransport):
         await super().cancel(frame)
         await self._client.disconnect()
 
-    async def send_message(self, frame: TransportMessageFrame):
-        if isinstance(frame, LiveKitTransportMessageFrame):
+    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+        if isinstance(frame, (LiveKitTransportMessageFrame, LiveKitTransportMessageUrgentFrame)):
             await self._client.send_data(frame.message.encode(), frame.participant_id)
         else:
             await self._client.send_data(frame.message.encode())
@@ -594,6 +600,13 @@ class LiveKitTransport(BaseTransport):
     async def send_message(self, message: str, participant_id: str | None = None):
         if self._output:
             frame = LiveKitTransportMessageFrame(message=message, participant_id=participant_id)
+            await self._output.send_message(frame)
+
+    async def send_message_urgent(self, message: str, participant_id: str | None = None):
+        if self._output:
+            frame = LiveKitTransportMessageUrgentFrame(
+                message=message, participant_id=participant_id
+            )
             await self._output.send_message(frame)
 
     async def cleanup(self):

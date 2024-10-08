@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **pipecat** will be documented in this file.
+All notable changes to **Pipecat** will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -9,11 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added Google TTS service and corresponding foundational example `07n-interruptible-google.py`
+- Added new `RTVIUserLLMTextProcessor`. This processor will send an RTVI
+  `user-llm-text` message with the user content's that was sent to the LLM.
+
+### Changed
+
+- `TransportMessageFrame` doesn't have an `urgent` field anymore, instead
+  there's now a `TransportMessageUrgentFrame` which is a `SystemFrame` and
+  therefore skip all internal queuing.
+
+- For TTS services, convert inputted languages to match each service's language
+  format
+
+### Fixed
+
+- Fixed an issue where changing a language with the Deepgram STT service
+  wouldn't apply the change. This was fixed by disconnecting and reconnecting
+  when the language changes.
+
+## [0.0.42] - 2024-10-02
+
+### Added
+
+- `SentryMetrics` has been added to report frame processor metrics to
+  Sentry. This is now possible because `FrameProcessorMetrics` can now be passed
+  to `FrameProcessor`.
+
+- Added Google TTS service and corresponding foundational example
+  `07n-interruptible-google.py`
 
 - Added AWS Polly TTS support and `07m-interruptible-aws.py` as an example.
 
 - Added InputParams to Azure TTS service.
+
+- Added `LivekitTransport` (audio-only for now).
+
+- RTVI 0.2.0 is now supported.
 
 - All `FrameProcessors` can now register event handlers.
 
@@ -86,8 +117,12 @@ async def on_connected(processor):
 
 ### Changed
 
-- Updated individual update settings frame classes into a single UpdateSettingsFrame
-  class for STT, LLM, and TTS.
+- Context frames are now pushed downstream from assistant context aggregators.
+
+- Removed Silero VAD torch dependency.
+
+- Updated individual update settings frame classes into a single
+  `ServiceUpdateSettingsFrame` class.
 
 - We now distinguish between input and output audio and image frames. We
   introduce `InputAudioRawFrame`, `OutputAudioRawFrame`, `InputImageRawFrame`
@@ -107,9 +142,9 @@ async def on_connected(processor):
   pipelines is synchronous (e.g. an HTTP-based service that waits for the
   response).
 
-- `StartFrame` is back a system frame so we make sure it's processed immediately
-  by all processors. `EndFrame` stays a control frame since it needs to be
-  ordered allowing the frames in the pipeline to be processed.
+- `StartFrame` is back a system frame to make sure it's processed immediately by
+  all processors. `EndFrame` stays a control frame since it needs to be ordered
+  allowing the frames in the pipeline to be processed.
 
 - Updated `MoondreamService` revision to `2024-08-26`.
 
@@ -133,6 +168,11 @@ async def on_connected(processor):
 
 ### Fixed
 
+- Fixed OpenAI multiple function calls.
+
+- Fixed a Cartesia TTS issue that would cause audio to be truncated in some
+  cases.
+
 - Fixed a `BaseOutputTransport` issue that would stop audio and video rendering
   tasks (after receiving and `EndFrame`) before the internal queue was emptied,
   causing the pipeline to finish prematurely.
@@ -145,6 +185,10 @@ async def on_connected(processor):
 
 - `obj_id()` and `obj_count()` now use `itertools.count` avoiding the need of
   `threading.Lock`.
+
+### Other
+
+- Pipecat now uses Ruff as its formatter (https://github.com/astral-sh/ruff).
 
 ## [0.0.41] - 2024-08-22
 
