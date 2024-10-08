@@ -147,7 +147,7 @@ class ConversationItemDeleteEvent(ClientEvent):
 
 class ResponseCreateEvent(ClientEvent):
     type: Literal["response.create"] = "response.create"
-    response: Optional[ResponseProperties] = ResponseProperties()
+    response: Optional[ResponseProperties] = None
 
 
 class ResponseCancelEvent(ClientEvent):
