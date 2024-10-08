@@ -512,7 +512,7 @@ class RTVIBotTTSTextProcessor(RTVIFrameProcessor):
 
     async def _handle_text(self, frame: TextFrame):
         message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self._push_transport_message(message)
+        await self._push_transport_message_urgent(message)
 
 
 class RTVIBotTTSAudioProcessor(RTVIFrameProcessor):
