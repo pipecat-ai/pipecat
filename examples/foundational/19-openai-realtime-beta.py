@@ -5,8 +5,10 @@
 #
 
 import asyncio
+import json
 import os
 import sys
+from datetime import datetime
 
 import aiohttp
 from dotenv import load_dotenv
@@ -20,6 +22,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
 )
 from pipecat.services.openai_realtime_beta import (
+    InputAudioTranscription,
     OpenAILLMServiceRealtimeBeta,
     SessionProperties,
 )
@@ -34,7 +37,24 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await result_callback({"conditions": "nice", "temperature": "75"})
+    await result_callback(
+        {
+            "conditions": "nice",
+            "temperature": "75",
+            "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+        }
+    )
+
+
+async def save_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"example_19_{timestamp}.json"
+    try:
+        with open(filename, "w") as file:
+            json.dump(context.messages, file, indent=4)
+        await result_callback({"success": True})
+    except Exception as e:
+        await result_callback({"success": False, "error": str(e)})
 
 
 tools = [
@@ -57,7 +77,17 @@ tools = [
             },
             "required": ["location", "format"],
         },
-    }
+    },
+    {
+        "type": "function",
+        "name": "save_conversation",
+        "description": "Save the current conversatione. Use this function to persist the current conversation to external storage.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 ]
 
 
@@ -82,7 +112,7 @@ async def main():
         )
 
         session_properties = SessionProperties(
-            # input_audio_transcription=InputAudioTranscription(),
+            input_audio_transcription=InputAudioTranscription(),
             # Set openai TurnDetection parameters. Not setting this at all will turn it
             # on by default
             # turn_detection=TurnDetection(silence_duration_ms=1000),
@@ -114,6 +144,7 @@ Remember, your responses should be short. Just one or two sentences, usually.
         # you can either register a single function for all function calls, or specific functions
         # llm.register_function(None, fetch_weather_from_api)
         llm.register_function("get_current_weather", fetch_weather_from_api)
+        llm.register_function("save_conversation", save_conversation)
 
         context = OpenAILLMContext(
             # [{"role": "user", "content": "What's the weather right now in San Francisco?"}], tools
