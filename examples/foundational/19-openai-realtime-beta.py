@@ -7,6 +7,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 from datetime import datetime
 
@@ -15,6 +16,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
+from pipecat.frames.frames import LLMMessagesUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -37,22 +39,50 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
+    temperature = 75 if args["format"] == "fahrenheit" else 24
     await result_callback(
         {
             "conditions": "nice",
-            "temperature": "75",
+            "temperature": temperature,
+            "format": args["format"],
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
+async def get_saved_conversation_filenames(
+    function_name, tool_call_id, args, llm, context, result_callback
+):
+    pattern = re.compile("example_19_\\d{8}_\\d{6}\\.json$")
+    matching_files = []
+
+    for filename in os.listdir("."):
+        if pattern.match(filename):
+            matching_files.append(filename)
+
+    await result_callback({"filenames": matching_files})
+
+
 async def save_conversation(function_name, tool_call_id, args, llm, context, result_callback):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"example_19_{timestamp}.json"
+    logger.debug(f"writing conversation to {filename}\n{json.dumps(context.messages, indent=4)}")
     try:
         with open(filename, "w") as file:
             json.dump(context.messages, file, indent=4)
         await result_callback({"success": True})
+    except Exception as e:
+        await result_callback({"success": False, "error": str(e)})
+
+
+async def load_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+    filename = args["filename"]
+    logger.debug(f"loading conversation from {filename}")
+    try:
+        with open(filename, "r") as file:
+            messages = json.load(file)
+        await result_callback({"success": True})
+        await llm.push_frame(LLMMessagesUpdateFrame(messages))
     except Exception as e:
         await result_callback({"success": False, "error": str(e)})
 
@@ -88,6 +118,31 @@ tools = [
             "required": [],
         },
     },
+    {
+        "type": "function",
+        "name": "get_saved_conversation_filenames",
+        "description": "Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a timestamp. Each file is conversation history that can be loaded into this session.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "load_conversation",
+        "description": "Load a conversation history. Use this function to load a conversation history into the current session.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "The filename of the conversation history to load.",
+                }
+            },
+            "required": ["filename"],
+        },
+    },
 ]
 
 
@@ -118,7 +173,7 @@ async def main():
             # turn_detection=TurnDetection(silence_duration_ms=1000),
             # Or set to False to disable openai turn detection and use transport VAD
             turn_detection=False,
-            tools=tools,
+            # tools=tools,
             instructions="""
 Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
 
@@ -145,10 +200,14 @@ Remember, your responses should be short. Just one or two sentences, usually.
         # llm.register_function(None, fetch_weather_from_api)
         llm.register_function("get_current_weather", fetch_weather_from_api)
         llm.register_function("save_conversation", save_conversation)
+        llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
+        llm.register_function("load_conversation", load_conversation)
 
         context = OpenAILLMContext(
-            # [{"role": "user", "content": "What's the weather right now in San Francisco?"}], tools
             [{"role": "user", "content": "Say 'hello'."}],
+            # [{"role": "user", "content": "What's the weather right now in San Francisco?"}],
+            # conversation load from file is a WIP -- not functional yet
+            # [{"role": "user", "content": "Load the most recent conversation."}],
             tools,
         )
         context_aggregator = llm.create_context_aggregator(context)
