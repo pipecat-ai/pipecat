@@ -1,0 +1,11 @@
+build~=1.2.1
+grpcio-tools~=1.62.2
+pip-tools~=7.4.1
+pyright~=1.1.376
+pytest~=8.3.2
+ruff~=0.6.7
+setuptools~=72.2.0
+setuptools_scm~=8.1.0
+-e .[daily,openai,azure,silero]
+python-dotenv
+fastapi[all]

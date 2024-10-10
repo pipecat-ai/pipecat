@@ -8,6 +8,7 @@ import asyncio
 import io
 from typing import AsyncGenerator, Optional
 
+import re
 import aiohttp
 from loguru import logger
 from PIL import Image
@@ -53,6 +54,16 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+
+def replace_formula(text):
+    # Define a regular expression to match the content inside <formula> tags
+    pattern = r"<formula>.*?</formula>"
+    
+    # Replace the formula with {{formula}}
+    new_text = re.sub(pattern, "{{formula}}", text, flags=re.DOTALL)
+    
+    return new_text
+
 class AzureLLMService(BaseOpenAILLMService):
     def __init__(
         self, *, api_key: str, endpoint: str, model: str, api_version: str = "2023-12-01-preview"
@@ -90,6 +101,7 @@ class AzureTTSService(TTSService):
         voice="en-US-SaraNeural",
         sample_rate: int = 16000,
         params: InputParams = InputParams(),
+        callback: Optional[callable] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -112,6 +124,9 @@ class AzureTTSService(TTSService):
         }
 
         self.set_voice(voice)
+
+        # Store the callback
+        self.callback = callback
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -251,6 +266,16 @@ class AzureTTSService(TTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
+
+        
+
+        # Invoke the callback with the raw text
+        if self.callback:
+            await self.callback(text)
+
+        text = replace_formula(text)
+
+        # Extract maths formula before generating tts
 
         await self.start_ttfb_metrics()
 
