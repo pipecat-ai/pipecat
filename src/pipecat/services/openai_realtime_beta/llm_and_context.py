@@ -1,6 +1,9 @@
 import asyncio
 import base64
 import json
+
+# temp: websocket logger
+import logging
 import traceback
 from copy import deepcopy
 from dataclasses import dataclass
@@ -48,12 +51,10 @@ from pipecat.utils.time import time_now_iso8601
 
 from . import events
 
-# temp: websocket logger
-# import logging
-# logging.basicConfig(
-#     format="%(message)s",
-#     level=logging.DEBUG,
-# )
+logging.basicConfig(
+    format="%(message)s",
+    level=logging.DEBUG,
+)
 
 
 @dataclass
@@ -332,6 +333,8 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         raise Exception("Websocket not connected")
 
     async def _update_settings(self):
+        # !!! LEAVE ALL DEFAULT SETTINGS FOR NOW
+        return
         settings = self._session_properties
         # tools given in the context override the tools in the session properties
         if self._context and self._context.tools:
@@ -347,9 +350,13 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 if evt.type == "session.created":
                     # session.created is received right after connecting. send a message
                     # to configure the session properties.
+                    logger.debug(f"!!! GOT SESSION CREATED {evt}")
                     await self._update_settings()
                 elif evt.type == "session.updated":
+                    logger.debug(f"!!! GOT SESSION UPDATED {evt}")
                     self._session_properties = evt.session
+                elif evt.type == "conversation.created":
+                    logger.debug(f"!!! GOT CONVERSATION CREATED: {evt}")
                 elif evt.type == "input_audio_buffer.speech_started":
                     # user started speaking
                     if self._send_user_started_speaking_frames:
@@ -374,6 +381,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 elif evt.type == "response.created":
                     # todo: 1. figure out TTS started/stopped frame semantics better
                     #       2. do not push these frames in text-only mode
+                    logger.debug(f"!!! GOT RESPONSE CREATED {evt}")
                     if not self._bot_speaking:
                         self._bot_speaking = True
                         await self.push_frame(TTSStartedFrame())
@@ -569,16 +577,36 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
 
         for item in items:
             context.note_manually_added_message(item.id)
-            await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+            evt = events.ConversationItemCreateEvent(item=item)
+            logger.debug(
+                f"!!! > Sending message: {evt.model_dump_json(indent=2, exclude_none=True)}"
+            )
+            await self.send_client_event(evt)
+            await asyncio.sleep(2)
+            # await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 
     async def _create_response(self):
         if self._context.get_tools_list_updated():
             await self._update_settings()
+
+        # !!! DEBUGGING - testing await on conversation.create
+        logger.debug("!!! A waiting on conversation.created")
+        await asyncio.sleep(3)
+        logger.debug("!!! A ok, done waiting")
+
         await self._send_messages_context_update()
         logger.debug(f"Creating response: {self._context.get_messages_for_logging()}")
         await self.push_frame(LLMFullResponseStartFrame())
         await self.start_processing_metrics()
-        await self.send_client_event(events.ResponseCreateEvent())
+        await self.send_client_event(
+            events.ResponseCreateEvent(
+                response=events.ResponseProperties(modalities=["audio", "text"])
+            )
+        )
+        # !!! DEBUGGING
+        await asyncio.sleep(2)
+        # logger.debug("Unpausing microphone")
+        # self.set_audio_input_paused(False)
 
     async def _send_user_audio(self, frame):
         payload = base64.b64encode(frame.audio).decode("utf-8")
