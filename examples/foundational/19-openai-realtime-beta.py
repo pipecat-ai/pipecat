@@ -38,6 +38,39 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
+messages = [
+    {"role": "user", "content": "Say 'Hello there' and ask my name."},
+    {"role": "assistant", "content": [{"type": "text", "text": "Hello there! What's your name?"}]},
+    # {"role": "user", "content": [{"type": "input_audio"}]},
+    {"role": "user", "content": [{"type": "text", "text": "Tell me a joke.\n"}]},
+    # {
+    #     "role": "assistant",
+    #     "content": [
+    #         {
+    #             "type": "text",
+    #             "text": "Why don't scientists trust atoms? Because they make up everything!",
+    #         }
+    #     ],
+    # },
+    # {"role": "user", "content": [{"type": "text", "text": "me know the joke.\n"}]},
+    # {
+    #     "role": "assistant",
+    #     "content": [{"type": "text", "text": "What do you call fake spaghetti? An impasta!"}],
+    # },
+    # {"role": "user", "content": [{"type": "text", "text": "me another joke.\n"}]},
+    # {
+    #     "role": "assistant",
+    #     "content": [
+    #         {
+    #             "type": "text",
+    #             "text": "Why couldn't the bicycle stand up by itself? It was two-tired!",
+    #         }
+    #     ],
+    # },
+    # {"role": "user", "content": [{"type": "input_audio"}]},
+]
+
+
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
     temperature = 75 if args["format"] == "fahrenheit" else 24
     await result_callback(
@@ -193,7 +226,9 @@ Remember, your responses should be short. Just one or two sentences, usually.
         )
 
         llm = OpenAILLMServiceRealtimeBeta(
-            api_key=os.getenv("OPENAI_API_KEY"), session_properties=session_properties
+            api_key=os.getenv("OPENAI_API_KEY"),
+            session_properties=session_properties,
+            start_audio_paused=True,
         )
 
         # you can either register a single function for all function calls, or specific functions
@@ -204,7 +239,8 @@ Remember, your responses should be short. Just one or two sentences, usually.
         llm.register_function("load_conversation", load_conversation)
 
         context = OpenAILLMContext(
-            [{"role": "user", "content": "Say 'hello'."}],
+            messages,
+            # [{"role": "user", "content": "Say 'hello'."}],
             # [{"role": "user", "content": "What's the weather right now in San Francisco?"}],
             # conversation load from file is a WIP -- not functional yet
             # [{"role": "user", "content": "Load the most recent conversation."}],
