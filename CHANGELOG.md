@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `MarkdownRemovalProcessor`. This processor removes markdown formatting
+  from a TextFrame. It's intended to be used between the LLM and TTS in order
+  to remove markdown from the text the TTS speaks.
+
 - Added new `RTVIUserLLMTextProcessor`. This processor will send an RTVI
   `user-llm-text` message with the user content's that was sent to the LLM.
 
