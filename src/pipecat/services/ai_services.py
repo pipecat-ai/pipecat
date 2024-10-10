@@ -47,6 +47,7 @@ class AIService(FrameProcessor):
         super().__init__(**kwargs)
         self._model_name: str = ""
         self._settings: Dict[str, Any] = {}
+        self._session_properties: Dict[str, Any] = {}
 
     @property
     def model_name(self) -> str:
@@ -66,11 +67,44 @@ class AIService(FrameProcessor):
         pass
 
     async def _update_settings(self, settings: Dict[str, Any]):
+        from pipecat.services.openai_realtime_beta.events import (
+            SessionProperties,
+        )
+
         for key, value in settings.items():
+            print("Update request for:", key, value)
+
             if key in self._settings:
-                logger.debug(f"Updating setting {key} to: [{value}] for {self.name}")
+                logger.debug(f"Updating LLM setting {key} to: [{value}]")
                 self._settings[key] = value
+            elif key in SessionProperties.model_fields:
+                print("Attempting to update", key, value)
+
+                try:
+                    from pipecat.services.openai_realtime_beta.events import (
+                        TurnDetection,
+                    )
+
+                    if isinstance(self._session_properties, SessionProperties):
+                        current_properties = self._session_properties
+                    else:
+                        current_properties = SessionProperties(**self._session_properties)
+
+                    if key == "turn_detection" and isinstance(value, dict):
+                        turn_detection = TurnDetection(**value)
+                        setattr(current_properties, key, turn_detection)
+                    else:
+                        setattr(current_properties, key, value)
+
+                    validated_properties = SessionProperties.model_validate(
+                        current_properties.model_dump()
+                    )
+                    logger.debug(f"Updating LLM setting {key} to: [{value}]")
+                    self._session_properties = validated_properties.model_dump()
+                except Exception as e:
+                    logger.warning(f"Unexpected error updating session property {key}: {e}")
             elif key == "model":
+                logger.debug(f"Updating LLM setting {key} to: [{value}]")
                 self.set_model_name(value)
             else:
                 logger.warning(f"Unknown setting for {self.name} service: {key}")
