@@ -34,8 +34,11 @@ class MarkdownRemovalProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     def _remove_markdown(self, markdown_string: str) -> str:
-        # Replace newlines with spaces to handle cases with leading newlines
-        markdown_string = markdown_string.replace("\n", " ")
+        # Replace newlines with spaces only when there's no text before or after
+        markdown_string = re.sub(r"^\s*\n", "", markdown_string, flags=re.MULTILINE)
+
+        # Remove repeated sequences of 5 or more characters
+        markdown_string = re.sub(r"(\S)(\1{4,})", "", markdown_string)
 
         # Preserve numbered list items with a unique marker, §NUM§
         markdown_string = re.sub(r"^(\d+\.)\s", r"§NUM§\1 ", markdown_string)
