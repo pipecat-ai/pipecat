@@ -7,6 +7,7 @@
 import re
 
 from markdown import Markdown
+from pydantic import BaseModel
 
 from pipecat.frames.frames import Frame, TextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -20,9 +21,13 @@ class MarkdownRemovalProcessor(FrameProcessor):
     asterisks and table formatting.
     """
 
-    def __init__(self, **kwargs):
+    class InputParams(BaseModel):
+        speak_code: bool = True
+
+    def __init__(self, params: InputParams = InputParams(), **kwargs):
         super().__init__(**kwargs)
         self._md = Markdown()
+        self._params = params
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -37,6 +42,9 @@ class MarkdownRemovalProcessor(FrameProcessor):
         # Replace newlines with spaces only when there's no text before or after
         markdown_string = re.sub(r"^\s*\n", "", markdown_string, flags=re.MULTILINE)
 
+        # Remove backticks from inline code, but not from code blocks
+        markdown_string = re.sub(r"(?<!`)`([^`\n]+)`(?!`)", r"\1", markdown_string)
+
         # Remove repeated sequences of 5 or more characters
         markdown_string = re.sub(r"(\S)(\1{4,})", "", markdown_string)
 
@@ -50,8 +58,13 @@ class MarkdownRemovalProcessor(FrameProcessor):
         )
 
         # Convert markdown to HTML
-        md = Markdown()
+        extensions = ["fenced_code"] if self._params.speak_code else []
+        md = Markdown(extensions=extensions)
         html = md.convert(preserved_markdown)
+
+        # Remove code blocks if speak_code is False
+        if not self._params.speak_code:
+            html = re.sub(r"<code>.*?</code>", "", html, flags=re.DOTALL)
 
         # Remove HTML tags
         text = re.sub("<[^<]+?>", "", html)
