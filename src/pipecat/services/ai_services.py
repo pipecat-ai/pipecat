@@ -37,6 +37,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.string import match_endofsentence
+from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.time import seconds_to_nanoseconds
 from pipecat.utils.utils import exp_smoothing
 
@@ -172,6 +173,7 @@ class TTSService(AIService):
         stop_frame_timeout_s: float = 1.0,
         # TTS output sample rate
         sample_rate: int = 16000,
+        text_filter: Optional[BaseTextFilter] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -182,6 +184,7 @@ class TTSService(AIService):
         self._sample_rate: int = sample_rate
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
+        self._text_filter: Optional[BaseTextFilter] = text_filter
 
         self._stop_frame_task: Optional[asyncio.Task] = None
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
@@ -203,6 +206,9 @@ class TTSService(AIService):
     @abstractmethod
     async def flush_audio(self):
         pass
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        return Language(language)
 
     # Converts the text to audio.
     @abstractmethod
@@ -234,11 +240,13 @@ class TTSService(AIService):
                 logger.debug(f"Updating TTS setting {key} to: [{value}]")
                 self._settings[key] = value
                 if key == "language":
-                    self._settings[key] = Language(value)
+                    self._settings[key] = self.language_to_service_language(value)
             elif key == "model":
                 self.set_model_name(value)
             elif key == "voice":
                 self.set_voice(value)
+            elif key == "text_filter" and self._text_filter:
+                self._text_filter.update_settings(value)
             else:
                 logger.warning(f"Unknown setting for TTS service: {key}")
 
@@ -256,7 +264,7 @@ class TTSService(AIService):
             await self._process_text_frame(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame, direction)
-        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
+        elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             sentence = self._current_sentence
             self._current_sentence = ""
             await self._push_tts_frames(sentence)
@@ -309,6 +317,8 @@ class TTSService(AIService):
             return
 
         await self.start_processing_metrics()
+        if self._text_filter:
+            text = self._text_filter.filter(text)
         await self.process_generator(self.run_tts(text))
         await self.stop_processing_metrics()
         if self._push_text_frames:
@@ -366,7 +376,7 @@ class WordTTSService(TTSService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, EndFrame):
+        if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
@@ -408,6 +418,10 @@ class STTService(AIService):
         self.set_model_name(model)
 
     @abstractmethod
+    async def set_language(self, language: Language):
+        pass
+
+    @abstractmethod
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Returns transcript as a string"""
         pass
@@ -419,7 +433,7 @@ class STTService(AIService):
                 logger.debug(f"Updating STT setting {key} to: [{value}]")
                 self._settings[key] = value
                 if key == "language":
-                    self._settings[key] = Language(value)
+                    await self.set_language(value)
             elif key == "model":
                 self.set_model_name(value)
             else:

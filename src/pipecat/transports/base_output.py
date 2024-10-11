@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TextFrame,
     TransportMessageFrame,
+    TransportMessageUrgentFrame,
 )
 from pipecat.transports.base_transport import TransportParams
 
@@ -148,7 +149,7 @@ class BaseOutputTransport(FrameProcessor):
             await self._audio_out_task
             self._audio_out_task = None
 
-    async def send_message(self, frame: TransportMessageFrame):
+    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         pass
 
     async def send_metrics(self, frame: MetricsFrame):
@@ -180,12 +181,14 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, StartInterruptionFrame) or isinstance(frame, StopInterruptionFrame):
+        elif isinstance(frame, (StartInterruptionFrame, StopInterruptionFrame)):
             await self.push_frame(frame, direction)
             await self._handle_interruptions(frame)
         elif isinstance(frame, MetricsFrame):
             await self.push_frame(frame, direction)
             await self.send_metrics(frame)
+        elif isinstance(frame, TransportMessageUrgentFrame):
+            await self.send_message(frame)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames.
@@ -196,10 +199,8 @@ class BaseOutputTransport(FrameProcessor):
         # Other frames.
         elif isinstance(frame, OutputAudioRawFrame):
             await self._handle_audio(frame)
-        elif isinstance(frame, OutputImageRawFrame) or isinstance(frame, SpriteFrame):
+        elif isinstance(frame, (OutputImageRawFrame, SpriteFrame)):
             await self._handle_image(frame)
-        elif isinstance(frame, TransportMessageFrame) and frame.urgent:
-            await self.send_message(frame)
         # TODO(aleix): Images and audio should support presentation timestamps.
         elif frame.pts:
             await self._sink_clock_queue.put((frame.pts, frame.id, frame))

@@ -175,7 +175,7 @@ class PipelineTask:
                 await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
                 if isinstance(frame, EndFrame):
                     await self._wait_for_endframe()
-                running = not (isinstance(frame, StopTaskFrame) or isinstance(frame, EndFrame))
+                running = not isinstance(frame, (StopTaskFrame, EndFrame))
                 should_cleanup = not isinstance(frame, StopTaskFrame)
                 self._push_queue.task_done()
             except asyncio.CancelledError:

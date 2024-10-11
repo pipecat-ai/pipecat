@@ -37,50 +37,6 @@ except ModuleNotFoundError as e:
 # https://github.com/coqui-ai/xtts-streaming-server
 
 
-def language_to_xtts_language(language: Language) -> str | None:
-    match language:
-        case Language.CS:
-            return "cs"
-        case Language.DE:
-            return "de"
-        case (
-            Language.EN
-            | Language.EN_US
-            | Language.EN_AU
-            | Language.EN_GB
-            | Language.EN_NZ
-            | Language.EN_IN
-        ):
-            return "en"
-        case Language.ES:
-            return "es"
-        case Language.FR:
-            return "fr"
-        case Language.HI:
-            return "hi"
-        case Language.HU:
-            return "hu"
-        case Language.IT:
-            return "it"
-        case Language.JA:
-            return "ja"
-        case Language.KO:
-            return "ko"
-        case Language.NL:
-            return "nl"
-        case Language.PL:
-            return "pl"
-        case Language.PT | Language.PT_BR:
-            return "pt"
-        case Language.RU:
-            return "ru"
-        case Language.TR:
-            return "tr"
-        case Language.ZH:
-            return "zh-cn"
-    return None
-
-
 class XTTSService(TTSService):
     def __init__(
         self,
@@ -94,7 +50,7 @@ class XTTSService(TTSService):
         super().__init__(**kwargs)
 
         self._settings = {
-            "language": language,
+            "language": self.language_to_service_language(language),
             "base_url": base_url,
         }
         self.set_voice(voice_id)
@@ -103,6 +59,49 @@ class XTTSService(TTSService):
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        match language:
+            case Language.CS:
+                return "cs"
+            case Language.DE:
+                return "de"
+            case (
+                Language.EN
+                | Language.EN_US
+                | Language.EN_AU
+                | Language.EN_GB
+                | Language.EN_NZ
+                | Language.EN_IN
+            ):
+                return "en"
+            case Language.ES:
+                return "es"
+            case Language.FR:
+                return "fr"
+            case Language.HI:
+                return "hi"
+            case Language.HU:
+                return "hu"
+            case Language.IT:
+                return "it"
+            case Language.JA:
+                return "ja"
+            case Language.KO:
+                return "ko"
+            case Language.NL:
+                return "nl"
+            case Language.PL:
+                return "pl"
+            case Language.PT | Language.PT_BR:
+                return "pt"
+            case Language.RU:
+                return "ru"
+            case Language.TR:
+                return "tr"
+            case Language.ZH:
+                return "zh-cn"
+        return None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -131,11 +130,9 @@ class XTTSService(TTSService):
 
         url = self._settings["base_url"] + "/tts_stream"
 
-        language = language_to_xtts_language(self._settings["language"])
-
         payload = {
             "text": text.replace(".", "").replace("*", ""),
-            "language": language,
+            "language": self._settings["language"],
             "speaker_embedding": embeddings["speaker_embedding"],
             "gpt_cond_latent": embeddings["gpt_cond_latent"],
             "add_wav_header": False,

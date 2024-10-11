@@ -50,76 +50,6 @@ def sample_rate_from_output_format(output_format: str) -> int:
     return 16000
 
 
-def language_to_elevenlabs_language(language: Language) -> str | None:
-    match language:
-        case Language.BG:
-            return "bg"
-        case Language.ZH:
-            return "zh"
-        case Language.CS:
-            return "cs"
-        case Language.DA:
-            return "da"
-        case Language.NL:
-            return "nl"
-        case (
-            Language.EN
-            | Language.EN_US
-            | Language.EN_AU
-            | Language.EN_GB
-            | Language.EN_NZ
-            | Language.EN_IN
-        ):
-            return "en"
-        case Language.FI:
-            return "fi"
-        case Language.FR | Language.FR_CA:
-            return "fr"
-        case Language.DE | Language.DE_CH:
-            return "de"
-        case Language.EL:
-            return "el"
-        case Language.HI:
-            return "hi"
-        case Language.HU:
-            return "hu"
-        case Language.ID:
-            return "id"
-        case Language.IT:
-            return "it"
-        case Language.JA:
-            return "ja"
-        case Language.KO:
-            return "ko"
-        case Language.MS:
-            return "ms"
-        case Language.NO:
-            return "no"
-        case Language.PL:
-            return "pl"
-        case Language.PT:
-            return "pt-PT"
-        case Language.PT_BR:
-            return "pt-BR"
-        case Language.RO:
-            return "ro"
-        case Language.RU:
-            return "ru"
-        case Language.SK:
-            return "sk"
-        case Language.ES:
-            return "es"
-        case Language.SV:
-            return "sv"
-        case Language.TR:
-            return "tr"
-        case Language.UK:
-            return "uk"
-        case Language.VI:
-            return "vi"
-    return None
-
-
 def calculate_word_times(
     alignment_info: Mapping[str, Any], cumulative_time: float
 ) -> List[Tuple[str, float]]:
@@ -198,7 +128,9 @@ class ElevenLabsTTSService(WordTTSService):
         self._url = url
         self._settings = {
             "sample_rate": sample_rate_from_output_format(params.output_format),
-            "language": params.language if params.language else Language.EN,
+            "language": self.language_to_service_language(params.language)
+            if params.language
+            else Language.EN,
             "output_format": params.output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
@@ -219,6 +151,75 @@ class ElevenLabsTTSService(WordTTSService):
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        match language:
+            case Language.BG:
+                return "bg"
+            case Language.ZH:
+                return "zh"
+            case Language.CS:
+                return "cs"
+            case Language.DA:
+                return "da"
+            case Language.NL:
+                return "nl"
+            case (
+                Language.EN
+                | Language.EN_US
+                | Language.EN_AU
+                | Language.EN_GB
+                | Language.EN_NZ
+                | Language.EN_IN
+            ):
+                return "en"
+            case Language.FI:
+                return "fi"
+            case Language.FR | Language.FR_CA:
+                return "fr"
+            case Language.DE | Language.DE_CH:
+                return "de"
+            case Language.EL:
+                return "el"
+            case Language.HI:
+                return "hi"
+            case Language.HU:
+                return "hu"
+            case Language.ID:
+                return "id"
+            case Language.IT:
+                return "it"
+            case Language.JA:
+                return "ja"
+            case Language.KO:
+                return "ko"
+            case Language.MS:
+                return "ms"
+            case Language.NO:
+                return "no"
+            case Language.PL:
+                return "pl"
+            case Language.PT:
+                return "pt-PT"
+            case Language.PT_BR:
+                return "pt-BR"
+            case Language.RO:
+                return "ro"
+            case Language.RU:
+                return "ru"
+            case Language.SK:
+                return "sk"
+            case Language.ES:
+                return "es"
+            case Language.SV:
+                return "sv"
+            case Language.TR:
+                return "tr"
+            case Language.UK:
+                return "uk"
+            case Language.VI:
+                return "vi"
+        return None
 
     def _set_voice_settings(self):
         voice_settings = {}
@@ -293,7 +294,7 @@ class ElevenLabsTTSService(WordTTSService):
                 url += f"&optimize_streaming_latency={self._settings['optimize_streaming_latency']}"
 
             # Language can only be used with the 'eleven_turbo_v2_5' model
-            language = language_to_elevenlabs_language(self._settings["language"])
+            language = self._settings["language"]
             if model == "eleven_turbo_v2_5":
                 url += f"&language_code={language}"
             else:

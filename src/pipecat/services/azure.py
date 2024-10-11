@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.ai_services import ImageGenService, STTService, TTSService
 from pipecat.services.openai import BaseOpenAILLMService
-from pipecat.transcriptions import language
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
@@ -72,101 +71,10 @@ class AzureLLMService(BaseOpenAILLMService):
         )
 
 
-def language_to_azure_language(language: Language) -> str | None:
-    match language:
-        case Language.BG:
-            return "bg-BG"
-        case Language.CA:
-            return "ca-ES"
-        case Language.ZH:
-            return "zh-CN"
-        case Language.ZH_TW:
-            return "zh-TW"
-        case Language.CS:
-            return "cs-CZ"
-        case Language.DA:
-            return "da-DK"
-        case Language.NL:
-            return "nl-NL"
-        case Language.EN:
-            return "en-US"
-        case Language.EN_US:
-            return "en-US"
-        case Language.EN_AU:
-            return "en-AU"
-        case Language.EN_GB:
-            return "en-GB"
-        case Language.EN_NZ:
-            return "en-NZ"
-        case Language.EN_IN:
-            return "en-IN"
-        case Language.ET:
-            return "et-EE"
-        case Language.FI:
-            return "fi-FI"
-        case Language.NL_BE:
-            return "nl-BE"
-        case Language.FR:
-            return "fr-FR"
-        case Language.FR_CA:
-            return "fr-CA"
-        case Language.DE:
-            return "de-DE"
-        case Language.DE_CH:
-            return "de-CH"
-        case Language.EL:
-            return "el-GR"
-        case Language.HI:
-            return "hi-IN"
-        case Language.HU:
-            return "hu-HU"
-        case Language.ID:
-            return "id-ID"
-        case Language.IT:
-            return "it-IT"
-        case Language.JA:
-            return "ja-JP"
-        case Language.KO:
-            return "ko-KR"
-        case Language.LV:
-            return "lv-LV"
-        case Language.LT:
-            return "lt-LT"
-        case Language.MS:
-            return "ms-MY"
-        case Language.NO:
-            return "nb-NO"
-        case Language.PL:
-            return "pl-PL"
-        case Language.PT:
-            return "pt-PT"
-        case Language.PT_BR:
-            return "pt-BR"
-        case Language.RO:
-            return "ro-RO"
-        case Language.RU:
-            return "ru-RU"
-        case Language.SK:
-            return "sk-SK"
-        case Language.ES:
-            return "es-ES"
-        case Language.SV:
-            return "sv-SE"
-        case Language.TH:
-            return "th-TH"
-        case Language.TR:
-            return "tr-TR"
-        case Language.UK:
-            return "uk-UA"
-        case Language.VI:
-            return "vi-VN"
-    return None
-
-
 class AzureTTSService(TTSService):
     class InputParams(BaseModel):
         emphasis: Optional[str] = None
-        language: Optional[Language] = Language.EN
+        language: Optional[Language] = Language.EN_US
         pitch: Optional[str] = None
         rate: Optional[str] = "1.05"
         role: Optional[str] = None
@@ -192,7 +100,9 @@ class AzureTTSService(TTSService):
         self._settings = {
             "sample_rate": sample_rate,
             "emphasis": params.emphasis,
-            "language": params.language if params.language else Language.EN,
+            "language": self.language_to_service_language(params.language)
+            if params.language
+            else Language.EN_US,
             "pitch": params.pitch,
             "rate": params.rate,
             "role": params.role,
@@ -206,8 +116,96 @@ class AzureTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    def language_to_service_language(self, language: Language) -> str | None:
+        match language:
+            case Language.BG:
+                return "bg-BG"
+            case Language.CA:
+                return "ca-ES"
+            case Language.ZH:
+                return "zh-CN"
+            case Language.ZH_TW:
+                return "zh-TW"
+            case Language.CS:
+                return "cs-CZ"
+            case Language.DA:
+                return "da-DK"
+            case Language.NL:
+                return "nl-NL"
+            case Language.EN | Language.EN_US:
+                return "en-US"
+            case Language.EN_AU:
+                return "en-AU"
+            case Language.EN_GB:
+                return "en-GB"
+            case Language.EN_NZ:
+                return "en-NZ"
+            case Language.EN_IN:
+                return "en-IN"
+            case Language.ET:
+                return "et-EE"
+            case Language.FI:
+                return "fi-FI"
+            case Language.NL_BE:
+                return "nl-BE"
+            case Language.FR:
+                return "fr-FR"
+            case Language.FR_CA:
+                return "fr-CA"
+            case Language.DE:
+                return "de-DE"
+            case Language.DE_CH:
+                return "de-CH"
+            case Language.EL:
+                return "el-GR"
+            case Language.HI:
+                return "hi-IN"
+            case Language.HU:
+                return "hu-HU"
+            case Language.ID:
+                return "id-ID"
+            case Language.IT:
+                return "it-IT"
+            case Language.JA:
+                return "ja-JP"
+            case Language.KO:
+                return "ko-KR"
+            case Language.LV:
+                return "lv-LV"
+            case Language.LT:
+                return "lt-LT"
+            case Language.MS:
+                return "ms-MY"
+            case Language.NO:
+                return "nb-NO"
+            case Language.PL:
+                return "pl-PL"
+            case Language.PT:
+                return "pt-PT"
+            case Language.PT_BR:
+                return "pt-BR"
+            case Language.RO:
+                return "ro-RO"
+            case Language.RU:
+                return "ru-RU"
+            case Language.SK:
+                return "sk-SK"
+            case Language.ES:
+                return "es-ES"
+            case Language.SV:
+                return "sv-SE"
+            case Language.TH:
+                return "th-TH"
+            case Language.TR:
+                return "tr-TR"
+            case Language.UK:
+                return "uk-UA"
+            case Language.VI:
+                return "vi-VN"
+        return None
+
     def _construct_ssml(self, text: str) -> str:
-        language = language_to_azure_language(self._settings["language"])
+        language = self._settings["language"]
         ssml = (
             f"<speak version='1.0' xml:lang='{language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
@@ -284,7 +282,7 @@ class AzureSTTService(STTService):
         *,
         api_key: str,
         region: str,
-        language="en-US",
+        language=Language.EN_US,
         sample_rate=16000,
         channels=1,
         **kwargs,
