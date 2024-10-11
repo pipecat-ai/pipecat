@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added new input params to the `MarkdownTextFilter` utility. You can set
-  `filter_code` to filter code from text.
+  `filter_code` to filter code from text and `filter_tables` to filter tables
+  from text.
 
 ## [0.0.43] - 2024-10-10
 
