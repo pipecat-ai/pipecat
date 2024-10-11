@@ -1,19 +1,23 @@
 import wave
 from io import BytesIO
 
-from pipecat.frames.frames import (AudioRawFrame, BotInterruptionFrame,
-                                   BotStartedSpeakingFrame,
-                                   BotStoppedSpeakingFrame, Frame,
-                                   InputAudioRawFrame, OutputAudioRawFrame,
-                                   StartInterruptionFrame,
-                                   StopInterruptionFrame,
-                                   UserStartedSpeakingFrame,
-                                   UserStoppedSpeakingFrame)
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    BotInterruptionFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    Frame,
+    InputAudioRawFrame,
+    OutputAudioRawFrame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class AudioBufferProcessor(FrameProcessor):
-
     def __init__(self, **kwargs):
         """
         Initialize the AudioBufferProcessor.
@@ -33,16 +37,13 @@ class AudioBufferProcessor(FrameProcessor):
         self._sample_rate = None
 
     def _buffer_has_audio(self, buffer: bytearray):
-        return (
-            buffer is not None and
-            len(buffer) > 0
-        )
+        return buffer is not None and len(buffer) > 0
 
     def _has_audio(self):
         return (
-            self._buffer_has_audio(self._user_audio_buffer) and
-            self._buffer_has_audio(self._assistant_audio_buffer) and
-            self._sample_rate is not None
+            self._buffer_has_audio(self._user_audio_buffer)
+            and self._buffer_has_audio(self._assistant_audio_buffer)
+            and self._sample_rate is not None
         )
 
     def _reset_audio_buffer(self):
@@ -51,13 +52,12 @@ class AudioBufferProcessor(FrameProcessor):
 
     def _merge_audio_buffers(self):
         with BytesIO() as buffer:
-            with wave.open(buffer, 'wb') as wf:
+            with wave.open(buffer, "wb") as wf:
                 wf.setnchannels(2)
                 wf.setsampwidth(2)
                 wf.setframerate(self._sample_rate)
                 # Interleave the two audio streams
-                max_length = max(len(self._user_audio_buffer),
-                                 len(self._assistant_audio_buffer))
+                max_length = max(len(self._user_audio_buffer), len(self._assistant_audio_buffer))
                 interleaved = bytearray(max_length * 2)
 
                 for i in range(0, max_length, 2):
@@ -89,7 +89,7 @@ class AudioBufferProcessor(FrameProcessor):
             # Sync the assistant's buffer to the user's buffer by adding silence if needed
             if len(self._user_audio_buffer) > len(self._assistant_audio_buffer):
                 silence_length = len(self._user_audio_buffer) - len(self._assistant_audio_buffer)
-                silence = b'\x00' * silence_length
+                silence = b"\x00" * silence_length
                 self._assistant_audio_buffer.extend(silence)
 
         # if the assistant is speaking, include all audio from the assistant,

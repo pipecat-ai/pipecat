@@ -18,9 +18,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator, LLMUserResponseAggregator)
-from pipecat.processors.audio.audio_buffer_processor import \
-    AudioBufferProcessor
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
+)
+from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -56,18 +57,16 @@ async def main():
                 #     tier="nova",
                 #     model="2-general"
                 # )
-            )
+            ),
         )
 
         tts = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-
             #
             # English
             #
             voice_id="cgSgspJ2msm6clMCkdW9",
             aiohttp_session=session,
-
             #
             # Spanish
             #
@@ -75,9 +74,7 @@ async def main():
             # voice_id="gD1IexrzCvsXPHUuT0s3",
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         messages = [
             {
@@ -86,7 +83,6 @@ async def main():
                 # English
                 #
                 "content": "You are Chatbot, a friendly, helpful robot. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by introducing yourself. Keep all your response to 12 words or fewer.",
-
                 #
                 # Spanish
                 #
@@ -98,15 +94,17 @@ async def main():
         assistant_response = LLMAssistantResponseAggregator()
 
         audiobuffer = AudioBufferProcessor()
-        pipeline = Pipeline([
-            transport.input(),  # microphone
-            user_response,
-            llm,
-            tts,
-            transport.output(),
-            audiobuffer,  # used to buffer the audio in the pipeline
-            assistant_response,
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),  # microphone
+                user_response,
+                llm,
+                tts,
+                transport.output(),
+                audiobuffer,  # used to buffer the audio in the pipeline
+                assistant_response,
+            ]
+        )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
