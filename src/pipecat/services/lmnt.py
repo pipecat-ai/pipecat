@@ -35,32 +35,6 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_lmnt_language(language: Language) -> str | None:
-    match language:
-        case Language.DE:
-            return "de"
-        case (
-            Language.EN
-            | Language.EN_US
-            | Language.EN_AU
-            | Language.EN_GB
-            | Language.EN_NZ
-            | Language.EN_IN
-        ):
-            return "en"
-        case Language.ES:
-            return "es"
-        case Language.FR | Language.FR_CA:
-            return "fr"
-        case Language.PT | Language.PT_BR:
-            return "pt"
-        case Language.ZH | Language.ZH_TW:
-            return "zh"
-        case Language.KO:
-            return "ko"
-    return None
-
-
 class LmntTTSService(TTSService):
     def __init__(
         self,
@@ -82,7 +56,7 @@ class LmntTTSService(TTSService):
                 "encoding": "pcm_s16le",
                 "sample_rate": sample_rate,
             },
-            "language": language,
+            "language": self.language_to_service_language(language),
         }
 
         self.set_voice(voice_id)
@@ -96,6 +70,31 @@ class LmntTTSService(TTSService):
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        match language:
+            case Language.DE:
+                return "de"
+            case (
+                Language.EN
+                | Language.EN_US
+                | Language.EN_AU
+                | Language.EN_GB
+                | Language.EN_NZ
+                | Language.EN_IN
+            ):
+                return "en"
+            case Language.ES:
+                return "es"
+            case Language.FR | Language.FR_CA:
+                return "fr"
+            case Language.PT | Language.PT_BR:
+                return "pt"
+            case Language.ZH | Language.ZH_TW:
+                return "zh"
+            case Language.KO:
+                return "ko"
+        return None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -121,6 +120,7 @@ class LmntTTSService(TTSService):
                 self._voice_id,
                 format="raw",
                 sample_rate=self._settings["output_format"]["sample_rate"],
+                language=self._settings["language"],
             )
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
         except Exception as e:

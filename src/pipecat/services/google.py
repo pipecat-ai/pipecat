@@ -146,93 +146,6 @@ class GoogleLLMService(LLMService):
             await self._process_context(context)
 
 
-def language_to_google_language(language: Language) -> str | None:
-    match language:
-        case Language.BG:
-            return "bg-BG"
-        case Language.CA:
-            return "ca-ES"
-        case Language.ZH:
-            return "cmn-CN"
-        case Language.ZH_TW:
-            return "cmn-TW"
-        case Language.CS:
-            return "cs-CZ"
-        case Language.DA:
-            return "da-DK"
-        case Language.NL:
-            return "nl-NL"
-        case Language.EN:
-            return "en-US"
-        case Language.EN_US:
-            return "en-US"
-        case Language.EN_AU:
-            return "en-AU"
-        case Language.EN_GB:
-            return "en-GB"
-        case Language.EN_IN:
-            return "en-IN"
-        case Language.ET:
-            return "et-EE"
-        case Language.FI:
-            return "fi-FI"
-        case Language.NL_BE:
-            return "nl-BE"
-        case Language.FR:
-            return "fr-FR"
-        case Language.FR_CA:
-            return "fr-CA"
-        case Language.DE:
-            return "de-DE"
-        case Language.EL:
-            return "el-GR"
-        case Language.HI:
-            return "hi-IN"
-        case Language.HU:
-            return "hu-HU"
-        case Language.ID:
-            return "id-ID"
-        case Language.IT:
-            return "it-IT"
-        case Language.JA:
-            return "ja-JP"
-        case Language.KO:
-            return "ko-KR"
-        case Language.LV:
-            return "lv-LV"
-        case Language.LT:
-            return "lt-LT"
-        case Language.MS:
-            return "ms-MY"
-        case Language.NO:
-            return "nb-NO"
-        case Language.PL:
-            return "pl-PL"
-        case Language.PT:
-            return "pt-PT"
-        case Language.PT_BR:
-            return "pt-BR"
-        case Language.RO:
-            return "ro-RO"
-        case Language.RU:
-            return "ru-RU"
-        case Language.SK:
-            return "sk-SK"
-        case Language.ES:
-            return "es-ES"
-        case Language.SV:
-            return "sv-SE"
-        case Language.TH:
-            return "th-TH"
-        case Language.TR:
-            return "tr-TR"
-        case Language.UK:
-            return "uk-UA"
-        case Language.VI:
-            return "vi-VN"
-    return None
-
-
 class GoogleTTSService(TTSService):
     class InputParams(BaseModel):
         pitch: Optional[str] = None
@@ -261,7 +174,9 @@ class GoogleTTSService(TTSService):
             "rate": params.rate,
             "volume": params.volume,
             "emphasis": params.emphasis,
-            "language": params.language if params.language else Language.EN,
+            "language": self.language_to_service_language(params.language)
+            if params.language
+            else Language.EN,
             "gender": params.gender,
             "google_style": params.google_style,
         }
@@ -291,13 +206,97 @@ class GoogleTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    def language_to_service_language(self, language: Language) -> str | None:
+        match language:
+            case Language.BG:
+                return "bg-BG"
+            case Language.CA:
+                return "ca-ES"
+            case Language.ZH:
+                return "cmn-CN"
+            case Language.ZH_TW:
+                return "cmn-TW"
+            case Language.CS:
+                return "cs-CZ"
+            case Language.DA:
+                return "da-DK"
+            case Language.NL:
+                return "nl-NL"
+            case Language.EN | Language.EN_US:
+                return "en-US"
+            case Language.EN_AU:
+                return "en-AU"
+            case Language.EN_GB:
+                return "en-GB"
+            case Language.EN_IN:
+                return "en-IN"
+            case Language.ET:
+                return "et-EE"
+            case Language.FI:
+                return "fi-FI"
+            case Language.NL_BE:
+                return "nl-BE"
+            case Language.FR:
+                return "fr-FR"
+            case Language.FR_CA:
+                return "fr-CA"
+            case Language.DE:
+                return "de-DE"
+            case Language.EL:
+                return "el-GR"
+            case Language.HI:
+                return "hi-IN"
+            case Language.HU:
+                return "hu-HU"
+            case Language.ID:
+                return "id-ID"
+            case Language.IT:
+                return "it-IT"
+            case Language.JA:
+                return "ja-JP"
+            case Language.KO:
+                return "ko-KR"
+            case Language.LV:
+                return "lv-LV"
+            case Language.LT:
+                return "lt-LT"
+            case Language.MS:
+                return "ms-MY"
+            case Language.NO:
+                return "nb-NO"
+            case Language.PL:
+                return "pl-PL"
+            case Language.PT:
+                return "pt-PT"
+            case Language.PT_BR:
+                return "pt-BR"
+            case Language.RO:
+                return "ro-RO"
+            case Language.RU:
+                return "ru-RU"
+            case Language.SK:
+                return "sk-SK"
+            case Language.ES:
+                return "es-ES"
+            case Language.SV:
+                return "sv-SE"
+            case Language.TH:
+                return "th-TH"
+            case Language.TR:
+                return "tr-TR"
+            case Language.UK:
+                return "uk-UA"
+            case Language.VI:
+                return "vi-VN"
+        return None
+
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
 
         # Voice tag
         voice_attrs = [f"name='{self._voice_id}'"]
 
-        language = language_to_google_language(self._settings["language"])
+        language = self._settings["language"]
         voice_attrs.append(f"language='{language}'")
 
         if self._settings["gender"]:

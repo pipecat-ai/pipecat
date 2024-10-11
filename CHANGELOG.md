@@ -5,6 +5,32 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.43] - 2024-10-10
+
+### Added
+
+- Added a new util called `MarkdownTextFilter` which is a subclass of a new
+  base class called `BaseTextFilter`. This is a configurable utility which
+  is intended to filter text received by TTS services.
+
+- Added new `RTVIUserLLMTextProcessor`. This processor will send an RTVI
+  `user-llm-text` message with the user content's that was sent to the LLM.
+
+### Changed
+
+- `TransportMessageFrame` doesn't have an `urgent` field anymore, instead
+  there's now a `TransportMessageUrgentFrame` which is a `SystemFrame` and
+  therefore skip all internal queuing.
+
+- For TTS services, convert inputted languages to match each service's language
+  format
+
+### Fixed
+
+- Fixed an issue where changing a language with the Deepgram STT service
+  wouldn't apply the change. This was fixed by disconnecting and reconnecting
+  when the language changes.
+
 ## [0.0.42] - 2024-10-02
 
 ### Added

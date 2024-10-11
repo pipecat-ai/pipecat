@@ -6,10 +6,11 @@
 
 import asyncio
 import base64
-
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
+
+from loguru import logger
+from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -20,26 +21,27 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    FunctionCallResultFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     OutputAudioRawFrame,
     StartFrame,
     SystemFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
     TextFrame,
     TranscriptionFrame,
     TransportMessageFrame,
+    TransportMessageUrgentFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     UserStartedSpeakingFrame,
-    FunctionCallResultFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-from loguru import logger
-
 
 RTVI_PROTOCOL_VERSION = "0.2"
 
@@ -291,20 +293,10 @@ class RTVIAudioMessageData(BaseModel):
     num_channels: int
 
 
-class RTVIBotAudioMessage(BaseModel):
+class RTVIBotTTSAudioMessage(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
-    type: Literal["bot-audio"] = "bot-audio"
+    type: Literal["bot-tts-audio"] = "bot-tts-audio"
     data: RTVIAudioMessageData
-
-
-class RTVIBotTranscriptionMessageData(BaseModel):
-    text: str
-
-
-class RTVIBotTranscriptionMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
-    type: Literal["bot-transcription"] = "bot-transcription"
-    data: RTVIBotTranscriptionMessageData
 
 
 class RTVIUserTranscriptionMessageData(BaseModel):
@@ -318,6 +310,12 @@ class RTVIUserTranscriptionMessage(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
     type: Literal["user-transcription"] = "user-transcription"
     data: RTVIUserTranscriptionMessageData
+
+
+class RTVIUserLLMTextMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["user-llm-text"] = "user-llm-text"
+    data: RTVITextMessageData
 
 
 class RTVIUserStartedSpeakingMessage(BaseModel):
@@ -350,9 +348,11 @@ class RTVIFrameProcessor(FrameProcessor):
         self._direction = direction
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        frame = TransportMessageFrame(
-            message=model.model_dump(exclude_none=exclude_none), urgent=True
-        )
+        frame = TransportMessageFrame(message=model.model_dump(exclude_none=exclude_none))
+        await self.push_frame(frame, self._direction)
+
+    async def _push_transport_message_urgent(self, model: BaseModel, exclude_none: bool = True):
+        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
         await self.push_frame(frame, self._direction)
 
 
@@ -378,7 +378,7 @@ class RTVISpeakingProcessor(RTVIFrameProcessor):
             message = RTVIUserStoppedSpeakingMessage()
 
         if message:
-            await self._push_transport_message(message)
+            await self._push_transport_message_urgent(message)
 
     async def _handle_bot_speaking(self, frame: Frame):
         message = None
@@ -388,7 +388,7 @@ class RTVISpeakingProcessor(RTVIFrameProcessor):
             message = RTVIBotStoppedSpeakingMessage()
 
         if message:
-            await self._push_transport_message(message)
+            await self._push_transport_message_urgent(message)
 
 
 class RTVIUserTranscriptionProcessor(RTVIFrameProcessor):
@@ -419,7 +419,36 @@ class RTVIUserTranscriptionProcessor(RTVIFrameProcessor):
             )
 
         if message:
-            await self._push_transport_message(message)
+            await self._push_transport_message_urgent(message)
+
+
+class RTVIUserLLMTextProcessor(RTVIFrameProcessor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        await self.push_frame(frame, direction)
+
+        if isinstance(frame, OpenAILLMContextFrame):
+            await self._handle_context(frame)
+
+    async def _handle_context(self, frame: OpenAILLMContextFrame):
+        messages = frame.context.messages
+        if len(messages) > 0:
+            message = messages[-1]
+            if message["role"] == "user":
+                content = message["content"]
+                if isinstance(content, list):
+                    print("LIST")
+                    text = " ".join(item["text"] for item in content if "text" in item)
+                else:
+                    print("STRING")
+                    text = content
+
+                rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
+                await self._push_transport_message_urgent(rtvi_message)
 
 
 class RTVIBotLLMProcessor(RTVIFrameProcessor):
@@ -432,9 +461,9 @@ class RTVIBotLLMProcessor(RTVIFrameProcessor):
         await self.push_frame(frame, direction)
 
         if isinstance(frame, LLMFullResponseStartFrame):
-            await self._push_transport_message(RTVIBotLLMStartedMessage())
+            await self._push_transport_message_urgent(RTVIBotLLMStartedMessage())
         elif isinstance(frame, LLMFullResponseEndFrame):
-            await self._push_transport_message(RTVIBotLLMStoppedMessage())
+            await self._push_transport_message_urgent(RTVIBotLLMStoppedMessage())
 
 
 class RTVIBotTTSProcessor(RTVIFrameProcessor):
@@ -447,9 +476,9 @@ class RTVIBotTTSProcessor(RTVIFrameProcessor):
         await self.push_frame(frame, direction)
 
         if isinstance(frame, TTSStartedFrame):
-            await self._push_transport_message(RTVIBotTTSStartedMessage())
+            await self._push_transport_message_urgent(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame):
-            await self._push_transport_message(RTVIBotTTSStoppedMessage())
+            await self._push_transport_message_urgent(RTVIBotTTSStoppedMessage())
 
 
 class RTVIBotLLMTextProcessor(RTVIFrameProcessor):
@@ -466,7 +495,7 @@ class RTVIBotLLMTextProcessor(RTVIFrameProcessor):
 
     async def _handle_text(self, frame: TextFrame):
         message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self._push_transport_message(message)
+        await self._push_transport_message_urgent(message)
 
 
 class RTVIBotTTSTextProcessor(RTVIFrameProcessor):
@@ -483,10 +512,10 @@ class RTVIBotTTSTextProcessor(RTVIFrameProcessor):
 
     async def _handle_text(self, frame: TextFrame):
         message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self._push_transport_message(message)
+        await self._push_transport_message_urgent(message)
 
 
-class RTVIBotAudioProcessor(RTVIFrameProcessor):
+class RTVIBotTTSAudioProcessor(RTVIFrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -500,7 +529,7 @@ class RTVIBotAudioProcessor(RTVIFrameProcessor):
 
     async def _handle_audio(self, frame: OutputAudioRawFrame):
         encoded = base64.b64encode(frame.audio).decode("utf-8")
-        message = RTVIBotAudioMessage(
+        message = RTVIBotTTSAudioMessage(
             data=RTVIAudioMessageData(
                 audio=encoded, sample_rate=frame.sample_rate, num_channels=frame.num_channels
             )
@@ -647,9 +676,7 @@ class RTVIProcessor(FrameProcessor):
             self._message_task = None
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        frame = TransportMessageFrame(
-            message=model.model_dump(exclude_none=exclude_none), urgent=True
-        )
+        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
         await self.push_frame(frame)
 
     async def _action_task_handler(self):
