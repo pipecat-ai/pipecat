@@ -819,6 +819,7 @@ class DailyTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
+        self._register_event_handler("on_error")
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_call_state_updated")
         self._register_event_handler("on_dialin_ready")
