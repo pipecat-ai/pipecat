@@ -119,9 +119,9 @@ async def main():
             user_response,
             llm,
             tts,
+            transport.output(),
             audio_buffer_processor,  # captures audio into a buffer
             canonical,  # uploads audio buffer to Canonical AI for metrics
-            transport.output(),
             assistant_response,
         ])
 

@@ -33,8 +33,6 @@ class AudioBufferProcessor(FrameProcessor):
         self._assistant_audio_buffer = bytearray()
         self._num_channels = None
         self._sample_rate = None
-        self._assistant_audio = False
-        self._user_audio = False
 
     def _buffer_has_audio(self, buffer: bytearray):
         return (
@@ -87,14 +85,6 @@ class AudioBufferProcessor(FrameProcessor):
         if (isinstance(frame, AudioRawFrame) and self._sample_rate is None):
             self._sample_rate = frame.sample_rate
 
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._assistant_audio = True
-
-        # this handles the case where the user starts speaking and interrupts the bot
-        if (isinstance(frame, BotStoppedSpeakingFrame) or
-                isinstance(frame, UserStartedSpeakingFrame)):
-            self._assistant_audio = False
-
         # include all audio from the user
         if isinstance(frame, InputAudioRawFrame):
             self._user_audio_buffer.extend(frame.audio)
@@ -105,7 +95,7 @@ class AudioBufferProcessor(FrameProcessor):
                 self._assistant_audio_buffer.extend(silence)
 
         # if the assistant is speaking, include all audio from the assistant,
-        if (isinstance(frame, OutputAudioRawFrame)) and self._assistant_audio:
+        if (isinstance(frame, OutputAudioRawFrame)):
             self._assistant_audio_buffer.extend(frame.audio)
 
         # do not push the user's audio frame, doing so will result in echo
