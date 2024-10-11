@@ -103,8 +103,8 @@ async def main():
             user_response,
             llm,
             tts,
-            audiobuffer,  # used to buffer the audio in the pipeline
             transport.output(),
+            audiobuffer,  # used to buffer the audio in the pipeline
             assistant_response,
         ])
 
