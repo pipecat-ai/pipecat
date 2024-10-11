@@ -57,6 +57,7 @@ class CanonicalMetricsService(AIService):
 
     def __init__(
         self,
+        *,
         aiohttp_session: aiohttp.ClientSession,
         audio_buffer_processor: AudioBufferProcessor,
         call_id: str,
@@ -65,8 +66,9 @@ class CanonicalMetricsService(AIService):
         api_url: str = "https://voiceapp.canonical.chat/api/v1",
         assistant_speaks_first: bool = True,
         output_dir: str = "recordings",
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
         self._aiohttp_session = aiohttp_session
         self._audio_buffer_processor = audio_buffer_processor
         self._api_key = api_key
