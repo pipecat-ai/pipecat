@@ -14,7 +14,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 class AudioBufferProcessor(FrameProcessor):
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         """
         Initialize the AudioBufferProcessor.
 
@@ -22,13 +22,11 @@ class AudioBufferProcessor(FrameProcessor):
         - audio_buffer: A bytearray to store incoming audio data.
         - num_channels: The number of audio channels (initialized as None).
         - sample_rate: The sample rate of the audio (initialized as None).
-        - assistant_audio: A boolean flag to indicate if assistant audio is being processed.
-        - user_audio: A boolean flag to indicate if user audio is being processed.
 
         The num_channels and sample_rate are set to None initially and will be
         populated when the first audio frame is processed.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self._user_audio_buffer = bytearray()
         self._assistant_audio_buffer = bytearray()
         self._num_channels = None
@@ -55,7 +53,7 @@ class AudioBufferProcessor(FrameProcessor):
         with BytesIO() as buffer:
             with wave.open(buffer, 'wb') as wf:
                 wf.setnchannels(2)
-                wf.setsampwidth(self._sample_rate // 8000)
+                wf.setsampwidth(2)
                 wf.setframerate(self._sample_rate)
                 # Interleave the two audio streams
                 max_length = max(len(self._user_audio_buffer),
@@ -82,7 +80,7 @@ class AudioBufferProcessor(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if (isinstance(frame, AudioRawFrame) and self._sample_rate is None):
+        if isinstance(frame, AudioRawFrame) and self._sample_rate is None:
             self._sample_rate = frame.sample_rate
 
         # include all audio from the user
@@ -95,7 +93,7 @@ class AudioBufferProcessor(FrameProcessor):
                 self._assistant_audio_buffer.extend(silence)
 
         # if the assistant is speaking, include all audio from the assistant,
-        if (isinstance(frame, OutputAudioRawFrame)):
+        if isinstance(frame, OutputAudioRawFrame):
             self._assistant_audio_buffer.extend(frame.audio)
 
         # do not push the user's audio frame, doing so will result in echo
