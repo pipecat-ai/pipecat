@@ -35,6 +35,7 @@ try:
         LiveResultResponse,
         LiveTranscriptionEvents,
         SpeakOptions,
+        logging,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -118,7 +119,11 @@ class DeepgramSTTService(STTService):
         *,
         api_key: str,
         url: str = "",
-        live_options: LiveOptions = LiveOptions(
+        live_options: LiveOptions = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        default_options = LiveOptions(
             encoding="linear16",
             language=Language.EN,
             model="nova-2-conversationalai",
@@ -129,15 +134,19 @@ class DeepgramSTTService(STTService):
             punctuate=True,
             profanity_filter=True,
             vad_events=False,
-        ),
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
+        )
 
-        self._settings = vars(live_options)
+        merged_options = default_options
+        if live_options:
+            merged_options = LiveOptions(**{**default_options.to_dict(), **live_options.to_dict()})
+        self._settings = merged_options
 
         self._client = DeepgramClient(
-            api_key, config=DeepgramClientOptions(url=url, options={"keepalive": "true"})
+            api_key,
+            config=DeepgramClientOptions(
+                url=url,
+                options={"keepalive": "true"},  # verbose=logging.DEBUG
+            ),
         )
         self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
