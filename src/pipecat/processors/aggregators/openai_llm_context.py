@@ -115,7 +115,7 @@ class OpenAILLMContext:
         return self._messages
 
     def get_messages_json(self) -> str:
-        return json.dumps(self._messages, cls=CustomEncoder)
+        return json.dumps(self._messages, cls=CustomEncoder, ensure_ascii=False, indent=2)
 
     def get_messages_for_logging(self) -> str:
         msgs = []
