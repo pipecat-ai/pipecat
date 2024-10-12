@@ -14,12 +14,13 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.services.ai_services import STTService, TTSService
 from pipecat.transcriptions.language import Language
@@ -102,7 +103,9 @@ class DeepgramTTSService(TTSService):
                 if not chunk:
                     break
                 frame = TTSAudioRawFrame(
-                    audio=chunk, sample_rate=self._settings["sample_rate"], num_channels=1
+                    audio=chunk,
+                    sample_rate=self._settings["sample_rate"],
+                    num_channels=1,
                 )
                 yield frame
 
@@ -138,20 +141,23 @@ class DeepgramSTTService(STTService):
 
         merged_options = default_options
         if live_options:
-            merged_options = LiveOptions(**{**default_options.to_dict(), **live_options.to_dict()})
+            merged_options = LiveOptions(
+                **{**default_options.to_dict(), **live_options.to_dict()}
+            )
         self._settings = merged_options.to_dict()
 
         self._client = DeepgramClient(
             api_key,
-            config=DeepgramClientOptions(
-                url=url,
-                options={"keepalive": "true"},  # verbose=logging.DEBUG
-            ),
+            config=DeepgramClientOptions(url=url, options={"keepalive": "true"}),
         )
-        self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
+        self._connection: AsyncListenWebSocketClient = (
+            self._client.listen.asyncwebsocket.v("1")
+        )
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
         if self.vad_enabled:
-            self._connection.on(LiveTranscriptionEvents.SpeechStarted, self._on_speech_started)
+            self._connection.on(
+                LiveTranscriptionEvents.SpeechStarted, self._on_speech_started
+            )
 
     @property
     def vad_enabled(self):
@@ -201,6 +207,7 @@ class DeepgramSTTService(STTService):
             logger.debug(f"{self}: Disconnected from Deepgram")
 
     async def _on_speech_started(self, *args, **kwargs):
+        await self.push_frame(UserStartedSpeakingFrame())
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
@@ -209,6 +216,7 @@ class DeepgramSTTService(STTService):
         if len(result.channel.alternatives) == 0:
             return
         is_final = result.is_final
+        speech_final = result.speech_final
         transcript = result.channel.alternatives[0].transcript
         language = None
         if result.channel.alternatives[0].languages:
@@ -217,11 +225,21 @@ class DeepgramSTTService(STTService):
         if len(transcript) > 0:
             await self.stop_ttfb_metrics()
             if is_final:
+                logger.debug(
+                    f"if: {is_final} sf: {speech_final} Transcript: {transcript}"
+                )
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
-                await self.stop_processing_metrics()
-            else:
-                await self.push_frame(
-                    InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language)
-                )
+
+                if speech_final:
+                    await self.push_frame(UserStoppedSpeakingFrame())
+                    await self.stop_processing_metrics()
+
+                    await self.push_frame(UserStartedSpeakingFrame())
+            # else:
+            #     await self.push_frame(
+            #         InterimTranscriptionFrame(
+            #             transcript, "", time_now_iso8601(), language
+            #         )
+            #     )

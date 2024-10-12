@@ -55,7 +55,9 @@ class AIService(FrameProcessor):
 
     def set_model_name(self, model: str):
         self._model_name = model
-        self.set_core_metrics_data(MetricsData(processor=self.name, model=self._model_name))
+        self.set_core_metrics_data(
+            MetricsData(processor=self.name, model=self._model_name)
+        )
 
     async def start(self, frame: StartFrame):
         pass
@@ -137,7 +139,9 @@ class LLMService(AIService):
         self._start_callbacks = {}
 
     # TODO-CB: callback function type
-    def register_function(self, function_name: str | None, callback, start_callback=None):
+    def register_function(
+        self, function_name: str | None, callback, start_callback=None
+    ):
         # Registering a function with the function_name set to None will run that callback
         # for all functions
         self._callbacks[function_name] = callback
@@ -187,9 +191,12 @@ class LLMService(AIService):
         elif None in self._start_callbacks.keys():
             return await self._start_callbacks[None](function_name, self, context)
 
-    async def request_image_frame(self, user_id: str, *, text_content: str | None = None):
+    async def request_image_frame(
+        self, user_id: str, *, text_content: str | None = None
+    ):
         await self.push_frame(
-            UserImageRequestFrame(user_id=user_id, context=text_content), FrameDirection.UPSTREAM
+            UserImageRequestFrame(user_id=user_id, context=text_content),
+            FrameDirection.UPSTREAM,
         )
 
 
@@ -252,7 +259,9 @@ class TTSService(AIService):
     async def start(self, frame: StartFrame):
         await super().start(frame)
         if self._push_stop_frames:
-            self._stop_frame_task = self.get_event_loop().create_task(self._stop_frame_handler())
+            self._stop_frame_task = self.get_event_loop().create_task(
+                self._stop_frame_handler()
+            )
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -315,7 +324,9 @@ class TTSService(AIService):
         else:
             await self.push_frame(frame, direction)
 
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+    async def push_frame(
+        self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+    ):
         await super().push_frame(frame, direction)
 
         if self._push_stop_frames and (
@@ -326,7 +337,9 @@ class TTSService(AIService):
         ):
             await self._stop_frame_queue.put(frame)
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(
+        self, frame: StartInterruptionFrame, direction: FrameDirection
+    ):
         self._current_sentence = ""
         if self._text_filter:
             self._text_filter.handle_interruption()
@@ -416,7 +429,9 @@ class WordTTSService(TTSService):
         if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(
+        self, frame: StartInterruptionFrame, direction: FrameDirection
+    ):
         await super()._handle_interruption(frame, direction)
         self.reset_word_timestamps()
 
@@ -599,7 +614,9 @@ class VisionService(AIService):
         self._describe_text = None
 
     @abstractmethod
-    async def run_vision(self, frame: VisionImageRawFrame) -> AsyncGenerator[Frame, None]:
+    async def run_vision(
+        self, frame: VisionImageRawFrame
+    ) -> AsyncGenerator[Frame, None]:
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

@@ -76,20 +76,21 @@ class AzureLLMService(BaseOpenAILLMService):
         )
 
 
-class AzureTTSService(TTSService):
-    class InputParams(BaseModel):
-        emphasis: Optional[str] = None
-        language_code: Optional[str] = (
-            "en-US"  # USE THIS!! necessary for compatibility with languages supported by azure but not by other service
-        )
-        language: Optional[Language] = Language.EN_US
-        pitch: Optional[str] = None
-        rate: Optional[str] = "1.05"
-        role: Optional[str] = None
-        style: Optional[str] = None
-        style_degree: Optional[str] = None
-        volume: Optional[str] = None
+class InputParams(BaseModel):
+    emphasis: Optional[str] = None
+    language_code: Optional[str] = (
+        "en-US"  # USE THIS!! necessary for compatibility with languages supported by azure but not by other service
+    )
+    language: Optional[Language] = Language.EN_US
+    pitch: Optional[str] = None
+    rate: Optional[str] = "1.05"
+    role: Optional[str] = None
+    style: Optional[str] = None
+    style_degree: Optional[str] = None
+    volume: Optional[str] = None
 
+
+class AzureTTSService(TTSService):
     def __init__(
         self,
         *,
@@ -103,7 +104,9 @@ class AzureTTSService(TTSService):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         speech_config = SpeechConfig(subscription=api_key, region=region)
-        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+        self._speech_synthesizer = SpeechSynthesizer(
+            speech_config=speech_config, audio_config=None
+        )
 
         self._settings = {
             "sample_rate": sample_rate,
@@ -306,7 +309,9 @@ class AzureSTTService(STTService):
         speech_config = SpeechConfig(subscription=api_key, region=region)
         speech_config.speech_recognition_language = language_code
 
-        stream_format = AudioStreamFormat(samples_per_second=sample_rate, channels=channels)
+        stream_format = AudioStreamFormat(
+            samples_per_second=sample_rate, channels=channels
+        )
         self._audio_stream = PushAudioInputStream(stream_format)
 
         audio_config = AudioConfig(stream=self._audio_stream)
@@ -336,9 +341,14 @@ class AzureSTTService(STTService):
         self._audio_stream.close()
 
     def _on_handle_recognized(self, event):
-        if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
+        if (
+            event.result.reason == ResultReason.RecognizedSpeech
+            and len(event.result.text) > 0
+        ):
             frame = TranscriptionFrame(event.result.text, "", time_now_iso8601())
-            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+            asyncio.run_coroutine_threadsafe(
+                self.push_frame(frame), self.get_event_loop()
+            )
 
 
 class AzureImageGenServiceREST(ImageGenService):
@@ -373,7 +383,9 @@ class AzureImageGenServiceREST(ImageGenService):
             "n": 1,
         }
 
-        async with self._aiohttp_session.post(url, headers=headers, json=body) as submission:
+        async with self._aiohttp_session.post(
+            url, headers=headers, json=body
+        ) as submission:
             # We never get past this line, because this header isn't
             # defined on a 429 response, but something is eating our
             # exceptions!
@@ -390,12 +402,16 @@ class AzureImageGenServiceREST(ImageGenService):
 
                 await asyncio.sleep(1)
 
-                response = await self._aiohttp_session.get(operation_location, headers=headers)
+                response = await self._aiohttp_session.get(
+                    operation_location, headers=headers
+                )
 
                 json_response = await response.json()
                 status = json_response["status"]
 
-            image_url = json_response["result"]["data"][0]["url"] if json_response else None
+            image_url = (
+                json_response["result"]["data"][0]["url"] if json_response else None
+            )
             if not image_url:
                 logger.error(f"{self} error: image generation failed")
                 yield ErrorFrame("Image generation failed")
