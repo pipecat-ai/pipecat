@@ -139,7 +139,7 @@ class DeepgramSTTService(STTService):
         merged_options = default_options
         if live_options:
             merged_options = LiveOptions(**{**default_options.to_dict(), **live_options.to_dict()})
-        self._settings = merged_options
+        self._settings = merged_options.to_dict()
 
         self._client = DeepgramClient(
             api_key,
