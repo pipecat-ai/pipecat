@@ -83,7 +83,7 @@ class ResponseProperties(BaseModel):
 #
 class RealtimeError(BaseModel):
     type: str
-    code: str
+    code: Optional[str] = ""
     message: str
     param: Optional[str] = None
 

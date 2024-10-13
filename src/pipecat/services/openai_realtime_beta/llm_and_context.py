@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import time
 
 from dataclasses import dataclass
 
@@ -8,6 +9,7 @@ import websockets
 from loguru import logger
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     DataFrame,
     EndFrame,
@@ -66,6 +68,14 @@ class _InternalFunctionCallResultFrame(DataFrame):
     result_frame: FunctionCallResultFrame
 
 
+@dataclass
+class _CurrentAudioResponse:
+    item_id: str
+    content_index: int
+    start_time_ms: int
+    total_size: int = 0
+
+
 class OpenAIUnhandledFunctionException(Exception):
     pass
 
@@ -88,41 +98,8 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
         return obj
 
     # todo
-    #   - truncate the last spoken message to maintain context when interrupted
-    #   - handle websocket errors in send message function
     #   - finish implementing all frames
     #   - add message conversion functions to OpenAILLMContext base class
-
-    # frames flow
-    #   - start
-    #       - StartFrame (AIService class)
-    #       - connect to websocket
-    #   - stop
-    #       - EndFrame (AIService class)
-    #       - finish any pending tasks, then disconnect and clean up. this pipeline should exit.
-    #   - cancel
-    #       - CancelFrame (AIService class)
-    #       - disconnect and clean up. this pipeline should stop right away. (todo: is this correct?)
-    #   - clear and restart the conversation
-    #       - LLMMessagesUpdateFrame
-    #       - disconnect, reconnect, update settings, convert_to_initial_messages
-    #   - add a message from an external source
-    #       - LLMMessagesAppendFrame
-    #       - uc.add_message, llm.add_message
-    #   - run the llm
-    #       - OpenAILLMContextFrame
-    #       - if new connection or context obj is different, set everything up
-    #       - llm.create_response
-    #   - update settings
-    #       - LLMUpdateSettingsFrame
-    #   - set tools
-    #       - LLMSetToolsFrame
-    #   - user started speaking
-    #       - UserStartedSpeakingFrame
-    #   - user stopped speaking
-    #       - UserStoppedSpeakingFrame
-    #   - interrupt the pipeline
-    #       - StartInterruptionFrame
 
     def from_standard_message(self, message):
         if message.get("role") == "assistant" and message.get("tool_calls"):
@@ -286,11 +263,12 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         self._websocket = None
         self._receive_task = None
         self._context = None
-        self._bot_speaking = False
 
         self._disconnecting = False
         self._api_session_ready = False
         self._run_llm_when_api_session_ready = False
+
+        self._current_audio_response = None
 
         self._messages_added_manually = {}
         self._user_and_response_message_tuple = None
@@ -321,24 +299,45 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
     # speech and interruption handling
     #
 
-    async def _handle_interruption(self, frame):
-        await self.send_client_event(events.InputAudioBufferClearEvent())
-        await self.send_client_event(events.ResponseCancelEvent())
+    async def _handle_interruption(self):
+        if self._session_properties.turn_detection is None:
+            await self.send_client_event(events.InputAudioBufferClearEvent())
+            await self.send_client_event(events.ResponseCancelEvent())
+        await self._truncate_current_audio_response()
         await self.stop_all_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
         await self.push_frame(TTSStoppedFrame())
 
     async def _handle_user_started_speaking(self, frame):
-        pass
+        if self._session_properties.turn_detection is None:
+            await self._handle_interruption()
 
     async def _handle_user_stopped_speaking(self, frame):
         if self._session_properties.turn_detection is None:
             await self.send_client_event(events.InputAudioBufferCommitEvent())
             await self.send_client_event(events.ResponseCreateEvent())
-        pass
+
+    async def _handle_bot_stopped_speaking(self):
+        self._current_audio_response = None
+
+    async def _truncate_current_audio_response(self):
+        # if the bot is still speaking, truncate the last message
+        if self._current_audio_response:
+            current = self._current_audio_response
+            self._current_audio_response = None
+            elapsed_ms = int(time.time() * 1000 - current.start_time_ms)
+            await self.send_client_event(
+                events.ConversationItemTruncateEvent(
+                    item_id=current.item_id,
+                    content_index=current.content_index,
+                    audio_end_ms=elapsed_ms,
+                )
+            )
 
     #
     # frame processing
+    #
+    # StartFrame, StopFrame, CancelFrame implemented in base class
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -362,15 +361,16 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
         elif isinstance(frame, StartInterruptionFrame):
-            await self._handle_interruption(frame)
+            await self._handle_interruption()
         elif isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
         elif isinstance(frame, UserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(frame)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking()
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
         elif isinstance(frame, _InternalMessagesUpdateFrame):
-            logger.debug(f"!!! MESSAGES UPDATE FRAME: {frame.context}")
             self._context = frame.context
         elif isinstance(frame, LLMUpdateSettingsFrame):
             self._session_properties = frame.settings
@@ -441,11 +441,14 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         try:
             if self._websocket:
                 await self._websocket.send(json.dumps(realtime_message))
-        # todo: handle specific websocket exceptions and reconnect. connection errors aren't necessarily fatal.
         except Exception as e:
             if self._disconnecting:
                 return
             logger.error(f"Error sending message to websocket: {e}")
+            # In server-to-server contexts, a WebSocket error should be quite rare. Given how hard
+            # it is to recover from a send-side error with proper state management, and that exponential
+            # backoff for retries can have cost/stability implications for a service cluster, let's just
+            # treat a send-side error as fatal.
             await self.push_error(ErrorFrame(error=f"Error sending client event: {e}", fatal=True))
 
     async def _update_settings(self):
@@ -486,13 +489,14 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                     await self._handle_evt_audio_transcript_delta(evt)
                 elif evt.type == "error":
                     await self._handle_evt_error(evt)
+                    # errors are fatal, so exit the receive loop
+                    return
 
                 else:
                     # logger.debug(f"!!! Unhandled event: {evt}")
                     pass
         except asyncio.CancelledError:
             logger.debug("websocket receive task cancelled")
-            return
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
@@ -513,15 +517,27 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         # note: ttfb is faster by 1/2 RTT than ttfb as measured for other services, since we're getting
         # this event from the server
         await self.stop_ttfb_metrics()
-        if not self._bot_speaking:
-            self._bot_speaking = True
+        if not self._current_audio_response:
+            self._current_audio_response = _CurrentAudioResponse(
+                item_id=evt.item_id,
+                content_index=evt.content_index,
+                start_time_ms=int(time.time() * 1000),
+            )
             await self.push_frame(TTSStartedFrame())
+        audio = base64.b64decode(evt.delta)
+        self._current_audio_response.total_size += len(audio)
         frame = TTSAudioRawFrame(
-            audio=base64.b64decode(evt.delta),
+            audio=audio,
             sample_rate=24000,
             num_channels=1,
         )
         await self.push_frame(frame)
+
+    async def _handle_evt_audio_done(self, evt):
+        if self._current_audio_response:
+            await self.push_frame(TTSStoppedFrame())
+            # Don't clear the self._current_audio_response here. We need to wait until we
+            # receive a BotStoppedSpeakingFrame from the output transport.
 
     async def _handle_evt_conversation_item_created(self, evt):
         # This will get sent from the server every time a new "message" is added
@@ -556,7 +572,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             logger.warn(f"Transcript for unknown user message: {evt}")
 
     async def _handle_evt_response_done(self, evt):
-        # todo: check for event.status == cancelled?
+        # todo: figure out whether there's anything we need to do for "cancelled" events
         # usage metrics
         tokens = LLMTokenUsage(
             prompt_tokens=evt.response.usage.input_tokens,
@@ -584,6 +600,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             await self.push_frame(TextFrame(evt.delta))
 
     async def _handle_evt_speech_started(self, evt):
+        await self._truncate_current_audio_response()
         if self._send_user_started_speaking_frames:
             await self.push_frame(UserStartedSpeakingFrame())
             await self.push_frame(StartInterruptionFrame())
@@ -596,16 +613,12 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             await self.push_frame(UserStoppedSpeakingFrame())
             await self.push_frame(StopInterruptionFrame())
 
-    async def _handle_evt_audio_done(self, evt):
-        if self._bot_speaking:
-            self._bot_speaking = False
-            await self.push_frame(TTSStoppedFrame())
-
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
         await self.push_error(ErrorFrame(error=f"Error: {evt}", fatal=True))
 
     async def _handle_assistant_output(self, output):
+        # logger.debug(f"!!! HANDLE Assistant output: {output}")
         # We haven't seen intermixed audio and function_call items in the same response. But let's
         # try to write logic that handles that, if it does happen.
         messages = [item for item in output if item.type == "message"]
