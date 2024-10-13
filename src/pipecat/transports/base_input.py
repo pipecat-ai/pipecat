@@ -5,31 +5,30 @@
 #
 
 import asyncio
-
 from concurrent.futures import ThreadPoolExecutor
 
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from loguru import logger
+
 from pipecat.frames.frames import (
-    AudioRawFrame,
     BotInterruptionFrame,
     CancelFrame,
-    StartFrame,
     EndFrame,
     Frame,
+    InputAudioRawFrame,
+    StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
-    VADParamsUpdateFrame)
+    VADParamsUpdateFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
 
-from loguru import logger
-
 
 class BaseInputTransport(FrameProcessor):
-
     def __init__(self, params: TransportParams, **kwargs):
         super().__init__(**kwargs)
 
@@ -37,9 +36,9 @@ class BaseInputTransport(FrameProcessor):
 
         self._executor = ThreadPoolExecutor(max_workers=5)
 
-        # Create push frame task. This is the task that will push frames in
-        # order. We also guarantee that all frames are pushed in the same task.
-        self._create_push_task()
+        # Task to process incoming audio (VAD) and push audio frames downstream
+        # if passthrough is enabled.
+        self._audio_task = None
 
     async def start(self, frame: StartFrame):
         # Create audio input queue and task if needed.
@@ -49,28 +48,22 @@ class BaseInputTransport(FrameProcessor):
 
     async def stop(self, frame: EndFrame):
         # Cancel and wait for the audio input task to finish.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_task.cancel()
             await self._audio_task
-
-        # Wait for the push frame task to finish. It will finish when the
-        # EndFrame is actually processed.
-        await self._push_frame_task
+            self._audio_task = None
 
     async def cancel(self, frame: CancelFrame):
-        # Cancel all the tasks and wait for them to finish.
-
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        # Cancel and wait for the audio input task to finish.
+        if self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_task.cancel()
             await self._audio_task
-
-        self._push_frame_task.cancel()
-        await self._push_frame_task
+            self._audio_task = None
 
     def vad_analyzer(self) -> VADAnalyzer | None:
         return self._params.vad_analyzer
 
-    async def push_audio_frame(self, frame: AudioRawFrame):
+    async def push_audio_frame(self, frame: InputAudioRawFrame):
         if self._params.audio_in_enabled or self._params.vad_enabled:
             await self._audio_in_queue.put(frame)
 
@@ -82,28 +75,26 @@ class BaseInputTransport(FrameProcessor):
         await super().process_frame(frame, direction)
 
         # Specific system frames
-        if isinstance(frame, CancelFrame):
+        if isinstance(frame, StartFrame):
+            # Push StartFrame before start(), because we want StartFrame to be
+            # processed by every processor before any other frame is processed.
+            await self.push_frame(frame, direction)
+            await self.start(frame)
+        elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotInterruptionFrame):
-            await self._handle_interruptions(frame, False)
-        elif isinstance(frame, StartInterruptionFrame):
+            logger.debug("Bot interruption")
             await self._start_interruption()
-        elif isinstance(frame, StopInterruptionFrame):
-            await self._stop_interruption()
+            await self.push_frame(StartInterruptionFrame())
         # All other system frames
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames
-        elif isinstance(frame, StartFrame):
-            # Push StartFrame before start(), because we want StartFrame to be
-            # processed by every processor before any other frame is processed.
-            await self._internal_push_frame(frame, direction)
-            await self.start(frame)
         elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.
-            await self._internal_push_frame(frame, direction)
+            await self.push_frame(frame, direction)
             await self.stop(frame)
         elif isinstance(frame, VADParamsUpdateFrame):
             vad_analyzer = self.vad_analyzer()
@@ -111,73 +102,28 @@ class BaseInputTransport(FrameProcessor):
                 vad_analyzer.set_params(frame.params)
         # Other frames
         else:
-            await self._internal_push_frame(frame, direction)
-
-    #
-    # Push frames task
-    #
-
-    def _create_push_task(self):
-        loop = self.get_event_loop()
-        self._push_queue = asyncio.Queue()
-        self._push_frame_task = loop.create_task(self._push_frame_task_handler())
-
-    async def _internal_push_frame(
-            self,
-            frame: Frame | None,
-            direction: FrameDirection | None = FrameDirection.DOWNSTREAM):
-        await self._push_queue.put((frame, direction))
-
-    async def _push_frame_task_handler(self):
-        running = True
-        while running:
-            try:
-                (frame, direction) = await self._push_queue.get()
-                await self.push_frame(frame, direction)
-                running = not isinstance(frame, EndFrame)
-                self._push_queue.task_done()
-            except asyncio.CancelledError:
-                break
+            await self.push_frame(frame, direction)
 
     #
     # Handle interruptions
     #
 
-    async def _start_interruption(self):
-        if not self.interruptions_allowed:
-            return
-
-        # Cancel the task. This will stop pushing frames downstream.
-        self._push_frame_task.cancel()
-        await self._push_frame_task
-        # Push an out-of-band frame (i.e. not using the ordered push
-        # frame task) to stop everything, specially at the output
-        # transport.
-        await self.push_frame(StartInterruptionFrame())
-        # Create a new queue and task.
-        self._create_push_task()
-
-    async def _stop_interruption(self):
-        if not self.interruptions_allowed:
-            return
-
-        await self.push_frame(StopInterruptionFrame())
-
-    async def _handle_interruptions(self, frame: Frame, push_frame: bool):
+    async def _handle_interruptions(self, frame: Frame):
         if self.interruptions_allowed:
-            # Make sure we notify about interruptions quickly out-of-band
-            if isinstance(frame, BotInterruptionFrame):
-                logger.debug("Bot interruption")
-                await self._start_interruption()
-            elif isinstance(frame, UserStartedSpeakingFrame):
+            # Make sure we notify about interruptions quickly out-of-band.
+            if isinstance(frame, UserStartedSpeakingFrame):
                 logger.debug("User started speaking")
                 await self._start_interruption()
+                # Push an out-of-band frame (i.e. not using the ordered push
+                # frame task) to stop everything, specially at the output
+                # transport.
+                await self.push_frame(StartInterruptionFrame())
             elif isinstance(frame, UserStoppedSpeakingFrame):
                 logger.debug("User stopped speaking")
                 await self._stop_interruption()
+                await self.push_frame(StopInterruptionFrame())
 
-        if push_frame:
-            await self._internal_push_frame(frame)
+        await self.push_frame(frame)
 
     #
     # Audio input
@@ -188,12 +134,17 @@ class BaseInputTransport(FrameProcessor):
         vad_analyzer = self.vad_analyzer()
         if vad_analyzer:
             state = await self.get_event_loop().run_in_executor(
-                self._executor, vad_analyzer.analyze_audio, audio_frames)
+                self._executor, vad_analyzer.analyze_audio, audio_frames
+            )
         return state
 
     async def _handle_vad(self, audio_frames: bytes, vad_state: VADState):
         new_vad_state = await self._vad_analyze(audio_frames)
-        if new_vad_state != vad_state and new_vad_state != VADState.STARTING and new_vad_state != VADState.STOPPING:
+        if (
+            new_vad_state != vad_state
+            and new_vad_state != VADState.STARTING
+            and new_vad_state != VADState.STOPPING
+        ):
             frame = None
             if new_vad_state == VADState.SPEAKING:
                 frame = UserStartedSpeakingFrame()
@@ -201,7 +152,7 @@ class BaseInputTransport(FrameProcessor):
                 frame = UserStoppedSpeakingFrame()
 
             if frame:
-                await self._handle_interruptions(frame, True)
+                await self._handle_interruptions(frame)
 
             vad_state = new_vad_state
         return vad_state
@@ -210,7 +161,7 @@ class BaseInputTransport(FrameProcessor):
         vad_state: VADState = VADState.QUIET
         while True:
             try:
-                frame: AudioRawFrame = await self._audio_in_queue.get()
+                frame: InputAudioRawFrame = await self._audio_in_queue.get()
 
                 audio_passthrough = True
 
@@ -222,7 +173,7 @@ class BaseInputTransport(FrameProcessor):
 
                 # Push audio downstream if passthrough.
                 if audio_passthrough:
-                    await self._internal_push_frame(frame)
+                    await self.push_frame(frame)
 
                 self._audio_in_queue.task_done()
             except asyncio.CancelledError:

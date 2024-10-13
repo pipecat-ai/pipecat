@@ -20,6 +20,7 @@ from runner import configure_with_args
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -29,12 +30,7 @@ logger.add(sys.stderr, level="DEBUG")
 async def main():
     async with aiohttp.ClientSession() as session:
         parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")
-        parser.add_argument(
-            "-i",
-            "--input",
-            type=str,
-            required=True,
-            help="Input video file")
+        parser.add_argument("-i", "--input", type=str, required=True, help="Input video file")
 
         (room_url, _, args) = await configure_with_args(session, parser)
 
@@ -49,7 +45,7 @@ async def main():
                 camera_out_width=1280,
                 camera_out_height=720,
                 camera_out_is_live=True,
-            )
+            ),
         )
 
         gst = GStreamerPipelineSource(
@@ -59,13 +55,15 @@ async def main():
                 video_height=720,
                 audio_sample_rate=16000,
                 audio_channels=1,
-            )
+            ),
         )
 
-        pipeline = Pipeline([
-            gst,                 # GStreamer file source
-            transport.output(),  # Transport bot output
-        ])
+        pipeline = Pipeline(
+            [
+                gst,  # GStreamer file source
+                transport.output(),  # Transport bot output
+            ]
+        )
 
         task = PipelineTask(pipeline)
 

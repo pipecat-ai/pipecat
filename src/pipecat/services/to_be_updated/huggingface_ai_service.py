@@ -19,8 +19,8 @@ class HuggingFaceAIService(AIService):
     # models use 2-character language codes**)
     def run_text_translation(self, sentence, source_language, target_language):
         translator = pipeline(
-            f"translation",
-            model=f"Helsinki-NLP/opus-mt-{source_language}-{target_language}")
+            f"translation", model=f"Helsinki-NLP/opus-mt-{source_language}-{target_language}"
+        )
 
         return translator(sentence)[0]["translation_text"]
 

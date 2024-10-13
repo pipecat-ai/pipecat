@@ -6,7 +6,8 @@ from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
     TextFrame,
-    UserStoppedSpeakingFrame)
+    UserStoppedSpeakingFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.services.daily import DailyTransportMessageFrame
 
@@ -34,6 +35,7 @@ class StoryPromptFrame(TextFrame):
 
 
 # ------------ Frame Processors ----------- #
+
 
 class StoryImageProcessor(FrameProcessor):
     """
@@ -113,7 +115,7 @@ class StoryProcessor(FrameProcessor):
                 # Extract the image prompt from the text using regex
                 image_prompt = re.search(r"<(.*?)>", self._text).group(1)
                 # Remove the image prompt from the text
-                self._text = re.sub(r"<.*?>", '', self._text, count=1)
+                self._text = re.sub(r"<.*?>", "", self._text, count=1)
                 # Process the image prompt frame
                 await self.push_frame(StoryImageFrame(image_prompt))
 
@@ -124,8 +126,7 @@ class StoryProcessor(FrameProcessor):
             if re.search(r".*\[[bB]reak\].*", self._text):
                 # Remove the [break] token from the text
                 # so it isn't spoken out loud by the TTS
-                self._text = re.sub(r'\[[bB]reak\]', '',
-                                    self._text, flags=re.IGNORECASE)
+                self._text = re.sub(r"\[[bB]reak\]", "", self._text, flags=re.IGNORECASE)
                 self._text = self._text.replace("\n", " ")
                 if len(self._text) > 2:
                     # Append the sentence to the story

@@ -21,6 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "aiohttp~=3.10.3",
+    "Markdown~=3.7",
     "numpy~=1.26.4",
     "loguru~=0.7.2",
     "Pillow~=10.4.0",
@@ -35,28 +36,30 @@ Website = "https://pipecat.ai"
 
 [project.optional-dependencies]
 anthropic = [ "anthropic~=0.34.0" ]
+aws = [ "boto3~=1.35.27" ]
 azure = [ "azure-cognitiveservices-speech~=1.40.0" ]
-cartesia = [ "websockets~=12.0" ]
-daily = [ "daily-python~=0.10.1" ]
-deepgram = [ "deepgram-sdk~=3.5.0" ]
+canonical = [ "aiofiles~=24.1.0" ]
+cartesia = [ "cartesia~=1.0.13", "websockets~=12.0" ]
+daily = [ "daily-python~=0.11.0" ]
+deepgram = [ "deepgram-sdk~=3.7.3" ]
 elevenlabs = [ "websockets~=12.0" ]
 examples = [ "python-dotenv~=1.0.1", "flask~=3.0.3", "flask_cors~=4.0.1" ]
 fal = [ "fal-client~=0.4.1" ]
 gladia = [ "websockets~=12.0" ]
-google = [ "google-generativeai~=0.7.2" ]
+google = [ "google-generativeai~=0.7.2", "google-cloud-texttospeech~=2.17.2" ]
 gstreamer = [ "pygobject~=3.48.2" ]
 fireworks = [ "openai~=1.37.2" ]
 langchain = [ "langchain~=0.2.14", "langchain-community~=0.2.12", "langchain-openai~=0.1.20" ]
-livekit = [ "livekit~=0.13.1" ]
+livekit = [ "livekit~=0.13.1", "tenacity~=9.0.0" ]
 lmnt = [ "lmnt~=1.1.4" ]
 local = [ "pyaudio~=0.2.14" ]
 moondream = [ "einops~=0.8.0", "timm~=1.0.8", "transformers~=4.44.0" ]
 openai = [ "openai~=1.37.2" ]
 openpipe = [ "openpipe~=4.24.0" ]
 playht = [ "pyht~=0.0.28" ]
-silero = [ "silero-vad~=5.1" ]
+silero = [ "onnxruntime>=1.16.1" ]
 together = [ "together~=1.2.7" ]
-websocket = [ "websockets~=12.0", "fastapi~=0.112.1" ]
+websocket = [ "websockets~=12.0", "fastapi~=0.115.0" ]
 whisper = [ "faster-whisper~=1.0.3" ]
 xtts = [ "resampy~=0.4.3" ]
 

@@ -3,18 +3,19 @@ import aiohttp
 import asyncio
 import logging
 import os
-from pipecat.pipeline.aggregators import SentenceAggregator
+from pipecat.processors.aggregators import SentenceAggregator
 from pipecat.pipeline.pipeline import Pipeline
 
-from pipecat.transports.daily_transport import DailyTransport
-from pipecat.services.azure_ai_services import AzureLLMService, AzureTTSService
-from pipecat.services.elevenlabs_ai_services import ElevenLabsTTSService
-from pipecat.services.fal_ai_services import FalImageGenService
-from pipecat.pipeline.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
+from pipecat.transports.services.daily import DailyTransport
+from pipecat.services.azure import AzureLLMService, AzureTTSService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.fal import FalImageGenService
+from pipecat.frames.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
 
 from runner import configure
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
@@ -53,9 +54,7 @@ async def main():
             voice_id="jBpfuIE2acCO8z3wKNLl",
         )
         dalle = FalImageGenService(
-            params=FalImageGenService.InputParams(
-                image_size="1024x1024"
-            ),
+            params=FalImageGenService.InputParams(image_size="1024x1024"),
             aiohttp_session=session,
             key=os.getenv("FAL_KEY"),
         )
@@ -75,13 +74,11 @@ async def main():
 
         async def get_text_and_audio(messages) -> Tuple[str, bytearray]:
             """This function streams text from the LLM and uses the TTS service to convert
-             that text to speech as it's received. """
+            that text to speech as it's received."""
             source_queue = asyncio.Queue()
             sink_queue = asyncio.Queue()
             sentence_aggregator = SentenceAggregator()
-            pipeline = Pipeline(
-                [llm, sentence_aggregator, tts1], source_queue, sink_queue
-            )
+            pipeline = Pipeline([llm, sentence_aggregator, tts1], source_queue, sink_queue)
 
             await source_queue.put(LLMMessagesFrame(messages))
             await source_queue.put(EndFrame())

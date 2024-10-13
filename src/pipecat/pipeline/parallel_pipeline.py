@@ -18,7 +18,6 @@ from loguru import logger
 
 
 class Source(FrameProcessor):
-
     def __init__(self, upstream_queue: asyncio.Queue):
         super().__init__()
         self._up_queue = upstream_queue
@@ -34,7 +33,6 @@ class Source(FrameProcessor):
 
 
 class Sink(FrameProcessor):
-
     def __init__(self, downstream_queue: asyncio.Queue):
         super().__init__()
         self._down_queue = downstream_queue
@@ -122,7 +120,7 @@ class ParallelPipeline(BasePipeline):
 
         # If we get an EndFrame we stop our queue processing tasks and wait on
         # all the pipelines to finish.
-        if isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
+        if isinstance(frame, (CancelFrame, EndFrame)):
             # Use None to indicate when queues should be done processing.
             await self._up_queue.put(None)
             await self._down_queue.put(None)

@@ -14,7 +14,6 @@ from loguru import logger
 
 
 class PipelineRunner:
-
     def __init__(self, *, name: str | None = None, handle_sigint: bool = True):
         self.id: int = obj_id()
         self.name: str = name or f"{self.__class__.__name__}#{obj_count(self)}"
@@ -42,12 +41,10 @@ class PipelineRunner:
     def _setup_sigint(self):
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(
-            signal.SIGINT,
-            lambda *args: asyncio.create_task(self._sig_handler())
+            signal.SIGINT, lambda *args: asyncio.create_task(self._sig_handler())
         )
         loop.add_signal_handler(
-            signal.SIGTERM,
-            lambda *args: asyncio.create_task(self._sig_handler())
+            signal.SIGTERM, lambda *args: asyncio.create_task(self._sig_handler())
         )
 
     async def _sig_handler(self):
