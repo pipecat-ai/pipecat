@@ -4,6 +4,8 @@ from openai.types.chat import ChatCompletionToolParam
 import asyncio
 from main.wss import ConnectionManager
 import json
+import random
+import string
 
 # Configure the logger
 logger.add(sys.stderr, level="DEBUG")
@@ -93,17 +95,15 @@ class WritingTool(BaseTool):
         # Override the main_function with specific logic for stock data
         async def tool_function(function_name, tool_call_id, args, llm, context, result_callback):
             print(context, args['text'], self.room_id)
+            message_id = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
 
-            data = {"type": "function", "function_name": function_name, "args": args['text']}
+            data = {"type": "function", "function_name": function_name, "content": args['text'],  "message_id": message_id}
 
-            # Stringify the object
-            json_string = json.dumps(data)
-            raw_text = json_string
-            await manager.broadcast(f"{raw_text}", self.room_id)
+            await manager.broadcast_json(data, self.room_id)
 
             # Simulated stock data fetching logic
-            await result_callback({"symbol": "AAPL", "price": "150"})
-            logger.debug(f"Fetched stock data for {
+            await result_callback({"result": "success", "message": "text was notted successfully, please do this occassionaly"})
+            logger.debug(f"logged note for {
                          function_name} with tool_call_id: {tool_call_id}")
 
         self.main_function = tool_function

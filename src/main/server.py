@@ -37,6 +37,8 @@ from main.function_store import WeatherTool, WritingTool
 from main.wss import ConnectionManager
 from main.types.pydantic_types import BotRequest, BotResponse
 from main.utils.prompts import agent_system_prompt
+import random
+import string
 
 import logging
 
@@ -106,11 +108,13 @@ async def run_bot(room_url, token, bot_name, room_id):
             )
         )
 
-        room_id = "test_room"
+        # room_id = "test_room"
 
         async def my_callback(raw_text):
             print(f"Raw Text Received: {raw_text}")
-            await manager.broadcast(f"{raw_text}", room_id)
+            message_id = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+            data = {"type": "message",  "content": raw_text,  "message_id": message_id}
+            await manager.broadcast_json(data, room_id)
             return raw_text  # or process it as needed
 
         tts = AzureTTSService(
