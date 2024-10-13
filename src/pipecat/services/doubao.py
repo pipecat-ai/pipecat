@@ -21,10 +21,6 @@ class DoubaoLLMService(LLMService):
         super().__init__(model=model, **kwargs)
         self._client = Ark()
         self._model: str = model
-        # detect if user start a new conversation during llm generation
-        self.llm_user_interrupt = False
-        # self._enable_metrics = True
-        # self._report_only_initial_ttfb = True
 
     async def get_chat_completions(
             self,
@@ -45,13 +41,7 @@ class DoubaoLLMService(LLMService):
             yield {"choices": [{"delta": {"content": f"Error: {str(e)}"}}]}
 
     def _convert_context_to_doubao_format(self, context: OpenAILLMContext) -> list:
-        doubao_messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful assistant."
-            }
-        ]
-
+        doubao_messages = []
         messages_json = context.get_messages_json()
         try:
             messages = json.loads(messages_json)
@@ -68,22 +58,19 @@ class DoubaoLLMService(LLMService):
                 logger.error(f"Unexpected type for messages after JSON parsing: {type(messages)}")
         except json.JSONDecodeError as e:
             logger.error(f"Error decoding JSON from get_messages_json(): {e}")
-
         return doubao_messages
 
     def can_generate_metrics(self) -> bool:
         return self._enable_metrics
 
     async def _process_context(self, context: OpenAILLMContext):
-        self.llm_user_interrupt = False
+
         await self.start_ttfb_metrics()
         messages = self._convert_context_to_doubao_format(context)
         chunk_stream = self.get_chat_completions(messages)
         try:
             async for chunk in chunk_stream:
-                # detect if user start a new conversation during llm generation
-                if self.llm_user_interrupt:
-                    break
+
                 await self.stop_ttfb_metrics()
 
                 if len(chunk["choices"]) == 0:
@@ -96,8 +83,7 @@ class DoubaoLLMService(LLMService):
             logger.error(f"Error in processing context: {e}")
 
     async def process_frame(self, frame: Frame, direction):
-        if isinstance(frame, UserStartedSpeakingFrame):
-            self.llm_user_interrupt = True
+
         await super().process_frame(frame, direction)
 
         context = None

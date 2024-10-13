@@ -4,16 +4,27 @@ import aiohttp
 from loguru import logger
 import requests
 from typing import AsyncGenerator
-from pipecat.frames.frames import Frame, AudioRawFrame, TTSStartedFrame, TTSStoppedFrame, ErrorFrame
+from pipecat.frames.frames import Frame, AudioRawFrame, OutputAudioRawFrame, TTSStartedFrame, TTSStoppedFrame, ErrorFrame
 from pipecat.services.ai_services import TTSService
 
 
 class ChatTTSTTSService(TTSService):
-    def __init__(self, *, api_url: str, aiohttp_session: aiohttp.ClientSession, **kwargs):
+    def __init__(
+        self,
+        *,
+        api_url: str,
+        aiohttp_session: aiohttp.ClientSession,
+        sample_rate: int = 24000,
+        num_channels: int = 1,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.api_url = api_url
         self._aiohttp_session = aiohttp_session
-        print(f"chattts url: {self.api_url}")
+        self._settings = {
+            "sample_rate": sample_rate,
+            "num_channels": num_channels,
+        }
 
     async def set_model(self, model: str):
         pass
@@ -36,17 +47,22 @@ class ChatTTSTTSService(TTSService):
 
                 if response.status != 200:
                     text = await response.text()
-                    raise Exception(f"Error getting audio: {text}")
+                    yield ErrorFrame("Error getting audio: {text}")
+                    return
                 await self.start_tts_usage_metrics(text)
-                await self.push_frame(TTSStartedFrame())
+                yield TTSStartedFrame()
 
                 async for chunk in response.content.iter_chunked(1024):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = AudioRawFrame(chunk, 24000, 1)
+                        frame = OutputAudioRawFrame(
+                            audio=chunk,
+                            sample_rate=self._settings["sample_rate"],
+                            num_channels=self._settings["num_channels"],
+                        )
                         yield frame
 
-                await self.push_frame(TTSStoppedFrame())
+                yield TTSStoppedFrame()
 
         except requests.exceptions.RequestException as e:
             yield ErrorFrame(f"Request to ChatTTS failed: {e}")

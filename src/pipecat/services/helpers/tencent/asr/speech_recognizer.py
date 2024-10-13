@@ -21,36 +21,36 @@ def is_python3():
     return False
 
 
-#实时识别语音使用
+# 实时识别语音使用
 class SpeechRecognitionListener():
     '''
-    reponse:  
+    reponse:
     on_recognition_start的返回只有voice_id字段。
     on_fail 只有voice_id、code、message字段。
     on_recognition_complete没有result字段。
     其余消息包含所有字段。
-    字段名	类型	
-    code	Integer	
-    message	String	
+    字段名	类型
+    code	Integer
+    message	String
     voice_id	String
     message_id	String
-    result	Result	
-    final	Integer	
+    result	Result
+    final	Integer
 
     Result的结构体格式为:
-    slice_type	Integer	
-    index	Integer	
-    start_time	Integer	
-    end_time	Integer	
-    voice_text_str	String	
-    word_size	Integer	
+    slice_type	Integer
+    index	Integer
+    start_time	Integer
+    end_time	Integer
+    voice_text_str	String
+    word_size	Integer
     word_list	Word Array
 
     Word的类型为:
-    word    String 
-    start_time Integer 
-    end_time Integer 
-    stable_flag：Integer 
+    word    String
+    start_time Integer
+    end_time Integer
+    stable_flag：Integer
     '''
 
     async def on_recognition_start(self, response):
@@ -79,7 +79,9 @@ FINAL = 3
 ERROR = 4
 CLOSED = 5
 
-#实时识别语音使用
+# 实时识别语音使用
+
+
 class SpeechRecognizer:
 
     def __init__(self, appid, credential, engine_model_type, listener):
@@ -224,7 +226,7 @@ class SpeechRecognizer:
         return query_arr
 
     async def stop(self):
-        if self.status == OPENED: 
+        if self.status == OPENED:
             msg = {}
             msg['type'] = "end"
             text_str = json.dumps(msg)
@@ -233,7 +235,6 @@ class SpeechRecognizer:
             if self.wst and self.wst.is_alive():
                 self.wst.join()
         self.ws.close()
-        
 
     async def write(self, data):
 
@@ -260,7 +261,7 @@ class SpeechRecognizer:
         except Exception as e:
             logger.error(f"WebSocket connection failed: {e}")
             raise e
-        
+
     async def start(self):
         query_arr = self.create_query_arr()
         if self.voice_id == "":
@@ -284,7 +285,6 @@ class SpeechRecognizer:
             # 启动接收消息的任务
             asyncio.create_task(self.listen_for_messages(self.ws))
 
-
         except Exception as e:
             logger.error(f"WebSocket connection failed: {e}")
 
@@ -298,7 +298,6 @@ class SpeechRecognizer:
             logger.error(f"WebSocket connection failed: {e}")
 
     async def on_message(self, message):
-        #logger.info(f"on message")
 
         response = json.loads(message)
         response['voice_id'] = self.voice_id

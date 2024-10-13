@@ -1,5 +1,3 @@
-
-
 import json
 from typing import AsyncGenerator
 from pipecat.frames.frames import (
@@ -15,8 +13,8 @@ from pipecat.services.ai_services import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from loguru import logger
-from pipecat.services.tencent.common import credential
-from pipecat.services.tencent.asr import speech_recognizer
+from pipecat.services.helpers.tencent.common import credential
+from pipecat.services.helpers.tencent.asr import speech_recognizer
 import os
 from dotenv import load_dotenv
 
@@ -29,20 +27,17 @@ ENGINE_MODEL_TYPE = os.getenv("TENCENT_ENGINE_MODEL_TYPE", "16k_zh")
 
 
 class TencentSTTService(STTService):
-    def __init__(self, **kwargs):
+    def __init__(self, *, param1=None, param2=None, **kwargs):
         super().__init__(**kwargs)
         self._recognizer = None
         self._listener = None
         self._credential = credential.Credential(SECRET_ID, SECRET_KEY)
 
     async def set_model(self, model: str):
+        await super().set_model(model)
         logger.debug(f"Switching STT model to: [{model}]")
         global ENGINE_MODEL_TYPE
         ENGINE_MODEL_TYPE = model
-        await self._reconnect()
-
-    async def set_language(self, language: Language):
-        logger.debug(f"Switching STT language to: [{language}]")
         await self._reconnect()
 
     async def start(self, frame: Frame):
