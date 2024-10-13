@@ -6,37 +6,35 @@
 
 import asyncio
 import itertools
-import time
 import sys
-
-from PIL import Image
+import time
 from typing import List
 
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from loguru import logger
+from PIL import Image
+
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    EndFrame,
+    Frame,
     MetricsFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     SpriteFrame,
     StartFrame,
-    EndFrame,
-    Frame,
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
-
-from loguru import logger
-
 from pipecat.utils.time import nanoseconds_to_seconds
 
 
@@ -65,7 +63,9 @@ class BaseOutputTransport(FrameProcessor):
         # We will write 20ms audio at a time. If we receive long audio frames we
         # will chunk them. This will help with interruption handling.
         audio_bytes_10ms = (
-            int(self._params.audio_out_sample_rate / 100) * self._params.audio_out_channels * 2
+            int(self._params.audio_out_sample_rate / 100)
+            * self._params.audio_out_channels
+            * 2
         )
         self._audio_chunk_size = audio_bytes_10ms * 2
         self._audio_buffer = bytearray()
@@ -92,7 +92,9 @@ class BaseOutputTransport(FrameProcessor):
         # Create audio output queue and task if needed.
         if self._params.audio_out_enabled and self._params.audio_out_is_live:
             self._audio_out_queue = asyncio.Queue()
-            self._audio_out_task = self.get_event_loop().create_task(self._audio_out_task_handler())
+            self._audio_out_task = self.get_event_loop().create_task(
+                self._audio_out_task_handler()
+            )
 
     async def stop(self, frame: EndFrame):
         # Cancel and wait for the camera output task to finish.
@@ -138,7 +140,9 @@ class BaseOutputTransport(FrameProcessor):
             await self._audio_out_task
             self._audio_out_task = None
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: TransportMessageFrame | TransportMessageUrgentFrame
+    ):
         pass
 
     async def send_metrics(self, frame: MetricsFrame):
@@ -329,12 +333,12 @@ class BaseOutputTransport(FrameProcessor):
                 logger.exception(f"{self} error processing sink clock queue: {e}")
 
     async def _bot_started_speaking(self):
-        logger.debug("Bot started speaking")
+        # logger.debug("Bot started speaking")
         self._bot_speaking = True
         await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
 
     async def _bot_stopped_speaking(self):
-        logger.debug("Bot stopped speaking")
+        # logger.debug("Bot stopped speaking")
         self._bot_speaking = False
         await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
 
@@ -351,7 +355,9 @@ class BaseOutputTransport(FrameProcessor):
         if frame.size != desired_size:
             image = Image.frombytes(frame.format, frame.size, frame.image)
             resized_image = image.resize(desired_size)
-            logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
+            logger.warning(
+                f"{frame} does not have the expected size {desired_size}, resizing"
+            )
             frame = OutputImageRawFrame(
                 resized_image.tobytes(), resized_image.size, resized_image.format
             )
@@ -394,8 +400,12 @@ class BaseOutputTransport(FrameProcessor):
 
         # Calculate how much time we need to wait before rendering next image.
         real_elapsed_time = time.time() - self._camera_out_start_time
-        real_render_time = self._camera_out_frame_index * self._camera_out_frame_duration
-        delay_time = self._camera_out_frame_duration + real_render_time - real_elapsed_time
+        real_render_time = (
+            self._camera_out_frame_index * self._camera_out_frame_duration
+        )
+        delay_time = (
+            self._camera_out_frame_duration + real_render_time - real_elapsed_time
+        )
 
         if abs(delay_time) > self._camera_out_frame_reset:
             self._camera_out_start_time = time.time()

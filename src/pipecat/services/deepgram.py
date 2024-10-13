@@ -235,8 +235,6 @@ class DeepgramSTTService(STTService):
                 if speech_final:
                     await self.push_frame(UserStoppedSpeakingFrame())
                     await self.stop_processing_metrics()
-
-                    await self.push_frame(UserStartedSpeakingFrame())
             # else:
             #     await self.push_frame(
             #         InterimTranscriptionFrame(

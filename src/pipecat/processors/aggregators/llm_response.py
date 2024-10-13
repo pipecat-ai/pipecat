@@ -93,13 +93,16 @@ class LLMResponseAggregator(FrameProcessor):
         send_aggregation = False
 
         if isinstance(frame, self._start_frame):
-            self._aggregation = ""
+            # if self._start_frame == UserStartedSpeakingFrame:
+            #     logger.debug(f"LLM frame received {frame}")
             self._aggregating = True
             self._seen_start_frame = True
             self._seen_end_frame = False
             self._seen_interim_results = False
             await self.push_frame(frame, direction)
         elif isinstance(frame, self._end_frame):
+            # if self._start_frame == UserStartedSpeakingFrame:
+            #     logger.debug(f"LLM frame received {frame}")
             self._seen_end_frame = True
             self._seen_start_frame = False
 
@@ -115,6 +118,8 @@ class LLMResponseAggregator(FrameProcessor):
             send_aggregation = not self._aggregating
             await self.push_frame(frame, direction)
         elif isinstance(frame, self._accumulator_frame):
+            if self._start_frame == UserStartedSpeakingFrame:
+                logger.debug(f"LLM frame received - aggregation {frame}")
             if self._aggregating:
                 if self._expect_stripped_words:
                     self._aggregation += (
@@ -132,6 +137,7 @@ class LLMResponseAggregator(FrameProcessor):
         elif self._interim_accumulator_frame and isinstance(
             frame, self._interim_accumulator_frame
         ):
+            logger.debug(f"LLM frame received: interim -  {frame}")
             self._seen_interim_results = True
         elif self._handle_interruptions and isinstance(frame, StartInterruptionFrame):
             await self._push_aggregation()
@@ -151,6 +157,8 @@ class LLMResponseAggregator(FrameProcessor):
             await self._push_aggregation()
 
     async def _push_aggregation(self):
+        if self._start_frame == UserStartedSpeakingFrame:
+            logger.debug(f"inside push_aggregation, pushing {self._aggregation}")
         if len(self._aggregation) > 0:
             self._messages.append({"role": self._role, "content": self._aggregation})
 
