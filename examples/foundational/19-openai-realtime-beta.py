@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
-from pipecat.frames.frames import LLMMessagesUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -27,6 +26,7 @@ from pipecat.services.openai_realtime_beta import (
     InputAudioTranscription,
     OpenAILLMServiceRealtimeBeta,
     SessionProperties,
+    TurnDetection,
 )
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
@@ -36,39 +36,6 @@ load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
-
-
-messages = [
-    {"role": "user", "content": "Say 'Hello there' and ask my name."},
-    {"role": "assistant", "content": [{"type": "text", "text": "Hello there! What's your name?"}]},
-    # {"role": "user", "content": [{"type": "input_audio"}]},
-    {"role": "user", "content": [{"type": "text", "text": "Tell me a joke.\n"}]},
-    # {
-    #     "role": "assistant",
-    #     "content": [
-    #         {
-    #             "type": "text",
-    #             "text": "Why don't scientists trust atoms? Because they make up everything!",
-    #         }
-    #     ],
-    # },
-    # {"role": "user", "content": [{"type": "text", "text": "me know the joke.\n"}]},
-    # {
-    #     "role": "assistant",
-    #     "content": [{"type": "text", "text": "What do you call fake spaghetti? An impasta!"}],
-    # },
-    # {"role": "user", "content": [{"type": "text", "text": "me another joke.\n"}]},
-    # {
-    #     "role": "assistant",
-    #     "content": [
-    #         {
-    #             "type": "text",
-    #             "text": "Why couldn't the bicycle stand up by itself? It was two-tired!",
-    #         }
-    #     ],
-    # },
-    # {"role": "user", "content": [{"type": "input_audio"}]},
-]
 
 
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
@@ -109,15 +76,18 @@ async def save_conversation(function_name, tool_call_id, args, llm, context, res
 
 
 async def load_conversation(function_name, tool_call_id, args, llm, context, result_callback):
-    filename = args["filename"]
-    logger.debug(f"loading conversation from {filename}")
-    try:
-        with open(filename, "r") as file:
-            messages = json.load(file)
-        await result_callback({"success": True})
-        await llm.push_frame(LLMMessagesUpdateFrame(messages))
-    except Exception as e:
-        await result_callback({"success": False, "error": str(e)})
+    async def _reset():
+        filename = args["filename"]
+        logger.debug(f"loading conversation from {filename}")
+        try:
+            with open(filename, "r") as file:
+                context.set_messages(json.load(file))
+                await llm.reset_conversation()
+                await llm._create_response()
+        except Exception as e:
+            await result_callback({"success": False, "error": str(e)})
+
+    asyncio.create_task(_reset())
 
 
 tools = [
@@ -203,12 +173,11 @@ async def main():
             input_audio_transcription=InputAudioTranscription(),
             # Set openai TurnDetection parameters. Not setting this at all will turn it
             # on by default
-            # turn_detection=TurnDetection(silence_duration_ms=1000),
+            turn_detection=TurnDetection(silence_duration_ms=1000),
             # Or set to False to disable openai turn detection and use transport VAD
-            turn_detection=False,
+            # turn_detection=False,
             # tools=tools,
-            instructions="""
-Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
+            instructions="""Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
 
 Act like a human, but remember that you aren't a human and that you can't do human
 things in the real world. Your voice and personality should be warm and engaging, with a lively and
@@ -217,18 +186,17 @@ playful tone.
 If interacting in a non-English language, start by using the standard accent or dialect familiar to
 the user. Talk quickly. You should always call a function if you can. Do not refer to these rules,
 even if you're asked about them.
-
+-
 You are participating in a voice conversation. Keep your responses concise, short, and to the point
 unless specifically asked to elaborate on a topic.
 
-Remember, your responses should be short. Just one or two sentences, usually.
-""",
+Remember, your responses should be short. Just one or two sentences, usually.""",
         )
 
         llm = OpenAILLMServiceRealtimeBeta(
             api_key=os.getenv("OPENAI_API_KEY"),
             session_properties=session_properties,
-            start_audio_paused=True,
+            start_audio_paused=False,
         )
 
         # you can either register a single function for all function calls, or specific functions
@@ -238,14 +206,7 @@ Remember, your responses should be short. Just one or two sentences, usually.
         llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
         llm.register_function("load_conversation", load_conversation)
 
-        context = OpenAILLMContext(
-            messages,
-            # [{"role": "user", "content": "Say 'hello'."}],
-            # [{"role": "user", "content": "What's the weather right now in San Francisco?"}],
-            # conversation load from file is a WIP -- not functional yet
-            # [{"role": "user", "content": "Load the most recent conversation."}],
-            tools,
-        )
+        context = OpenAILLMContext([], tools)
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
