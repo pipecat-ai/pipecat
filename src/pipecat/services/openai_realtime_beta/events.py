@@ -2,7 +2,6 @@ import json
 import uuid
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from loguru import logger
 from pydantic import BaseModel, Field
 
 #
@@ -103,7 +102,6 @@ class SessionUpdateEvent(ClientEvent):
     session: SessionProperties
 
     def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
-        logger.debug(f"!!! SessionUpdateEvent.model_dump: {self}")
         dump = super().model_dump(*args, **kwargs)
 
         # Handle turn_detection so that False is serialized as null

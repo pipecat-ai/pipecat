@@ -2,12 +2,7 @@ import asyncio
 import base64
 import json
 
-# temp: websocket logger
-import logging
-import traceback
-from copy import deepcopy
 from dataclasses import dataclass
-from typing import List
 
 import websockets
 from loguru import logger
@@ -18,9 +13,11 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    FunctionCallResultFrame,
     InputAudioRawFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
     LLMUpdateSettingsFrame,
@@ -51,15 +48,22 @@ from pipecat.utils.time import time_now_iso8601
 
 from . import events
 
-logging.basicConfig(
-    format="%(message)s",
-    level=logging.DEBUG,
-)
+# websocket logger -- in case needed for debugging send/recv
+# import logging
+# logging.basicConfig(
+#     format="%(message)s",
+#     level=logging.DEBUG,
+# )
 
 
 @dataclass
 class _InternalMessagesUpdateFrame(DataFrame):
     context: "OpenAIRealtimeLLMContext"
+
+
+@dataclass
+class _InternalFunctionCallResultFrame(DataFrame):
+    result_frame: FunctionCallResultFrame
 
 
 class OpenAIUnhandledFunctionException(Exception):
@@ -72,18 +76,9 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
         self.__setup_local()
 
     def __setup_local(self):
-        # messages that have been added to the context but not yet sent to the openai server
-        self._unsent_messages = deepcopy(self._messages)
-        # messages that we added to the context because they were part of our external
-        # context store. we do not want to add these again when we see conversation.item.created
-        # events about them. map from item_id to True
-        self._manually_created_messages = {}
-        # "conversation items" that have been created by opeanai realtime api events but are
-        # not completely filled in, yet. map from item_id to message
-        self._messages_in_progress = {}
-        # count of messages prior to recent reset
-        self._messages_reset_count = 0
-        self._tools_list_updated = True
+        self.llm_needs_settings_update = True
+        self.llm_needs_initial_messages = True
+        return
 
     @staticmethod
     def upgrade_to_realtime(obj: OpenAILLMContext) -> "OpenAIRealtimeLLMContext":
@@ -92,87 +87,101 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
             obj.__setup_local()
         return obj
 
-    # still working on
-    #   - clearing the context by deleting all messages
-    #   - reloading from a standard messages list
-    #   - truncating the last spoken message to maintain context when interrupted
+    # todo
+    #   - truncate the last spoken message to maintain context when interrupted
+    #   - handle websocket errors in send message function
+    #   - finish implementing all frames
+    #   - add message conversion functions to OpenAILLMContext base class
 
-    def set_tools(self, tools: List):
-        super().set_tools(tools)
-        self._tools_list_updated = True
+    # frames flow
+    #   - start
+    #       - StartFrame (AIService class)
+    #       - connect to websocket
+    #   - stop
+    #       - EndFrame (AIService class)
+    #       - finish any pending tasks, then disconnect and clean up. this pipeline should exit.
+    #   - cancel
+    #       - CancelFrame (AIService class)
+    #       - disconnect and clean up. this pipeline should stop right away. (todo: is this correct?)
+    #   - clear and restart the conversation
+    #       - LLMMessagesUpdateFrame
+    #       - disconnect, reconnect, update settings, convert_to_initial_messages
+    #   - add a message from an external source
+    #       - LLMMessagesAppendFrame
+    #       - uc.add_message, llm.add_message
+    #   - run the llm
+    #       - OpenAILLMContextFrame
+    #       - if new connection or context obj is different, set everything up
+    #       - llm.create_response
+    #   - update settings
+    #       - LLMUpdateSettingsFrame
+    #   - set tools
+    #       - LLMSetToolsFrame
+    #   - user started speaking
+    #       - UserStartedSpeakingFrame
+    #   - user stopped speaking
+    #       - UserStoppedSpeakingFrame
+    #   - interrupt the pipeline
+    #       - StartInterruptionFrame
 
-    def add_message(self, message):
-        super().add_message(message)
-        self._unsent_messages.append(message)
-        return message
-
-    def add_messages(self, messages):
-        super().add_messages(messages)
-        self._unsent_messages.extend(messages)
-
-    def add_message_already_present_in_api_context(self, message):
-        super().add_message(message)
-        return message
-
-    def set_messages(self, messages):
-        self._messages_reset_count = len(self.messages) - len(self._unsent_messages)
-        super().set_messages(messages)
-        self._unsent_messages = deepcopy(self._messages)
-
-    def get_unsent_messages(self):
-        return self._unsent_messages
-
-    def get_messages_reset_count(self):
-        return self._messages_reset_count
-
-    def get_tools_list_updated(self):
-        return self._tools_list_updated
-
-    def update_all_messages_sent(self):
-        self._unsent_messages = []
-        self._messages_reset_count = 0
-
-    def update_tools_list_sent(self):
-        self._tools_list_updated = False
-
-    def note_manually_added_message(self, item_id):
-        self._manually_created_messages[item_id] = True
-
-    def add_message_from_realtime_event(self, evt):
-        if evt.item.id in self._manually_created_messages:
-            del self._manually_created_messages[evt.item.id]
-            return
-
-        # add messages. don't add function_call or function_call_output items.
-        if evt.item.type == "message":
-            message = self.add_message_already_present_in_api_context(
-                {"role": evt.item.role, "content": []}
+    def from_standard_message(self, message):
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            tc = m.get("tool_calls")[0]
+            return events.ConversationItem(
+                type="function_call",
+                call_id=tc["id"],
+                name=tc["function"]["name"],
+                arguments=tc["function"]["arguments"],
             )
-            if not evt.item.content:
-                self._messages_in_progress[evt.item.id] = message
-                return
-            for content in evt.item.content:
-                message["content"].append({"type": content.type})
-                if content.text:
-                    message["content"] = content.text
-                elif content.transcript:
-                    message["content"] = content.transcript
-                else:
-                    # we will get the transcript in a later event
-                    self._messages_in_progress[evt.item.id] = message
-            return
+        logger.error(f"Unhandled message type in from_standard_message: {message}")
 
-    def add_transcript_to_message(self, evt):
-        message = self._messages_in_progress.get(evt.item_id)
-        if message:
-            cs = message["content"]
-            cs.extend([{"type": ""}] * (evt.content_index - len(cs) + 1))
-            cs[evt.content_index] = {"type": "text", "text": evt.transcript}
-            del self._messages_in_progress[evt.item_id]
-        else:
-            logger.error(
-                f"Could not find content {evt.item_id}/{evt.content_index} to add transcript to"
-            )
+    def get_messages_for_initializing_history(self):
+        # We can't load a long conversation history into the openai realtime api yet. (The API/model
+        # forgets that it can do audio, if you do a series of `conversation.item.create` calls.) So
+        # let's just put everything into a "system" message as a single input.
+        if not self.messages:
+            return []
+
+        intro_text = """
+        This is a previously saved conversation. Please treat this conversation history as a
+        starting point for the current conversation."""
+
+        trailing_text = """
+        This is the end of the previously saved conversation. Please continue the conversation
+        from here. If the last message is a user instruction or question, act on that instruction
+        or answer the question. If the last message is an assistant response, simple say that you
+        are ready to continue the conversation."""
+
+        return [
+            {
+                "role": "user",
+                "type": "message",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "\n\n".join(
+                            [intro_text, json.dumps(self.messages, indent=2), trailing_text]
+                        ),
+                    }
+                ],
+            }
+        ]
+
+    def add_user_content_item_as_message(self, item):
+        message = {
+            "role": "user",
+            "content": [{"type": "text", "text": item.content[0].transcript}],
+        }
+        self.add_message(message)
+
+    def add_assistant_content_item_as_message(self, item):
+        message = {"role": "assistant", "content": []}
+        for content in item.content:
+            if content.type == "audio":
+                message["content"].append({"type": "text", "text": content.transcript})
+            else:
+                logger.error(f"Unhandled content type in assistant item: {content.type} - {item}")
+        self.add_message(message)
 
 
 class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
@@ -182,8 +191,8 @@ class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
         await super().process_frame(frame, direction)
         # Parent does not push LLMMessagesUpdateFrame. This ensures that in a typical pipeline,
         # messages are only processed by the user context aggregator, which is generally what we want. But
-        # we also need to send new messages over the websocket, in case audio mode triggers a response before
-        # we get any other context frames through the pipeline.
+        # we also need to send new messages over the websocket, so the openai realtime API has them
+        # in its context.
         if isinstance(frame, LLMMessagesUpdateFrame):
             await self.push_frame(_InternalMessagesUpdateFrame(context=self._context))
 
@@ -210,7 +219,8 @@ class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator)
             frame = self._function_call_result
             self._function_call_result = None
             if frame.result:
-                self._context.add_message_already_present_in_api_context(
+                # The "tool_call" message from the LLM that triggered the function call
+                self._context.add_message(
                     {
                         "role": "assistant",
                         "tool_calls": [
@@ -225,12 +235,20 @@ class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator)
                         ],
                     }
                 )
-                self._context.add_message(
-                    {
-                        "role": "tool",
-                        "content": json.dumps(frame.result),
-                        "tool_call_id": frame.tool_call_id,
-                    }
+                # The result of the function call. Need to add this both to our context here and to
+                # the openai realtime api context.
+                result_message = {
+                    "role": "tool",
+                    "content": json.dumps(frame.result),
+                    "tool_call_id": frame.tool_call_id,
+                }
+
+                self._context.add_message(result_message)
+                # The standard function callback code path pushes the FunctionCallResultFrame from the llm itself,
+                # so we didn't have a chance to add the result to the openai realtime api context. Let's push a
+                # special frame to do that.
+                await self._user_context_aggregator.push_frame(
+                    _InternalFunctionCallResultFrame(result_frame=frame)
                 )
                 run_llm = frame.run_llm
 
@@ -270,11 +288,22 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         self._context = None
         self._bot_speaking = False
 
+        self._disconnecting = False
+        self._api_session_ready = False
+        self._run_llm_when_api_session_ready = False
+
+        self._messages_added_manually = {}
+        self._user_and_response_message_tuple = None
+
     def can_generate_metrics(self) -> bool:
         return True
 
     def set_audio_input_paused(self, paused: bool):
         self._audio_input_paused = paused
+
+    #
+    # standard AIService frame handling
+    #
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -288,18 +317,95 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         await super().cancel(frame)
         await self._disconnect()
 
+    #
+    # speech and interruption handling
+    #
+
+    async def _handle_interruption(self, frame):
+        await self.send_client_event(events.InputAudioBufferClearEvent())
+        await self.send_client_event(events.ResponseCancelEvent())
+        await self.stop_all_metrics()
+        await self.push_frame(LLMFullResponseEndFrame())
+        await self.push_frame(TTSStoppedFrame())
+
+    async def _handle_user_started_speaking(self, frame):
+        pass
+
+    async def _handle_user_stopped_speaking(self, frame):
+        if self._session_properties.turn_detection is None:
+            await self.send_client_event(events.InputAudioBufferCommitEvent())
+            await self.send_client_event(events.ResponseCreateEvent())
+        pass
+
+    #
+    # frame processing
+    #
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TranscriptionFrame):
+            pass
+        elif isinstance(frame, OpenAILLMContextFrame):
+            context: OpenAIRealtimeLLMContext = OpenAIRealtimeLLMContext.upgrade_to_realtime(
+                frame.context
+            )
+            if not self._context:
+                self._context = context
+            elif frame.context is not self._context:
+                # If the context has changed, reset the conversation
+                self._context = context
+                await self.reset_conversation()
+            # Run the LLM at next opportunity
+            await self._create_response()
+        elif isinstance(frame, InputAudioRawFrame):
+            if not self._audio_input_paused:
+                await self._send_user_audio(frame)
+        elif isinstance(frame, StartInterruptionFrame):
+            await self._handle_interruption(frame)
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            await self._handle_user_started_speaking(frame)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_user_stopped_speaking(frame)
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            await self._handle_messages_append(frame)
+        elif isinstance(frame, _InternalMessagesUpdateFrame):
+            logger.debug(f"!!! MESSAGES UPDATE FRAME: {frame.context}")
+            self._context = frame.context
+        elif isinstance(frame, LLMUpdateSettingsFrame):
+            self._session_properties = frame.settings
+            await self._update_settings()
+        elif isinstance(frame, LLMSetToolsFrame):
+            await self._update_settings()
+        elif isinstance(frame, _InternalFunctionCallResultFrame):
+            await self._handle_function_call_result(frame.result_frame)
+
+        await self.push_frame(frame, direction)
+
+    async def _handle_messages_append(self, frame):
+        logger.error("!!! NEED TO IMPLEMENT MESSAGES APPEND")
+
+    async def _handle_function_call_result(self, frame):
+        item = events.ConversationItem(
+            type="function_call_output",
+            call_id=frame.tool_call_id,
+            output=json.dumps(frame.result),
+        )
+        await self.send_client_event(events.ConversationItemCreateEvent(item=item))
+
+    #
+    # websocket communication
+    #
+
     async def send_client_event(self, event: events.ClientEvent):
         await self._ws_send(event.model_dump(exclude_none=True))
 
-    async def _ws_send(self, realtime_message):
-        try:
-            await self._websocket.send(json.dumps(realtime_message))
-        except Exception as e:
-            logger.error(f"Error sending message to websocket: {e}")
-            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}", fatal=True))
-
     async def _connect(self):
         try:
+            if self._websocket:
+                # Here we assume that if we have a websocket, we are connected. We
+                # handle disconnections in the send/recv code paths.
+                return
             self._websocket = await websockets.connect(
                 uri=self.base_url,
                 extra_headers={
@@ -314,147 +420,199 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
 
     async def _disconnect(self):
         try:
+            self._disconnecting = True
+            self._api_session_ready = False
             await self.stop_all_metrics()
-
             if self._websocket:
                 await self._websocket.close()
                 self._websocket = None
-
             if self._receive_task:
                 self._receive_task.cancel()
-                await self._receive_task
+                try:
+                    await asyncio.wait_for(self._receive_task, timeout=1.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Timed out waiting for receive task to finish")
                 self._receive_task = None
+            self._disconnecting = False
         except Exception as e:
-            logger.error(f"{self} error closing websocket: {e}")
+            logger.error(f"{self} error disconnecting: {e}")
 
-    def _get_websocket(self):
-        if self._websocket:
-            return self._websocket
-        raise Exception("Websocket not connected")
+    async def _ws_send(self, realtime_message):
+        try:
+            if self._websocket:
+                await self._websocket.send(json.dumps(realtime_message))
+        # todo: handle specific websocket exceptions and reconnect. connection errors aren't necessarily fatal.
+        except Exception as e:
+            if self._disconnecting:
+                return
+            logger.error(f"Error sending message to websocket: {e}")
+            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}", fatal=True))
 
     async def _update_settings(self):
-        # !!! LEAVE ALL DEFAULT SETTINGS FOR NOW
-        return
         settings = self._session_properties
         # tools given in the context override the tools in the session properties
         if self._context and self._context.tools:
             settings.tools = self._context.tools
-            self._context.update_tools_list_sent()
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
+
+    #
+    # inbound server event handling
+    # https://platform.openai.com/docs/api-reference/realtime-server-events
+    #
 
     async def _receive_task_handler(self):
         try:
-            async for message in self._get_websocket():
+            async for message in self._websocket:
                 evt = events.parse_server_event(message)
-                # logger.debug(f"Received event: {evt}")
                 if evt.type == "session.created":
-                    # session.created is received right after connecting. send a message
-                    # to configure the session properties.
-                    logger.debug(f"!!! GOT SESSION CREATED {evt}")
-                    await self._update_settings()
+                    await self._handle_evt_session_created(evt)
                 elif evt.type == "session.updated":
-                    logger.debug(f"!!! GOT SESSION UPDATED {evt}")
-                    self._session_properties = evt.session
-                elif evt.type == "conversation.created":
-                    logger.debug(f"!!! GOT CONVERSATION CREATED: {evt}")
-                elif evt.type == "input_audio_buffer.speech_started":
-                    # user started speaking
-                    if self._send_user_started_speaking_frames:
-                        await self.push_frame(UserStartedSpeakingFrame())
-                        await self.push_frame(StartInterruptionFrame())
-                        logger.debug("User started speaking")
-                    pass
-                elif evt.type == "input_audio_buffer.speech_stopped":
-                    # user stopped speaking
-                    if self._send_user_started_speaking_frames:
-                        await self.push_frame(UserStoppedSpeakingFrame())
-                        await self.push_frame(StopInterruptionFrame())
-
-                        logger.debug("User stopped speaking")
-                    await self.start_processing_metrics()
-                    await self.start_ttfb_metrics()
-                elif evt.type == "conversation.item.created":
-                    # this will get sent from the server every time a new "message" is added
-                    # to the server's conversation state
-                    if self._context:
-                        self._context.add_message_from_realtime_event(evt)
-                elif evt.type == "response.created":
-                    # todo: 1. figure out TTS started/stopped frame semantics better
-                    #       2. do not push these frames in text-only mode
-                    logger.debug(f"!!! GOT RESPONSE CREATED {evt}")
-                    if not self._bot_speaking:
-                        self._bot_speaking = True
-                        await self.push_frame(TTSStartedFrame())
-                    pass
-                elif evt.type == "conversation.item.input_audio_transcription.completed":
-                    if evt.transcript:
-                        if self._context:
-                            self._context.add_transcript_to_message(evt)
-                        if self._send_transcription_frames:
-                            await self.push_frame(
-                                # no way to get a language code?
-                                TranscriptionFrame(evt.transcript, "", time_now_iso8601())
-                            )
-                elif evt.type == "response.output_item.added":
-                    # todo: think about adding a frame for this (generally, in Pipecat/RTVI), as
-                    # it could be useful for managing UI state
-                    pass
-                elif evt.type == "response.content_part.added":
-                    # todo: same thing — possibly a useful event for client-side UI
-                    pass
-                elif evt.type == "response.audio_transcript.delta":
-                    # note: the openai playground app uses this, not "response.text.delta"
-                    if evt.delta:
-                        await self.push_frame(TextFrame(evt.delta))
+                    await self._handle_evt_session_updated(evt)
                 elif evt.type == "response.audio.delta":
-                    await self.stop_ttfb_metrics()
-                    frame = TTSAudioRawFrame(
-                        audio=base64.b64decode(evt.delta),
-                        sample_rate=24000,
-                        num_channels=1,
-                    )
-                    await self.push_frame(frame)
+                    await self._handle_evt_audio_delta(evt)
                 elif evt.type == "response.audio.done":
-                    if self._bot_speaking:
-                        self._bot_speaking = False
-                        await self.push_frame(TTSStoppedFrame())
-                elif evt.type == "response.audio_transcript.done":
-                    if self._context:
-                        self._context.add_transcript_to_message(evt)
-                    pass
-                elif evt.type == "response.content_part.done":
-                    # this doesn't map to any Pipecat frame types
-                    pass
-                elif evt.type == "response.output_item.done":
-                    # this doesn't map to any Pipecat frame types
-                    pass
+                    await self._handle_evt_audio_done(evt)
+                elif evt.type == "conversation.item.created":
+                    await self._handle_evt_conversation_item_created(evt)
+                elif evt.type == "conversation.item.input_audio_transcription.completed":
+                    await self.handle_evt_input_audio_transcription_completed(evt)
                 elif evt.type == "response.done":
-                    # usage metrics
-                    tokens = LLMTokenUsage(
-                        prompt_tokens=evt.response.usage.input_tokens,
-                        completion_tokens=evt.response.usage.output_tokens,
-                        total_tokens=evt.response.usage.total_tokens,
-                    )
-                    await self.start_llm_usage_metrics(tokens)
-                    await self.stop_processing_metrics()
-                    # function calls
-                    items = evt.response.output
-                    function_calls = [item for item in items if item.type == "function_call"]
-                    if function_calls:
-                        await self._handle_function_call_items(function_calls)
-                    await self.push_frame(LLMFullResponseEndFrame())
-                elif evt.type == "rate_limits.updated":
-                    # todo: add a Pipecat frame for this. (maybe?)
-                    pass
+                    await self._handle_evt_response_done(evt)
+                elif evt.type == "input_audio_buffer.speech_started":
+                    await self._handle_evt_speech_started(evt)
+                elif evt.type == "input_audio_buffer.speech_stopped":
+                    await self._handle_evt_speech_stopped(evt)
+                elif evt.type == "response.audio_transcript.delta":
+                    await self._handle_evt_audio_transcript_delta(evt)
                 elif evt.type == "error":
-                    # These errors seem to be fatal to this connection. So, close and send an ErrorFrame.
-                    raise Exception(f"Error: {evt}")
+                    await self._handle_evt_error(evt)
 
+                else:
+                    # logger.debug(f"!!! Unhandled event: {evt}")
+                    pass
         except asyncio.CancelledError:
-            pass
+            logger.debug("websocket receive task cancelled")
+            return
         except Exception as e:
-            logger.error(f"{self} exception: {e}\n\nStack trace:\n{traceback.format_exc()}")
-            await self.push_error(ErrorFrame(error=f"Error receiving: {e}", fatal=True))
+            logger.error(f"{self} exception: {e}")
+
+    async def _handle_evt_session_created(self, evt):
+        # session.created is received right after connecting. Send a message
+        # to configure the session properties.
+        await self._update_settings()
+
+    async def _handle_evt_session_updated(self, evt):
+        # If this is our first context frame, run the LLM
+        self._api_session_ready = True
+        # Now that we've configured the session, we can run the LLM if we need to.
+        if self._run_llm_when_api_session_ready:
+            self._run_llm_when_api_session_ready = False
+            await self._create_response()
+
+    async def _handle_evt_audio_delta(self, evt):
+        # note: ttfb is faster by 1/2 RTT than ttfb as measured for other services, since we're getting
+        # this event from the server
+        await self.stop_ttfb_metrics()
+        if not self._bot_speaking:
+            self._bot_speaking = True
+            await self.push_frame(TTSStartedFrame())
+        frame = TTSAudioRawFrame(
+            audio=base64.b64decode(evt.delta),
+            sample_rate=24000,
+            num_channels=1,
+        )
+        await self.push_frame(frame)
+
+    async def _handle_evt_conversation_item_created(self, evt):
+        # This will get sent from the server every time a new "message" is added
+        # to the server's conversation state, whether we create it via the API
+        # or the server creates it from LLM output.
+        if self._messages_added_manually.get(evt.item.id):
+            del self._messages_added_manually[evt.item.id]
+            return
+
+        if evt.item.role == "user":
+            # We need to wait for completion of both user message and response message. Then we'll
+            # add both to the context. User message is complete when we have a "transcript" field
+            # that is not None. Response message is complete when we get a "response.done" event.
+            self._user_and_response_message_tuple = (evt.item, {"done": False, "output": []})
+
+    async def handle_evt_input_audio_transcription_completed(self, evt):
+        if self._send_transcription_frames:
+            await self.push_frame(
+                # no way to get a language code?
+                TranscriptionFrame(evt.transcript, "", time_now_iso8601())
+            )
+        pair = self._user_and_response_message_tuple
+        if pair:
+            user, assistant = pair
+            user.content[0].transcript = evt.transcript
+            if assistant["done"]:
+                self._user_and_response_message_tuple = None
+                self._context.add_user_content_item_as_message(user)
+                await self._handle_assistant_output(assistant["output"])
+        else:
+            # User message without preceding conversation.item.created. Bug?
+            logger.warn(f"Transcript for unknown user message: {evt}")
+
+    async def _handle_evt_response_done(self, evt):
+        # todo: check for event.status == cancelled?
+        # usage metrics
+        tokens = LLMTokenUsage(
+            prompt_tokens=evt.response.usage.input_tokens,
+            completion_tokens=evt.response.usage.output_tokens,
+            total_tokens=evt.response.usage.total_tokens,
+        )
+        await self.start_llm_usage_metrics(tokens)
+        await self.stop_processing_metrics()
+        # response content
+        pair = self._user_and_response_message_tuple
+        if pair:
+            user, assistant = pair
+            assistant["done"] = True
+            assistant["output"] = evt.response.output
+            if user.content[0].transcript is not None:
+                self._user_and_response_message_tuple = None
+                self._context.add_user_content_item_as_message(user)
+                await self._handle_assistant_output(assistant["output"])
+        else:
+            # Response message without preceding user message. Add it to the context.
+            await self._handle_assistant_output(evt.response.output)
+
+    async def _handle_evt_audio_transcript_delta(self, evt):
+        if evt.delta:
+            await self.push_frame(TextFrame(evt.delta))
+
+    async def _handle_evt_speech_started(self, evt):
+        if self._send_user_started_speaking_frames:
+            await self.push_frame(UserStartedSpeakingFrame())
+            await self.push_frame(StartInterruptionFrame())
+            logger.debug("User started speaking")
+
+    async def _handle_evt_speech_stopped(self, evt):
+        await self.start_ttfb_metrics()
+        await self.start_processing_metrics()
+        if self._send_user_started_speaking_frames:
+            await self.push_frame(UserStoppedSpeakingFrame())
+            await self.push_frame(StopInterruptionFrame())
+
+    async def _handle_evt_audio_done(self, evt):
+        if self._bot_speaking:
+            self._bot_speaking = False
+            await self.push_frame(TTSStoppedFrame())
+
+    async def _handle_evt_error(self, evt):
+        # Errors are fatal to this connection. Send an ErrorFrame.
+        await self.push_error(ErrorFrame(error=f"Error: {evt}", fatal=True))
+
+    async def _handle_assistant_output(self, output):
+        # We haven't seen intermixed audio and function_call items in the same response. But let's
+        # try to write logic that handles that, if it does happen.
+        messages = [item for item in output if item.type == "message"]
+        function_calls = [item for item in output if item.type == "function_call"]
+        for item in messages:
+            self._context.add_assistant_content_item_as_message(item)
+        await self._handle_function_call_items(function_calls)
 
     async def _handle_function_call_items(self, items):
         total_items = len(items)
@@ -485,179 +643,53 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                     f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
                 )
 
-    async def _reset_conversation(self, count):
-        # need to think about how to implement this, and how to think about interop with messages lists
-        # used with the HTTP API
-        logger.debug(f"!!! RESET CONVERSATION: {count} [WIP]")
+    #
+    # state and client events for the current conversation
+    # https://platform.openai.com/docs/api-reference/realtime-client-events
+    #
+
+    async def reset_conversation(self):
+        # Disconnect/reconnect is the safest way to start a new conversation.
+        # Note that this will fail if called from the receive task.
+        logger.debug("Resetting conversation")
         await self._disconnect()
+        if self._context:
+            self._context.llm_needs_settings_update = True
+            self._context.llm_needs_initial_messages = True
         await self._connect()
-        pass
-
-    async def _send_messages_context_update(self):
-        if not self._context:
-            return
-        context = self._context
-        messages = context.get_unsent_messages()
-
-        needs_reset = context.get_messages_reset_count()
-        context.update_all_messages_sent()
-
-        if needs_reset:
-            await self._reset_conversation(needs_reset)
-            # debugging
-            logger.debug("MESSAGE HISTORY RELOAD NOT IMPLEMENTED YET")
-            return
-
-        items = []
-        for m in messages:
-            if m and (
-                m.get("role") == "user" or m.get("role") == "system" or m.get("role") == "assistant"
-            ):
-                content = m.get("content")
-                if isinstance(content, str):
-                    # skip any messages that aren't "text" and change "user" message type to "input_text"
-
-                    if m.get("type", "text") == "text":
-                        items.append(
-                            events.ConversationItem(
-                                type="message",
-                                status="completed",
-                                role=m.get("role", "user"),
-                                content=[
-                                    events.ItemContent(
-                                        type="input_text" if m.get("role") == "user" else "text",
-                                        text=content,
-                                    )
-                                ],
-                            )
-                        )
-                elif isinstance(content, list):
-                    # skip any messages that aren't "text" and change "user" message type to "input_text"
-                    cs = []
-                    for item in content:
-                        if item.get("type", "text") == "text":
-                            # cs.append(events.ItemContent(type="input_text", text=item.get("text")))
-                            (
-                                cs.append(
-                                    events.ItemContent(
-                                        type="input_text" if m.get("role") == "user" else "text",
-                                        text=item.get("text"),
-                                    )
-                                ),
-                            )
-                    if cs:
-                        items.append(
-                            events.ConversationItem(
-                                type="message",
-                                status="completed",
-                                role=m.get("role", "user"),
-                                content=cs,
-                            )
-                        )
-                elif m.get("role") == "assistant" and m.get("tool_calls"):
-                    tc = m.get("tool_calls")[0]
-                    items.append(
-                        events.ConversationItem(
-                            type="function_call",
-                            call_id=tc["id"],
-                            name=tc["function"]["name"],
-                            arguments=tc["function"]["arguments"],
-                        )
-                    )
-                else:
-                    raise Exception(f"Invalid message content {m}")
-            elif m and m.get("role") == "tool":
-                items.append(
-                    events.ConversationItem(
-                        type="function_call_output",
-                        call_id=m.get("tool_call_id"),
-                        output=m["content"],
-                    )
-                )
-
-        for item in items:
-            context.note_manually_added_message(item.id)
-            evt = events.ConversationItemCreateEvent(item=item)
-            logger.debug(
-                f"!!! > Sending message: {evt.model_dump_json(indent=2, exclude_none=True)}"
-            )
-            await self.send_client_event(evt)
-            await asyncio.sleep(2)
-            # await self.send_client_event(events.ConversationItemCreateEvent(item=item))
 
     async def _create_response(self):
-        if self._context.get_tools_list_updated():
+        if not self._api_session_ready:
+            self._run_llm_when_api_session_ready = True
+            return
+
+        if self._context.llm_needs_settings_update:
+            # try catch here for retries?
             await self._update_settings()
+            self._context.llm_needs_settings_update = False
 
-        # !!! DEBUGGING - testing await on conversation.create
-        logger.debug("!!! A waiting on conversation.created")
-        await asyncio.sleep(3)
-        logger.debug("!!! A ok, done waiting")
+        if self._context.llm_needs_initial_messages:
+            messages = self._context.get_messages_for_initializing_history()
+            for item in messages:
+                evt = events.ConversationItemCreateEvent(item=item)
+                self._messages_added_manually[evt.item.id] = True
+                await self.send_client_event(evt)
+            self._context.llm_needs_initial_messages = False
 
-        await self._send_messages_context_update()
         logger.debug(f"Creating response: {self._context.get_messages_for_logging()}")
+
         await self.push_frame(LLMFullResponseStartFrame())
         await self.start_processing_metrics()
+        await self.start_ttfb_metrics()
         await self.send_client_event(
             events.ResponseCreateEvent(
                 response=events.ResponseProperties(modalities=["audio", "text"])
             )
         )
-        # !!! DEBUGGING
-        await asyncio.sleep(2)
-        # logger.debug("Unpausing microphone")
-        # self.set_audio_input_paused(False)
 
     async def _send_user_audio(self, frame):
         payload = base64.b64encode(frame.audio).decode("utf-8")
         await self.send_client_event(events.InputAudioBufferAppendEvent(audio=payload))
-
-    async def _handle_interruption(self, frame):
-        await self.send_client_event(events.InputAudioBufferClearEvent())
-        await self.send_client_event(events.ResponseCancelEvent())
-        await self.stop_all_metrics()
-        await self.push_frame(LLMFullResponseEndFrame())
-        await self.push_frame(TTSStoppedFrame())
-
-    async def _handle_user_started_speaking(self, frame):
-        pass
-
-    async def _handle_user_stopped_speaking(self, frame):
-        if self._session_properties.turn_detection is None:
-            await self.send_client_event(events.InputAudioBufferCommitEvent())
-            await self.send_client_event(events.ResponseCreateEvent())
-        pass
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, TranscriptionFrame):
-            pass
-        elif isinstance(frame, OpenAILLMContextFrame):
-            context: OpenAIRealtimeLLMContext = OpenAIRealtimeLLMContext.upgrade_to_realtime(
-                frame.context
-            )
-            self._context = context
-            await self._create_response()
-        elif isinstance(frame, InputAudioRawFrame):
-            if not self._audio_input_paused:
-                await self._send_user_audio(frame)
-        elif isinstance(frame, StartInterruptionFrame):
-            await self._handle_interruption(frame)
-        elif isinstance(frame, UserStartedSpeakingFrame):
-            await self._handle_user_started_speaking(frame)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            await self._handle_user_stopped_speaking(frame)
-        elif isinstance(frame, _InternalMessagesUpdateFrame):
-            self._context = frame.context
-            await self._send_messages_context_update()
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            self._session_properties = frame.settings
-            await self._update_settings()
-        elif isinstance(frame, LLMSetToolsFrame):
-            await self._update_settings()
-
-        await self.push_frame(frame, direction)
 
     def create_context_aggregator(
         self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = False
