@@ -64,6 +64,53 @@ def replace_formula(text):
     
     return new_text
 
+def markdown_to_text(markdown_string):
+    # Handle headers
+    def header_replace(match):
+        level = len(match.group(1))
+        text = match.group(2).strip()
+        if level == 1:
+            return f"{text.upper()}\n{'=' * len(text)}\n\n"
+        elif level == 2:
+            return f"{text}\n{'-' * len(text)}\n\n"
+        else:
+            return f"{'  ' * (level - 3)}• {text}\n\n"
+    
+    markdown_string = re.sub(r'^(#{1,6})\s*(.*?)$', header_replace, markdown_string, flags=re.MULTILINE)
+    
+    # Remove bold and italic
+    markdown_string = re.sub(r'\*\*(.*?)\*\*', r'\1', markdown_string)
+    markdown_string = re.sub(r'\*(.*?)\*', r'\1', markdown_string)
+    markdown_string = re.sub(r'__(.*?)__', r'\1', markdown_string)
+    markdown_string = re.sub(r'_(.*?)_', r'\1', markdown_string)
+    
+    # Remove links
+    markdown_string = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', markdown_string)
+    
+    # Remove images
+    markdown_string = re.sub(r'!\[.*?\]\(.*?\)', '', markdown_string)
+    
+    # Remove code blocks
+    markdown_string = re.sub(r'```[\s\S]*?```', '', markdown_string)
+    markdown_string = re.sub(r'~~~[\s\S]*?~~~', '', markdown_string)
+    
+    # Remove inline code
+    markdown_string = re.sub(r'`([^`]+)`', r'\1', markdown_string)
+    
+    # Remove blockquotes
+    markdown_string = re.sub(r'^\s*>\s*', '', markdown_string, flags=re.MULTILINE)
+    
+    # Remove horizontal rules
+    markdown_string = re.sub(r'^\s*[-*_]{3,}\s*$', '', markdown_string, flags=re.MULTILINE)
+    
+    # Remove strikethrough
+    markdown_string = re.sub(r'~~(.*?)~~', r'\1', markdown_string)
+    
+    # Replace formulas
+    markdown_string = re.sub(r'\\\((.*?)\\\)', '(formula here)', markdown_string, flags=re.DOTALL)
+    
+    return markdown_string.strip()
+
 class AzureLLMService(BaseOpenAILLMService):
     def __init__(
         self, *, api_key: str, endpoint: str, model: str, api_version: str = "2023-12-01-preview"
@@ -273,7 +320,8 @@ class AzureTTSService(TTSService):
         if self.callback:
             await self.callback(text)
 
-        text = replace_formula(text)
+        # text = replace_formula(text)
+        text = markdown_to_text(text)
 
         # Extract maths formula before generating tts
 

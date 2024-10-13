@@ -16,6 +16,7 @@ app = FastAPI()
 class ConfigRequest(BaseModel):
     room_url: str = None
     apikey: str = None
+    room_id: str = None
 
 async def configure(aiohttp_session: aiohttp.ClientSession, request: ConfigRequest):
     url = request.room_url or os.getenv("DAILY_SAMPLE_ROOM_URL")
