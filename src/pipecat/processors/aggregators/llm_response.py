@@ -95,6 +95,7 @@ class LLMResponseAggregator(FrameProcessor):
         if isinstance(frame, self._start_frame):
             # if self._start_frame == UserStartedSpeakingFrame:
             #     logger.debug(f"LLM frame received {frame}")
+            self._aggregation = ""
             self._aggregating = True
             self._seen_start_frame = True
             self._seen_end_frame = False
