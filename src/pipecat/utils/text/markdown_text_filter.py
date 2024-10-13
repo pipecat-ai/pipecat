@@ -5,7 +5,7 @@
 #
 
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 from markdown import Markdown
 from pydantic import BaseModel
@@ -22,9 +22,9 @@ class MarkdownTextFilter(BaseTextFilter):
     """
 
     class InputParams(BaseModel):
-        enable_text_filter: bool = True
-        filter_code: bool = False
-        filter_tables: bool = False
+        enable_text_filter: Optional[bool] = True
+        filter_code: Optional[bool] = False
+        filter_tables: Optional[bool] = False
 
     def __init__(self, params: InputParams = InputParams(), **kwargs):
         super().__init__(**kwargs)
