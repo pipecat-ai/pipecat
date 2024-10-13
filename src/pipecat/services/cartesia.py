@@ -152,7 +152,7 @@ class CartesiaTTSService(WordTTSService):
                 voice_config["__experimental_controls"]["emotion"] = self._settings["emotion"]
 
         msg = {
-            "transcript": text,
+            "transcript": text or " ",  # Text must contain at least one character
             "continue": continue_transcript,
             "context_id": self._context_id,
             "model_id": self.model_name,
@@ -271,7 +271,7 @@ class CartesiaTTSService(WordTTSService):
                 yield TTSStartedFrame()
                 self._context_id = str(uuid.uuid4())
 
-            msg = self._build_msg(text=text)
+            msg = self._build_msg(text=text or " ")  # Text must contain at least one character
 
             try:
                 await self._get_websocket().send(msg)

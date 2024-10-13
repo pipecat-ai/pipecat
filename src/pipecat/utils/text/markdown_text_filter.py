@@ -96,7 +96,7 @@ class MarkdownTextFilter(BaseTextFilter):
             # Restore leading and trailing spaces
             filtered_text = re.sub("§", " ", filtered_text)
 
-            return filtered_text or " "  # Return a space to satisfy TTS services
+            return filtered_text
         else:
             return text
 

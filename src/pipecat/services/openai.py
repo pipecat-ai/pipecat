@@ -409,7 +409,7 @@ class OpenAITTSService(TTSService):
             await self.start_ttfb_metrics()
 
             async with self._client.audio.speech.with_streaming_response.create(
-                input=text,
+                input=text or " ",  # Text must contain at least one character
                 model=self.model_name,
                 voice=VALID_VOICES[self._voice_id],
                 response_format="pcm",
