@@ -4,14 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
-import os
 import argparse
+import os
 import subprocess
-
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+import aiohttp
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -23,6 +23,8 @@ MAX_BOTS_PER_ROOM = 1
 bot_procs = {}
 
 daily_helpers = {}
+
+load_dotenv(override=True)
 
 
 def cleanup():
@@ -122,13 +124,13 @@ if __name__ == "__main__":
     default_host = os.getenv("HOST", "0.0.0.0")
     default_port = int(os.getenv("FAST_API_PORT", "7860"))
 
-    parser = argparse.ArgumentParser(description="Daily patient-intake FastAPI server")
+    parser = argparse.ArgumentParser(description="Daily Storyteller FastAPI server")
     parser.add_argument("--host", type=str, default=default_host, help="Host address")
     parser.add_argument("--port", type=int, default=default_port, help="Port number")
     parser.add_argument("--reload", action="store_true", help="Reload code on change")
 
     config = parser.parse_args()
-    print(f"to join a test room, visit http://localhost:{config.port}/start")
+
     uvicorn.run(
         "server:app",
         host=config.host,

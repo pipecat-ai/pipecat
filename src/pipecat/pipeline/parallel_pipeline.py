@@ -120,7 +120,7 @@ class ParallelPipeline(BasePipeline):
 
         # If we get an EndFrame we stop our queue processing tasks and wait on
         # all the pipelines to finish.
-        if isinstance(frame, CancelFrame) or isinstance(frame, EndFrame):
+        if isinstance(frame, (CancelFrame, EndFrame)):
             # Use None to indicate when queues should be done processing.
             await self._up_queue.put(None)
             await self._down_queue.put(None)

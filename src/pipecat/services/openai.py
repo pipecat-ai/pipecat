@@ -276,12 +276,11 @@ class BaseOpenAILLMService(LLMService):
             arguments_list.append(arguments)
             tool_id_list.append(tool_call_id)
 
-            total_items = len(functions_list)
             for index, (function_name, arguments, tool_id) in enumerate(
                 zip(functions_list, arguments_list, tool_id_list), start=1
             ):
                 if self.has_function(function_name):
-                    run_llm = index == total_items
+                    run_llm = False
                     arguments = json.loads(arguments)
                     await self.call_function(
                         context=context,
@@ -555,7 +554,8 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                             "tool_call_id": frame.tool_call_id,
                         }
                     )
-                    run_llm = frame.run_llm
+                    # Only run the LLM if there are no more function calls in progress.
+                    run_llm = not bool(self._function_calls_in_progress)
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
