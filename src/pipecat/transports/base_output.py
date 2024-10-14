@@ -1,6 +1,5 @@
 #
 # Copyright (c) 2024, Daily
-
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -31,7 +30,6 @@ from pipecat.frames.frames import (
     SystemFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TextFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
@@ -296,12 +294,6 @@ class BaseOutputTransport(FrameProcessor):
             except Exception as e:
                 logger.exception(f"{self} error processing sink queue: {e}")
 
-    async def _sink_clock_frame_handler(self, frame: Frame):
-        # TODO(aleix): For now we just process TextFrame. But we should process
-        # audio and video as well.
-        if isinstance(frame, TextFrame):
-            await self.push_frame(frame)
-
     async def _sink_clock_task_handler(self):
         running = True
         while running:
@@ -316,12 +308,10 @@ class BaseOutputTransport(FrameProcessor):
                 # time to process it.
                 if running:
                     current_time = self.get_clock().get_time()
-                    if timestamp <= current_time:
-                        await self._sink_clock_frame_handler(frame)
-                    else:
+                    if timestamp > current_time:
                         wait_time = nanoseconds_to_seconds(timestamp - current_time)
                         await asyncio.sleep(wait_time)
-                        await self._sink_frame_handler(frame)
+                    await self._sink_frame_handler(frame)
 
                 self._sink_clock_queue.task_done()
             except asyncio.CancelledError:
