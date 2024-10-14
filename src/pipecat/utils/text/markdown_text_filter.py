@@ -88,7 +88,7 @@ class MarkdownTextFilter(BaseTextFilter):
 
             # Remove code blocks
             if self._settings.filter_code:
-                filtered_text = self.remove_code_blocks(filtered_text)
+                filtered_text = self._remove_code_blocks(filtered_text)
 
             # Restore numbered list items
             filtered_text = filtered_text.replace("§NUM§", "")
@@ -112,7 +112,7 @@ class MarkdownTextFilter(BaseTextFilter):
     # Filter code
     #
 
-    def remove_code_blocks(self, text: str) -> str:
+    def _remove_code_blocks(self, text: str) -> str:
         """
         Main method to remove code blocks from the input text.
         Handles interruptions and delegates to specific methods based on the current state.
@@ -139,7 +139,7 @@ class MarkdownTextFilter(BaseTextFilter):
             self._in_code_block = False
             end_index = match.end()
             return text[end_index:].strip()
-        return " "  # Skip content inside code block
+        return ""  # Skip content inside code block
 
     def _handle_not_in_code_block(self, match, text, code_block_pattern):
         """
