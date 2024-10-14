@@ -5,6 +5,8 @@
 #
 
 import asyncio
+import glob
+import json
 import os
 import sys
 from datetime import datetime
@@ -35,6 +37,8 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
+BASE_FILENAME = "/tmp/pipecat_conversation_"
+
 
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
     temperature = 75 if args["format"] == "fahrenheit" else 24
@@ -46,6 +50,62 @@ async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
+
+
+async def get_saved_conversation_filenames(
+    function_name, tool_call_id, args, llm, context, result_callback
+):
+    # Construct the full pattern including the BASE_FILENAME
+    full_pattern = f"{BASE_FILENAME}*.json"
+
+    # Use glob to find all matching files
+    matching_files = glob.glob(full_pattern)
+    logger.debug(f"matching files: {matching_files}")
+
+    await result_callback({"filenames": matching_files})
+
+
+# async def get_saved_conversation_filenames(
+#     function_name, tool_call_id, args, llm, context, result_callback
+# ):
+#     pattern = re.compile(re.escape(BASE_FILENAME) + "\\d{8}_\\d{6}\\.json$")
+#     matching_files = []
+
+#     for filename in os.listdir("."):
+#         if pattern.match(filename):
+#             matching_files.append(filename)
+
+#     await result_callback({"filenames": matching_files})
+
+
+async def save_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+    filename = f"{BASE_FILENAME}{timestamp}.json"
+    logger.debug(f"writing conversation to {filename}\n{json.dumps(context.messages, indent=4)}")
+    try:
+        with open(filename, "w") as file:
+            messages = context.get_messages_for_persistent_storage()
+            # remove the last message, which is the instruction we just gave to save the conversation
+            messages.pop()
+            json.dump(messages, file, indent=2)
+        await result_callback({"success": True})
+    except Exception as e:
+        await result_callback({"success": False, "error": str(e)})
+
+
+async def load_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+    async def _reset():
+        filename = args["filename"]
+        logger.debug(f"loading conversation from {filename}")
+        try:
+            with open(filename, "r") as file:
+                context.set_messages(json.load(file))
+                await llm.reset_conversation()
+                await llm._create_response()
+        except Exception as e:
+            await result_callback({"success": False, "error": str(e)})
+
+    asyncio.create_task(_reset())
 
 
 tools = [
@@ -68,7 +128,42 @@ tools = [
             },
             "required": ["location", "format"],
         },
-    }
+    },
+    {
+        "type": "function",
+        "name": "save_conversation",
+        "description": "Save the current conversatione. Use this function to persist the current conversation to external storage.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_saved_conversation_filenames",
+        "description": "Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "type": "function",
+        "name": "load_conversation",
+        "description": "Load a conversation history. Use this function to load a conversation history into the current session.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "type": "string",
+                    "description": "The filename of the conversation history to load.",
+                }
+            },
+            "required": ["filename"],
+        },
+    },
 ]
 
 
@@ -125,8 +220,11 @@ Remember, your responses should be short. Just one or two sentences, usually."""
         # you can either register a single function for all function calls, or specific functions
         # llm.register_function(None, fetch_weather_from_api)
         llm.register_function("get_current_weather", fetch_weather_from_api)
+        llm.register_function("save_conversation", save_conversation)
+        llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
+        llm.register_function("load_conversation", load_conversation)
 
-        context = OpenAILLMContext([{"role": "user", "content": "Say hello!"}], tools)
+        context = OpenAILLMContext([], tools)
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(

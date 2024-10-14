@@ -361,6 +361,100 @@ class AnthropicLLMContext(OpenAILLMContext):
         self._messages[:] = messages
         self._restructure_from_openai_messages()
 
+    # convert a message in Anthropic format into one or more messages in OpenAI format
+    def to_standard_messages(self, obj):
+        # todo: image format (?)
+        # tool_use
+        role = obj.get("role")
+        content = obj.get("content")
+        if role == "assistant":
+            if isinstance(content, str):
+                return [{"role": role, "content": [{"type": "text", "text": content}]}]
+            elif isinstance(content, list):
+                text_items = []
+                tool_items = []
+                for item in content:
+                    if item["type"] == "text":
+                        text_items.append({"type": "text", "text": item["text"]})
+                    elif item["type"] == "tool_use":
+                        tool_items.append(
+                            {
+                                "type": "function",
+                                "id": item["id"],
+                                "function": {
+                                    "name": item["name"],
+                                    "arguments": json.dumps(item["input"]),
+                                },
+                            }
+                        )
+                messages = []
+                if text_items:
+                    messages.append({"role": role, "content": text_items})
+                if tool_items:
+                    messages.append({"role": role, "tool_calls": tool_items})
+                return messages
+        elif role == "user":
+            if isinstance(content, str):
+                return [{"role": role, "content": [{"type": "text", "text": content}]}]
+            elif isinstance(content, list):
+                text_items = []
+                tool_items = []
+                for item in content:
+                    if item["type"] == "text":
+                        text_items.append({"type": "text", "text": item["text"]})
+                    elif item["type"] == "tool_result":
+                        tool_items.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": item["tool_use_id"],
+                                "content": item["content"],
+                            }
+                        )
+                messages = []
+                if text_items:
+                    messages.append({"role": role, "content": text_items})
+                messages.extend(tool_items)
+                return messages
+
+    def from_standard_message(self, message):
+        # todo: image messages (?)
+        if message["role"] == "tool":
+            return {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": message["tool_call_id"],
+                        "content": message["content"],
+                    },
+                ],
+            }
+        if message.get("tool_calls"):
+            tc = message["tool_calls"]
+            ret = {"role": "assistant", "content": []}
+            for tool_call in tc:
+                function = tool_call["function"]
+                arguments = json.loads(function["arguments"])
+                new_tool_use = {
+                    "type": "tool_use",
+                    "id": tool_call["id"],
+                    "name": function["name"],
+                    "input": arguments,
+                }
+                ret["content"].append(new_tool_use)
+            return ret
+        # check for empty text strings
+        content = message.get("content")
+        if isinstance(content, str):
+            if content == "":
+                content = "(empty)"
+        elif isinstance(content, list):
+            for item in content:
+                if item["type"] == "text" and item["text"] == "":
+                    item["text"] = "(empty)"
+
+        return message
+
     def add_image_frame_message(
         self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
     ):
@@ -429,6 +523,14 @@ class AnthropicLLMContext(OpenAILLMContext):
             return self.messages
 
     def _restructure_from_openai_messages(self):
+        # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
+        logger.debug("!!! mapping")
+        try:
+            self._messages[:] = [self.from_standard_message(m) for m in self._messages]
+        except Exception as e:
+            logger.error(f"Error mapping messages: {e}")
+
+        logger.debug("!!! restructuring system thingy")
         # See if we should pull the system message out of our context.messages list. (For
         # compatibility with Open AI messages format.)
         if self.messages and self.messages[0]["role"] == "system":
