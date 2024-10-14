@@ -13,7 +13,7 @@ pip install -r requirements.txt
 ## Run the bot
 
 ```bash
-python bot.py
+python3 bot.py
 ```
 
 ## Run the HTTP server
@@ -21,7 +21,7 @@ python bot.py
 This will host the static web client:
 
 ```bash
-python -m http.server
+python3 -m http.server
 ```
 
 Then, visit `http://localhost:8000` in your browser to start a session.
