@@ -132,6 +132,23 @@ class OpenAILLMContext:
             msgs.append(msg)
         return json.dumps(msgs)
 
+    def from_standard_message(self, message):
+        return message
+
+    # convert a message in this LLM's format to one or more messages in OpenAI format
+    def to_standard_messages(self, obj) -> list:
+        return [obj]
+
+    def get_messages_for_initializing_history(self):
+        return self._messages
+
+    def get_messages_for_persistent_storage(self):
+        messages = []
+        for m in self._messages:
+            standard_messages = self.to_standard_messages(m)
+            messages.extend(standard_messages)
+        return messages
+
     def set_tool_choice(self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven):
         self._tool_choice = tool_choice
 
