@@ -268,6 +268,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         self._api_session_ready = False
         self._run_llm_when_api_session_ready = False
 
+        self._current_assistant_response = None
         self._current_audio_response = None
 
         self._messages_added_manually = {}
@@ -305,8 +306,9 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             await self.send_client_event(events.ResponseCancelEvent())
         await self._truncate_current_audio_response()
         await self.stop_all_metrics()
-        await self.push_frame(LLMFullResponseEndFrame())
-        await self.push_frame(TTSStoppedFrame())
+        if self._current_assistant_response:
+            await self.push_frame(LLMFullResponseEndFrame())
+            await self.push_frame(TTSStoppedFrame())
 
     async def _handle_user_started_speaking(self, frame):
         if self._session_properties.turn_detection is None:
@@ -552,6 +554,9 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             # add both to the context. User message is complete when we have a "transcript" field
             # that is not None. Response message is complete when we get a "response.done" event.
             self._user_and_response_message_tuple = (evt.item, {"done": False, "output": []})
+        elif evt.item.role == "assistant":
+            self._current_assistant_response = evt.item
+            await self.push_frame(LLMFullResponseStartFrame())
 
     async def handle_evt_input_audio_transcription_completed(self, evt):
         if self._send_transcription_frames:
@@ -581,6 +586,8 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         )
         await self.start_llm_usage_metrics(tokens)
         await self.stop_processing_metrics()
+        await self.push_frame(LLMFullResponseEndFrame())
+        self._current_assistant_response = None
         # response content
         pair = self._user_and_response_message_tuple
         if pair:
