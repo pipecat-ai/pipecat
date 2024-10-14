@@ -16,3 +16,11 @@ class BaseTextFilter(ABC):
     @abstractmethod
     def filter(self, text: str) -> str:
         pass
+
+    @abstractmethod
+    def handle_interruption(self):
+        pass
+
+    @abstractmethod
+    def reset_interruption(self):
+        pass
