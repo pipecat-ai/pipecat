@@ -248,7 +248,6 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         session_properties: events.SessionProperties = events.SessionProperties(),
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
-        send_user_started_speaking_frames: bool = False,
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
@@ -258,8 +257,6 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         self._session_properties: events.SessionProperties = session_properties
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
-        # todo: wire _send_user_started_speaking_frames up correctly
-        self._send_user_started_speaking_frames = send_user_started_speaking_frames
         self._websocket = None
         self._receive_task = None
         self._context = None
@@ -335,6 +332,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                     audio_end_ms=elapsed_ms,
                 )
             )
+
 
     #
     # frame processing
@@ -608,17 +606,18 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
-        if self._send_user_started_speaking_frames:
-            await self.push_frame(UserStartedSpeakingFrame())
-            await self.push_frame(StartInterruptionFrame())
-            logger.debug("User started speaking")
+        # todo: might need to guard sending these when we fully support using either openai
+        # turn detection of Pipecat turn detection
+        await self._start_interruption() # cancels this processor task
+        await self.push_frame(StartInterruptionFrame()) # cancels downstream tasks
+        await self.push_frame(UserStartedSpeakingFrame())
 
     async def _handle_evt_speech_stopped(self, evt):
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-        if self._send_user_started_speaking_frames:
-            await self.push_frame(UserStoppedSpeakingFrame())
-            await self.push_frame(StopInterruptionFrame())
+        await self._stop_interruption()
+        await self.push_frame(StopInterruptionFrame())
+        await self.push_frame(UserStoppedSpeakingFrame())
 
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
