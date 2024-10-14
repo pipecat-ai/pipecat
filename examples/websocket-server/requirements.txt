@@ -1,2 +1,2 @@
 python-dotenv
-pipecat-ai[cartesia,openai,silero,websocket,whisper]
+pipecat-ai[cartesia,openai,silero,websocket,deepgram]
