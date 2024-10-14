@@ -2,7 +2,6 @@ import asyncio
 import base64
 import json
 import time
-
 from dataclasses import dataclass
 
 import websockets
@@ -49,6 +48,7 @@ from pipecat.services.openai import (
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
+from .events import SessionProperties
 
 # websocket logger -- in case needed for debugging send/recv
 # import logging
@@ -103,7 +103,7 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
 
     def from_standard_message(self, message):
         if message.get("role") == "assistant" and message.get("tool_calls"):
-            tc = m.get("tool_calls")[0]
+            tc = message.get("tool_calls")[0]
             return events.ConversationItem(
                 type="function_call",
                 call_id=tc["id"],
@@ -373,7 +373,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         elif isinstance(frame, _InternalMessagesUpdateFrame):
             self._context = frame.context
         elif isinstance(frame, LLMUpdateSettingsFrame):
-            self._session_properties = frame.settings
+            self._session_properties = SessionProperties(**frame.settings)
             await self._update_settings()
         elif isinstance(frame, LLMSetToolsFrame):
             await self._update_settings()
@@ -569,7 +569,7 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 await self._handle_assistant_output(assistant["output"])
         else:
             # User message without preceding conversation.item.created. Bug?
-            logger.warn(f"Transcript for unknown user message: {evt}")
+            logger.warning(f"Transcript for unknown user message: {evt}")
 
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
