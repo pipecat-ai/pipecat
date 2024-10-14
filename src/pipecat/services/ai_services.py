@@ -427,15 +427,18 @@ class WordTTSService(TTSService):
             self._words_task = None
 
     async def _words_task_handler(self):
+        last_pts = 0
         while True:
             try:
                 (word, timestamp) = await self._words_queue.get()
                 if word == "LLMFullResponseEndFrame" and timestamp == 0:
-                    await self.push_frame(LLMFullResponseEndFrame())
+                    frame = LLMFullResponseEndFrame()
+                    frame.pts = last_pts
                 else:
                     frame = TextFrame(word)
                     frame.pts = self._initial_word_timestamp + timestamp
-                    await self.push_frame(frame)
+                last_pts = frame.pts
+                await self.push_frame(frame)
                 self._words_queue.task_done()
             except asyncio.CancelledError:
                 break
