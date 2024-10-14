@@ -347,10 +347,6 @@ class RTVIFrameProcessor(FrameProcessor):
         super().__init__(**kwargs)
         self._direction = direction
 
-    async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        frame = TransportMessageFrame(message=model.model_dump(exclude_none=exclude_none))
-        await self.push_frame(frame, self._direction)
-
     async def _push_transport_message_urgent(self, model: BaseModel, exclude_none: bool = True):
         frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
         await self.push_frame(frame, self._direction)
@@ -534,7 +530,7 @@ class RTVIBotTTSAudioProcessor(RTVIFrameProcessor):
                 audio=encoded, sample_rate=frame.sample_rate, num_channels=frame.num_channels
             )
         )
-        await self._push_transport_message(message)
+        await self._push_transport_message_urgent(message)
 
 
 class RTVIProcessor(FrameProcessor):
