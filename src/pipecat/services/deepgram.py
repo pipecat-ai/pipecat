@@ -207,6 +207,7 @@ class DeepgramSTTService(STTService):
             logger.debug(f"{self}: Disconnected from Deepgram")
 
     async def _on_speech_started(self, *args, **kwargs):
+        logger.debug(f"{self}: Speech started")
         await self.push_frame(UserStartedSpeakingFrame())
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
@@ -232,9 +233,10 @@ class DeepgramSTTService(STTService):
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
 
-                if speech_final:
-                    await self.push_frame(UserStoppedSpeakingFrame())
-                    await self.stop_processing_metrics()
+                # if speech_final:
+                await self.push_frame(UserStoppedSpeakingFrame())
+                logger.debug(f"{self}: Speech ended")
+                await self.stop_processing_metrics()
             # else:
             #     await self.push_frame(
             #         InterimTranscriptionFrame(

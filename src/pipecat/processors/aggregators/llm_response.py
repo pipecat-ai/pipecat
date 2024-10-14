@@ -28,6 +28,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.string import match_endofsentence
 
 
 class LLMResponseAggregator(FrameProcessor):
@@ -94,8 +95,8 @@ class LLMResponseAggregator(FrameProcessor):
 
         if isinstance(frame, self._start_frame):
             # if self._start_frame == UserStartedSpeakingFrame:
-            #     logger.debug(f"LLM frame received {frame}")
-            self._aggregation = ""
+            # #     logger.debug(f"LLM frame received {frame}")
+            # self._aggregation = "" # we are resetting at the end so it should work without this line
             self._aggregating = True
             self._seen_start_frame = True
             self._seen_end_frame = False
@@ -110,17 +111,16 @@ class LLMResponseAggregator(FrameProcessor):
             # We might have received the end frame but we might still be
             # aggregating (i.e. we have seen interim results but not the final
             # text).
-            self._aggregating = (
-                self._seen_interim_results or len(self._aggregation) == 0
-            )
+            # self._aggregating = (
+            #     self._seen_interim_results or len(self._aggregation) == 0
+            # )
 
             # Send the aggregation if we are not aggregating anymore (i.e. no
             # more interim results received).
-            send_aggregation = not self._aggregating
+            # send_aggregation = not self._aggregating
+            send_aggregation = True
             await self.push_frame(frame, direction)
         elif isinstance(frame, self._accumulator_frame):
-            if self._start_frame == UserStartedSpeakingFrame:
-                logger.debug(f"LLM frame received - aggregation {frame}")
             if self._aggregating:
                 if self._expect_stripped_words:
                     self._aggregation += (
@@ -131,14 +131,13 @@ class LLMResponseAggregator(FrameProcessor):
                 # We have recevied a complete sentence, so if we have seen the
                 # end frame and we were still aggregating, it means we should
                 # send the aggregation.
-                send_aggregation = self._seen_end_frame
+                # send_aggregation = self._seen_end_frame
 
             # We just got our final result, so let's reset interim results.
             self._seen_interim_results = False
         elif self._interim_accumulator_frame and isinstance(
             frame, self._interim_accumulator_frame
         ):
-            logger.debug(f"LLM frame received: interim -  {frame}")
             self._seen_interim_results = True
         elif self._handle_interruptions and isinstance(frame, StartInterruptionFrame):
             await self._push_aggregation()
@@ -158,14 +157,20 @@ class LLMResponseAggregator(FrameProcessor):
             await self._push_aggregation()
 
     async def _push_aggregation(self):
-        if self._start_frame == UserStartedSpeakingFrame:
-            logger.debug(f"inside push_aggregation, pushing {self._aggregation}")
         if len(self._aggregation) > 0:
-            self._messages.append({"role": self._role, "content": self._aggregation})
+            text = self._aggregation
+            eos_end_marker = match_endofsentence(text)
+            if eos_end_marker:
+                text = text[:eos_end_marker]
+                self._aggregation = text[eos_end_marker:]
+            else:
+                self._aggregation = ""
 
-            # Reset the aggregation. Reset it before pushing it down, otherwise
-            # if the tasks gets cancelled we won't be able to clear things up.
-            self._aggregation = ""
+            if self._start_frame == UserStartedSpeakingFrame:
+                logger.debug(
+                    f"inside push_aggregation, pushing: {text} , leftover: {self._aggregation}"
+                )
+            self._messages.append({"role": self._role, "content": text})
 
             frame = LLMMessagesFrame(self._messages)
             await self.push_frame(frame)
@@ -262,6 +267,7 @@ class LLMFullResponseAggregator(FrameProcessor):
         if isinstance(frame, TextFrame):
             self._aggregation += frame.text
         elif isinstance(frame, LLMFullResponseEndFrame):
+            logger.debug(f"Pushing to TTS: {self._aggregation}")
             await self.push_frame(TextFrame(self._aggregation))
             await self.push_frame(frame)
             self._aggregation = ""
