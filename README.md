@@ -128,7 +128,7 @@ Pipecat makes use of WebRTC VAD by default when using a WebRTC transport layer. 
 pip install pipecat-ai[silero]
 ```
 
-The first time your run your bot with Silero, startup may take a while whilst it downloads and caches the model in the background. You can check the progress of this in the console.
+The first time you run your bot with Silero, startup may take a while whilst it downloads and caches the model in the background. You can check the progress of this in the console.
 
 ## Hacking on the framework itself
 
