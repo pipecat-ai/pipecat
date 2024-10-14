@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `filter_code` to filter code from text and `filter_tables` to filter tables
   from text.
 
+### Fixed
+
+- Fixed an issue in Daily transport that would cause tasks to be hanging if
+  urgent transport messages were being sent from a transport event handler.
+
 ## [0.0.43] - 2024-10-10
 
 ### Added
