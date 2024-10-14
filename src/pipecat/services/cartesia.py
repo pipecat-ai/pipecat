@@ -210,7 +210,6 @@ class CartesiaTTSService(WordTTSService):
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        await self.push_frame(LLMFullResponseEndFrame())
         self._context_id = None
 
     async def flush_audio(self):
