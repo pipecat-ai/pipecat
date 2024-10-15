@@ -267,7 +267,7 @@ class AnthropicLLMService(LLMService):
 
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
-            context = frame.context
+            context: "AnthropicLLMContext" = AnthropicLLMContext.upgrade_to_anthropic(frame.context)
         elif isinstance(frame, LLMMessagesFrame):
             context = AnthropicLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
@@ -331,6 +331,14 @@ class AnthropicLLMContext(OpenAILLMContext):
         self.turns_above_cache_threshold = 0
 
         self.system = system
+
+    @staticmethod
+    def upgrade_to_anthropic(obj: OpenAILLMContext) -> "AnthropicLLMContext":
+        logger.debug(f"Upgrading to Anthropic: {obj}")
+        if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AnthropicLLMContext):
+            obj.__class__ = AnthropicLLMContext
+            obj._restructure_from_openai_messages()
+        return obj
 
     @classmethod
     def from_openai_context(cls, openai_context: OpenAILLMContext):
@@ -543,6 +551,39 @@ class AnthropicLLMContext(OpenAILLMContext):
                 # list.
                 self.system = self.messages[0]["content"]
                 self.messages.pop(0)
+
+        # Merge consecutive messages with the same role.
+        i = 0
+        while i < len(self.messages) - 1:
+            current_message = self.messages[i]
+            next_message = self.messages[i + 1]
+            if current_message["role"] == next_message["role"]:
+                # Convert content to list of dictionaries if it's a string
+                if isinstance(current_message["content"], str):
+                    current_message["content"] = [
+                        {"type": "text", "text": current_message["content"]}
+                    ]
+                if isinstance(next_message["content"], str):
+                    next_message["content"] = [{"type": "text", "text": next_message["content"]}]
+                # Concatenate the content
+                current_message["content"].extend(next_message["content"])
+                # Remove the next message from the list
+                self.messages.pop(i + 1)
+            else:
+                i += 1
+
+        # Avoid empty content in messages
+        for message in self.messages:
+            if isinstance(message["content"], str) and message["content"] == "":
+                message["content"] = "(empty)"
+            elif isinstance(message["content"], list) and len(message["content"]) == 0:
+                message["content"] = [{"type": "text", "text": "(empty)"}]
+
+    def get_messages_for_persistent_storage(self):
+        messages = super().get_messages_for_persistent_storage()
+        if self.system:
+            messages.insert(0, {"role": "system", "content": self.system})
+        return messages
 
     def get_messages_for_logging(self) -> str:
         msgs = []
