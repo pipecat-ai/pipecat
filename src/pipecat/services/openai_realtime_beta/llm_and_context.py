@@ -1,5 +1,12 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
 import base64
+import copy
 import json
 import time
 from dataclasses import dataclass
@@ -88,6 +95,8 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
     def __setup_local(self):
         self.llm_needs_settings_update = True
         self.llm_needs_initial_messages = True
+        self._session_instructions = ""
+
         return
 
     @staticmethod
@@ -115,10 +124,32 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
     def get_messages_for_initializing_history(self):
         # We can't load a long conversation history into the openai realtime api yet. (The API/model
         # forgets that it can do audio, if you do a series of `conversation.item.create` calls.) So
-        # let's just put everything into a "system" message as a single input.
+        # our general strategy until this is fixed is just to put everything into a first "user"
+        # message as a single input.
         if not self.messages:
             return []
 
+        messages = copy.deepcopy(self.messages)
+
+        # If we have a "system" message as our first message, let's pull that out into session
+        # "instructions"
+        if messages[0].get("role") == "system":
+            self.llm_needs_settings_update = True
+            system = messages.pop(0)
+            content = system.get("content")
+            if isinstance(content, str):
+                self._session_instructions = content
+            elif isinstance(content, list):
+                self._session_instructions = content[0].get("text")
+            if not messages:
+                return []
+
+        # If we have just a single "user" item, we can just send it normally
+        if len(messages) == 1 and messages[0].get("role") == "user":
+            return messages
+
+        # Otherwise, let's pack everything into a single "user" message with a bit of
+        # explanation for the LLM
         intro_text = """
         This is a previously saved conversation. Please treat this conversation history as a
         starting point for the current conversation."""
@@ -137,7 +168,7 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
                     {
                         "type": "input_text",
                         "text": "\n\n".join(
-                            [intro_text, json.dumps(self.messages, indent=2), trailing_text]
+                            [intro_text, json.dumps(messages, indent=2), trailing_text]
                         ),
                     }
                 ],
@@ -456,6 +487,10 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
         # tools given in the context override the tools in the session properties
         if self._context and self._context.tools:
             settings.tools = self._context.tools
+        # instructions in the context come from an initial "system" message in the
+        # messages list, and override instructions in the session properties
+        if self._context and self._context._session_instructions:
+            settings.instructions = self._context._session_instructions
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
 
     #
@@ -682,11 +717,6 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
             self._run_llm_when_api_session_ready = True
             return
 
-        if self._context.llm_needs_settings_update:
-            # try catch here for retries?
-            await self._update_settings()
-            self._context.llm_needs_settings_update = False
-
         if self._context.llm_needs_initial_messages:
             messages = self._context.get_messages_for_initializing_history()
             for item in messages:
@@ -694,6 +724,10 @@ class OpenAILLMServiceRealtimeBeta(LLMService):
                 self._messages_added_manually[evt.item.id] = True
                 await self.send_client_event(evt)
             self._context.llm_needs_initial_messages = False
+
+        if self._context.llm_needs_settings_update:
+            await self._update_settings()
+            self._context.llm_needs_settings_update = False
 
         logger.debug(f"Creating response: {self._context.get_messages_for_logging()}")
 
