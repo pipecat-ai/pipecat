@@ -5,9 +5,13 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.44] - 2024-10-15
 
 ### Added
+
+- Added support for OpenAI Realtime API with the new
+  `OpenAILLMServiceRealtimeBeta` processor.
+  (see https://platform.openai.com/docs/guides/realtime/overview)
 
 - Added `RTVIBotTranscriptionProcessor` which will send the RTVI
   `bot-transcription` protocol message. These are TTS text aggregated (into
@@ -17,13 +21,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `filter_code` to filter code from text and `filter_tables` to filter tables
   from text.
 
+- Added `CanonicalMetricsService`. This processor uses the new
+  `AudioBufferProcessor` to capture conversation audio and later send it to
+  Canonical AI.
+  (see https://canonical.chat/)
+
+- Added `AudioBufferProcessor`. This processor can be used to buffer mixed user and
+  bot audio. This can later be saved into an audio file or processed by some
+  audio analyzer.
+
+- Added `on_first_participant_joined` event to `LiveKitTransport`.
+
+### Changed
+
+- LLM text responses are now logged properly as unicode characters.
+
+- `UserStartedSpeakingFrame`, `UserStoppedSpeakingFrame`,
+  `BotStartedSpeakingFrame`, `BotStoppedSpeakingFrame`, `BotSpeakingFrame` and
+  `UserImageRequestFrame` are now based from `SystemFrame`
+
 ### Fixed
 
 - Merge `RTVIBotLLMProcessor`/`RTVIBotLLMTextProcessor` and
   `RTVIBotTTSProcessor`/`RTVIBotTTSTextProcessor` to avoid out of order issues.
 
+- Fixed an issue in RTVI protocol that could cause a `bot-llm-stopped` or
+  `bot-tts-stopped` message to be sent before a `bot-llm-text` or `bot-tts-text`
+  message.
+
+- Fixed `DeepgramSTTService` constructor settings not being merged with default
+  ones.
+
 - Fixed an issue in Daily transport that would cause tasks to be hanging if
   urgent transport messages were being sent from a transport event handler.
+
+- Fixed an issue in `BaseOutputTransport` that would cause `EndFrame` to be
+  pushed downed too early and call `FrameProcessor.cleanup()` before letting the
+  transport stop properly.
 
 ## [0.0.43] - 2024-10-10
 
