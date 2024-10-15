@@ -60,7 +60,7 @@ class SyncParallelPipeline(BasePipeline):
         super().__init__()
 
         if len(args) == 0:
-            raise Exception(f"SyncParallelPipeline needs at least one argument")
+            raise Exception("SyncParallelPipeline needs at least one argument")
 
         self._sinks = []
         self._sources = []

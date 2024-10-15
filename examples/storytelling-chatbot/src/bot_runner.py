@@ -84,7 +84,7 @@ async def start_bot(request: Request) -> JSONResponse:
         # Is this a webhook creation request?
         if "test" in data:
             return JSONResponse({"test": True})
-    except Exception as e:
+    except Exception:
         pass
 
     # Use specified room URL, or create a new one if not specified

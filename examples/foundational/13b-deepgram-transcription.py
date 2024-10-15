@@ -14,7 +14,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.deepgram import DeepgramSTTService, LiveOptions, Language
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from runner import configure

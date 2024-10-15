@@ -52,7 +52,7 @@ class ParallelPipeline(BasePipeline):
         super().__init__()
 
         if len(args) == 0:
-            raise Exception(f"ParallelPipeline needs at least one argument")
+            raise Exception("ParallelPipeline needs at least one argument")
 
         self._sources = []
         self._sinks = []
