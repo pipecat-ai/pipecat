@@ -40,8 +40,8 @@ class MarkdownTextFilter(BaseTextFilter):
 
     def filter(self, text: str) -> str:
         if self._settings.enable_text_filter:
-            # Remove newlines only when there's no text before or after
-            filtered_text = re.sub(r"^\s*\n", "", text, flags=re.MULTILINE)
+            # Remove newlines and replace with a space only when there's no text before or after
+            filtered_text = re.sub(r"^\s*\n", " ", text, flags=re.MULTILINE)
 
             # Remove backticks from inline code, but not from code blocks
             filtered_text = re.sub(r"(?<!`)`([^`\n]+)`(?!`)", r"\1", filtered_text)
@@ -57,6 +57,10 @@ class MarkdownTextFilter(BaseTextFilter):
             filtered_text = re.sub(
                 r"^( +)|\s+$", lambda m: "§" * len(m.group(0)), filtered_text, flags=re.MULTILINE
             )
+
+            # Remove space placeholders before tables, so that tables are converted to HTML
+            # correctly
+            filtered_text = re.sub(r"§\| ", "| ", filtered_text)
 
             # Convert markdown to HTML
             extension = ["tables"] if self._settings.filter_tables else []
