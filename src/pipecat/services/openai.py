@@ -63,6 +63,7 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
+
 ValidVoice = Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
 
 VALID_VOICES: Dict[str, ValidVoice] = {
@@ -468,7 +469,7 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
                     if frame.user_id in self._context._user_image_request_context:
                         del self._context._user_image_request_context[frame.user_id]
             elif isinstance(frame, UserImageRawFrame):
-                # Push a new AnthropicImageMessageFrame with the text context we cached
+                # Push a new OpenAIImageMessageFrame with the text context we cached
                 # downstream to be handled by our assistant context aggregator. This is
                 # necessary so that we add the message to the context in the right order.
                 text = self._context._user_image_request_context.get(frame.user_id) or ""
@@ -495,8 +496,10 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             self._function_calls_in_progress.clear()
             self._function_call_finished = None
         elif isinstance(frame, FunctionCallInProgressFrame):
+            logger.debug(f"FunctionCallInProgressFrame: {frame}")
             self._function_calls_in_progress[frame.tool_call_id] = frame
         elif isinstance(frame, FunctionCallResultFrame):
+            logger.debug(f"FunctionCallResultFrame: {frame}")
             if frame.tool_call_id in self._function_calls_in_progress:
                 del self._function_calls_in_progress[frame.tool_call_id]
                 self._function_call_result = frame
