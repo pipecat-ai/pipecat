@@ -35,3 +35,32 @@ An automated medical intake system using AI-powered conversational interfaces.
 - Deepgram API
 - Cartesia API
 
+# Websocket Server
+
+This is an example that shows how to use `WebsocketServerTransport` to communicate with a web client.
+
+## Get started
+
+```python
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Run the bot
+
+```bash
+python bot.py
+```
+
+## Run the HTTPS server
+
+This will host the static web client:
+
+```bash
+python httpserver.py
+```
+
+Then, visit `https://your-ip or domain:8000` in your browser to start a session.
+
+
