@@ -459,14 +459,18 @@ class RTVIBotTranscriptionProcessor(RTVIFrameProcessor):
 
         await self.push_frame(frame, direction)
 
-        if isinstance(frame, TextFrame):
+        if isinstance(frame, UserStartedSpeakingFrame):
+            await self._push_aggregation()
+        elif isinstance(frame, TextFrame):
             self._aggregation += frame.text
             if match_endofsentence(self._aggregation):
-                message = RTVIBotTranscriptionMessage(
-                    data=RTVITextMessageData(text=self._aggregation)
-                )
-                await self._push_transport_message_urgent(message)
-                self._aggregation = ""
+                await self._push_aggregation()
+
+    async def _push_aggregation(self):
+        if len(self._aggregation) > 0:
+            message = RTVIBotTranscriptionMessage(data=RTVITextMessageData(text=self._aggregation))
+            await self._push_transport_message_urgent(message)
+            self._aggregation = ""
 
 
 class RTVIBotLLMProcessor(RTVIFrameProcessor):
