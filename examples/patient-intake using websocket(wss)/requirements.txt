@@ -1,2 +1,6 @@
 python-dotenv
 pipecat-ai[cartesia,openai,silero,websocket,deepgram]
+loguru
+python-dotenv
+firebase-admin
+pydantic
