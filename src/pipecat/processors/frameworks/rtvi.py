@@ -5,7 +5,6 @@
 #
 
 import asyncio
-import base64
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
 
@@ -25,7 +24,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    OutputAudioRawFrame,
     StartFrame,
     SystemFrame,
     TextFrame,
@@ -484,6 +482,9 @@ class RTVIBotLLMProcessor(RTVIFrameProcessor):
             await self._push_transport_message_urgent(RTVIBotLLMStartedMessage())
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self._push_transport_message_urgent(RTVIBotLLMStoppedMessage())
+        elif type(frame) is TextFrame:
+            message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
+            await self._push_transport_message_urgent(message)
 
 
 class RTVIBotTTSProcessor(RTVIFrameProcessor):
@@ -499,62 +500,9 @@ class RTVIBotTTSProcessor(RTVIFrameProcessor):
             await self._push_transport_message_urgent(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame):
             await self._push_transport_message_urgent(RTVIBotTTSStoppedMessage())
-
-
-class RTVIBotLLMTextProcessor(RTVIFrameProcessor):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        await self.push_frame(frame, direction)
-
-        if type(frame) is TextFrame:
-            await self._handle_text(frame)
-
-    async def _handle_text(self, frame: TextFrame):
-        message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self._push_transport_message_urgent(message)
-
-
-class RTVIBotTTSTextProcessor(RTVIFrameProcessor):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        await self.push_frame(frame, direction)
-
-        if type(frame) is TextFrame:
-            await self._handle_text(frame)
-
-    async def _handle_text(self, frame: TextFrame):
-        message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self._push_transport_message_urgent(message)
-
-
-class RTVIBotTTSAudioProcessor(RTVIFrameProcessor):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        await self.push_frame(frame, direction)
-
-        if isinstance(frame, OutputAudioRawFrame):
-            await self._handle_audio(frame)
-
-    async def _handle_audio(self, frame: OutputAudioRawFrame):
-        encoded = base64.b64encode(frame.audio).decode("utf-8")
-        message = RTVIBotTTSAudioMessage(
-            data=RTVIAudioMessageData(
-                audio=encoded, sample_rate=frame.sample_rate, num_channels=frame.num_channels
-            )
-        )
-        await self._push_transport_message_urgent(message)
+        elif type(frame) is TextFrame:
+            message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
+            await self._push_transport_message_urgent(message)
 
 
 class RTVIProcessor(FrameProcessor):

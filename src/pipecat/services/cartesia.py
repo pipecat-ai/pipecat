@@ -210,7 +210,6 @@ class CartesiaTTSService(WordTTSService):
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        await self.push_frame(LLMFullResponseEndFrame())
         self._context_id = None
 
     async def flush_audio(self):
@@ -228,12 +227,13 @@ class CartesiaTTSService(WordTTSService):
                     continue
                 if msg["type"] == "done":
                     await self.stop_ttfb_metrics()
-                    await self.push_frame(TTSStoppedFrame())
                     # Unset _context_id but not the _context_id_start_timestamp
                     # because we are likely still playing out audio and need the
                     # timestamp to set send context frames.
                     self._context_id = None
-                    await self.add_word_timestamps([("LLMFullResponseEndFrame", 0)])
+                    await self.add_word_timestamps(
+                        [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0)]
+                    )
                 elif msg["type"] == "timestamps":
                     await self.add_word_timestamps(
                         list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
