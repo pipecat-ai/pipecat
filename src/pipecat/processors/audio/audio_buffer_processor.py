@@ -1,18 +1,17 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import wave
 from io import BytesIO
 
 from pipecat.frames.frames import (
     AudioRawFrame,
-    BotInterruptionFrame,
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
-    StartInterruptionFrame,
-    StopInterruptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -39,18 +38,18 @@ class AudioBufferProcessor(FrameProcessor):
     def _buffer_has_audio(self, buffer: bytearray):
         return buffer is not None and len(buffer) > 0
 
-    def _has_audio(self):
+    def has_audio(self):
         return (
             self._buffer_has_audio(self._user_audio_buffer)
             and self._buffer_has_audio(self._assistant_audio_buffer)
             and self._sample_rate is not None
         )
 
-    def _reset_audio_buffer(self):
+    def reset_audio_buffer(self):
         self._user_audio_buffer = bytearray()
         self._assistant_audio_buffer = bytearray()
 
-    def _merge_audio_buffers(self):
+    def merge_audio_buffers(self):
         with BytesIO() as buffer:
             with wave.open(buffer, "wb") as wf:
                 wf.setnchannels(2)

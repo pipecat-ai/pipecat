@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List
