@@ -532,13 +532,11 @@ class AnthropicLLMContext(OpenAILLMContext):
 
     def _restructure_from_openai_messages(self):
         # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
-        logger.debug("!!! mapping")
         try:
             self._messages[:] = [self.from_standard_message(m) for m in self._messages]
         except Exception as e:
             logger.error(f"Error mapping messages: {e}")
 
-        logger.debug("!!! restructuring system thingy")
         # See if we should pull the system message out of our context.messages list. (For
         # compatibility with Open AI messages format.)
         if self.messages and self.messages[0]["role"] == "system":
