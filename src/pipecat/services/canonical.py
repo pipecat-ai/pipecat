@@ -1,9 +1,21 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+import aiohttp
 import os
 import uuid
+
 from datetime import datetime
 from typing import Dict, List, Tuple
 
-import aiohttp
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame
+from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import AIService
+
 from loguru import logger
 
 try:
@@ -18,27 +30,18 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-from pipecat.frames.frames import CancelFrame, EndFrame, Frame
-from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AIService
-
 # Multipart upload part size in bytes, cannot be smaller than 5MB
 PART_SIZE = 1024 * 1024 * 5
-"""
-This class extends AudioBufferProcessor to handle audio processing and uploading
-for the Canonical Voice API.
-"""
 
 
 class CanonicalMetricsService(AIService):
-    """
-    Initialize a CanonicalAudioProcessor instance.
+    """Initialize a CanonicalAudioProcessor instance.
 
-    This class extends AudioBufferProcessor to handle audio processing and uploading
-    for the Canonical Voice API.
+    This class uses an AudioBufferProcessor to get the conversation audio and
+    uploads it to Canonical Voice API for audio processing.
 
     Args:
+
         call_id (str): Your unique identifier for the call. This is used to match the call in the Canonical Voice system to the call in your system.
         assistant (str): Identifier for the AI assistant. This can be whatever you want, it's intended for you convenience so you can distinguish
         between different assistants and a grouping mechanism for calls.
@@ -52,7 +55,6 @@ class CanonicalMetricsService(AIService):
         output_dir (str): Directory path for saving temporary audio files.
 
     The constructor also ensures that the output directory exists.
-    This class requires a Canonical API key to be set in the CANONICAL_API_KEY environment variable.
     """
 
     def __init__(
@@ -90,17 +92,17 @@ class CanonicalMetricsService(AIService):
 
     async def _process_audio(self):
         pipeline = self._audio_buffer_processor
-        if pipeline._has_audio():
+        if pipeline.has_audio():
             os.makedirs(self._output_dir, exist_ok=True)
             filename = self._get_output_filename()
-            wave_data = pipeline._merge_audio_buffers()
+            wave_data = pipeline.merge_audio_buffers()
 
             async with aiofiles.open(filename, "wb") as file:
                 await file.write(wave_data)
 
             try:
                 await self._multipart_upload(filename)
-                pipeline._reset_audio_buffer()
+                pipeline.reset_audio_buffer()
                 await aiofiles.os.remove(filename)
             except FileNotFoundError:
                 pass
