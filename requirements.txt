@@ -9,3 +9,4 @@ setuptools_scm~=8.1.0
 -e .[daily,openai,azure,silero]
 python-dotenv
 fastapi[all]
+aiohttp
