@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Merge `RTVIBotLLMProcessor`/`RTVIBotLLMTextProcessor` and
+  `RTVIBotTTSProcessor`/`RTVIBotTTSTextProcessor` to avoid out of order issues.
+
 - Fixed an issue in Daily transport that would cause tasks to be hanging if
   urgent transport messages were being sent from a transport event handler.
 
