@@ -434,6 +434,9 @@ class WordTTSService(TTSService):
                 if word == "LLMFullResponseEndFrame" and timestamp == 0:
                     frame = LLMFullResponseEndFrame()
                     frame.pts = last_pts
+                elif word == "TTSStoppedFrame" and timestamp == 0:
+                    frame = TTSStoppedFrame()
+                    frame.pts = last_pts
                 else:
                     frame = TextFrame(word)
                     frame.pts = self._initial_word_timestamp + timestamp
