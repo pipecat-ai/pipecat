@@ -1,0 +1,2 @@
+python-dotenv
+pipecat-ai[cartesia,openai,silero,websocket,deepgram]
