@@ -241,6 +241,15 @@ class IntakeProcessor:
         user_ref = db.collection("users").document(
             "chad_bailey"
         )  # You might want to make this dynamic
+        doc = user_ref.get()
+        if not doc.exists:
+             # Create the document with default values (optional, you can add more fields if needed)
+             user_ref.set({
+                 'name': 'Chad Bailey',
+                 'created_at': firestore.SERVER_TIMESTAMP
+             })
+             logger.info("Document 'chad_bailey' created since it did not exist.")
+
 
         # Update the user document based on the function name
         if function_name == "list_prescriptions":
