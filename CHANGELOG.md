@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `RTVIBotTranscriptionProcessor` which will send the RTVI
+  `bot-transcription` protocol message. These are TTS text aggregated (into
+  sentences) messages.
+
 - Added new input params to the `MarkdownTextFilter` utility. You can set
   `filter_code` to filter code from text and `filter_tables` to filter tables
   from text.
