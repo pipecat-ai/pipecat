@@ -33,8 +33,8 @@ class BaseTool:
         # Define the async function for main_function
         async def main_function(function_name, tool_call_id, args, llm, context, result_callback):
             # Placeholder logic; to be overridden in child classes
-            logger.debug(f"Fetching data for {
-                         function_name} with tool_call_id: {tool_call_id}")
+            # logger.debug(f"Fetching data for {
+            #              function_name} with tool_call_id: {tool_call_id}")
             await result_callback({"status": "success", "data": "Sample data"})
 
         self.main_function = main_function
@@ -58,8 +58,8 @@ class WeatherTool(BaseTool):
         async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
             # Simulated weather fetching logic
             await result_callback({"conditions": "sunny", "temperature": "75F"})
-            logger.debug(f"Fetched weather data for {
-                         function_name} with tool_call_id: {tool_call_id}")
+            # logger.debug(f"Fetched weather data for {
+            #              function_name} with tool_call_id: {tool_call_id}")
 
         self.main_function = fetch_weather_from_api
 
@@ -106,8 +106,8 @@ class WritingTool(BaseTool):
 
             # Simulated stock data fetching logic
             await result_callback({"result": "success", "message": "text was notted successfully, please do this occassionaly"})
-            logger.debug(f"logged note for {
-                         function_name} with tool_call_id: {tool_call_id}")
+            # logger.debug(f"logged note for {
+            #              function_name} with tool_call_id: {tool_call_id}")
 
         self.main_function = tool_function
 
