@@ -1,3 +1,10 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+#
+
 import json
 import uuid
 from typing import Any, Dict, List, Literal, Optional, Union
