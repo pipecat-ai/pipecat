@@ -6,24 +6,22 @@
 
 import base64
 import json
+from typing import AsyncGenerator, Optional
 
-from typing import Optional
+from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
-    SystemFrame,
-    TranscriptionFrame)
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AsyncAIService
+    TranscriptionFrame,
+)
+from pipecat.services.ai_services import STTService
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-
-from loguru import logger
 
 # See .env.example for Gladia configuration needed
 try:
@@ -31,41 +29,119 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Gladia, you need to `pip install pipecat-ai[gladia]`. Also, set `GLADIA_API_KEY` environment variable.")
+        "In order to use Gladia, you need to `pip install pipecat-ai[gladia]`. Also, set `GLADIA_API_KEY` environment variable."
+    )
     raise Exception(f"Missing module: {e}")
 
 
-class GladiaSTTService(AsyncAIService):
+class GladiaSTTService(STTService):
     class InputParams(BaseModel):
         sample_rate: Optional[int] = 16000
-        language: Optional[str] = "english"
+        language: Optional[Language] = Language.EN
         transcription_hint: Optional[str] = None
         endpointing: Optional[int] = 200
         prosody: Optional[bool] = None
 
-    def __init__(self,
-                 *,
-                 api_key: str,
-                 url: str = "wss://api.gladia.io/audio/text/audio-transcription",
-                 confidence: float = 0.5,
-                 params: InputParams = InputParams(),
-                 **kwargs):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        url: str = "wss://api.gladia.io/audio/text/audio-transcription",
+        confidence: float = 0.5,
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
         super().__init__(**kwargs)
 
         self._api_key = api_key
         self._url = url
-        self._params = params
+        self._settings = {
+            "sample_rate": params.sample_rate,
+            "language": self.language_to_service_language(params.language)
+            if params.language
+            else Language.EN,
+            "transcription_hint": params.transcription_hint,
+            "endpointing": params.endpointing,
+            "prosody": params.prosody,
+        }
         self._confidence = confidence
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, SystemFrame):
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, AudioRawFrame):
-            await self._send_audio(frame)
-        else:
-            await self.queue_frame(frame, direction)
+    def language_to_service_language(self, language: Language) -> str | None:
+        match language:
+            case Language.BG:
+                return "bulgarian"
+            case Language.CA:
+                return "catalan"
+            case Language.ZH:
+                return "chinese"
+            case Language.CS:
+                return "czech"
+            case Language.DA:
+                return "danish"
+            case Language.NL:
+                return "dutch"
+            case (
+                Language.EN
+                | Language.EN_US
+                | Language.EN_AU
+                | Language.EN_GB
+                | Language.EN_NZ
+                | Language.EN_IN
+            ):
+                return "english"
+            case Language.ET:
+                return "estonian"
+            case Language.FI:
+                return "finnish"
+            case Language.FR | Language.FR_CA:
+                return "french"
+            case Language.DE | Language.DE_CH:
+                return "german"
+            case Language.EL:
+                return "greek"
+            case Language.HI:
+                return "hindi"
+            case Language.HU:
+                return "hungarian"
+            case Language.ID:
+                return "indonesian"
+            case Language.IT:
+                return "italian"
+            case Language.JA:
+                return "japanese"
+            case Language.KO:
+                return "korean"
+            case Language.LV:
+                return "latvian"
+            case Language.LT:
+                return "lithuanian"
+            case Language.MS:
+                return "malay"
+            case Language.NO:
+                return "norwegian"
+            case Language.PL:
+                return "polish"
+            case Language.PT | Language.PT_BR:
+                return "portuguese"
+            case Language.RO:
+                return "romanian"
+            case Language.RU:
+                return "russian"
+            case Language.SK:
+                return "slovak"
+            case Language.ES:
+                return "spanish"
+            case Language.SV:
+                return "slovenian"
+            case Language.TH:
+                return "thai"
+            case Language.TR:
+                return "turkish"
+            case Language.UK:
+                return "ukrainian"
+            case Language.VI:
+                return "vietnamese"
+        return None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -81,21 +157,29 @@ class GladiaSTTService(AsyncAIService):
         await super().cancel(frame)
         await self._websocket.close()
 
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        await self.start_processing_metrics()
+        await self._send_audio(audio)
+        await self.stop_processing_metrics()
+        yield None
+
     async def _setup_gladia(self):
         configuration = {
             "x_gladia_key": self._api_key,
             "encoding": "WAV/PCM",
             "model_type": "fast",
             "language_behaviour": "manual",
-            **self._params.model_dump(exclude_none=True)
+            "sample_rate": self._settings["sample_rate"],
+            "language": self._settings["language"],
+            "transcription_hint": self._settings["transcription_hint"],
+            "endpointing": self._settings["endpointing"],
+            "prosody": self._settings["prosody"],
         }
 
         await self._websocket.send(json.dumps(configuration))
 
-    async def _send_audio(self, frame: AudioRawFrame):
-        message = {
-            'frames': base64.b64encode(frame.audio).decode("utf-8")
-        }
+    async def _send_audio(self, audio: bytes):
+        message = {"frames": base64.b64encode(audio).decode("utf-8")}
         await self._websocket.send(json.dumps(message))
 
     async def _receive_task_handler(self):
@@ -113,6 +197,10 @@ class GladiaSTTService(AsyncAIService):
                 transcript = utterance["transcription"]
                 if confidence >= self._confidence:
                     if type == "final":
-                        await self.queue_frame(TranscriptionFrame(transcript, "", time_now_iso8601()))
+                        await self.push_frame(
+                            TranscriptionFrame(transcript, "", time_now_iso8601())
+                        )
                     else:
-                        await self.queue_frame(InterimTranscriptionFrame(transcript, "", time_now_iso8601()))
+                        await self.push_frame(
+                            InterimTranscriptionFrame(transcript, "", time_now_iso8601())
+                        )

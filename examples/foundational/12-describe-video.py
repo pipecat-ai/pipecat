@@ -26,6 +26,7 @@ from runner import configure
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -33,7 +34,6 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 class UserImageRequester(FrameProcessor):
-
     def __init__(self, participant_id: str | None = None):
         super().__init__()
         self._participant_id = participant_id
@@ -45,7 +45,9 @@ class UserImageRequester(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if self._participant_id and isinstance(frame, TextFrame):
-            await self.push_frame(UserImageRequestFrame(self._participant_id), FrameDirection.UPSTREAM)
+            await self.push_frame(
+                UserImageRequestFrame(self._participant_id), FrameDirection.UPSTREAM
+            )
         await self.push_frame(frame, direction)
 
 
@@ -61,8 +63,8 @@ async def main():
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer()
-            )
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
 
         user_response = UserResponseAggregator()
@@ -86,21 +88,24 @@ async def main():
             transport.capture_participant_transcription(participant["id"])
             image_requester.set_participant_id(participant["id"])
 
-        pipeline = Pipeline([
-            transport.input(),
-            user_response,
-            image_requester,
-            vision_aggregator,
-            moondream,
-            tts,
-            transport.output()
-        ])
+        pipeline = Pipeline(
+            [
+                transport.input(),
+                user_response,
+                image_requester,
+                vision_aggregator,
+                moondream,
+                tts,
+                transport.output(),
+            ]
+        )
 
         task = PipelineTask(pipeline)
 
         runner = PipelineRunner()
 
         await runner.run(task)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **pipecat** will be documented in this file.
+All notable changes to **Pipecat** will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -8,6 +8,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- Added new input params to the `MarkdownTextFilter` utility. You can set
+  `filter_code` to filter code from text and `filter_tables` to filter tables
+  from text.
+
+### Fixed
+
+- Fixed an issue in Daily transport that would cause tasks to be hanging if
+  urgent transport messages were being sent from a transport event handler.
+
+## [0.0.43] - 2024-10-10
+
+### Added
+
+- Added a new util called `MarkdownTextFilter` which is a subclass of a new
+  base class called `BaseTextFilter`. This is a configurable utility which
+  is intended to filter text received by TTS services.
+
+- Added new `RTVIUserLLMTextProcessor`. This processor will send an RTVI
+  `user-llm-text` message with the user content's that was sent to the LLM.
+
+### Changed
+
+- `TransportMessageFrame` doesn't have an `urgent` field anymore, instead
+  there's now a `TransportMessageUrgentFrame` which is a `SystemFrame` and
+  therefore skip all internal queuing.
+
+- For TTS services, convert inputted languages to match each service's language
+  format
+
+### Fixed
+
+- Fixed an issue where changing a language with the Deepgram STT service
+  wouldn't apply the change. This was fixed by disconnecting and reconnecting
+  when the language changes.
+
+## [0.0.42] - 2024-10-02
+
+### Added
+
+- `SentryMetrics` has been added to report frame processor metrics to
+  Sentry. This is now possible because `FrameProcessorMetrics` can now be passed
+  to `FrameProcessor`.
+
+- Added Google TTS service and corresponding foundational example
+  `07n-interruptible-google.py`
+
+- Added AWS Polly TTS support and `07m-interruptible-aws.py` as an example.
+
+- Added InputParams to Azure TTS service.
+
+- Added `LivekitTransport` (audio-only for now).
+
+- RTVI 0.2.0 is now supported.
+
+- All `FrameProcessors` can now register event handlers.
+
+```
+tts = SomeTTSService(...)
+
+@tts.event_handler("on_connected"):
+async def on_connected(processor):
+  ...
+```
+
+- Added `AsyncGeneratorProcessor`. This processor can be used together with a
+  `FrameSerializer` as an async generator. It provides a `generator()` function
+  that returns an `AsyncGenerator` and that yields serialized frames.
+
+- Added `EndTaskFrame` and `CancelTaskFrame`. These are new frames that are
+  meant to be pushed upstream to tell the pipeline task to stop nicely or
+  immediately respectively.
+
+- Added configurable LLM parameters (e.g., temperature, top_p, max_tokens, seed)
+  for OpenAI, Anthropic, and Together AI services along with corresponding
+  setter functions.
+
+- Added `sample_rate` as a constructor parameter for TTS services.
+
+- Pipecat has a pipeline-based architecture. The pipeline consists of frame
+  processors linked to each other. The elements traveling across the pipeline
+  are called frames.
+
+  To have a deterministic behavior the frames traveling through the pipeline
+  should always be ordered, except system frames which are out-of-band
+  frames. To achieve that, each frame processor should only output frames from a
+  single task.
+
+  In this version all the frame processors have their own task to push
+  frames. That is, when `push_frame()` is called the given frame will be put
+  into an internal queue (with the exception of system frames) and a frame
+  processor task will push it out.
+
+- Added pipeline clocks. A pipeline clock is used by the output transport to
+  know when a frame needs to be presented. For that, all frames now have an
+  optional `pts` field (prensentation timestamp). There's currently just one
+  clock implementation `SystemClock` and the `pts` field is currently only used
+  for `TextFrame`s (audio and image frames will be next).
+
+- A clock can now be specified to `PipelineTask` (defaults to
+  `SystemClock`). This clock will be passed to each frame processor via the
+  `StartFrame`.
+
+- Added `CartesiaHttpTTSService`.
 
 - `DailyTransport` now supports setting the audio bitrate to improve audio
   quality through the `DailyParams.audio_out_bitrate` parameter. The new
@@ -30,6 +134,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Context frames are now pushed downstream from assistant context aggregators.
+
+- Removed Silero VAD torch dependency.
+
+- Updated individual update settings frame classes into a single
+  `ServiceUpdateSettingsFrame` class.
+
+- We now distinguish between input and output audio and image frames. We
+  introduce `InputAudioRawFrame`, `OutputAudioRawFrame`, `InputImageRawFrame`
+  and `OutputImageRawFrame` (and other subclasses of those). The input frames
+  usually come from an input transport and are meant to be processed inside the
+  pipeline to generate new frames. However, the input frames will not be sent
+  through an output transport. The output frames can also be processed by any
+  frame processor in the pipeline and they are allowed to be sent by the output
+  transport.
+
+- `ParallelTask` has been renamed to `SyncParallelPipeline`. A
+  `SyncParallelPipeline` is a frame processor that contains a list of different
+  pipelines to be executed concurrently. The difference between a
+  `SyncParallelPipeline` and a `ParallelPipeline` is that, given an input frame,
+  the `SyncParallelPipeline` will wait for all the internal pipelines to
+  complete. This is achieved by making sure the last processor in each of the
+  pipelines is synchronous (e.g. an HTTP-based service that waits for the
+  response).
+
+- `StartFrame` is back a system frame to make sure it's processed immediately by
+  all processors. `EndFrame` stays a control frame since it needs to be ordered
+  allowing the frames in the pipeline to be processed.
+
+- Updated `MoondreamService` revision to `2024-08-26`.
+
+- `CartesiaTTSService` and `ElevenLabsTTSService` now add presentation
+  timestamps to their text output. This allows the output transport to push the
+  text frames downstream at almost the same time the words are spoken. We say
+  "almost" because currently the audio frames don't have presentation timestamp
+  but they should be played at roughly the same time.
+
 - `DailyTransport.on_joined` event now returns the full session data instead of
   just the participant.
 
@@ -44,6 +185,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed OpenAI multiple function calls.
+
+- Fixed a Cartesia TTS issue that would cause audio to be truncated in some
+  cases.
+
+- Fixed a `BaseOutputTransport` issue that would stop audio and video rendering
+  tasks (after receiving and `EndFrame`) before the internal queue was emptied,
+  causing the pipeline to finish prematurely.
+
 - `StartFrame` should be the first frame every processor receives to avoid
   situations where things are not initialized (because initialization happens on
   `StartFrame`) and other frames come in resulting in undesired behavior.
@@ -52,6 +202,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `obj_id()` and `obj_count()` now use `itertools.count` avoiding the need of
   `threading.Lock`.
+
+### Other
+
+- Pipecat now uses Ruff as its formatter (https://github.com/astral-sh/ruff).
 
 ## [0.0.41] - 2024-08-22
 
@@ -277,7 +431,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - It is now possible to specify a Silero VAD version when using `SileroVADAnalyzer`
   or `SileroVAD`.
 
-- Added `AysncFrameProcessor` and `AsyncAIService`.  Some services like
+- Added `AysncFrameProcessor` and `AsyncAIService`. Some services like
   `DeepgramSTTService` need to process things asynchronously. For example, audio
   is sent to Deepgram but transcriptions are not returned immediately. In these
   cases we still require all frames (except system frames) to be pushed
@@ -294,7 +448,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `WhisperSTTService` model can now also be a string.
 
-- Added missing * keyword separators in services.
+- Added missing \* keyword separators in services.
 
 ### Fixed
 
@@ -371,7 +525,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added new `TwilioFrameSerializer`. This is a new serializer that knows how to
   serialize and deserialize audio frames from Twilio.
 
-- Added Daily transport event: `on_dialout_answered`.  See
+- Added Daily transport event: `on_dialout_answered`. See
   https://reference-python.daily.co/api_reference.html#daily.EventHandler
 
 - Added new `AzureSTTService`. This allows you to use Azure Speech-To-Text.
@@ -611,7 +765,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Daily transport support for dial-in use cases.
 
 - Added Daily transport events: `on_dialout_connected`, `on_dialout_stopped`,
-  `on_dialout_error` and `on_dialout_warning`.  See
+  `on_dialout_error` and `on_dialout_warning`. See
   https://reference-python.daily.co/api_reference.html#daily.EventHandler
 
 ## [0.0.21] - 2024-05-22

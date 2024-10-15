@@ -11,18 +11,25 @@ import sys
 
 import tkinter as tk
 
-from pipecat.frames.frames import AudioRawFrame, Frame, URLImageRawFrame, LLMMessagesFrame, TextFrame
-from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+from pipecat.frames.frames import (
+    Frame,
+    OutputAudioRawFrame,
+    TTSAudioRawFrame,
+    URLImageRawFrame,
+    LLMMessagesFrame,
+    TextFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
+from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.tk import TkLocalTransport
+from pipecat.transports.local.tk import TkLocalTransport, TkOutputTransport
 
 from loguru import logger
 
@@ -42,7 +49,12 @@ async def main():
         runner = PipelineRunner()
 
         async def get_month_data(month):
-            messages = [{"role": "system", "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.", }]
+            messages = [
+                {
+                    "role": "system",
+                    "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
+                }
+            ]
 
             class ImageDescription(FrameProcessor):
                 def __init__(self):
@@ -60,14 +72,17 @@ async def main():
                 def __init__(self):
                     super().__init__()
                     self.audio = bytearray()
+                    self.frame = None
 
                 async def process_frame(self, frame: Frame, direction: FrameDirection):
                     await super().process_frame(frame, direction)
 
-                    if isinstance(frame, AudioRawFrame):
+                    if isinstance(frame, TTSAudioRawFrame):
                         self.audio.extend(frame.audio)
-                        self.frame = AudioRawFrame(
-                            bytes(self.audio), frame.sample_rate, frame.num_channels)
+                        self.frame = OutputAudioRawFrame(
+                            bytes(self.audio), frame.sample_rate, frame.num_channels
+                        )
+                    await self.push_frame(frame, direction)
 
             class ImageGrabber(FrameProcessor):
                 def __init__(self):
@@ -79,23 +94,22 @@ async def main():
 
                     if isinstance(frame, URLImageRawFrame):
                         self.frame = frame
+                    await self.push_frame(frame, direction)
 
-            llm = OpenAILLMService(
-                api_key=os.getenv("OPENAI_API_KEY"),
-                model="gpt-4o")
+            llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
-            tts = ElevenLabsTTSService(
-                api_key=os.getenv("ELEVENLABS_API_KEY"),
-                voice_id=os.getenv("ELEVENLABS_VOICE_ID"))
+            tts = CartesiaHttpTTSService(
+                api_key=os.getenv("CARTESIA_API_KEY"),
+                voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            )
 
             imagegen = FalImageGenService(
-                params=FalImageGenService.InputParams(
-                    image_size="square_hd"
-                ),
+                params=FalImageGenService.InputParams(image_size="square_hd"),
                 aiohttp_session=session,
-                key=os.getenv("FAL_KEY"))
+                key=os.getenv("FAL_KEY"),
+            )
 
-            aggregator = LLMFullResponseAggregator()
+            sentence_aggregator = SentenceAggregator()
 
             description = ImageDescription()
 
@@ -103,13 +117,27 @@ async def main():
 
             image_grabber = ImageGrabber()
 
-            pipeline = Pipeline([
-                llm,
-                aggregator,
-                description,
-                ParallelPipeline([tts, audio_grabber],
-                                 [imagegen, image_grabber])
-            ])
+            # With `SyncParallelPipeline` we synchronize audio and images by
+            # pushing them basically in order (e.g. I1 A1 A1 A1 I2 A2 A2 A2 A2
+            # I3 A3). To do that, each pipeline runs concurrently and
+            # `SyncParallelPipeline` will wait for the input frame to be
+            # processed.
+            #
+            # Note that `SyncParallelPipeline` requires the last processor in
+            # each of the pipelines to be synchronous. In this case, we use
+            # `CartesiaHttpTTSService` and `FalImageGenService` which make HTTP
+            # requests and wait for the response.
+            pipeline = Pipeline(
+                [
+                    llm,  # LLM
+                    sentence_aggregator,  # Aggregates LLM output into full sentences
+                    description,  # Store sentence
+                    SyncParallelPipeline(
+                        [tts, audio_grabber],  # Generate and store audio for the given sentence
+                        [imagegen, image_grabber],  # Generate and storeimage for the given sentence
+                    ),
+                ]
+            )
 
             task = PipelineTask(pipeline)
             await task.queue_frame(LLMMessagesFrame(messages))
@@ -130,7 +158,9 @@ async def main():
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,
-                camera_out_height=1024))
+                camera_out_height=1024,
+            ),
+        )
 
         pipeline = Pipeline([transport.output()])
 

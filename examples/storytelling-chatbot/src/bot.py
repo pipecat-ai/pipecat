@@ -9,11 +9,18 @@ from pipecat.frames.frames import LLMMessagesFrame, StopTaskFrame, EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator, LLMUserResponseAggregator
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantResponseAggregator,
+    LLMUserResponseAggregator,
+)
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyTransportMessageFrame
+from pipecat.transports.services.daily import (
+    DailyParams,
+    DailyTransport,
+    DailyTransportMessageFrame,
+)
 
 from processors import StoryProcessor, StoryImageProcessor
 from prompts import LLM_BASE_PROMPT, LLM_INTRO_PROMPT, CUE_USER_TURN
@@ -22,6 +29,7 @@ from utils.helpers import load_sounds, load_images
 from loguru import logger
 
 from dotenv import load_dotenv
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -33,7 +41,6 @@ images = load_images(["book1.png", "book2.png"])
 
 async def main(room_url, token=None):
     async with aiohttp.ClientSession() as session:
-
         # -------------- Transport --------------- #
 
         transport = DailyTransport(
@@ -47,17 +54,14 @@ async def main(room_url, token=None):
                 camera_out_height=768,
                 transcription_enabled=True,
                 vad_enabled=True,
-            )
+            ),
         )
 
         logger.debug("Transport created for room:" + room_url)
 
         # -------------- Services --------------- #
 
-        llm_service = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o"
-        )
+        llm_service = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         tts_service = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY"),
@@ -65,10 +69,7 @@ async def main(room_url, token=None):
         )
 
         fal_service_params = FalImageGenService.InputParams(
-            image_size={
-                "width": 768,
-                "height": 768
-            }
+            image_size={"width": 768, "height": 768}
         )
 
         fal_service = FalImageGenService(
@@ -110,12 +111,12 @@ async def main(room_url, token=None):
             transport.capture_participant_transcription(participant["id"])
             await intro_task.queue_frames(
                 [
-                    images['book1'],
+                    images["book1"],
                     LLMMessagesFrame([LLM_INTRO_PROMPT]),
                     DailyTransportMessageFrame(CUE_USER_TURN),
                     sounds["listening"],
-                    images['book2'],
-                    StopTaskFrame()
+                    images["book2"],
+                    StopTaskFrame(),
                 ]
             )
 
@@ -125,22 +126,24 @@ async def main(room_url, token=None):
 
         # The main story pipeline is used to continue the story based on user
         # input.
-        main_pipeline = Pipeline([
-            transport.input(),
-            user_responses,
-            llm_service,
-            story_processor,
-            image_processor,
-            tts_service,
-            transport.output(),
-            llm_responses
-        ])
+        main_pipeline = Pipeline(
+            [
+                transport.input(),
+                user_responses,
+                llm_service,
+                story_processor,
+                image_processor,
+                tts_service,
+                transport.output(),
+                llm_responses,
+            ]
+        )
 
         main_task = PipelineTask(main_pipeline)
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            intro_task.queue_frame(EndFrame())
+            await intro_task.queue_frame(EndFrame())
             await main_task.queue_frame(EndFrame())
 
         @transport.event_handler("on_call_state_updated")
@@ -149,6 +152,7 @@ async def main(room_url, token=None):
                 await main_task.queue_frame(EndFrame())
 
         await runner.run(main_task)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Daily Storyteller Bot")

@@ -8,7 +8,7 @@ import asyncio
 
 from concurrent.futures import ThreadPoolExecutor
 
-from pipecat.frames.frames import AudioRawFrame, StartFrame
+from pipecat.frames.frames import InputAudioRawFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -21,12 +21,12 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use local audio, you need to `pip install pipecat-ai[local]`. On MacOS, you also need to `brew install portaudio`.")
+        "In order to use local audio, you need to `pip install pipecat-ai[local]`. On MacOS, you also need to `brew install portaudio`."
+    )
     raise Exception(f"Missing module: {e}")
 
 
 class LocalAudioInputTransport(BaseInputTransport):
-
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
 
@@ -39,7 +39,8 @@ class LocalAudioInputTransport(BaseInputTransport):
             rate=params.audio_in_sample_rate,
             frames_per_buffer=num_frames,
             stream_callback=self._audio_in_callback,
-            input=True)
+            input=True,
+        )
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -54,9 +55,11 @@ class LocalAudioInputTransport(BaseInputTransport):
         self._in_stream.close()
 
     def _audio_in_callback(self, in_data, frame_count, time_info, status):
-        frame = AudioRawFrame(audio=in_data,
-                              sample_rate=self._params.audio_in_sample_rate,
-                              num_channels=self._params.audio_in_channels)
+        frame = InputAudioRawFrame(
+            audio=in_data,
+            sample_rate=self._params.audio_in_sample_rate,
+            num_channels=self._params.audio_in_channels,
+        )
 
         asyncio.run_coroutine_threadsafe(self.push_audio_frame(frame), self.get_event_loop())
 
@@ -64,7 +67,6 @@ class LocalAudioInputTransport(BaseInputTransport):
 
 
 class LocalAudioOutputTransport(BaseOutputTransport):
-
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
 
@@ -74,7 +76,8 @@ class LocalAudioOutputTransport(BaseOutputTransport):
             format=py_audio.get_format_from_width(2),
             channels=params.audio_out_channels,
             rate=params.audio_out_sample_rate,
-            output=True)
+            output=True,
+        )
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -93,7 +96,6 @@ class LocalAudioOutputTransport(BaseOutputTransport):
 
 
 class LocalAudioTransport(BaseTransport):
-
     def __init__(self, params: TransportParams):
         self._params = params
         self._pyaudio = pyaudio.PyAudio()

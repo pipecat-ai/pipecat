@@ -38,7 +38,7 @@ pip install "pipecat-ai[option,...]"
 
 Your project may or may not need these, so they're made available as optional requirements. Here is a list:
 
-- **AI services**: `anthropic`, `azure`, `deepgram`, `gladia`, `google`, `fal`, `lmnt`, `moondream`, `openai`, `openpipe`, `playht`, `silero`, `whisper`, `xtts`
+- **AI services**: `anthropic`, `aws`, `azure`, `deepgram`, `gladia`, `google`, `fal`, `lmnt`, `moondream`, `openai`, `openpipe`, `playht`, `silero`, `whisper`, `xtts`
 - **Transports**: `local`, `websocket`, `daily`
 
 ## Code examples
@@ -110,7 +110,6 @@ python app.py
 
 Daily provides a prebuilt WebRTC user interface. Whilst the app is running, you can visit at `https://<yourdomain>.daily.co/<room_url>` and listen to the bot say hello!
 
-
 ## WebRTC for production use
 
 WebSockets are fine for server-to-server communication or for initial development. But for production use, you’ll need client-server audio to use a protocol designed for real-time media transport. (For an explanation of the difference between WebSockets and WebRTC, see [this post.](https://www.daily.co/blog/how-to-talk-to-an-llm-with-your-voice/#webrtc))
@@ -128,9 +127,6 @@ Pipecat makes use of WebRTC VAD by default when using a WebRTC transport layer. 
 ```shell
 pip install pipecat-ai[silero]
 ```
-
-The first time your run your bot with Silero, startup may take a while whilst it downloads and caches the model in the background. You can check the progress of this in the console.
-
 
 ## Hacking on the framework itself
 
@@ -165,27 +161,29 @@ pip install "path_to_this_repo[option,...]"
 From the root directory, run:
 
 ```shell
-pytest --doctest-modules --ignore-glob="*to_be_updated*" src tests
+pytest --doctest-modules --ignore-glob="*to_be_updated*" --ignore-glob=*pipeline_source* src tests
 ```
 
 ## Setting up your editor
 
-This project uses strict [PEP 8](https://peps.python.org/pep-0008/) formatting.
+This project uses strict [PEP 8](https://peps.python.org/pep-0008/) formatting via [Ruff](https://github.com/astral-sh/ruff).
 
 ### Emacs
 
-You can use [use-package](https://github.com/jwiegley/use-package) to install [py-autopep8](https://codeberg.org/ideasman42/emacs-py-autopep8) package and configure `autopep8` arguments:
+You can use [use-package](https://github.com/jwiegley/use-package) to install [emacs-lazy-ruff](https://github.com/christophermadsen/emacs-lazy-ruff) package and configure `ruff` arguments:
 
 ```elisp
-(use-package py-autopep8
+(use-package lazy-ruff
   :ensure t
-  :defer t
-  :hook ((python-mode . py-autopep8-mode))
+  :hook ((python-mode . lazy-ruff-mode))
   :config
-  (setq py-autopep8-options '("-a" "-a", "--max-line-length=100")))
+  (setq lazy-ruff-format-command "ruff format --config line-length=100")
+  (setq lazy-ruff-only-format-block t)
+  (setq lazy-ruff-only-format-region t)
+  (setq lazy-ruff-only-format-buffer t))
 ```
 
-`autopep8` was installed in the `venv` environment described before, so you should be able to use [pyvenv-auto](https://github.com/ryotaro612/pyvenv-auto) to automatically load that environment inside Emacs.
+`ruff` was installed in the `venv` environment described before, so you should be able to use [pyvenv-auto](https://github.com/ryotaro612/pyvenv-auto) to automatically load that environment inside Emacs.
 
 ```elisp
 (use-package pyvenv-auto
@@ -198,18 +196,14 @@ You can use [use-package](https://github.com/jwiegley/use-package) to install [p
 ### Visual Studio Code
 
 Install the
-[autopep8](https://marketplace.visualstudio.com/items?itemName=ms-python.autopep8) extension. Then edit the user settings (_Ctrl-Shift-P_ `Open User Settings (JSON)`) and set it as the default Python formatter, enable formatting on save and configure `autopep8` arguments:
+[Ruff](https://marketplace.visualstudio.com/items?itemName=charliermarsh.ruff) extension. Then edit the user settings (_Ctrl-Shift-P_ `Open User Settings (JSON)`) and set it as the default Python formatter, enable formatting on save and configure `ruff` arguments:
 
 ```json
 "[python]": {
-    "editor.defaultFormatter": "ms-python.autopep8",
+    "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true
 },
-"autopep8.args": [
-    "-a",
-    "-a",
-    "--max-line-length=100"
-],
+"ruff.format.args": ["--config", "line-length=100"]
 ```
 
 ## Getting help
