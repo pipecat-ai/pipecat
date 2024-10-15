@@ -390,8 +390,12 @@ class OpenAISTTService(SegmentedSTTService):
     async def set_model(self, model: str):
         self.set_model_name(model)
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         try:
+            await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
             response: Transcription = await self._client.audio.transcriptions.create(
@@ -399,6 +403,7 @@ class OpenAISTTService(SegmentedSTTService):
             )
 
             await self.stop_ttfb_metrics()
+            await self.stop_processing_metrics()
 
             text = response.text.strip()
 
