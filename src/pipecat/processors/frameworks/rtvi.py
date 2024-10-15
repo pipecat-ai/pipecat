@@ -42,6 +42,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.string import match_endofsentence
 
 RTVI_PROTOCOL_VERSION = "0.2"
 
@@ -275,6 +276,12 @@ class RTVITextMessageData(BaseModel):
     text: str
 
 
+class RTVIBotTranscriptionMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["bot-transcription"] = "bot-transcription"
+    data: RTVITextMessageData
+
+
 class RTVIBotLLMTextMessage(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
     type: Literal["bot-llm-text"] = "bot-llm-text"
@@ -437,14 +444,31 @@ class RTVIUserLLMTextProcessor(RTVIFrameProcessor):
             if message["role"] == "user":
                 content = message["content"]
                 if isinstance(content, list):
-                    print("LIST")
                     text = " ".join(item["text"] for item in content if "text" in item)
                 else:
-                    print("STRING")
                     text = content
-
                 rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
                 await self._push_transport_message_urgent(rtvi_message)
+
+
+class RTVIBotTranscriptionProcessor(RTVIFrameProcessor):
+    def __init__(self):
+        super().__init__()
+        self._aggregation = ""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        await self.push_frame(frame, direction)
+
+        if isinstance(frame, TextFrame):
+            self._aggregation += frame.text
+            if match_endofsentence(self._aggregation):
+                message = RTVIBotTranscriptionMessage(
+                    data=RTVITextMessageData(text=self._aggregation)
+                )
+                await self._push_transport_message_urgent(message)
+                self._aggregation = ""
 
 
 class RTVIBotLLMProcessor(RTVIFrameProcessor):
