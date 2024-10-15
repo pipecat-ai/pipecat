@@ -24,8 +24,9 @@ class BaseTool:
     def main(self):
         # Define the async function for start_callback_function
         async def start_callback_function(function_name, llm, context):
-            logger.debug(f"Starting {
-                         self.function_definition['function']['name']} with function_name: {function_name} and Room_id: {self.room_id}")
+            print("running")
+            # logger.debug(f"Starting {
+            #              self.function_definition['function']['name']} with function_name: {function_name} and Room_id: {self.room_id}")
 
         self.start_callback_function = start_callback_function
 
@@ -95,9 +96,11 @@ class WritingTool(BaseTool):
         # Override the main_function with specific logic for stock data
         async def tool_function(function_name, tool_call_id, args, llm, context, result_callback):
             print(context, args['text'], self.room_id)
-            message_id = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+            message_id = ''.join(random.choices(
+                string.ascii_letters + string.digits, k=8))
 
-            data = {"type": "function", "function_name": function_name, "content": args['text'],  "message_id": message_id}
+            data = {"type": "function", "function_name": function_name,
+                    "content": args['text'],  "message_id": message_id}
 
             await manager.broadcast_json(data, self.room_id)
 
