@@ -62,7 +62,7 @@
       });
 
       function initWebSocket() {
-          ws = new WebSocket('wss://www.allenmylath.run.place:8765');
+          ws = new WebSocket('wss://www.YOUR-IP OR DOMAIN:8765');
 
           ws.addEventListener('open', () => console.log('WebSocket connection established.'));
           ws.addEventListener('message', handleWebSocketMessage);
