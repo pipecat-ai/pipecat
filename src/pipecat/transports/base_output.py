@@ -95,15 +95,6 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_out_task = self.get_event_loop().create_task(self._audio_out_task_handler())
 
     async def stop(self, frame: EndFrame):
-        # At this point we have enqueued an EndFrame and we need to wait for
-        # that EndFrame to be processed by the sink tasks. We also need to wait
-        # for these tasks before cancelling the camera and audio tasks below
-        # because they might be still rendering.
-        if self._sink_task:
-            await self._sink_task
-        if self._sink_clock_task:
-            await self._sink_clock_task
-
         # Cancel and wait for the camera output task to finish.
         if self._camera_out_task and self._params.camera_out_enabled:
             self._camera_out_task.cancel()
@@ -191,9 +182,12 @@ class BaseOutputTransport(FrameProcessor):
             await self.push_frame(frame, direction)
         # Control frames.
         elif isinstance(frame, EndFrame):
-            await self._sink_clock_queue.put((sys.maxsize, frame.id, frame))
-            await self._sink_queue.put(frame)
+            # Process sink tasks.
+            await self._stop_sink_tasks(frame)
+            # Now we can stop.
             await self.stop(frame)
+            # We finally push EndFrame down so PipelineTask stops nicely.
+            await self.push_frame(frame, direction)
         # Other frames.
         elif isinstance(frame, OutputAudioRawFrame):
             await self._handle_audio(frame)
@@ -204,6 +198,20 @@ class BaseOutputTransport(FrameProcessor):
             await self._sink_clock_queue.put((frame.pts, frame.id, frame))
         else:
             await self._sink_queue.put(frame)
+
+    async def _stop_sink_tasks(self, frame: EndFrame):
+        # Let the sink tasks process the queue until they reach this EndFrame.
+        await self._sink_clock_queue.put((sys.maxsize, frame.id, frame))
+        await self._sink_queue.put(frame)
+
+        # At this point we have enqueued an EndFrame and we need to wait for
+        # that EndFrame to be processed by the sink tasks. We also need to wait
+        # for these tasks before cancelling the camera and audio tasks below
+        # because they might be still rendering.
+        if self._sink_task:
+            await self._sink_task
+        if self._sink_clock_task:
+            await self._sink_clock_task
 
     async def _handle_interruptions(self, frame: Frame):
         if not self.interruptions_allowed:
@@ -278,7 +286,8 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, TTSStoppedFrame):
             await self._bot_stopped_speaking()
             await self.push_frame(frame)
-        else:
+        # We will push EndFrame later.
+        elif not isinstance(frame, EndFrame):
             await self.push_frame(frame)
 
     async def _sink_task_handler(self):
