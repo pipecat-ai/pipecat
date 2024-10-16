@@ -241,7 +241,7 @@ class DailyTransportClient(EventHandler):
         self._callbacks = callbacks
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
-        if not self._client:
+        if not self._joined or self._leaving:
             return
 
         participant_id = None
