@@ -247,7 +247,7 @@ class ElevenLabsTTSService(WordTTSService):
 
     async def set_model(self, model: str):
         await super().set_model(model)
-        logger.debug(f"Switching TTS model to: [{model}]")
+        logger.info(f"Switching TTS model to: [{model}]")
         await self._disconnect()
         await self._connect()
 
@@ -257,7 +257,7 @@ class ElevenLabsTTSService(WordTTSService):
         if not prev_voice == self._voice_id:
             await self._disconnect()
             await self._connect()
-            logger.debug(f"Switching TTS voice to: [{self._voice_id}]")
+            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -298,7 +298,7 @@ class ElevenLabsTTSService(WordTTSService):
             if model == "eleven_turbo_v2_5":
                 url += f"&language_code={language}"
             else:
-                logger.debug(
+                logger.warning(
                     f"Language code [{language}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
                 )
 
