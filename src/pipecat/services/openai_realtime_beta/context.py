@@ -45,9 +45,24 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
 
     # todo
     #   - finish implementing all frames
-    #   - add message conversion functions to OpenAILLMContext base class
 
     def from_standard_message(self, message):
+        if message.get("role") == "user":
+            content = message.get("content")
+            if isinstance(message.get("content"), list):
+                content = ""
+                for c in message.get("content"):
+                    if c.get("type") == "text":
+                        content += " " + c.get("text")
+                    else:
+                        logger.error(
+                            f"Unhandled content type in context message: {c.get('type')} - {message}"
+                        )
+            return events.ConversationItem(
+                role="user",
+                type="message",
+                content=[events.ItemContent(type="input_text", text=content)],
+            )
         if message.get("role") == "assistant" and message.get("tool_calls"):
             tc = message.get("tool_calls")[0]
             return events.ConversationItem(
@@ -83,7 +98,7 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
 
         # If we have just a single "user" item, we can just send it normally
         if len(messages) == 1 and messages[0].get("role") == "user":
-            return messages
+            return [self.from_standard_message(messages[0])]
 
         # Otherwise, let's pack everything into a single "user" message with a bit of
         # explanation for the LLM

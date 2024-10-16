@@ -124,7 +124,21 @@ Remember, your responses should be short. Just one or two sentences, usually."""
         # llm.register_function(None, fetch_weather_from_api)
         llm.register_function("get_current_weather", fetch_weather_from_api)
 
-        context = OpenAILLMContext([{"role": "user", "content": "Say hello!"}], tools)
+        context = OpenAILLMContext(
+            [{"role": "user", "content": "Say hello!"}],
+            # [{"role": "user", "content": [{"type": "text", "text": "Say hello!"}]}],
+            #     [
+            #         {
+            #             "role": "user",
+            #             "content": [
+            #                 {"type": "text", "text": "Say"},
+            #                 {"type": "text", "text": "yo what's up!"},
+            #             ],
+            #         }
+            #     ],
+            tools,
+        )
+
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
