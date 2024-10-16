@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed `OpenAILLMServiceRealtimeBeta` to `OpenAIRealtimeBetaLLMService` to
   match other services.
 
+### Fixed
+
+- Fixed `SileroVAD` processor to support interruptions properly.
+
+### Other
+
+- Added `examples/foundational/07-interruptible-vad.py`. This is the same as
+  `07-interruptible.py` but using the `SileroVAD` processor instead of passing
+  the `VADAnalyzer` in the transport.
+
 ## [0.0.45] - 2024-10-16
 
 ### Changed

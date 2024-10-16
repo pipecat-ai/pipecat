@@ -11,6 +11,8 @@ import numpy as np
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -200,6 +202,27 @@ class SileroVAD(FrameProcessor):
         else:
             await self.push_frame(frame, direction)
 
+    #
+    # Handle interruptions
+    #
+
+    async def _handle_interruptions(self, frame: Frame):
+        if self.interruptions_allowed:
+            # Make sure we notify about interruptions quickly out-of-band.
+            if isinstance(frame, UserStartedSpeakingFrame):
+                logger.debug("User started speaking")
+                await self._start_interruption()
+                # Push an out-of-band frame (i.e. not using the ordered push
+                # frame task) to stop everything, specially at the output
+                # transport.
+                await self.push_frame(StartInterruptionFrame())
+            elif isinstance(frame, UserStoppedSpeakingFrame):
+                logger.debug("User stopped speaking")
+                await self._stop_interruption()
+                await self.push_frame(StopInterruptionFrame())
+
+        await self.push_frame(frame)
+
     async def _analyze_audio(self, frame: AudioRawFrame):
         # Check VAD and push event if necessary. We just care about changes
         # from QUIET to SPEAKING and vice versa.
@@ -217,5 +240,6 @@ class SileroVAD(FrameProcessor):
                 new_frame = UserStoppedSpeakingFrame()
 
             if new_frame:
-                await self.push_frame(new_frame)
-                self._processor_vad_state = new_vad_state
+                await self._handle_interruptions(new_frame)
+
+            self._processor_vad_state = new_vad_state
