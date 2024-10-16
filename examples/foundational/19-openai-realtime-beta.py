@@ -17,12 +17,10 @@ from runner import configure
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai_realtime_beta import (
     InputAudioTranscription,
-    OpenAILLMServiceRealtimeBeta,
+    OpenAIRealtimeBetaLLMService,
     SessionProperties,
     TurnDetection,
 )
@@ -116,7 +114,7 @@ unless specifically asked to elaborate on a topic.
 Remember, your responses should be short. Just one or two sentences, usually.""",
         )
 
-        llm = OpenAILLMServiceRealtimeBeta(
+        llm = OpenAIRealtimeBetaLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             session_properties=session_properties,
             start_audio_paused=False,
@@ -126,7 +124,24 @@ Remember, your responses should be short. Just one or two sentences, usually."""
         # llm.register_function(None, fetch_weather_from_api)
         llm.register_function("get_current_weather", fetch_weather_from_api)
 
-        context = OpenAILLMContext([{"role": "user", "content": "Say hello!"}], tools)
+        # Create a standard OpenAI LLM context object using the normal messages format. The
+        # OpenAIRealtimeBetaLLMService will convert this internally to messages that the
+        # openai WebSocket API can understand.
+        context = OpenAILLMContext(
+            [{"role": "user", "content": "Say hello!"}],
+            # [{"role": "user", "content": [{"type": "text", "text": "Say hello!"}]}],
+            #     [
+            #         {
+            #             "role": "user",
+            #             "content": [
+            #                 {"type": "text", "text": "Say"},
+            #                 {"type": "text", "text": "yo what's up!"},
+            #             ],
+            #         }
+            #     ],
+            tools,
+        )
+
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
