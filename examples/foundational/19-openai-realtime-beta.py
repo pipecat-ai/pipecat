@@ -17,12 +17,10 @@ from runner import configure
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai_realtime_beta import (
     InputAudioTranscription,
-    OpenAILLMServiceRealtimeBeta,
+    OpenAIRealtimeBetaLLMService,
     SessionProperties,
     TurnDetection,
 )
@@ -116,7 +114,7 @@ unless specifically asked to elaborate on a topic.
 Remember, your responses should be short. Just one or two sentences, usually.""",
         )
 
-        llm = OpenAILLMServiceRealtimeBeta(
+        llm = OpenAIRealtimeBetaLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             session_properties=session_properties,
             start_audio_paused=False,

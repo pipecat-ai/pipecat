@@ -24,7 +24,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.services.openai_realtime_beta import (
     InputAudioTranscription,
-    OpenAILLMServiceRealtimeBeta,
+    OpenAIRealtimeBetaLLMService,
     SessionProperties,
     TurnDetection,
 )
@@ -211,7 +211,7 @@ unless specifically asked to elaborate on a topic.
 Remember, your responses should be short. Just one or two sentences, usually.""",
         )
 
-        llm = OpenAILLMServiceRealtimeBeta(
+        llm = OpenAIRealtimeBetaLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             session_properties=session_properties,
             start_audio_paused=False,
