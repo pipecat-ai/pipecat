@@ -124,6 +124,9 @@ Remember, your responses should be short. Just one or two sentences, usually."""
         # llm.register_function(None, fetch_weather_from_api)
         llm.register_function("get_current_weather", fetch_weather_from_api)
 
+        # Create a standard OpenAI LLM context object using the normal messages format. The
+        # OpenAIRealtimeBetaLLMService will convert this internally to messages that the
+        # openai WebSocket API can understand.
         context = OpenAILLMContext(
             [{"role": "user", "content": "Say hello!"}],
             # [{"role": "user", "content": [{"type": "text", "text": "Say hello!"}]}],
