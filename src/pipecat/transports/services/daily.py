@@ -241,7 +241,7 @@ class DailyTransportClient(EventHandler):
         self._callbacks = callbacks
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
-        if not self._client:
+        if not self._joined or self._leaving:
             return
 
         participant_id = None
@@ -740,13 +740,17 @@ class DailyOutputTransport(BaseOutputTransport):
             self._messages_task.cancel()
             await self._messages_task
             self._messages_task = None
-        self._messages_task = None
         # Leave the room.
         await self._client.leave()
 
     async def cancel(self, frame: CancelFrame):
         # Parent stop.
         await super().cancel(frame)
+        # Cancel messages task
+        if self._messages_task:
+            self._messages_task.cancel()
+            await self._messages_task
+            self._messages_task = None
         # Leave the room.
         await self._client.leave()
 
