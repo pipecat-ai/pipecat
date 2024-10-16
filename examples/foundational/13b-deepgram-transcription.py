@@ -14,7 +14,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.deepgram import DeepgramSTTService
+from pipecat.services.deepgram import DeepgramSTTService, LiveOptions, Language
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from runner import configure
@@ -45,7 +45,10 @@ async def main():
             room_url, None, "Transcription bot", DailyParams(audio_in_enabled=True)
         )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = DeepgramSTTService(
+            api_key=os.getenv("DEEPGRAM_API_KEY"),
+            # live_options=LiveOptions(language=Language.FR),
+        )
 
         tl = TranscriptionLogger()
 

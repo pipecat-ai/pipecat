@@ -115,7 +115,7 @@ class OpenAILLMContext:
         return self._messages
 
     def get_messages_json(self) -> str:
-        return json.dumps(self._messages, cls=CustomEncoder)
+        return json.dumps(self._messages, cls=CustomEncoder, ensure_ascii=False, indent=2)
 
     def get_messages_for_logging(self) -> str:
         msgs = []
@@ -131,6 +131,23 @@ class OpenAILLMContext:
                 msg["data"] = "..."
             msgs.append(msg)
         return json.dumps(msgs)
+
+    def from_standard_message(self, message):
+        return message
+
+    # convert a message in this LLM's format to one or more messages in OpenAI format
+    def to_standard_messages(self, obj) -> list:
+        return [obj]
+
+    def get_messages_for_initializing_history(self):
+        return self._messages
+
+    def get_messages_for_persistent_storage(self):
+        messages = []
+        for m in self._messages:
+            standard_messages = self.to_standard_messages(m)
+            messages.extend(standard_messages)
+        return messages
 
     def set_tool_choice(self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven):
         self._tool_choice = tool_choice
@@ -168,6 +185,7 @@ class OpenAILLMContext:
         llm: FrameProcessor,
         run_llm: bool = True,
     ) -> None:
+        logger.debug(f"Calling function {function_name} with arguments {arguments}")
         # Push a SystemFrame downstream. This frame will let our assistant context aggregator
         # know that we are in the middle of a function call. Some contexts/aggregators may
         # not need this. But some definitely do (Anthropic, for example).
