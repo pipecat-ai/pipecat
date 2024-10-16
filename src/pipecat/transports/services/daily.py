@@ -4,14 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import time
-
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, Optional
-from concurrent.futures import ThreadPoolExecutor
 
+import aiohttp
 from daily import (
     CallClient,
     Daily,
@@ -20,6 +19,7 @@ from daily import (
     VirtualMicrophoneDevice,
     VirtualSpeakerDevice,
 )
+from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
@@ -45,17 +45,15 @@ from pipecat.metrics.metrics import (
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams
 
-from loguru import logger
-
 try:
-    from daily import EventHandler, CallClient, Daily
+    from daily import CallClient, Daily, EventHandler
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -778,7 +776,7 @@ class DailyOutputTransport(BaseOutputTransport):
                 metrics["characters"].append(d.model_dump(exclude_none=True))
 
         message = DailyTransportMessageFrame(
-            message={"type": "pipecat-metrics", "metrics": metrics}
+            message={"label": "rtvi-ai", "type": "metrics", "data": metrics}
         )
         await self._messages_queue.put(message)
 
