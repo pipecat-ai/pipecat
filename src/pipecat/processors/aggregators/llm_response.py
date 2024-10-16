@@ -28,7 +28,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.string import match_endofsentence
+from pipecat.utils.string import find_endofsentences
 
 
 class LLMResponseAggregator(FrameProcessor):
@@ -131,7 +131,7 @@ class LLMResponseAggregator(FrameProcessor):
                 # We have recevied a complete sentence, so if we have seen the
                 # end frame and we were still aggregating, it means we should
                 # send the aggregation.
-                # send_aggregation = self._seen_end_frame
+                send_aggregation = self._seen_end_frame
 
             # We just got our final result, so let's reset interim results.
             self._seen_interim_results = False
@@ -159,10 +159,10 @@ class LLMResponseAggregator(FrameProcessor):
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:
             text = self._aggregation
-            eos_end_marker = match_endofsentence(text)
+            eos_end_marker = find_endofsentences(text)
             if eos_end_marker:
-                text = text[:eos_end_marker]
                 self._aggregation = text[eos_end_marker:]
+                text = text[:eos_end_marker]
             else:
                 self._aggregation = ""
 
