@@ -75,7 +75,7 @@ class AIService(FrameProcessor):
             print("Update request for:", key, value)
 
             if key in self._settings:
-                logger.debug(f"Updating LLM setting {key} to: [{value}]")
+                logger.info(f"Updating LLM setting {key} to: [{value}]")
                 self._settings[key] = value
             elif key in SessionProperties.model_fields:
                 print("Attempting to update", key, value)
@@ -99,12 +99,12 @@ class AIService(FrameProcessor):
                     validated_properties = SessionProperties.model_validate(
                         current_properties.model_dump()
                     )
-                    logger.debug(f"Updating LLM setting {key} to: [{value}]")
+                    logger.info(f"Updating LLM setting {key} to: [{value}]")
                     self._session_properties = validated_properties.model_dump()
                 except Exception as e:
                     logger.warning(f"Unexpected error updating session property {key}: {e}")
             elif key == "model":
-                logger.debug(f"Updating LLM setting {key} to: [{value}]")
+                logger.info(f"Updating LLM setting {key} to: [{value}]")
                 self.set_model_name(value)
             else:
                 logger.warning(f"Unknown setting for {self.name} service: {key}")
@@ -271,7 +271,7 @@ class TTSService(AIService):
     async def _update_settings(self, settings: Dict[str, Any]):
         for key, value in settings.items():
             if key in self._settings:
-                logger.debug(f"Updating TTS setting {key} to: [{value}]")
+                logger.info(f"Updating TTS setting {key} to: [{value}]")
                 self._settings[key] = value
                 if key == "language":
                     self._settings[key] = self.language_to_service_language(value)
@@ -470,10 +470,10 @@ class STTService(AIService):
         pass
 
     async def _update_settings(self, settings: Dict[str, Any]):
-        logger.debug(f"Updating STT settings: {self._settings}")
+        logger.info(f"Updating STT settings: {self._settings}")
         for key, value in settings.items():
             if key in self._settings:
-                logger.debug(f"Updating STT setting {key} to: [{value}]")
+                logger.info(f"Updating STT setting {key} to: [{value}]")
                 self._settings[key] = value
                 if key == "language":
                     await self.set_language(value)

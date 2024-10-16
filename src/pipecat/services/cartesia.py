@@ -18,7 +18,6 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
@@ -132,7 +131,7 @@ class CartesiaTTSService(WordTTSService):
     async def set_model(self, model: str):
         self._model_id = model
         await super().set_model(model)
-        logger.debug(f"Switching TTS model to: [{model}]")
+        logger.info(f"Switching TTS model to: [{model}]")
 
     def language_to_service_language(self, language: Language) -> str | None:
         return language_to_cartesia_language(language)
