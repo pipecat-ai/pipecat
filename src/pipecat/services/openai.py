@@ -400,7 +400,7 @@ class OpenAITTSService(TTSService):
         return True
 
     async def set_model(self, model: str):
-        logger.debug(f"Switching TTS model to: [{model}]")
+        logger.info(f"Switching TTS model to: [{model}]")
         self.set_model_name(model)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
