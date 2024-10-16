@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-logging.basicConfig(format=f"%(levelno)s %(asctime)s %(message)s")
+logging.basicConfig(format="%(levelno)s %(asctime)s %(message)s")
 logger = logging.getLogger("pipecat")
 logger.setLevel(logging.DEBUG)
 

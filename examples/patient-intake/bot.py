@@ -57,7 +57,7 @@ for file in sound_files:
 
 class IntakeProcessor:
     def __init__(self, context: OpenAILLMContext):
-        print(f"Initializing context from IntakeProcessor")
+        print("Initializing context from IntakeProcessor")
         context.add_message(
             {
                 "role": "system",
@@ -145,7 +145,7 @@ class IntakeProcessor:
             )
 
     async def start_prescriptions(self, function_name, llm, context):
-        print(f"!!! doing start prescriptions")
+        print("!!! doing start prescriptions")
         # Move on to allergies
         context.set_tools(
             [
@@ -181,9 +181,9 @@ class IntakeProcessor:
                 "content": "Next, ask the user if they have any allergies. Once they have listed their allergies or confirmed they don't have any, call the list_allergies function.",
             }
         )
-        print(f"!!! about to await llm process frame in start prescrpitions")
+        print("!!! about to await llm process frame in start prescrpitions")
         await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
-        print(f"!!! past await process frame in start prescriptions")
+        print("!!! past await process frame in start prescriptions")
 
     async def start_allergies(self, function_name, llm, context):
         print("!!! doing start allergies")

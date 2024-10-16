@@ -17,7 +17,6 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator,
 )
-from pipecat.services.deepgram import DeepgramSTTService, DeepgramTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.xtts import XTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport

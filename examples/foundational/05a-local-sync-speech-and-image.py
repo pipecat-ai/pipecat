@@ -29,7 +29,7 @@ from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.fal import FalImageGenService
 from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.tk import TkLocalTransport, TkOutputTransport
+from pipecat.transports.local.tk import TkLocalTransport
 
 from loguru import logger
 

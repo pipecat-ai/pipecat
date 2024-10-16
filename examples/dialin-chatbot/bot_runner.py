@@ -86,7 +86,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
             )
         )
 
-        print(f"Creating new room...")
+        print("Creating new room...")
         room: DailyRoomObject = await daily_helpers["rest"].create_room(params=params)
 
     else:
@@ -103,7 +103,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     token = await daily_helpers["rest"].get_token(room.url, MAX_SESSION_TIME)
 
     if not room or not token:
-        raise HTTPException(status_code=500, detail=f"Failed to get room or token token")
+        raise HTTPException(status_code=500, detail="Failed to get room or token token")
 
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
@@ -126,7 +126,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
 
 @app.post("/twilio_start_bot", response_class=PlainTextResponse)
 async def twilio_start_bot(request: Request):
-    print(f"POST /twilio_voice_bot")
+    print("POST /twilio_voice_bot")
 
     # twilio_start_bot is invoked directly by Twilio (as a web hook).
     # On Twilio, under Active Numbers, pick the phone number
@@ -153,7 +153,7 @@ async def twilio_start_bot(request: Request):
     # note: Twilio does not require a callDomain
     room: DailyRoomObject = await _create_daily_room(room_url, callId, None, "twilio")
 
-    print(f"Put Twilio on hold...")
+    print("Put Twilio on hold...")
     # We have the room and the SIP URI,
     # but we do not know if the Daily SIP Worker and the Bot have joined the call
     # put the call on hold until the 'on_dialin_ready' fires.
