@@ -6,37 +6,34 @@
 
 import asyncio
 import itertools
-import time
 import sys
-
-from PIL import Image
+import time
 from typing import List
 
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from loguru import logger
+from PIL import Image
+
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
-    MetricsFrame,
+    EndFrame,
+    Frame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     SpriteFrame,
     StartFrame,
-    EndFrame,
-    Frame,
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
-
-from loguru import logger
-
 from pipecat.utils.time import nanoseconds_to_seconds
 
 
@@ -141,9 +138,6 @@ class BaseOutputTransport(FrameProcessor):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         pass
 
-    async def send_metrics(self, frame: MetricsFrame):
-        pass
-
     async def write_frame_to_camera(self, frame: OutputImageRawFrame):
         pass
 
@@ -173,9 +167,6 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, (StartInterruptionFrame, StopInterruptionFrame)):
             await self.push_frame(frame, direction)
             await self._handle_interruptions(frame)
-        elif isinstance(frame, MetricsFrame):
-            await self.push_frame(frame, direction)
-            await self.send_metrics(frame)
         elif isinstance(frame, TransportMessageUrgentFrame):
             await self.send_message(frame)
         elif isinstance(frame, SystemFrame):

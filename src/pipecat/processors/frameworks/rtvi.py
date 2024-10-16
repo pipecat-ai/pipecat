@@ -6,7 +6,17 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Union,
+)
 
 from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
@@ -24,6 +34,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    MetricsFrame,
     StartFrame,
     SystemFrame,
     TextFrame,
@@ -34,6 +45,12 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+)
+from pipecat.metrics.metrics import (
+    LLMUsageMetricsData,
+    ProcessingMetricsData,
+    TTFBMetricsData,
+    TTSUsageMetricsData,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -343,6 +360,12 @@ class RTVIBotStoppedSpeakingMessage(BaseModel):
     type: Literal["bot-stopped-speaking"] = "bot-stopped-speaking"
 
 
+class RTVIMetricsMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["metrics"] = "metrics"
+    data: Mapping[str, Any]
+
+
 class RTVIProcessorParams(BaseModel):
     send_bot_ready: bool = True
 
@@ -507,6 +530,42 @@ class RTVIBotTTSProcessor(RTVIFrameProcessor):
         elif type(frame) is TextFrame:
             message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
             await self._push_transport_message_urgent(message)
+
+
+class RTVIMetricsProcessor(RTVIFrameProcessor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        await self.push_frame(frame, direction)
+
+        if isinstance(frame, MetricsFrame):
+            await self._handle_metrics(frame)
+
+    async def _handle_metrics(self, frame: MetricsFrame):
+        metrics = {}
+        for d in frame.data:
+            if isinstance(d, TTFBMetricsData):
+                if "ttfb" not in metrics:
+                    metrics["ttfb"] = []
+                metrics["ttfb"].append(d.model_dump(exclude_none=True))
+            elif isinstance(d, ProcessingMetricsData):
+                if "processing" not in metrics:
+                    metrics["processing"] = []
+                metrics["processing"].append(d.model_dump(exclude_none=True))
+            elif isinstance(d, LLMUsageMetricsData):
+                if "tokens" not in metrics:
+                    metrics["tokens"] = []
+                metrics["tokens"].append(d.value.model_dump(exclude_none=True))
+            elif isinstance(d, TTSUsageMetricsData):
+                if "characters" not in metrics:
+                    metrics["characters"] = []
+                metrics["characters"].append(d.model_dump(exclude_none=True))
+
+        message = RTVIMetricsMessage(data=metrics)
+        await self._push_transport_message_urgent(message)
 
 
 class RTVIProcessor(FrameProcessor):

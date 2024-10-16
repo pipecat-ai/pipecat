@@ -10,31 +10,25 @@ from typing import Any, Awaitable, Callable, List
 
 import numpy as np
 from loguru import logger
+from pydantic import BaseModel
+from scipy import signal
+
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
-    MetricsFrame,
     OutputAudioRawFrame,
     StartFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
-)
-from pipecat.metrics.metrics import (
-    LLMUsageMetricsData,
-    ProcessingMetricsData,
-    TTFBMetricsData,
-    TTSUsageMetricsData,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.vad.vad_analyzer import VADAnalyzer
-from pydantic import BaseModel
-from scipy import signal
 
 try:
     from livekit import rtc
@@ -449,31 +443,6 @@ class LiveKitOutputTransport(BaseOutputTransport):
             await self._client.send_data(frame.message.encode(), frame.participant_id)
         else:
             await self._client.send_data(frame.message.encode())
-
-    async def send_metrics(self, frame: MetricsFrame):
-        metrics = {}
-        for d in frame.data:
-            if isinstance(d, TTFBMetricsData):
-                if "ttfb" not in metrics:
-                    metrics["ttfb"] = []
-                metrics["ttfb"].append(d.model_dump(exclude_none=True))
-            elif isinstance(d, ProcessingMetricsData):
-                if "processing" not in metrics:
-                    metrics["processing"] = []
-                metrics["processing"].append(d.model_dump(exclude_none=True))
-            elif isinstance(d, LLMUsageMetricsData):
-                if "tokens" not in metrics:
-                    metrics["tokens"] = []
-                metrics["tokens"].append(d.value.model_dump(exclude_none=True))
-            elif isinstance(d, TTSUsageMetricsData):
-                if "characters" not in metrics:
-                    metrics["characters"] = []
-                metrics["characters"].append(d.model_dump(exclude_none=True))
-
-        message = LiveKitTransportMessageFrame(
-            message={"type": "pipecat-metrics", "metrics": metrics}
-        )
-        await self._client.send_data(str(message.message).encode())
 
     async def write_raw_audio_frames(self, frames: bytes):
         livekit_audio = self._convert_pipecat_audio_to_livekit(frames)

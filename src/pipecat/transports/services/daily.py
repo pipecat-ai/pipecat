@@ -28,7 +28,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
-    MetricsFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     SpriteFrame,
@@ -38,12 +37,6 @@ from pipecat.frames.frames import (
     TransportMessageUrgentFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
-)
-from pipecat.metrics.metrics import (
-    LLMUsageMetricsData,
-    ProcessingMetricsData,
-    TTFBMetricsData,
-    TTSUsageMetricsData,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
@@ -758,31 +751,6 @@ class DailyOutputTransport(BaseOutputTransport):
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._messages_queue.put(frame)
-
-    async def send_metrics(self, frame: MetricsFrame):
-        metrics = {}
-        for d in frame.data:
-            if isinstance(d, TTFBMetricsData):
-                if "ttfb" not in metrics:
-                    metrics["ttfb"] = []
-                metrics["ttfb"].append(d.model_dump(exclude_none=True))
-            elif isinstance(d, ProcessingMetricsData):
-                if "processing" not in metrics:
-                    metrics["processing"] = []
-                metrics["processing"].append(d.model_dump(exclude_none=True))
-            elif isinstance(d, LLMUsageMetricsData):
-                if "tokens" not in metrics:
-                    metrics["tokens"] = []
-                metrics["tokens"].append(d.value.model_dump(exclude_none=True))
-            elif isinstance(d, TTSUsageMetricsData):
-                if "characters" not in metrics:
-                    metrics["characters"] = []
-                metrics["characters"].append(d.model_dump(exclude_none=True))
-
-        message = DailyTransportMessageFrame(
-            message={"label": "rtvi-ai", "type": "metrics", "data": metrics}
-        )
-        await self._messages_queue.put(message)
 
     async def write_raw_audio_frames(self, frames: bytes):
         await self._client.write_raw_audio_frames(frames)
