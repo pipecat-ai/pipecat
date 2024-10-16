@@ -8,30 +8,26 @@ import base64
 import copy
 import io
 import json
-
 from dataclasses import dataclass
-
 from typing import Any, Awaitable, Callable, List
 
+from loguru import logger
 from PIL import Image
 
 from pipecat.frames.frames import (
     Frame,
-    VisionImageRawFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    VisionImageRawFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor
 
-from loguru import logger
-
 try:
     from openai._types import NOT_GIVEN, NotGiven
-
     from openai.types.chat import (
-        ChatCompletionToolParam,
-        ChatCompletionToolChoiceOptionParam,
         ChatCompletionMessageParam,
+        ChatCompletionToolChoiceOptionParam,
+        ChatCompletionToolParam,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -185,7 +181,7 @@ class OpenAILLMContext:
         llm: FrameProcessor,
         run_llm: bool = True,
     ) -> None:
-        logger.debug(f"Calling function {function_name} with arguments {arguments}")
+        logger.info(f"Calling function {function_name} with arguments {arguments}")
         # Push a SystemFrame downstream. This frame will let our assistant context aggregator
         # know that we are in the middle of a function call. Some contexts/aggregators may
         # not need this. But some definitely do (Anthropic, for example).

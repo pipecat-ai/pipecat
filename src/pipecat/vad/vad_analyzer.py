@@ -7,11 +7,10 @@
 from abc import abstractmethod
 from enum import Enum
 
+from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.utils.audio import calculate_audio_volume, exp_smoothing
-
-from loguru import logger
 
 
 class VADState(Enum):
@@ -58,7 +57,7 @@ class VADAnalyzer:
         pass
 
     def set_params(self, params: VADParams):
-        logger.debug(f"Setting VAD params to: {params}")
+        logger.info(f"Setting VAD params to: {params}")
         self._params = params
         self._vad_frames = self.num_frames_required()
         self._vad_frames_num_bytes = self._vad_frames * self._num_channels * 2
