@@ -269,10 +269,20 @@ class TTSSpeakFrame(DataFrame):
 @dataclass
 class TransportMessageFrame(DataFrame):
     message: Any
-    urgent: bool = False
 
     def __str__(self):
         return f"{self.name}(message: {self.message})"
+
+
+@dataclass
+class FunctionCallResultFrame(DataFrame):
+    """A frame containing the result of an LLM function (tool) call."""
+
+    function_name: str
+    tool_call_id: str
+    arguments: str
+    result: Any
+    run_llm: bool = True
 
 
 #
@@ -395,6 +405,25 @@ class StopInterruptionFrame(SystemFrame):
 
 
 @dataclass
+class UserStartedSpeakingFrame(SystemFrame):
+    """Emitted by VAD to indicate that a user has started speaking. This can be
+    used for interruptions or other times when detecting that someone is
+    speaking is more important than knowing what they're saying (as you will
+    with a TranscriptionFrame)
+
+    """
+
+    pass
+
+
+@dataclass
+class UserStoppedSpeakingFrame(SystemFrame):
+    """Emitted by the VAD to indicate that a user stopped speaking."""
+
+    pass
+
+
+@dataclass
 class BotInterruptionFrame(SystemFrame):
     """Emitted by when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the
@@ -403,6 +432,60 @@ class BotInterruptionFrame(SystemFrame):
     """
 
     pass
+
+
+@dataclass
+class BotStartedSpeakingFrame(SystemFrame):
+    """Emitted upstream by transport outputs to indicate the bot started speaking."""
+
+    pass
+
+
+@dataclass
+class BotStoppedSpeakingFrame(SystemFrame):
+    """Emitted upstream by transport outputs to indicate the bot stopped speaking."""
+
+    pass
+
+
+@dataclass
+class BotSpeakingFrame(SystemFrame):
+    """Emitted upstream by transport outputs while the bot is still
+    speaking. This can be used, for example, to detect when a user is idle. That
+    is, while the bot is speaking we don't want to trigger any user idle timeout
+    since the user might be listening.
+
+    """
+
+    pass
+
+
+@dataclass
+class UserImageRequestFrame(SystemFrame):
+    """A frame user to request an image from the given user."""
+
+    user_id: str
+    context: Optional[Any] = None
+
+    def __str__(self):
+        return f"{self.name}, user: {self.user_id}"
+
+
+@dataclass
+class FunctionCallInProgressFrame(SystemFrame):
+    """A frame signaling that a function call is in progress."""
+
+    function_name: str
+    tool_call_id: str
+    arguments: str
+
+
+@dataclass
+class TransportMessageUrgentFrame(SystemFrame):
+    message: Any
+
+    def __str__(self):
+        return f"{self.name}(message: {self.message})"
 
 
 @dataclass
@@ -451,51 +534,6 @@ class LLMFullResponseEndFrame(ControlFrame):
 
 
 @dataclass
-class UserStartedSpeakingFrame(ControlFrame):
-    """Emitted by VAD to indicate that a user has started speaking. This can be
-    used for interruptions or other times when detecting that someone is
-    speaking is more important than knowing what they're saying (as you will
-    with a TranscriptionFrame)
-
-    """
-
-    pass
-
-
-@dataclass
-class UserStoppedSpeakingFrame(ControlFrame):
-    """Emitted by the VAD to indicate that a user stopped speaking."""
-
-    pass
-
-
-@dataclass
-class BotStartedSpeakingFrame(ControlFrame):
-    """Emitted upstream by transport outputs to indicate the bot started speaking."""
-
-    pass
-
-
-@dataclass
-class BotStoppedSpeakingFrame(ControlFrame):
-    """Emitted upstream by transport outputs to indicate the bot stopped speaking."""
-
-    pass
-
-
-@dataclass
-class BotSpeakingFrame(ControlFrame):
-    """Emitted upstream by transport outputs while the bot is still
-    speaking. This can be used, for example, to detect when a user is idle. That
-    is, while the bot is speaking we don't want to trigger any user idle timeout
-    since the user might be listening.
-
-    """
-
-    pass
-
-
-@dataclass
 class TTSStartedFrame(ControlFrame):
     """Used to indicate the beginning of a TTS response. Following
     TTSAudioRawFrames are part of the TTS response until an
@@ -513,17 +551,6 @@ class TTSStoppedFrame(ControlFrame):
     """Indicates the end of a TTS response."""
 
     pass
-
-
-@dataclass
-class UserImageRequestFrame(ControlFrame):
-    """A frame user to request an image from the given user."""
-
-    user_id: str
-    context: Optional[Any] = None
-
-    def __str__(self):
-        return f"{self.name}, user: {self.user_id}"
 
 
 @dataclass
@@ -546,26 +573,6 @@ class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame):
 @dataclass
 class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame):
     pass
-
-
-@dataclass
-class FunctionCallInProgressFrame(SystemFrame):
-    """A frame signaling that a function call is in progress."""
-
-    function_name: str
-    tool_call_id: str
-    arguments: str
-
-
-@dataclass
-class FunctionCallResultFrame(DataFrame):
-    """A frame containing the result of an LLM function (tool) call."""
-
-    function_name: str
-    tool_call_id: str
-    arguments: str
-    result: Any
-    run_llm: bool = True
 
 
 @dataclass

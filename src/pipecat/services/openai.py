@@ -63,6 +63,7 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
+
 ValidVoice = Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
 
 VALID_VOICES: Dict[str, ValidVoice] = {
@@ -254,12 +255,11 @@ class BaseOpenAILLMService(LLMService):
             arguments_list.append(arguments)
             tool_id_list.append(tool_call_id)
 
-            total_items = len(functions_list)
             for index, (function_name, arguments, tool_id) in enumerate(
                 zip(functions_list, arguments_list, tool_id_list), start=1
             ):
                 if self.has_function(function_name):
-                    run_llm = index == total_items
+                    run_llm = False
                     arguments = json.loads(arguments)
                     await self.call_function(
                         context=context,
@@ -409,7 +409,7 @@ class OpenAITTSService(TTSService):
             await self.start_ttfb_metrics()
 
             async with self._client.audio.speech.with_streaming_response.create(
-                input=text,
+                input=text or " ",  # Text must contain at least one character
                 model=self.model_name,
                 voice=VALID_VOICES[self._voice_id],
                 response_format="pcm",
@@ -469,7 +469,7 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
                     if frame.user_id in self._context._user_image_request_context:
                         del self._context._user_image_request_context[frame.user_id]
             elif isinstance(frame, UserImageRawFrame):
-                # Push a new AnthropicImageMessageFrame with the text context we cached
+                # Push a new OpenAIImageMessageFrame with the text context we cached
                 # downstream to be handled by our assistant context aggregator. This is
                 # necessary so that we add the message to the context in the right order.
                 text = self._context._user_image_request_context.get(frame.user_id) or ""
@@ -496,8 +496,10 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             self._function_calls_in_progress.clear()
             self._function_call_finished = None
         elif isinstance(frame, FunctionCallInProgressFrame):
+            logger.debug(f"FunctionCallInProgressFrame: {frame}")
             self._function_calls_in_progress[frame.tool_call_id] = frame
         elif isinstance(frame, FunctionCallResultFrame):
+            logger.debug(f"FunctionCallResultFrame: {frame}")
             if frame.tool_call_id in self._function_calls_in_progress:
                 del self._function_calls_in_progress[frame.tool_call_id]
                 self._function_call_result = frame
@@ -550,7 +552,8 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                             "tool_call_id": frame.tool_call_id,
                         }
                     )
-                    run_llm = frame.run_llm
+                    # Only run the LLM if there are no more function calls in progress.
+                    run_llm = not bool(self._function_calls_in_progress)
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
