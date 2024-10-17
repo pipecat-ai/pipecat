@@ -4,11 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+from datetime import datetime
 from typing import List, Type
 
 from loguru import logger
 
 from pipecat.frames.frames import (
+    CustomAssistantTranscriptionFrame,
+    CustomUserTranscriptionFrame,
     Frame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
@@ -95,8 +98,9 @@ class LLMResponseAggregator(FrameProcessor):
 
         if isinstance(frame, self._start_frame):
             # if self._start_frame == UserStartedSpeakingFrame:
-            # #     logger.debug(f"LLM frame received {frame}")
-            # self._aggregation = "" # we are resetting at the end so it should work without this line
+            #     logger.debug(f"LLM frame received {frame}")
+            if self._start_frame == LLMFullResponseStartFrame:
+                self._aggregation = ""
             self._aggregating = True
             self._seen_start_frame = True
             self._seen_end_frame = False
@@ -154,9 +158,23 @@ class LLMResponseAggregator(FrameProcessor):
             await self.push_frame(frame, direction)
 
         if send_aggregation:
-            await self._push_aggregation()
+            if self._start_frame == UserStartedSpeakingFrame:
+                await self._modified_push_aggregation()
+            else:
+                await self._push_aggregation()
 
     async def _push_aggregation(self):
+        if len(self._aggregation) > 0:
+            self._messages.append({"role": self._role, "content": self._aggregation})
+
+            # Reset the aggregation. Reset it before pushing it down, otherwise
+            # if the tasks gets cancelled we won't be able to clear things up.
+            self._aggregation = ""
+
+            frame = LLMMessagesFrame(self._messages)
+            await self.push_frame(frame)
+
+    async def _modified_push_aggregation(self):
         if len(self._aggregation) > 0:
             text = self._aggregation
             eos_end_marker = find_endofsentences(text)
@@ -172,8 +190,14 @@ class LLMResponseAggregator(FrameProcessor):
                 )
             self._messages.append({"role": self._role, "content": text})
 
+            timestamp = datetime.utcnow().timestamp()
             frame = LLMMessagesFrame(self._messages)
+            frame.pts = int(timestamp)
             await self.push_frame(frame)
+            if self._start_frame == UserStartedSpeakingFrame:
+                await self.push_frame(
+                    CustomUserTranscriptionFrame(text, str(int(timestamp)))
+                )
 
     # TODO-CB: Types
     def _add_messages(self, messages):
@@ -267,8 +291,11 @@ class LLMFullResponseAggregator(FrameProcessor):
         if isinstance(frame, TextFrame):
             self._aggregation += frame.text
         elif isinstance(frame, LLMFullResponseEndFrame):
-            logger.debug(f"Pushing to TTS: {self._aggregation}")
-            await self.push_frame(TextFrame(self._aggregation))
+            text_frame = TextFrame(self._aggregation)
+            await self.push_frame(text_frame)
+            await self.push_frame(
+                CustomAssistantTranscriptionFrame(self._aggregation, str(frame.pts))
+            )
             await self.push_frame(frame)
             self._aggregation = ""
         else:

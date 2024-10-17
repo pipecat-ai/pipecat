@@ -301,7 +301,9 @@ class BaseOpenAILLMService(LLMService):
             await self.start_processing_metrics()
             await self._process_context(context)
             await self.stop_processing_metrics()
-            await self.push_frame(LLMFullResponseEndFrame())
+            lfre_frame = LLMFullResponseEndFrame()
+            lfre_frame.pts = frame.pts
+            await self.push_frame(lfre_frame)
 
 
 @dataclass

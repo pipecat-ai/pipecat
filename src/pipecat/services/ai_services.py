@@ -90,7 +90,9 @@ class AIService(FrameProcessor):
                     if isinstance(self._session_properties, SessionProperties):
                         current_properties = self._session_properties
                     else:
-                        current_properties = SessionProperties(**self._session_properties)
+                        current_properties = SessionProperties(
+                            **self._session_properties
+                        )
 
                     if key == "turn_detection" and isinstance(value, dict):
                         turn_detection = TurnDetection(**value)
@@ -104,7 +106,9 @@ class AIService(FrameProcessor):
                     logger.debug(f"Updating LLM setting {key} to: [{value}]")
                     self._session_properties = validated_properties.model_dump()
                 except Exception as e:
-                    logger.warning(f"Unexpected error updating session property {key}: {e}")
+                    logger.warning(
+                        f"Unexpected error updating session property {key}: {e}"
+                    )
             elif key == "model":
                 logger.debug(f"Updating LLM setting {key} to: [{value}]")
                 self.set_model_name(value)
@@ -362,7 +366,10 @@ class TTSService(AIService):
     async def _push_tts_frames(self, text: str):
         # Don't send only whitespace. This causes problems for some TTS models. But also don't
         # strip all whitespace, as whitespace can influence prosody.
-        if not text.strip():
+        text = text.strip()
+        text = text.strip(".")
+        text = text.strip(",")
+        if not text:
             return
 
         await self.start_processing_metrics()

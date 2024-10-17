@@ -158,10 +158,18 @@ class DeepgramSTTService(STTService):
             self._connection.on(
                 LiveTranscriptionEvents.SpeechStarted, self._on_speech_started
             )
+        if self.utterance_end:
+            self._connection.on(
+                LiveTranscriptionEvents.UtteranceEnd, self._on_utterance_end
+            )
 
     @property
     def vad_enabled(self):
         return self._settings["vad_events"]
+
+    @property
+    def utterance_end(self):
+        return self._settings.get("utterance_end_ms")
 
     def can_generate_metrics(self) -> bool:
         return self.vad_enabled
@@ -207,10 +215,14 @@ class DeepgramSTTService(STTService):
             logger.debug(f"{self}: Disconnected from Deepgram")
 
     async def _on_speech_started(self, *args, **kwargs):
-        logger.debug(f"{self}: Speech started")
         await self.push_frame(UserStartedSpeakingFrame())
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
+
+    async def _on_utterance_end(self, *args, **kwargs):
+        await self.push_frame(UserStoppedSpeakingFrame())
+        await self.stop_processing_metrics()
+        logger.debug("Utterance ended")
 
     async def _on_message(self, *args, **kwargs):
         result: LiveResultResponse = kwargs["result"]
@@ -226,17 +238,13 @@ class DeepgramSTTService(STTService):
         if len(transcript) > 0:
             await self.stop_ttfb_metrics()
             if is_final:
-                logger.debug(
-                    f"if: {is_final} sf: {speech_final} Transcript: {transcript}"
-                )
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
-
-                # if speech_final:
+            if not self.utterance_end:
                 await self.push_frame(UserStoppedSpeakingFrame())
-                logger.debug(f"{self}: Speech ended")
                 await self.stop_processing_metrics()
+
             # else:
             #     await self.push_frame(
             #         InterimTranscriptionFrame(
