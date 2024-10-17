@@ -9,6 +9,7 @@ import asyncio
 import os
 import sys
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -19,7 +20,6 @@ from pipecat.processors.aggregators.llm_response import (
 )
 from pipecat.services.azure import AzureLLMService, AzureSTTService, AzureTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 
 from runner import configure
