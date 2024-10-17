@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from loguru import logger
 
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     CancelFrame,
@@ -25,7 +26,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
-from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
 
 
 class BaseInputTransport(FrameProcessor):

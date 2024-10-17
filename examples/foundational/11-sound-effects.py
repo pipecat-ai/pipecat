@@ -10,6 +10,7 @@ import os
 import sys
 import wave
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
@@ -28,7 +29,6 @@ from pipecat.processors.logger import FrameLogger
 from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 

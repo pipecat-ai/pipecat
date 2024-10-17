@@ -12,8 +12,8 @@ from abc import ABC, abstractmethod
 from pydantic import ConfigDict
 from pydantic.main import BaseModel
 
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.processors.frame_processor import FrameProcessor
-from pipecat.vad.vad_analyzer import VADAnalyzer
 
 from loguru import logger
 

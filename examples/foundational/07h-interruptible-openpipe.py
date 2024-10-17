@@ -9,6 +9,7 @@ import aiohttp
 import os
 import sys
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -20,7 +21,6 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openpipe import OpenPipeLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 

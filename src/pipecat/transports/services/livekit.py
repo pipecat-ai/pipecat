@@ -13,6 +13,7 @@ from loguru import logger
 from pydantic import BaseModel
 from scipy import signal
 
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -28,7 +29,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.vad.vad_analyzer import VADAnalyzer
 
 try:
     from livekit import rtc
