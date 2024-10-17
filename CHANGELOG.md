@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `AudioFilter` base class. An audio filter can now be passed to the
+  transport and it will run before VAD.
+
 - Added `AssemblyAISTTService` and corresponding foundational examples
   `07o-interruptible-assemblyai.py` and `13d-assemblyai-transcription.py`.
 

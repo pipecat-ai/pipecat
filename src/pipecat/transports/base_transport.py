@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from pydantic import ConfigDict
 from pydantic.main import BaseModel
 
+from pipecat.audio.filters.base_filter import AudioFilter
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.processors.frame_processor import FrameProcessor
 
@@ -39,6 +40,7 @@ class TransportParams(BaseModel):
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
     vad_analyzer: VADAnalyzer | None = None
+    audio_filter: AudioFilter | None = None
 
 
 class BaseTransport(ABC):
