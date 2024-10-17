@@ -10,7 +10,7 @@ from enum import Enum
 from loguru import logger
 from pydantic.main import BaseModel
 
-from pipecat.utils.audio import calculate_audio_volume, exp_smoothing
+from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 
 
 class VADState(Enum):

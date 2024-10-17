@@ -28,6 +28,7 @@ dependencies = [
     "protobuf~=4.25.4",
     "pydantic~=2.8.2",
     "pyloudnorm~=0.1.1",
+    "scipy~=1.14.1",
 ]
 
 [project.urls]
@@ -61,7 +62,6 @@ silero = [ "onnxruntime>=1.16.1" ]
 together = [ "openai~=1.50.2" ]
 websocket = [ "websockets~=13.1", "fastapi~=0.115.0" ]
 whisper = [ "faster-whisper~=1.0.3" ]
-xtts = [ "resampy~=0.4.3" ]
 
 [tool.setuptools.packages.find]
 # All the following settings are optional:

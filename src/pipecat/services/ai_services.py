@@ -12,6 +12,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -35,11 +36,9 @@ from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
-from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.time import seconds_to_nanoseconds
-from pipecat.utils.utils import exp_smoothing
 
 
 class AIService(FrameProcessor):

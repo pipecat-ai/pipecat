@@ -7,9 +7,8 @@
 from typing import Any, AsyncGenerator, Dict
 
 import aiohttp
-import numpy as np
-from loguru import logger
 
+from pipecat.audio.utils import resample_audio
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -21,12 +20,7 @@ from pipecat.frames.frames import (
 from pipecat.services.ai_services import TTSService
 from pipecat.transcriptions.language import Language
 
-try:
-    import resampy
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use XTTS, you need to `pip install pipecat-ai[xtts]`.")
-    raise Exception(f"Missing module: {e}")
+from loguru import logger
 
 
 # The server below can connect to XTTS through a local running docker
@@ -168,22 +162,16 @@ class XTTSService(TTSService):
                         # Remove processed data from buffer
                         buffer = buffer[48000:]
 
-                        # Convert the byte data to numpy array for resampling
-                        audio_np = np.frombuffer(process_data, dtype=np.int16)
                         # Resample the audio from 24000 Hz to 16000 Hz
-                        resampled_audio = resampy.resample(audio_np, 24000, 16000)
-                        # Convert the numpy array back to bytes
-                        resampled_audio_bytes = resampled_audio.astype(np.int16).tobytes()
+                        resampled_audio = resample_audio(bytes(process_data), 24000, 16000)
                         # Create the frame with the resampled audio
-                        frame = TTSAudioRawFrame(resampled_audio_bytes, 16000, 1)
+                        frame = TTSAudioRawFrame(resampled_audio, 16000, 1)
                         yield frame
 
             # Process any remaining data in the buffer
             if len(buffer) > 0:
-                audio_np = np.frombuffer(buffer, dtype=np.int16)
-                resampled_audio = resampy.resample(audio_np, 24000, 16000)
-                resampled_audio_bytes = resampled_audio.astype(np.int16).tobytes()
-                frame = TTSAudioRawFrame(resampled_audio_bytes, 16000, 1)
+                resampled_audio = resample_audio(bytes(buffer), 24000, 16000)
+                frame = TTSAudioRawFrame(resampled_audio, 16000, 1)
                 yield frame
 
             yield TTSStoppedFrame()
