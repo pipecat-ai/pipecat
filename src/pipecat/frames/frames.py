@@ -206,6 +206,34 @@ class InterimTranscriptionFrame(TextFrame):
 
 
 @dataclass
+class CustomUserTranscriptionFrame(Frame):
+    """A frame with user transcription-specific data. Will be placed in the
+    transport's receive queue when a participant speaks.
+
+    """
+
+    text: str
+    timestamp: str
+
+    def __str__(self):
+        return f"{self.name}(text: [{self.text}], timestamp: {self.timestamp})"
+
+
+@dataclass
+class CustomAssistantTranscriptionFrame(Frame):
+    """A frame with assistant transcription-specific data. Will be placed in the
+    transport's receive queue when a participant speaks.
+
+    """
+
+    text: str
+    timestamp: str
+
+    def __str__(self):
+        return f"{self.name}(text: [{self.text}], timestamp: {self.timestamp})"
+
+
+@dataclass
 class LLMMessagesFrame(DataFrame):
     """A frame containing a list of LLM messages. Used to signal that an LLM
     service should run a chat completion and emit an LLMStartFrames, TextFrames
