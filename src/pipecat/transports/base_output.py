@@ -75,6 +75,7 @@ class BaseOutputTransport(FrameProcessor):
         self._bot_speaking = False
 
     async def start(self, frame: StartFrame):
+        # Start audio mixer.
         if self._params.audio_out_mixer:
             await self._params.audio_out_mixer.start(self._params.audio_out_sample_rate)
         self._create_output_tasks()
@@ -82,6 +83,7 @@ class BaseOutputTransport(FrameProcessor):
 
     async def stop(self, frame: EndFrame):
         await self._cancel_output_tasks()
+        # Stop audio mixer.
         if self._params.audio_out_mixer:
             await self._params.audio_out_mixer.stop()
 

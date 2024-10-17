@@ -13,6 +13,7 @@ from typing import Optional
 from pydantic import ConfigDict
 from pydantic.main import BaseModel
 
+from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.processors.frame_processor import FrameProcessor
@@ -39,6 +40,7 @@ class TransportParams(BaseModel):
     audio_in_enabled: bool = False
     audio_in_sample_rate: int = 16000
     audio_in_channels: int = 1
+    audio_in_filter: Optional[BaseAudioFilter] = None
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
     vad_analyzer: VADAnalyzer | None = None
