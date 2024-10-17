@@ -7,6 +7,14 @@
 import audioop
 import numpy as np
 import pyloudnorm as pyln
+from scipy import signal
+
+
+def resample_audio(audio: bytes, original_rate: int, target_rate: int) -> bytes:
+    audio_data = np.frombuffer(audio, dtype=np.int16)
+    num_samples = int(len(audio) * target_rate / original_rate)
+    resampled_audio = signal.resample(audio_data, num_samples)
+    return resampled_audio.astype(np.int16).tobytes()
 
 
 def normalize_value(value, min_value, max_value):
