@@ -556,10 +556,6 @@ class LiveKitTransport(BaseTransport):
     async def _on_participant_disconnected(self, participant_id: str):
         await self._call_event_handler("on_participant_disconnected", participant_id)
         await self._call_event_handler("on_participant_left", participant_id, "disconnected")
-        if self._input:
-            await self._input.process_frame(EndFrame(), FrameDirection.DOWNSTREAM)
-        if self._output:
-            await self._output.process_frame(EndFrame(), FrameDirection.DOWNSTREAM)
 
     async def _on_audio_track_subscribed(self, participant_id: str):
         await self._call_event_handler("on_audio_track_subscribed", participant_id)
