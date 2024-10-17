@@ -25,6 +25,7 @@ from pipecat.services.openai import OpenAILLMService
 from pipecat.services.playht import PlayHTTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.transcriptions.language import Language
 
 load_dotenv(override=True)
 
@@ -53,6 +54,7 @@ async def main():
             user_id=os.getenv("PLAYHT_USER_ID"),
             api_key=os.getenv("PLAYHT_API_KEY"),
             voice_url="s3://voice-cloning-zero-shot/801a663f-efd0-4254-98d0-5c175514c3e8/jennifer/manifest.json",
+            params=PlayHTTTSService.InputParams(language=Language.EN),
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
