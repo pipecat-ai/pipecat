@@ -9,9 +9,9 @@ import json
 
 from pydantic import BaseModel
 
+from pipecat.audio.utils import ulaw_to_pcm, pcm_to_ulaw
 from pipecat.frames.frames import AudioRawFrame, Frame, StartInterruptionFrame
 from pipecat.serializers.base_serializer import FrameSerializer
-from pipecat.utils.audio import ulaw_to_pcm, pcm_to_ulaw
 
 
 class TwilioFrameSerializer(FrameSerializer):

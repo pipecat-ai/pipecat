@@ -8,11 +8,9 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List
 
-import numpy as np
-from loguru import logger
 from pydantic import BaseModel
-from scipy import signal
 
+from pipecat.audio.utils import resample_audio
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -29,6 +27,8 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+
+from loguru import logger
 
 try:
     from livekit import rtc
@@ -381,12 +381,12 @@ class LiveKitInputTransport(BaseInputTransport):
         self, audio_frame_event: rtc.AudioFrameEvent
     ) -> AudioRawFrame:
         audio_frame = audio_frame_event.frame
-        audio_data = np.frombuffer(audio_frame.data, dtype=np.int16)
+        audio_data = audio_frame.data
         original_sample_rate = audio_frame.sample_rate
 
         # Allow 8kHz and 16kHz, convert anything else to 16kHz
         if original_sample_rate not in [8000, 16000]:
-            audio_data = self._resample_audio(audio_data, original_sample_rate, 16000)
+            audio_data = resample_audio(audio_data, original_sample_rate, 16000)
             sample_rate = 16000
         else:
             sample_rate = original_sample_rate
@@ -400,17 +400,10 @@ class LiveKitInputTransport(BaseInputTransport):
                 )
 
         return AudioRawFrame(
-            audio=audio_data.tobytes(),
+            audio=audio_data,
             sample_rate=sample_rate,
             num_channels=audio_frame.num_channels,
         )
-
-    def _resample_audio(
-        self, audio_data: np.ndarray, original_rate: int, target_rate: int
-    ) -> np.ndarray:
-        num_samples = int(len(audio_data) * target_rate / original_rate)
-        resampled_audio = signal.resample(audio_data, num_samples)
-        return resampled_audio.astype(np.int16)
 
 
 class LiveKitOutputTransport(BaseOutputTransport):

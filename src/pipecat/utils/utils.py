@@ -36,7 +36,3 @@ def obj_count(obj) -> int:
     0
     """
     return next(_COUNTS[obj.__class__.__name__])
-
-
-def exp_smoothing(value: float, prev_value: float, factor: float) -> float:
-    return prev_value + factor * (value - prev_value)
