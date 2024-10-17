@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that would cause an error if no VAD analyzer was passed to
+  `LiveKitTransport` params.
+
 - Fixed `SileroVAD` processor to support interruptions properly.
 
 ### Other

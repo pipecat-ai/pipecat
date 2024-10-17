@@ -11,7 +11,6 @@ from typing import Any, Awaitable, Callable, List
 from pydantic import BaseModel
 
 from pipecat.audio.utils import resample_audio
-from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -50,11 +49,7 @@ class LiveKitTransportMessageUrgentFrame(TransportMessageUrgentFrame):
 
 
 class LiveKitParams(TransportParams):
-    audio_out_sample_rate: int = 48000
-    audio_out_channels: int = 1
-    vad_enabled: bool = True
-    vad_analyzer: VADAnalyzer | None = None
-    audio_in_sample_rate: int = 16000
+    pass
 
 
 class LiveKitCallbacks(BaseModel):
@@ -310,11 +305,6 @@ class LiveKitInputTransport(BaseInputTransport):
         self._client = client
         self._audio_in_task = None
         self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
-        self._current_sample_rate: int = params.audio_in_sample_rate
-        if params.vad_enabled and not params.vad_analyzer:
-            self._vad_analyzer = VADAnalyzer(
-                sample_rate=self._current_sample_rate, num_channels=self._params.audio_in_channels
-            )
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -384,24 +374,14 @@ class LiveKitInputTransport(BaseInputTransport):
         audio_data = audio_frame.data
         original_sample_rate = audio_frame.sample_rate
 
-        # Allow 8kHz and 16kHz, convert anything else to 16kHz
-        if original_sample_rate not in [8000, 16000]:
-            audio_data = resample_audio(audio_data, original_sample_rate, 16000)
-            sample_rate = 16000
-        else:
-            sample_rate = original_sample_rate
-
-        if sample_rate != self._current_sample_rate:
-            self._current_sample_rate = sample_rate
-            if self._params.vad_enabled:
-                self._vad_analyzer = VADAnalyzer(
-                    sample_rate=self._current_sample_rate,
-                    num_channels=self._params.audio_in_channels,
-                )
+        if original_sample_rate != self._params.audio_in_sample_rate:
+            audio_data = resample_audio(
+                audio_data, original_sample_rate, self._params.audio_in_sample_rate
+            )
 
         return AudioRawFrame(
             audio=audio_data,
-            sample_rate=sample_rate,
+            sample_rate=self._params.audio_in_sample_rate,
             num_channels=audio_frame.num_channels,
         )
 
