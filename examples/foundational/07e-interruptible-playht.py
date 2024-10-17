@@ -23,9 +23,9 @@ from pipecat.processors.aggregators.llm_response import (
 )
 from pipecat.services.openai import OpenAILLMService
 from pipecat.services.playht import PlayHTTTSService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-from pipecat.transcriptions.language import Language
 
 load_dotenv(override=True)
 
@@ -80,7 +80,15 @@ async def main():
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+        task = PipelineTask(
+            pipeline,
+            PipelineParams(
+                allow_interruptions=True,
+                enable_metrics=True,
+                enable_usage_metrics=True,
+                report_only_initial_ttfb=True,
+            ),
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
