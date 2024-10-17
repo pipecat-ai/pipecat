@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added a websocket service for PlayHT, called `PlayHTTTSService`.
+- Added input parameter options for `PlayHTTTSService` and
+  `PlayHTHttpTTSService`.
+
 ### Changed
 
+- `PlayHTTTSService` and `PlayHTHttpTTSService` now use a `voice_engine` of
+  `PlayHT3.0-mini`, which allows for multi-lingual support.
+- Changed the name of the HTTP PlayHT service from `PlayHTTTSService` to
+  `PlayHTHttpTTSService` since there's now a websocket service, which is the
+  default.
 - Renamed `OpenAILLMServiceRealtimeBeta` to `OpenAIRealtimeBetaLLMService` to
   match other services.
 
