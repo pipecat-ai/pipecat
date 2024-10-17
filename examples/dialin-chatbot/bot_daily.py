@@ -3,6 +3,7 @@ import os
 import sys
 import argparse
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -14,7 +15,7 @@ from pipecat.frames.frames import LLMMessagesFrame, EndFrame
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyDialinSettings
-from pipecat.vad.silero import SileroVADAnalyzer
+
 from loguru import logger
 
 from dotenv import load_dotenv

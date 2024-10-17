@@ -11,6 +11,7 @@ import sys
 
 from PIL import Image
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     ImageRawFrame,
     OutputImageRawFrame,
@@ -23,7 +24,6 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserImageRequestFrame,
 )
-
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -36,7 +36,6 @@ from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.moondream import MoondreamService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 

@@ -22,6 +22,7 @@ from daily import (
 from loguru import logger
 from pydantic.main import BaseModel
 
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -43,7 +44,6 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams
 
 try:
     from daily import CallClient, Daily, EventHandler
