@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `audio_passthrough` parameter to `STTService`. If enabled it allows
+  audio frames to be pushed downstream in case other processors need them.
+
 - Added input parameter options for `PlayHTTTSService` and
   `PlayHTHttpTTSService`.
 
