@@ -451,8 +451,9 @@ class WordTTSService(TTSService):
 class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, audio_passthrough=False, **kwargs):
         super().__init__(**kwargs)
+        self._audio_passthrough = audio_passthrough
         self._settings: Dict[str, Any] = {}
 
     @abstractmethod
@@ -490,8 +491,11 @@ class STTService(AIService):
 
         if isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
-            # push a TextFrame. We don't really want to push audio frames down.
+            # push a TextFrame. We also push audio downstream in case someone
+            # else needs it.
             await self.process_audio_frame(frame)
+            if self._audio_passthrough:
+                await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
