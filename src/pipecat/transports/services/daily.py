@@ -46,6 +46,7 @@ from pipecat.metrics.metrics import (
     TTSUsageMetricsData,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -1069,21 +1070,22 @@ class DailyTransport(BaseTransport):
             "on_transcription_message", participant_id, message
         )
 
-    # Pipecat latest:
-    # async def _on_transcription_message(self, participant_id, message):
-    #     text = message["text"]
-    #     timestamp = message["timestamp"]
-    #     is_final = message["rawResponse"]["is_final"]
-    #     try:
-    #         language = message["rawResponse"]["channel"]["alternatives"][0]["languages"][0]
-    #         language = Language(language)
-    #     except KeyError:
-    #         language = None
-    #     if is_final:
-    #         frame = TranscriptionFrame(text, participant_id, timestamp, language)
-    #         logger.debug(f"Transcription (from: {participant_id}): [{text}]")
-    #     else:
-    #         frame = InterimTranscriptionFrame(text, participant_id, timestamp, language)
+    async def _on_transcription_message(self, participant_id, message):
+        text = message["text"]
+        timestamp = message["timestamp"]
+        is_final = message["rawResponse"]["is_final"]
+        try:
+            language = message["rawResponse"]["channel"]["alternatives"][0][
+                "languages"
+            ][0]
+            language = Language(language)
+        except KeyError:
+            language = None
+        if is_final:
+            frame = TranscriptionFrame(text, participant_id, timestamp, language)
+            logger.debug(f"Transcription (from: {participant_id}): [{text}]")
+        else:
+            frame = InterimTranscriptionFrame(text, participant_id, timestamp, language)
 
-    #     if self._input:
-    #         await self._input.push_transcription_frame(frame)
+        if self._input:
+            await self._input.push_transcription_frame(frame)
