@@ -41,6 +41,9 @@ class BaseInputTransport(FrameProcessor):
         self._audio_task = None
 
     async def start(self, frame: StartFrame):
+        # Start audio filter.
+        if self._params.audio_in_filter:
+            await self._params.audio_in_filter.start(self._params.audio_in_sample_rate)
         # Create audio input queue and task if needed.
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_queue = asyncio.Queue()
@@ -52,6 +55,9 @@ class BaseInputTransport(FrameProcessor):
             self._audio_task.cancel()
             await self._audio_task
             self._audio_task = None
+        # Stop audio filter.
+        if self._params.audio_in_filter:
+            await self._params.audio_in_filter.stop()
 
     async def cancel(self, frame: CancelFrame):
         # Cancel and wait for the audio input task to finish.
@@ -164,6 +170,17 @@ class BaseInputTransport(FrameProcessor):
                 frame: InputAudioRawFrame = await self._audio_in_queue.get()
 
                 audio_passthrough = True
+
+                # If an audio filter is available, run it before VAD.
+                if self._params.audio_in_filter:
+                    audio = await self._params.audio_in_filter.filter(
+                        frame.audio, frame.sample_rate, frame.num_channels
+                    )
+                    frame = InputAudioRawFrame(
+                        audio=audio,
+                        sample_rate=frame.sample_rate,
+                        num_channels=frame.num_channels,
+                    )
 
                 # Check VAD and push event if necessary. We just care about
                 # changes from QUIET to SPEAKING and vice versa.

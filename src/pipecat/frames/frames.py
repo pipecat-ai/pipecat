@@ -585,8 +585,29 @@ class VADParamsUpdateFrame(ControlFrame):
 
 
 @dataclass
+class FilterControlFrame(ControlFrame):
+    """Base control frame for other audio filter frames."""
+
+    pass
+
+
+@dataclass
+class FilterUpdateSettingsFrame(FilterControlFrame):
+    """Control frame to update filter settings."""
+
+    settings: Mapping[str, Any]
+
+
+@dataclass
+class FilterEnableFrame(FilterControlFrame):
+    """Control frame to enable or disable the filter at runtime."""
+
+    enable: bool
+
+
+@dataclass
 class MixerControlFrame(ControlFrame):
-    """Base control frame for other mixer frames."""
+    """Base control frame for other audio mixer frames."""
 
     pass
 
