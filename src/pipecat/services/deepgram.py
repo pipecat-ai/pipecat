@@ -126,7 +126,7 @@ class DeepgramSTTService(STTService):
         default_options = LiveOptions(
             encoding="linear16",
             language=Language.EN,
-            model="nova-2-conversationalai",
+            model="nova-2-general",
             sample_rate=16000,
             channels=1,
             interim_results=True,
