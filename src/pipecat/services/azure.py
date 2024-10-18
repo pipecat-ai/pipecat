@@ -39,10 +39,7 @@ try:
         SpeechRecognizer,
         SpeechSynthesizer,
     )
-    from azure.cognitiveservices.speech.audio import (
-        AudioStreamFormat,
-        PushAudioInputStream,
-    )
+    from azure.cognitiveservices.speech.audio import AudioStreamFormat, PushAudioInputStream
     from azure.cognitiveservices.speech.dialog import AudioConfig
     from openai import AsyncAzureOpenAI
 except ModuleNotFoundError as e:
@@ -51,6 +48,10 @@ except ModuleNotFoundError as e:
         "In order to use Azure, you need to `pip install pipecat-ai[azure]`. Also, set `AZURE_SPEECH_API_KEY` and `AZURE_SPEECH_REGION` environment variables."
     )
     raise Exception(f"Missing module: {e}")
+    from azure.cognitiveservices.speech.audio import (
+        AudioStreamFormat,
+        PushAudioInputStream,
+    )
 
 
 class AzureLLMService(BaseOpenAILLMService):
@@ -94,15 +95,21 @@ class AzureTTSService(TTSService):
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        speech_config = SpeechConfig(subscription=api_key, region=region)
+        language = (
+            self.language_to_service_language(params.language)
+            if params.language
+            else Language.EN_US
+        )
+
+        speech_config = SpeechConfig(
+            subscription=api_key, region=region, speech_recognition_language=language
+        )
         self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
 
         self._settings = {
             "sample_rate": sample_rate,
             "emphasis": params.emphasis,
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else Language.EN_US,
+            "language": language,
             "pitch": params.pitch,
             "rate": params.rate,
             "role": params.role,
