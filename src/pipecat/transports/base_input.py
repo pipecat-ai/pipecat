@@ -165,6 +165,15 @@ class BaseInputTransport(FrameProcessor):
 
                 audio_passthrough = True
 
+                # If an audio filter is available, run it before VAD.
+                if self._params.audio_filter:
+                    audio = await self._params.audio_filter.filter(frame.audio)
+                    frame = InputAudioRawFrame(
+                        audio=audio,
+                        sample_rate=frame.sample_rate,
+                        num_channels=frame.num_channels,
+                    )
+
                 # Check VAD and push event if necessary. We just care about
                 # changes from QUIET to SPEAKING and vice versa.
                 if self._params.vad_enabled:
