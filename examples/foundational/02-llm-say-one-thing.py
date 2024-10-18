@@ -57,7 +57,11 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            await task.queue_frames([LLMMessagesFrame(messages), EndFrame()])
+            await task.queue_frame(LLMMessagesFrame(messages))
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
 
         await runner.run(task)
 
