@@ -47,10 +47,15 @@ async def main():
 
         # Register an event handler so we can play the audio when the
         # participant joins.
-        @transport.event_handler("on_participant_joined")
-        async def on_new_participant_joined(transport, participant):
-            participant_name = participant["info"]["userName"] or ""
-            await task.queue_frames([TextFrame(f"Hello there, {participant_name}!"), EndFrame()])
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            participant_name = participant.get("info", {}).get("userName", "")
+            await task.queue_frame(TextFrame(f"Hello there, {participant_name}!"))
+
+        # Register an event handler to exit the application when the user leaves.
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
 
         await runner.run(task)
 
