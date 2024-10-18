@@ -22,7 +22,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator,
 )
-from pipecat.services.openai import OpenAILLMService, OpenAITTSService
+from pipecat.services.openai import OpenAILLMService, OpenAISTTService, OpenAITTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -42,11 +42,14 @@ async def main():
             DailyParams(
                 audio_out_enabled=True,
                 audio_out_sample_rate=24000,
-                transcription_enabled=True,
+                transcription_enabled=False,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
         )
+
+        stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"), model="whisper-1")
 
         tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), voice="alloy")
 
@@ -65,6 +68,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                stt,  # STT
                 tma_in,  # User responses
                 llm,  # LLM
                 tts,  # TTS
