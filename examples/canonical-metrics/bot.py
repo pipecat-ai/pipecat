@@ -19,10 +19,7 @@ from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.services.canonical import CanonicalMetricsService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
@@ -92,8 +89,8 @@ async def main():
             },
         ]
 
-        user_response = LLMUserResponseAggregator()
-        assistant_response = LLMAssistantResponseAggregator()
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         """
         CanonicalMetrics uses AudioBufferProcessor under the hood to buffer the audio. On
@@ -113,13 +110,13 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # microphone
-                user_response,
+                context_aggregator.user(),
                 llm,
                 tts,
                 transport.output(),
                 audio_buffer_processor,  # captures audio into a buffer
                 canonical,  # uploads audio buffer to Canonical AI for metrics
-                assistant_response,
+                context_aggregator.assistant(),
             ]
         )
 
