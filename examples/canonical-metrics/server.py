@@ -59,7 +59,7 @@ app.add_middleware(
 )
 
 
-@app.get("/start")
+@app.get("/")
 async def start_agent(request: Request):
     print(f"!!! Creating room")
     room = await daily_helpers["rest"].create_room(DailyRoomParams())

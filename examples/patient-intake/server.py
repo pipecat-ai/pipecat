@@ -57,7 +57,7 @@ app.add_middleware(
 )
 
 
-@app.get("/start")
+@app.get("/")
 async def start_agent(request: Request):
     print(f"!!! Creating room")
     room = await daily_helpers["rest"].create_room(DailyRoomParams())
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     parser.add_argument("--reload", action="store_true", help="Reload code on change")
 
     config = parser.parse_args()
-    print(f"to join a test room, visit http://localhost:{config.port}/start")
+    print(f"to join a test room, visit http://localhost:{config.port}/")
     uvicorn.run(
         "server:app",
         host=config.host,
