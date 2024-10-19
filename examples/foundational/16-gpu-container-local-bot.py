@@ -18,10 +18,7 @@ from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.deepgram import DeepgramTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import (
@@ -75,17 +72,17 @@ async def main():
             },
         ]
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                tma_in,  # User responses
+                context_aggregator.user(),
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
-                tma_out,  # Assistant spoken responses
+                context_aggregator.assistant(),
             ]
         )
 
@@ -123,7 +120,7 @@ async def main():
                         )
                     )
                     # And push to the pipeline for the Daily transport.output to send
-                    await tma_in.push_frame(
+                    await task.queue_frame(
                         DailyTransportMessageFrame(
                             message={"latency-pong-pipeline-delivery": {"ts": ts}},
                             participant_id=sender,

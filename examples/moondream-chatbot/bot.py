@@ -28,7 +28,7 @@ from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMUserResponseAggregator
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -182,17 +182,19 @@ async def main():
             },
         ]
 
-        ura = LLMUserResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),
-                ura,
+                context_aggregator.user(),
                 llm,
                 ParallelPipeline([sa, ir, va, moondream], [tf, imgf]),
                 tts,
                 ta,
                 transport.output(),
+                context_aggregator.assistant(),
             ]
         )
 

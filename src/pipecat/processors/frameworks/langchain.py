@@ -39,7 +39,7 @@ class LangchainProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, LLMMessagesFrame):
-            # Messages are accumulated by the `LLMUserResponseAggregator` in a list of messages.
+            # Messages are accumulated on the context as a list of messages.
             # The last one by the human is the one we want to send to the LLM.
             logger.debug(f"Got transcription frame {frame}")
             text: str = frame.messages[-1]["content"]
