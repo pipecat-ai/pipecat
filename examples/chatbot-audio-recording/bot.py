@@ -9,6 +9,8 @@ import os
 import sys
 
 import aiohttp
+import datetime
+import wave
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
@@ -28,6 +30,20 @@ load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+
+async def save_audio(audiobuffer):
+    if audiobuffer.has_audio():
+        merged_audio = audiobuffer.merge_audio_buffers()
+        filename = f"conversation_recording{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+        with wave.open(filename, "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(audiobuffer._sample_rate)
+            wf.writeframes(merged_audio)
+        print(f"Merged audio saved to {filename}")
+    else:
+        print("No audio data to save")
 
 
 async def main():
@@ -114,11 +130,7 @@ async def main():
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
             await task.queue_frame(EndFrame())
-
-        @transport.event_handler("on_call_state_updated")
-        async def on_call_state_updated(transport, state):
-            if state == "left":
-                await task.queue_frame(EndFrame())
+            await save_audio(audiobuffer)
 
         runner = PipelineRunner()
 
