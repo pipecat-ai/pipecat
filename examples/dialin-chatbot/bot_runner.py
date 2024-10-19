@@ -108,11 +108,9 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
     if vendor == "daily":
-        bot_proc = f"python3 - m bot_daily - u {room.url} - t {token} - i {
-            callId} - d {callDomain}"
+        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain}"
     else:
-        bot_proc = f"python3 - m bot_twilio - u {room.url} - t {
-            token} - i {callId} - s {room.config.sip_endpoint}"
+        bot_proc = f"python3 -m bot_twilio -u {room.url} -t {token} -i {callId} -s {room.config.sip_endpoint}"
 
     try:
         subprocess.Popen(
