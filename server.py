@@ -119,7 +119,6 @@ async def run_bot(room_url, token, bot_name, room_id):
             await manager.broadcast_json(data, room_id)
             return raw_text  # or process it as needed
 
-
         tts = AzureTTSService(
             api_key=os.getenv("AZURE_SPEECH_API_KEY"),
             region="northcentralus",
