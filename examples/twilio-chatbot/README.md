@@ -53,7 +53,7 @@ This project is a FastAPI-based chatbot that integrates with Twilio to handle We
     ```
 
 2. **Update the Twilio Webhook**:
-    Copy the ngrok URL and update your Twilio phone number webhook URL to `http://<ngrok_url>/start_call`.
+    Copy the ngrok URL and update your Twilio phone number webhook URL to `http://<ngrok_url>/`.
 
 3. **Update streams.xml**:
     Copy the ngrok URL and update templates/streams.xml with `wss://<ngrok_url>/ws`.

@@ -54,7 +54,7 @@ cp env.example .env # and add your credentials
 python server.py
 ```
 
-Then, visit `http://localhost:7860/start` in your browser to start a chatbot session.
+Then, visit `http://localhost:7860/` in your browser to start a chatbot session.
 
 ## Build and test the Docker image
 
