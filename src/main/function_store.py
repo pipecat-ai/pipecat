@@ -136,6 +136,47 @@ class WritingTool(BaseTool):
         )
 
 
+class VisionTool(BaseTool):
+    def main(self):
+        super().main()  # Initialize base functions
+
+        # Override the main_function with specific logic for stock data
+        async def tool_function(function_name, tool_call_id, args, llm, context, result_callback):
+            print(context, args['text'], self.room_id)
+            # message_id = ''.join(random.choices(
+            #     string.ascii_letters + string.digits, k=8))
+
+            # data = {"type": "function", "function_name": function_name,
+            #         "content": args['text'],  "message_id": message_id}
+
+            # await manager.broadcast_json(data, self.room_id)
+
+            logger.debug(f"!!! IN get_image {video_participant_id}, {arguments}")
+            question = args["question"]
+            await llm.request_image_frame(user_id=video_participant_id, text_content=question)
+
+        self.main_function = tool_function
+
+        # Define function_definition specific to stock data
+        self.function_definition = ChatCompletionToolParam(
+                type="function",
+                function={
+                    "name": "get_image",
+                    "description": "Get an image from the video stream.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "The question to ask the AI to generate an image of",
+                            },
+                        },
+                        "required": ["question"],
+                    },
+                },
+            )
+
+
 # # Test function to run async functions of tools
 # async def test_tool(tool_instance):
 #     # Mock arguments for testing

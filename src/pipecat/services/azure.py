@@ -107,7 +107,7 @@ def markdown_to_text(markdown_string):
     markdown_string = re.sub(r'~~(.*?)~~', r'\1', markdown_string)
     
     # Replace formulas
-    markdown_string = re.sub(r'\\\((.*?)\\\)', '(formula here)', markdown_string, flags=re.DOTALL)
+    markdown_string = re.sub(r'\\\((.*?)\\\)', '()', markdown_string, flags=re.DOTALL)
     
     return markdown_string.strip()
 
