@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Moved `SileroVAD` audio processor to `processors.audio.vad`.
+
 - Module `utils.audio` is now `audio.utils`. A new `resample_audio` function has
   been added.
 
