@@ -33,7 +33,7 @@ from loguru import logger
 from dotenv import load_dotenv
 
 from main.fetch_room import configure, ConfigRequest
-from main.function_store import WeatherTool, WritingTool
+from main.function_store import WeatherTool, WritingTool, VisionTool
 from main.wss import ConnectionManager
 from main.types.pydantic_types import BotRequest, BotResponse
 from main.utils.prompts import agent_system_prompt
@@ -90,10 +90,12 @@ async def run_bot(room_url, token, bot_name, room_id):
         # Initialize tools with room_id passed
         weather_tool = WeatherTool(room_id=room_id)
         writing_tool = WritingTool(room_id=room_id)
+        vision_tool = VisionTool(room_id=room_id)
         
         # Run the main function of the tools
         weather_tool.main()
         writing_tool.main()
+        vision_tool.main()
 
         # Create the DailyTransport with the provided room URL, token, and bot name
         transport = DailyTransport(
@@ -119,8 +121,8 @@ async def run_bot(room_url, token, bot_name, room_id):
 
         tts = AzureTTSService(
             api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-            region=os.getenv("AZURE_SPEECH_REGION"),
-            voice="en-US-JennyMultilingualNeural",
+            region="northcentralus",
+            voice="en-US-ShimmerMultilingualNeural", # en-US-AvaMultilingualNeural
             callback=my_callback
         )
 
@@ -132,8 +134,12 @@ async def run_bot(room_url, token, bot_name, room_id):
 
         llm.register_function(None, weather_tool.get_main_function(
         ), start_callback=weather_tool.get_start_callback_function())
+
         llm.register_function("Jotting_tool", writing_tool.get_main_function(
         ), start_callback=writing_tool.get_start_callback_function())
+
+        llm.register_function("vision_tool", vision_tool.get_main_function(
+        ), start_callback=vision_tool.get_start_callback_function())
         tools = [
             weather_tool.get_function_definition(),
             writing_tool.get_function_definition()
@@ -183,7 +189,7 @@ async def run_bot(room_url, token, bot_name, room_id):
             # participant_name = participant["info"]["userName"] or ""
             # Kick off the conversation.
             messages.append(
-                {"role": "system", "content": "log the meaning of gravity on my notepad"}
+                {"role": "system", "content": "talk"}
             )
             await task.queue_frames([LLMMessagesFrame(messages)])
 
