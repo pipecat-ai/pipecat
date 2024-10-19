@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""This module implements Whisper transcription with a locally-downloaded model."""
+"""This module implements the Tavus CVI as a sink layer."""
 
 import asyncio
 from typing import Any
