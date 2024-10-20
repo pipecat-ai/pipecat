@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `AssemblyAISTTService` and corresponding foundational examples
+  `07o-interruptible-assemblyai.py` and `13d-assemblyai-transcription.py`.
+
+- Added a foundational example for Gladia transcription:
+  `13c-gladia-transcription.py`
+
 ### Fixed
 
 - Fixed `enable_usage_metrics` to control LLM/TTS usage metrics separately
