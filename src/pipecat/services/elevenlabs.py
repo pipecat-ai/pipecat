@@ -282,6 +282,7 @@ class ElevenLabsTTSService(WordTTSService):
             self._started = False
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("LLMFullResponseEndFrame", 0)])
+                await self.resume_processing_frames()
 
     async def _connect(self):
         try:
