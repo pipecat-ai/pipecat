@@ -22,4 +22,4 @@ This project implements an AI-powered chatbot designed to provide basic legal ad
 
 ## Run the server
 
-python app.py
+python server.py
