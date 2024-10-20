@@ -1,17 +1,65 @@
-# Pipecat architecture guide
+# Pipecat Architecture Guide
 
-## Frames
+This guide provides an overview of the key components that make up the Pipecat framework. Understanding these components will help you build efficient and flexible data processing pipelines.
 
-Frames can represent discrete chunks of data, for instance a chunk of text, a chunk of audio, or an image. They can also be used to as control flow, for instance a frame that indicates that there is no more data available, or that a user started or stopped talking. They can also represent more complex data structures, such as a message array used for an LLM completion.
+## Core Components
 
-## FrameProcessors
+### 1. Frames
 
-Frame processors operate on frames. Every frame processor implements a `process_frame` method that consumes one frame and produces zero or more frames. Frame processors can do simple transforms, such as concatenating text fragments into sentences, or they can treat frames as input for an AI Service, and emit chat completions based on message arrays or transform text into audio or images.
+Frames are the fundamental units of data in Pipecat. They can represent:
 
-## Pipelines
+- Discrete data chunks (e.g., text, audio, images)
+- Control flow signals (e.g., end of data, start/stop of user input)
+- Complex data structures (e.g., message arrays for LLM completions)
 
-Pipelines are lists of frame processors linked together. Frame processors can push frames upstream or downstream to their peers. A very simple pipeline might chain an LLM frame processor to a text-to-speech frame processor, with a transport as an output.
+Frames serve as a versatile abstraction, allowing Pipecat to handle various types of data uniformly.
 
-## Transports
+### 2. Frame Processors
 
-Transports provide input and output frame processors to receive or send frames respectively. For example, the `DailyTransport` does this with a WebRTC session joined to a Daily.co room.
+Frame processors are the workhorses of Pipecat. They:
+
+- Implement a `process_frame` method
+- Consume one frame and produce zero or more frames
+- Perform operations ranging from simple transformations to complex AI service interactions
+
+Examples of frame processor operations:
+- Concatenating text fragments into sentences
+- Generating chat completions based on message arrays
+- Converting text to audio or images
+
+### 3. Pipelines
+
+Pipelines orchestrate the flow of frames through a series of frame processors. They:
+
+- Consist of linked lists of frame processors
+- Allow frame processors to push frames upstream or downstream
+- Enable the creation of complex data processing workflows
+
+A simple pipeline example:
+LLM Frame Processor → Text-to-Speech Frame Processor → Transport (output)
+
+### 4. Transports
+
+Transports act as the interface between Pipecat pipelines and the outside world. They:
+
+- Provide input and output frame processors
+- Handle receiving and sending frames
+- Can integrate with various communication protocols and services
+
+Example: The `DailyTransport` interfaces with a WebRTC session in a Daily.co room.
+
+## How It All Fits Together
+
+1. Frames enter the system through a Transport.
+2. The Pipeline routes Frames through a series of Frame Processors.
+3. Each Frame Processor performs its specific operation on the Frame.
+4. Processed Frames are either passed to the next Frame Processor or sent out through a Transport.
+
+This architecture allows for flexible, modular, and scalable data processing pipelines that can handle a wide variety of tasks and data types.
+
+## Best Practices
+
+- Design Frame Processors to be modular and reusable
+- Use appropriate Transports for your input/output requirements
+- Structure your Pipeline to optimize data flow and processing efficiency
+- Leverage the flexibility of Frames to represent diverse data types and control signals
