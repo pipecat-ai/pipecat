@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
@@ -100,6 +101,7 @@ class CartesiaTTSService(WordTTSService):
             aggregate_sentences=True,
             push_text_frames=False,
             sample_rate=params.sample_rate,
+            block_on_frames=(LLMFullResponseEndFrame),
             **kwargs,
         )
 
@@ -233,6 +235,7 @@ class CartesiaTTSService(WordTTSService):
                     await self.add_word_timestamps(
                         [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0)]
                     )
+                    await self.resume_processing_frames()
                 elif msg["type"] == "timestamps":
                     await self.add_word_timestamps(
                         list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
@@ -249,6 +252,7 @@ class CartesiaTTSService(WordTTSService):
                 elif msg["type"] == "error":
                     logger.error(f"{self} error: {msg}")
                     await self.push_frame(TTSStoppedFrame())
+                    await self.resume_processing_frames()
                     await self.stop_all_metrics()
                     await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
                 else:
@@ -278,6 +282,7 @@ class CartesiaTTSService(WordTTSService):
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
+                await self.resume_processing_frames()
                 await self._disconnect()
                 await self._connect()
                 return

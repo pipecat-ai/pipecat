@@ -112,6 +112,7 @@ class LmntTTSService(TTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
             self._started = False
+            await self.resume_processing_frames()
 
     async def _connect(self):
         try:
@@ -151,6 +152,7 @@ class LmntTTSService(TTSService):
                 if "error" in msg:
                     logger.error(f'{self} error: {msg["error"]}')
                     await self.push_frame(TTSStoppedFrame())
+                    await self.resume_processing_frames()
                     await self.stop_all_metrics()
                     await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
                 elif "audio" in msg:
@@ -187,6 +189,7 @@ class LmntTTSService(TTSService):
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
+                await self.resume_processing_frames()
                 await self._disconnect()
                 await self._connect()
                 return
