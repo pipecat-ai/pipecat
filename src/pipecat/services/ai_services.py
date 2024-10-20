@@ -15,6 +15,7 @@ from loguru import logger
 from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -297,6 +298,8 @@ class TTSService(AIService):
             await self._process_text_frame(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame, direction)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self.resume_processing_frames()
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             sentence = self._current_sentence
             self._current_sentence = ""

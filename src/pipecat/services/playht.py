@@ -21,9 +21,11 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -121,7 +123,11 @@ class PlayHTTTSService(TTSService):
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            block_on_frames=(TTSSpeakFrame, LLMFullResponseEndFrame),
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._user_id = user_id
