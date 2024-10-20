@@ -128,9 +128,7 @@ async def main():
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id=os.getenv("CARTESIA_VOICE_ID", "4d2fd738-3b3d-4368-957a-bb4805275bd9"),
             # British Narration Lady: 4d2fd738-3b3d-4368-957a-bb4805275bd9
-            params=CartesiaTTSService.InputParams(
-                sample_rate=44100,
-            ),
+            sample_rate=44100,
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
