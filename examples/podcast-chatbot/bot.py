@@ -60,7 +60,7 @@ async def main():
         messages = [
         {
         "role": "system",
-        "content": "You are Keith, the podcast host. You will engage with the participants by asking about tech topics, keeping responses short, clear, and conversational."
+        "content": "You are an AI assistant, the podcast host. You will engage with the participants by asking about tech topics, keeping responses short, clear, and conversational."
         }
     ]
 
