@@ -1,5 +1,8 @@
 # LegalAssistant Chatbot
 
+![Image](https://github.com/user-attachments/assets/f234e871-463a-4c20-aae4-9bd6eb477a49)
+
+
 This project implements an AI-powered chatbot designed to provide basic legal advice. The chatbot, named LegalAssistant, interacts with users to help answer legal queries and provide explanations for legal terms or processes.
 
 ## Features
