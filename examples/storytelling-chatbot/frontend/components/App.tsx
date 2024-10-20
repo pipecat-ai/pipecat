@@ -27,7 +27,7 @@ export default function Call() {
 
     // Create a new room for the story session
     try {
-      const response = await fetch("/start_bot", {
+      const response = await fetch("/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
