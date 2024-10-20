@@ -64,7 +64,7 @@ async def main():
   # Use Daily as a real-time media transport (WebRTC)
   transport = DailyTransport(
     room_url=...,
-    token="", # leave empty
+    token="", # leave empty, token is not api key
     bot_name="Bot Name",
     params=DailyParams(audio_out_enabled=True))
 
