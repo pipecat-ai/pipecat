@@ -26,7 +26,7 @@ async def main():
         voice_id=os.getenv("ELEVENLABS_VOICE_ID")
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
     messages = [
         {
