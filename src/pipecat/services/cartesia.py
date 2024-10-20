@@ -18,9 +18,11 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -100,6 +102,7 @@ class CartesiaTTSService(WordTTSService):
             aggregate_sentences=True,
             push_text_frames=False,
             sample_rate=sample_rate,
+            block_on_frames=(TTSSpeakFrame, LLMFullResponseEndFrame),
             **kwargs,
         )
 
