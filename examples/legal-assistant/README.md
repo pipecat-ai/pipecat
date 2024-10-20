@@ -10,7 +10,7 @@ This project implements an AI-powered chatbot designed to provide basic legal ad
 ## Technical Stack
 
 - **Language**: Python
-- **AI Model**: OpenAI's GPT-4
+- **AI Model**: OpenAI's GPT-4o
 - **Text-to-Speech**: ElevenLabs
 - **Real-time Communication**: Daily.co API
 
@@ -21,3 +21,5 @@ This project implements an AI-powered chatbot designed to provide basic legal ad
 3. Install the required packages: `pip install -r requirements.txt`.
 
 ## Run the server
+
+python app.py
