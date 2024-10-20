@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed `OpenAILLMServiceRealtimeBeta` to `OpenAIRealtimeBetaLLMService` to
   match other services.
 
+### Deprecated
+
+- `LLMUserResponseAggregator` and `LLMAssistantResponseAggregator` are
+  mostly deprecated, use `OpenAILLMContext` instead.
+
 - The `vad` package is now deprecated and `audio.vad` should be used
   instead. The `avd` package will get removed in a future release.
 

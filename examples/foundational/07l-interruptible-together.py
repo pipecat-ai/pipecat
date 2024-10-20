@@ -52,7 +52,7 @@ async def main():
 
         llm = TogetherLLMService(
             api_key=os.getenv("TOGETHER_API_KEY"),
-            model=os.getenv("TOGETHER_MODEL"),
+            model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
             params=TogetherLLMService.InputParams(
                 temperature=1.0,
                 top_p=0.9,
