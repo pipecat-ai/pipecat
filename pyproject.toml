@@ -37,6 +37,7 @@ Website = "https://pipecat.ai"
 
 [project.optional-dependencies]
 anthropic = [ "anthropic~=0.34.0" ]
+assemblyai = [ "assemblyai~=0.34.0" ]
 aws = [ "boto3~=1.35.27" ]
 azure = [ "azure-cognitiveservices-speech~=1.40.0" ]
 canonical = [ "aiofiles~=24.1.0" ]
