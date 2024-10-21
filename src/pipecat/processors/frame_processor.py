@@ -63,11 +63,11 @@ class FrameProcessor:
         self._metrics = metrics or FrameProcessorMetrics()
         self._metrics.set_processor_name(self.name)
 
-        # Processors have an input queue. The input queue can be processed
-        # immediately (default) or it can be processed when the processor asks
-        # to process a new frame (via process_next_frame()).
+        # Processors have an input queue. The input queue will be processed
+        # immediately (default) or it will block if one of the `block_on_frames`
+        # is found. To resume processing frames we need to call
+        # `resume_processing_frames()`.
         self._block_on_frames = block_on_frames
-        self._should_queue_input_frames = False
         self.__create_input_task()
 
         # Every processor in Pipecat should only output frames from a single
@@ -134,7 +134,8 @@ class FrameProcessor:
         await self.stop_processing_metrics()
 
     async def cleanup(self):
-        pass
+        await self.__cancel_input_task()
+        await self.__cancel_push_task()
 
     def link(self, processor: "FrameProcessor"):
         self._next = processor
@@ -210,12 +211,17 @@ class FrameProcessor:
     #
 
     async def _start_interruption(self):
-        # Cancel the task. This will stop pushing frames downstream.
-        self.__push_frame_task.cancel()
-        await self.__push_frame_task
+        # Cancel the input task. This will stop processing queued frames.
+        await self.__cancel_input_task()
 
-        # Create a new queue and task.
+        # Cancel the push frame task. This will stop pushing frames downstream.
+        await self.__cancel_push_task()
+
+        # Create a new output queue and task.
         self.__create_push_task()
+
+        # Create a new input queue and task.
+        self.__create_input_task()
 
     async def _stop_interruption(self):
         # Nothing to do right now.
@@ -238,6 +244,10 @@ class FrameProcessor:
             self.__input_frame_task_handler()
         )
         self.__input_event = asyncio.Event()
+
+    async def __cancel_input_task(self):
+        self.__input_frame_task.cancel()
+        await self.__input_frame_task
 
     async def __input_frame_task_handler(self):
         running = True
@@ -268,6 +278,10 @@ class FrameProcessor:
     def __create_push_task(self):
         self.__push_queue = asyncio.Queue()
         self.__push_frame_task = self.get_event_loop().create_task(self.__push_frame_task_handler())
+
+    async def __cancel_push_task(self):
+        self.__push_frame_task.cancel()
+        await self.__push_frame_task
 
     async def __push_frame_task_handler(self):
         running = True
