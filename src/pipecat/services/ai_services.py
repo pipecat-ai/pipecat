@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     STTUpdateSettingsFrame,
+    TTSTextFrame,
     TextFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
@@ -284,11 +285,13 @@ class TTSService(AIService):
                 logger.warning(f"Unknown setting for TTS service: {key}")
 
     async def say(self, text: str):
+        async def flush_audio(processor: FrameProcessor, frame: Frame, direction: FrameDirection):
+            await self.flush_audio()
+
         aggregate_sentences = self._aggregate_sentences
         self._aggregate_sentences = False
-        await self.process_frame(TextFrame(text=text), FrameDirection.DOWNSTREAM)
+        await self.queue_frame(TTSTextFrame(text=text), FrameDirection.DOWNSTREAM, flush_audio)
         self._aggregate_sentences = aggregate_sentences
-        await self.flush_audio()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
