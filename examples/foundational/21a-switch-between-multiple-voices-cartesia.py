@@ -2,31 +2,22 @@ import asyncio
 import os
 import sys
 from enum import Enum
-from typing import Dict, List, Optional
 
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.frames.frames import (
-    TTSStoppedFrame,
-    TTSStartedFrame,
     Frame,
     LLMMessagesFrame,
     TextFrame,
-    SystemFrame,
     TTSUpdateSettingsFrame,
-    StopTaskFrame
 )
-from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.aggregators.sentence import SentenceAggregator
-from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -89,11 +80,11 @@ class FrameAndCharacterHandler(FrameProcessor):
         return False
 
     async def change_tts_settings(self, character: str):
-        upper_character_voice_id = character.upper() + "_VOICE_ID"
-        cartesia_voice_id = "CARTESIA_" + character.upper() + "_VOICE_ID"
-        logger.debug(f"Cartesia voice ID: {cartesia_voice_id}")
-        voice_id = os.getenv(cartesia_voice_id)
-        logger.debug(f"Changing TTS settings to {voice_id}")
+        voice_id_mapping = {
+            "Gimli": "79a125e8-cd45-4c13-8a67-188112f4dd22",
+            "Legolas": "95856005-0332-41b0-935f-352e296aa0df",
+        }
+        voice_id = voice_id_mapping[character]
         if voice_id:
             settingsFrame = TTSUpdateSettingsFrame(settings={"voice": voice_id})
             await self.push_frame(settingsFrame)
@@ -105,8 +96,8 @@ class FrameAndCharacterHandler(FrameProcessor):
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        room_url = "some room url"  # https://bdom.daily.co/support for example
-        token = "room token here that you generate"
+        room_url = "some url here"
+        token = "some token here"
 
         transport = DailyTransport(
             room_url,
@@ -139,22 +130,18 @@ async def main():
         context_aggregator = llm.create_context_aggregator(context)
         frame_and_character_handler = FrameAndCharacterHandler()
 
-        tts = ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("GIMLI_VOICE_ID"),
-        )
-
-        tts2 = CartesiaTTSService(
+        tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id=os.getenv("CARTESIA_GIMLI_VOICE_ID"),
         )
 
         pipeline = Pipeline(
             [
+                # transport.input(),            # Transport user input - I have commented this out because we don't want to capture user input. Just for this example. Add it back in if you want to capture user input.
+                # context_aggregator.user(),    # User responses - I have commented this out because we don't want to capture user input. Just for this example. Add it back in if you want to capture user input.
                 llm,
                 frame_and_character_handler,
-                # tts,
-                tts2,
+                tts,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
