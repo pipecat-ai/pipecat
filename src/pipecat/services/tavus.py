@@ -16,7 +16,7 @@ from typing import AsyncGenerator
 
 import numpy as np
 
-from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame, TTSAudioRawFrame, TransportMessageUrgentFrame
+from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame, TTSAudioRawFrame, TransportMessageUrgentFrame, TTSStartedFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import AIService
 from pipecat.transports.base_output import BaseOutputTransport
@@ -82,7 +82,9 @@ class TavusVideoService(BaseOutputTransport):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if isinstance(frame, TTSAudioRawFrame):
+        if isinstance(frame, TTSStartedFrame):
+            self._current_idx_str = str(frame.id)
+        elif isinstance(frame, TTSAudioRawFrame):
             await self.encode_audio_and_send(frame.audio)
         else:
             await self.push_frame(frame, direction)
@@ -95,6 +97,7 @@ class TavusVideoService(BaseOutputTransport):
                 "conversation_id": self._conversation_id,
                 "properties": {
                     "type": "audio",
+                    "inference_id": self._current_idx_str,
                     "audio": audio_base64
                 }
             }
