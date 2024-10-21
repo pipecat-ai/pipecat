@@ -308,6 +308,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                     await self._handle_evt_audio_delta(evt)
                 elif evt.type == "response.audio.done":
                     await self._handle_evt_audio_done(evt)
+                elif evt.type == "response.text.delta":
+                    await self._handle_evt_text_delta(evt)
                 elif evt.type == "conversation.item.created":
                     await self._handle_evt_conversation_item_created(evt)
                 elif evt.type == "conversation.item.input_audio_transcription.completed":
@@ -370,6 +372,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             await self.push_frame(TTSStoppedFrame())
             # Don't clear the self._current_audio_response here. We need to wait until we
             # receive a BotStoppedSpeakingFrame from the output transport.
+
+    async def _handle_evt_text_delta(self, evt):
+        await self.stop_ttfb_metrics()
+        await self.push_frame(TextFrame(evt.delta))
 
     async def _handle_evt_conversation_item_created(self, evt):
         # This will get sent from the server every time a new "message" is added
