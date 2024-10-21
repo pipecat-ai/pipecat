@@ -206,6 +206,17 @@ class InterimTranscriptionFrame(TextFrame):
 
 
 @dataclass
+class TTSTextFrame(TextFrame):
+    """A user generated chunk of text that should be spoken by TTS services."""
+
+    text: str
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, text: [{self.text}])"
+
+
+@dataclass
 class LLMMessagesFrame(DataFrame):
     """A frame containing a list of LLM messages. Used to signal that an LLM
     service should run a chat completion and emit an LLMStartFrames, TextFrames

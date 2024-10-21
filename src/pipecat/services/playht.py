@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService
@@ -122,7 +123,9 @@ class PlayHTTTSService(TTSService):
         **kwargs,
     ):
         super().__init__(
-            sample_rate=sample_rate, block_on_frames=(LLMFullResponseEndFrame), **kwargs
+            sample_rate=sample_rate,
+            block_on_frames=(TTSTextFrame, LLMFullResponseEndFrame),
+            **kwargs,
         )
 
         self._api_key = api_key

@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService, WordTTSService
@@ -101,7 +102,7 @@ class CartesiaTTSService(WordTTSService):
             aggregate_sentences=True,
             push_text_frames=False,
             sample_rate=params.sample_rate,
-            block_on_frames=(LLMFullResponseEndFrame),
+            block_on_frames=(TTSTextFrame, LLMFullResponseEndFrame),
             **kwargs,
         )
 
