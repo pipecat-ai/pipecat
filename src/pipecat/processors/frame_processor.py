@@ -8,6 +8,7 @@ import asyncio
 import inspect
 
 from enum import Enum
+from typing import Awaitable, Callable, Optional
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
@@ -154,10 +155,15 @@ class FrameProcessor:
         return self._clock
 
     async def queue_frame(
-        self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+        self,
+        frame: Frame,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        callback: Optional[
+            Callable[["FrameProcessor", Frame, FrameDirection], Awaitable[None]]
+        ] = None,
     ):
         if self._should_queue_input_frames:
-            await self.__input_queue.put((frame, direction))
+            await self.__input_queue.put((frame, direction, callback))
         else:
             await self.process_frame(frame, direction)
 
@@ -253,8 +259,10 @@ class FrameProcessor:
         while running:
             try:
                 await self.__input_event.wait()
-                (frame, direction) = await self.__input_queue.get()
+                (frame, direction, callback) = await self.__input_queue.get()
                 await self.process_frame(frame, direction)
+                if callback:
+                    await callback(self, frame, direction)
                 running = not isinstance(frame, EndFrame)
                 self.__input_queue.task_done()
             except asyncio.CancelledError:
