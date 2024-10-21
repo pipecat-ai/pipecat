@@ -8,6 +8,7 @@ import asyncio
 import inspect
 
 from enum import Enum
+from typing import Awaitable, Callable, Optional
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
@@ -155,14 +156,19 @@ class FrameProcessor:
         return self._clock
 
     async def queue_frame(
-        self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+        self,
+        frame: Frame,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        callback: Optional[
+            Callable[["FrameProcessor", Frame, FrameDirection], Awaitable[None]]
+        ] = None,
     ):
         if isinstance(frame, SystemFrame):
             # We don't want to queue system frames.
             await self.process_frame(frame, direction)
         else:
             # We queue everything else.
-            await self.__input_queue.put((frame, direction))
+            await self.__input_queue.put((frame, direction, callback))
 
     async def resume_processing_frames(self):
         self.__input_event.set()
@@ -259,10 +265,14 @@ class FrameProcessor:
                     self.__input_event.clear()
                     should_block_frames = False
 
-                (frame, direction) = await self.__input_queue.get()
+                (frame, direction, callback) = await self.__input_queue.get()
 
                 # Process the frame.
                 await self.process_frame(frame, direction)
+
+                # If this frame has an associated callback, call it now.
+                if callback:
+                    await callback(self, frame, direction)
 
                 # Check if we should block incoming frames from now on (until we
                 # resume processing).
