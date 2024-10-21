@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a foundational example for Gladia transcription:
   `13c-gladia-transcription.py`
 
+### Changed
+
+- Updated `GladiaSTTService` to use the V2 API.
+
 ### Fixed
 
 - Fixed `enable_usage_metrics` to control LLM/TTS usage metrics separately
