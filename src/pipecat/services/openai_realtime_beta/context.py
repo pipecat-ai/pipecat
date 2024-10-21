@@ -139,6 +139,8 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
         for content in item.content:
             if content.type == "audio":
                 message["content"].append({"type": "text", "text": content.transcript})
+            if content.type == "text":
+                message["content"].append({"type": "text", "text": content.text})
             else:
                 logger.error(f"Unhandled content type in assistant item: {content.type} - {item}")
         self.add_message(message)
