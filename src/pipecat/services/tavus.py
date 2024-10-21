@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""This module implements the Tavus CVI as a sink layer."""
+"""This module implements Whisper transcription with a locally-downloaded model."""
 
 import asyncio
 from typing import Any
@@ -49,7 +49,6 @@ class TavusVideoService(BaseOutputTransport):
         cls,
         api_key: str,
         replica_id: str,
-        persona_id: str,
         properties: dict[str, Any] = {}
     ) -> tuple[str, str]:
         url = "https://tavusapi.com/v2/conversations"
@@ -59,7 +58,7 @@ class TavusVideoService(BaseOutputTransport):
         }
         payload = {
             "replica_id": replica_id,
-            "persona_id": persona_id,
+            "persona_id": "pipecat0",
             "properties": properties
         }
 
@@ -75,11 +74,9 @@ class TavusVideoService(BaseOutputTransport):
         await self.start_processing_metrics()
         await self.start_ttfb_metrics()
 
-        # Divide by 32768 because we have signed 16-bit data.
-        audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
-        audio_base64 = base64.b64encode(audio_float).decode("utf-8")
+        audio_base64 = base64.b64encode(audio).decode("utf-8")
 
-        await self.send_message(audio_base64)
+        await self.send_audio_message(audio_base64)
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
@@ -90,17 +87,15 @@ class TavusVideoService(BaseOutputTransport):
         else:
             await self.push_frame(frame, direction)
 
-    async def send_message(self, audio_base64: str) -> None:
+    async def send_audio_message(self, audio_base64: str) -> None:
         message = TransportMessageUrgentFrame(
             message={
-                "message": {
                 "message_type": "conversation",
                 "event_type": "conversation.echo",
                 "conversation_id": self._conversation_id,
                 "properties": {
                     "type": "audio",
                     "audio": audio_base64
-                }
                 }
             }
         )
