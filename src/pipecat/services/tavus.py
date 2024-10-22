@@ -13,7 +13,7 @@ import aiohttp
 from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
-    TransportMessageFrame,
+    TransportMessageUrgentFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -111,7 +111,7 @@ class TavusVideoService(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def _send_audio_message(self, audio_base64: str) -> None:
-        transport_frame = TransportMessageFrame(
+        transport_frame = TransportMessageUrgentFrame(
             message={
                 "message_type": "conversation",
                 "event_type": "conversation.echo",
