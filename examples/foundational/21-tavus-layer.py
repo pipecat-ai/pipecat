@@ -114,7 +114,7 @@ async def main():
         )
 
         @transport.event_handler("on_participant_joined")
-        async def on_participant_joined(transport: DailyTransport, participant):
+        async def on_participant_joined(transport: DailyTransport, participant: dict[str, Any]) -> None:
             if participant.get("info", {}).get("userName", "") == persona_name:
                 transport._client._client.update_subscriptions(
                     participant_settings={
@@ -125,7 +125,7 @@ async def main():
                 )
 
         @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
+        async def on_first_participant_joined(transport: DailyTransport, participant: dict[str, Any]) -> None:
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
