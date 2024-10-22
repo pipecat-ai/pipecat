@@ -10,6 +10,7 @@
 # from typing import Any
 import base64
 import requests
+import time
 
 # from enum import Enum
 # from typing import AsyncGenerator
@@ -25,7 +26,7 @@ from pipecat.transports.services.daily import DailyTransportClient, DailyParams
 
 from loguru import logger
 
-MIN_AUDIO_BUFFER_SIZE = 3200
+MIN_AUDIO_BUFFER_SIZE = int(16000 * 2 * 0.5) # 0.5 seconds
 
 class TavusVideoService(BaseOutputTransport):
     """Class to send base64 encoded audio to Tavus"""
@@ -94,16 +95,15 @@ class TavusVideoService(BaseOutputTransport):
 
     async def encode_audio_and_send(self, audio: bytes) -> None:
         """Encodes audio to base64 and sends it to Tavus"""
-        self._tavus_audio_buffer = self._tavus_audio_buffer + audio
-        if len(self._tavus_audio_buffer) > MIN_AUDIO_BUFFER_SIZE:
-            audio_base64 = base64.b64encode(self._tavus_audio_buffer[:MIN_AUDIO_BUFFER_SIZE]).decode("utf-8")
-            await self.send_audio_message(audio_base64)
-            self._tavus_audio_buffer = self._tavus_audio_buffer[MIN_AUDIO_BUFFER_SIZE:]
-    
+        self._tavus_audio_buffer += audio
+        if len(self._tavus_audio_buffer) >= MIN_AUDIO_BUFFER_SIZE:
+            await self.flush_audio_buffer()
+
     async def flush_audio_buffer(self) -> None:
         """Flushes the audio buffer"""
         if len(self._tavus_audio_buffer) > 0:
             audio_base64 = base64.b64encode(self._tavus_audio_buffer).decode("utf-8")
+            logger.debug(f"TavusVideoService sending {len(audio_base64)} bytes")
             await self.send_audio_message(audio_base64)
             self._tavus_audio_buffer = b""
 
