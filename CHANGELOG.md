@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grained control of what media subscriptions you want for each participant in a
   room.
 
+### Deprecated
+
+- `DailyTransport.capture_participant_transcription()` is now deprecated. This
+  has been a source of confusion and always hard to remember it needs to be
+  added. Participant transcriptions will now be enabled by default.
+
 ## [0.0.47] - 2024-10-22
 
 ### Added

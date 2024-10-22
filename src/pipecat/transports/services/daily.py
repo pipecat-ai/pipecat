@@ -138,6 +138,7 @@ class DailyCallbacks(BaseModel):
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_transcription_message: Callable[[Mapping[str, Any]], Awaitable[None]]
 
 
 def completion_callback(future):
@@ -187,7 +188,6 @@ class DailyTransportClient(EventHandler):
 
         self._participant_id: str = ""
         self._video_renderers = {}
-        self._transcription_renderers = {}
         self._other_participant_has_joined = False
 
         self._joined = False
@@ -321,6 +321,8 @@ class DailyTransportClient(EventHandler):
 
                 if self._token and self._params.transcription_enabled:
                     await self._start_transcription()
+
+                self._participant_id = data["participants"]["local"]["id"]
 
                 await self._callbacks.on_joined(data)
             else:
@@ -551,14 +553,8 @@ class DailyTransportClient(EventHandler):
     def on_participant_updated(self, participant):
         self._call_async_callback(self._callbacks.on_participant_updated, participant)
 
-    def on_transcription_message(self, message: Mapping[str, Any]):
-        participant_id = ""
-        if "participantId" in message:
-            participant_id = message["participantId"]
-
-        if participant_id in self._transcription_renderers:
-            callback = self._transcription_renderers[participant_id]
-            self._call_async_callback(callback, participant_id, message)
+    def on_transcription_message(self, message):
+        self._call_async_callback(self._callbacks.on_transcription_message, message)
 
     def on_transcription_error(self, message):
         logger.error(f"Transcription error: {message}")
@@ -822,6 +818,7 @@ class DailyTransport(BaseTransport):
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
+            on_transcription_message=self._on_transcription_message,
         )
         self._params = params
 
@@ -897,9 +894,12 @@ class DailyTransport(BaseTransport):
         self._client.stop_recording(stream_id)
 
     def capture_participant_transcription(self, participant_id: str):
-        self._client.capture_participant_transcription(
-            participant_id, self._on_transcription_message
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "Function `capture_participant_transcription` is deprecated. Transcription are now always captured.",
+                DeprecationWarning,
+            )
 
     def capture_participant_video(
         self,
@@ -1001,7 +1001,16 @@ class DailyTransport(BaseTransport):
     async def _on_first_participant_joined(self, participant):
         await self._call_event_handler("on_first_participant_joined", participant)
 
-    async def _on_transcription_message(self, participant_id, message):
+    async def _on_transcription_message(self, message):
+        participant_id = ""
+        if "participantId" in message:
+            participant_id = message["participantId"]
+
+        # If we don't have a participant id, ignore it. If this is the
+        # transcription for the bot also ignore it.
+        if not participant_id or participant_id == self.participant_id:
+            return
+
         text = message["text"]
         timestamp = message["timestamp"]
         is_final = message["rawResponse"]["is_final"]
