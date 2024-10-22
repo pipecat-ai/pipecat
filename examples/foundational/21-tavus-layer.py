@@ -6,6 +6,7 @@
 
 import asyncio
 import aiohttp
+from typing import Any
 import os
 import sys
 
@@ -19,7 +20,7 @@ from pipecat.processors.aggregators.llm_response import (
 )
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
-# from pipecat.services.deepgram import DeepgramSTTService
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.tavus import TavusVideoService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
@@ -41,7 +42,7 @@ async def main():
         # get persona, look up persona_name, set this as the bot name to ignore
         persona_name = TavusVideoService._get_persona_name(
             api_key=os.getenv("TAVUS_API_KEY"),
-            persona_id=os.getenv("TAVUS_PERSONA_ID"),
+            persona_id=os.getenv("TAVUS_PERSONA_ID", "pipecat0"),
         )
 
         room_url, conversation_id = TavusVideoService._initiate_conversation(
@@ -55,9 +56,8 @@ async def main():
         transport = DailyTransport(
             room_url=room_url,
             token=None,
-            bot_name="Respond bot",
+            bot_name="Pipecat bot",
             params=DailyParams(
-                # audio_out_enabled=False,
                 transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
@@ -65,7 +65,7 @@ async def main():
             ),
         )
 
-        # stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
@@ -93,7 +93,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                # stt,  # STT
+                stt,  # STT
                 tma_in,  # User responses
                 llm,  # LLM
                 tts,  # TTS

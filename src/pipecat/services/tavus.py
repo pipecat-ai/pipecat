@@ -4,26 +4,28 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""This module implements Whisper transcription with a locally-downloaded model."""
+"""This module implements Tavus as a sink transport layer"""
 
-import asyncio
-from typing import Any
+# import asyncio
+# from typing import Any
 import base64
 import requests
 
-from enum import Enum
-from typing import AsyncGenerator
+# from enum import Enum
+# from typing import AsyncGenerator
 
-import numpy as np
+# import numpy as np
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame, TTSAudioRawFrame, TransportMessageUrgentFrame, TTSStartedFrame, TTSStoppedFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.ai_services import AIService
+# from pipecat.services.ai_services import AIService
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.services.daily import DailyTransportClient, DailyParams
-from pipecat.utils.time import time_now_iso8601
+# from pipecat.utils.time import time_now_iso8601
 
 from loguru import logger
+
+MIN_AUDIO_BUFFER_SIZE = 3200
 
 class TavusVideoService(BaseOutputTransport):
     """Class to send base64 encoded audio to Tavus"""
@@ -95,13 +97,13 @@ class TavusVideoService(BaseOutputTransport):
         await self.start_processing_metrics()
         await self.start_ttfb_metrics()
         self._tavus_audio_buffer = self._tavus_audio_buffer + audio
-        if len(self._tavus_audio_buffer) > 72000:
-            print(f"sending audio")
-            audio_base64 = base64.b64encode(self._tavus_audio_buffer[:72000]).decode("utf-8")
+        if len(self._tavus_audio_buffer) > MIN_AUDIO_BUFFER_SIZE:
+            # print(f"sending audio")
+            audio_base64 = base64.b64encode(self._tavus_audio_buffer[:MIN_AUDIO_BUFFER_SIZE]).decode("utf-8")
             await self.send_audio_message(audio_base64)
-            self._tavus_audio_buffer = self._tavus_audio_buffer[72000:]
+            self._tavus_audio_buffer = self._tavus_audio_buffer[MIN_AUDIO_BUFFER_SIZE:]
         else:
-            print(f"accumulating audio buffer: {len(self._tavus_audio_buffer)}")
+            pass # print(f"accumulating audio buffer: {len(self._tavus_audio_buffer)}")
         
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
