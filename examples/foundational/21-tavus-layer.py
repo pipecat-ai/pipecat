@@ -41,7 +41,8 @@ async def main():
         room_url, conversation_id = TavusVideoService._initiate_conversation(
             api_key=os.getenv("TAVUS_API_KEY"),
             replica_id=os.getenv("TAVUS_REPLICA_ID"),
-            properties={'greeting': "Hello, I'm pipecat"}
+            custom_greeting='Hello, I am pipecat',
+
         )
 
         transport = DailyTransport(
@@ -53,6 +54,7 @@ async def main():
                 transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
         )
 
@@ -66,10 +68,10 @@ async def main():
         llm = OpenAILLMService(model="gpt-4o-mini")
 
         messages = [
-            # {
-            #     "role": "system",
-            #     "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
-            # },
+            {
+                 "role": "system",
+                 "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            },
         ]
 
         tma_in = LLMUserResponseAggregator(messages)
@@ -104,12 +106,23 @@ async def main():
             ),
         )
 
-        # @transport.event_handler("on_first_participant_joined")
-        # async def on_first_participant_joined(transport, participant):
-        #     transport.capture_participant_transcription(participant["id"])
-        #     # Kick off the conversation.
-        #     messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        #     await task.queue_frames([LLMMessagesFrame(messages)])
+        @transport.event_handler("on_participant_joined")
+        async def on_participant_joined(transport: DailyTransport, participant):
+            if participant.get("info", {}).get("userName", "") == "Ari":
+                transport._client._client.update_subscriptions(
+                    participant_settings={
+                        participant["id"]: {
+                            "media": { "microphone": "unsubscribed" },
+                        }
+                    }
+                )
+
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
+            # Kick off the conversation.
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()
 
