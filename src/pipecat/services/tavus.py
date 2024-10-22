@@ -4,17 +4,25 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+
 """This module implements Tavus as a sink transport layer"""
 
 import base64
 import aiohttp
 
-from pipecat.frames.frames import Frame, TTSAudioRawFrame, TransportMessageFrame, TTSStartedFrame, TTSStoppedFrame
+from pipecat.frames.frames import (
+    Frame,
+    TTSAudioRawFrame,
+    TransportMessageFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from loguru import logger
 
-MIN_AUDIO_BUFFER_SIZE = int(16000 * 2 * 0.5) # 0.5 seconds
+MIN_AUDIO_BUFFER_SIZE = int(16000 * 2 * 0.5)  # 0.5 seconds
+
 
 class TavusVideoService(FrameProcessor):
     """Class to send base64 encoded audio to Tavus"""
@@ -29,7 +37,6 @@ class TavusVideoService(FrameProcessor):
         self._conversation_id = conversation_id
         self._tavus_audio_buffer = b""
 
-
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -42,10 +49,7 @@ class TavusVideoService(FrameProcessor):
         persona_id: str,
     ) -> str:
         url = f"https://tavusapi.com/v2/personas/{persona_id}"
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": api_key
-        }
+        headers = {"Content-Type": "application/json", "x-api-key": api_key}
         async with session.get(url, headers=headers) as r:
             r.raise_for_status()
             response_json = await r.json()
@@ -61,13 +65,10 @@ class TavusVideoService(FrameProcessor):
         api_key: str,
         replica_id: str,
         persona_id: str = "pipecat0",
-        custom_greeting: str = {}
+        custom_greeting: str = {},
     ) -> tuple[str, str]:
         url = "https://tavusapi.com/v2/conversations"
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": api_key
-        }
+        headers = {"Content-Type": "application/json", "x-api-key": api_key}
         payload = {
             "replica_id": replica_id,
             "persona_id": persona_id,
@@ -118,8 +119,8 @@ class TavusVideoService(FrameProcessor):
                 "properties": {
                     "type": "audio",
                     "inference_id": self._current_idx_str,
-                    "audio": audio_base64
-                }
+                    "audio": audio_base64,
+                },
             }
         )
         await self.push_frame(transport_frame)

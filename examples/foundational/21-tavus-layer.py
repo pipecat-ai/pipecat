@@ -49,8 +49,7 @@ async def main():
             api_key=os.getenv("TAVUS_API_KEY"),
             replica_id=os.getenv("TAVUS_REPLICA_ID"),
             persona_id=os.getenv("TAVUS_PERSONA_ID", "pipecat0"),
-            custom_greeting='Hello, I am pipecat',
-
+            custom_greeting="Hello, I am pipecat",
         )
 
         transport = DailyTransport(
@@ -92,7 +91,7 @@ async def main():
                 tma_in,  # User responses
                 llm,  # LLM
                 tts,  # TTS
-                tavus, # Tavus output layer
+                tavus,  # Tavus output layer
                 transport.output(),  # Transport bot output
                 tma_out,  # Assistant spoken responses
             ]
@@ -109,18 +108,22 @@ async def main():
         )
 
         @transport.event_handler("on_participant_joined")
-        async def on_participant_joined(transport: DailyTransport, participant: dict[str, Any]) -> None:
+        async def on_participant_joined(
+            transport: DailyTransport, participant: dict[str, Any]
+        ) -> None:
             if participant.get("info", {}).get("userName", "") == persona_name:
                 await transport.update_subscriptions(
                     participant_settings={
                         participant["id"]: {
-                            "media": { "microphone": "unsubscribed" },
+                            "media": {"microphone": "unsubscribed"},
                         }
                     }
                 )
 
         @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport: DailyTransport, participant: dict[str, Any]) -> None:
+        async def on_first_participant_joined(
+            transport: DailyTransport, participant: dict[str, Any]
+        ) -> None:
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
