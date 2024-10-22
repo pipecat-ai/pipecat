@@ -16,7 +16,7 @@ from typing import AsyncGenerator
 
 import numpy as np
 
-from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame, TTSAudioRawFrame, TransportMessageUrgentFrame, TTSStartedFrame
+from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame, TTSAudioRawFrame, TransportMessageUrgentFrame, TTSStartedFrame, TTSStoppedFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import AIService
 from pipecat.transports.base_output import BaseOutputTransport
@@ -39,17 +39,38 @@ class TavusVideoService(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._conversation_id = conversation_id
+        self._tavus_audio_buffer = b""
 
 
     def can_generate_metrics(self) -> bool:
         return True
 
     @classmethod
+    def _get_persona_name(
+        cls,
+        api_key: str,
+        persona_id: str,
+    ) -> str:
+        url = f"https://tavusapi.com/v2/personas/{persona_id}"
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": api_key
+        }
+
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+
+        response_json = response.json()
+        logger.debug(f"TavusVideoService persona grabbed {response_json}")
+        return response_json["persona_name"]
+
+    @classmethod
     def _initiate_conversation(
         cls,
         api_key: str,
         replica_id: str,
-        properties: dict[str, Any] = {}
+        persona_id: str = "pipecat0",
+        custom_greeting: str = {}
     ) -> tuple[str, str]:
         url = "https://tavusapi.com/v2/conversations"
         headers = {
@@ -58,8 +79,8 @@ class TavusVideoService(BaseOutputTransport):
         }
         payload = {
             "replica_id": replica_id,
-            "persona_id": "pipecat0",
-            "properties": properties
+            "persona_id": persona_id,
+            "custom_greeting": custom_greeting,
         }
 
         response = requests.post(url, headers=headers, json=payload)
@@ -73,10 +94,26 @@ class TavusVideoService(BaseOutputTransport):
         """Encodes audio to base64 and sends it to Tavus"""
         await self.start_processing_metrics()
         await self.start_ttfb_metrics()
-
-        audio_base64 = base64.b64encode(audio).decode("utf-8")
-
-        await self.send_audio_message(audio_base64)
+        self._tavus_audio_buffer = self._tavus_audio_buffer + audio
+        if len(self._tavus_audio_buffer) > 72000:
+            print(f"sending audio")
+            audio_base64 = base64.b64encode(self._tavus_audio_buffer[:72000]).decode("utf-8")
+            await self.send_audio_message(audio_base64)
+            self._tavus_audio_buffer = self._tavus_audio_buffer[72000:]
+        else:
+            print(f"accumulating audio buffer: {len(self._tavus_audio_buffer)}")
+        
+        await self.stop_ttfb_metrics()
+        await self.stop_processing_metrics()
+    
+    async def flush_audio_buffer(self) -> None:
+        """Flushes the audio buffer"""
+        await self.start_processing_metrics()
+        await self.start_ttfb_metrics()
+        if len(self._tavus_audio_buffer) > 0:
+            audio_base64 = base64.b64encode(self._tavus_audio_buffer).decode("utf-8")
+            await self.send_audio_message(audio_base64)
+            self._tavus_audio_buffer = b""
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
@@ -86,6 +123,8 @@ class TavusVideoService(BaseOutputTransport):
             self._current_idx_str = str(frame.id)
         elif isinstance(frame, TTSAudioRawFrame):
             await self.encode_audio_and_send(frame.audio)
+        elif isinstance(frame, TTSStoppedFrame):
+            await self.flush_audio_buffer()
         else:
             await self.push_frame(frame, direction)
 

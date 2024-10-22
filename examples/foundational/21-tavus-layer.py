@@ -22,7 +22,7 @@ from pipecat.services.openai import OpenAILLMService
 # from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.tavus import TavusVideoService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-# from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.vad.silero import SileroVADAnalyzer
 
 from loguru import logger
 
@@ -38,10 +38,18 @@ async def main():
     async with aiohttp.ClientSession() as session:
         # (room_url, token) = await configure(session)
 
+        # get persona, look up persona_name, set this as the bot name to ignore
+        persona_name = TavusVideoService._get_persona_name(
+            api_key=os.getenv("TAVUS_API_KEY"),
+            persona_id=os.getenv("TAVUS_PERSONA_ID"),
+        )
+
         room_url, conversation_id = TavusVideoService._initiate_conversation(
             api_key=os.getenv("TAVUS_API_KEY"),
             replica_id=os.getenv("TAVUS_REPLICA_ID"),
-            properties={"enable_transcription": True}
+            persona_id=os.getenv("TAVUS_PERSONA_ID", "pipecat0"),
+            custom_greeting='Hello, I am pipecat',
+
         )
 
         transport = DailyTransport(
@@ -51,8 +59,9 @@ async def main():
             params=DailyParams(
                 # audio_out_enabled=False,
                 transcription_enabled=True,
-                # vad_enabled=True,
-                # vad_analyzer=SileroVADAnalyzer(),
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
         )
 
@@ -104,12 +113,23 @@ async def main():
             ),
         )
 
+        @transport.event_handler("on_participant_joined")
+        async def on_participant_joined(transport: DailyTransport, participant):
+            if participant.get("info", {}).get("userName", "") == persona_name:
+                transport._client._client.update_subscriptions(
+                    participant_settings={
+                        participant["id"]: {
+                            "media": { "microphone": "unsubscribed" },
+                        }
+                    }
+                )
+
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMMessagesFrame(messages)])
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()
 
