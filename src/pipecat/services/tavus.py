@@ -94,19 +94,11 @@ class TavusVideoService(BaseOutputTransport):
 
     async def encode_audio_and_send(self, audio: bytes) -> None:
         """Encodes audio to base64 and sends it to Tavus"""
-        await self.start_processing_metrics()
-        await self.start_ttfb_metrics()
         self._tavus_audio_buffer = self._tavus_audio_buffer + audio
         if len(self._tavus_audio_buffer) > MIN_AUDIO_BUFFER_SIZE:
-            # print(f"sending audio")
             audio_base64 = base64.b64encode(self._tavus_audio_buffer[:MIN_AUDIO_BUFFER_SIZE]).decode("utf-8")
             await self.send_audio_message(audio_base64)
             self._tavus_audio_buffer = self._tavus_audio_buffer[MIN_AUDIO_BUFFER_SIZE:]
-        else:
-            pass # print(f"accumulating audio buffer: {len(self._tavus_audio_buffer)}")
-        
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
     
     async def flush_audio_buffer(self) -> None:
         """Flushes the audio buffer"""
@@ -118,11 +110,15 @@ class TavusVideoService(BaseOutputTransport):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, TTSStartedFrame):
+            await self.start_processing_metrics()
+            await self.start_ttfb_metrics()
             self._current_idx_str = str(frame.id)
         elif isinstance(frame, TTSAudioRawFrame):
             await self.encode_audio_and_send(frame.audio)
         elif isinstance(frame, TTSStoppedFrame):
             await self.flush_audio_buffer()
+            await self.stop_ttfb_metrics()
+            await self.stop_processing_metrics()
         else:
             await self.push_frame(frame, direction)
 
