@@ -9,7 +9,7 @@
 import base64
 import aiohttp
 
-from pipecat.frames.frames import Frame, TTSAudioRawFrame, TransportMessageUrgentFrame, TTSStartedFrame, TTSStoppedFrame
+from pipecat.frames.frames import Frame, TTSAudioRawFrame, TransportMessageFrame, TTSStartedFrame, TTSStoppedFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from loguru import logger
@@ -110,7 +110,7 @@ class TavusVideoService(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def _send_audio_message(self, audio_base64: str) -> None:
-        transport_frame = TransportMessageUrgentFrame(
+        transport_frame = TransportMessageFrame(
             message={
                 "message_type": "conversation",
                 "event_type": "conversation.echo",
