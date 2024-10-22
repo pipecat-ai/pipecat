@@ -108,14 +108,10 @@ class TavusVideoService(BaseOutputTransport):
     
     async def flush_audio_buffer(self) -> None:
         """Flushes the audio buffer"""
-        await self.start_processing_metrics()
-        await self.start_ttfb_metrics()
         if len(self._tavus_audio_buffer) > 0:
             audio_base64 = base64.b64encode(self._tavus_audio_buffer).decode("utf-8")
             await self.send_audio_message(audio_base64)
             self._tavus_audio_buffer = b""
-        await self.stop_ttfb_metrics()
-        await self.stop_processing_metrics()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
