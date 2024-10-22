@@ -111,7 +111,7 @@ async def main():
         @transport.event_handler("on_participant_joined")
         async def on_participant_joined(transport: DailyTransport, participant: dict[str, Any]) -> None:
             if participant.get("info", {}).get("userName", "") == persona_name:
-                transport._client._client.update_subscriptions(
+                await transport.update_subscriptions(
                     participant_settings={
                         participant["id"]: {
                             "media": { "microphone": "unsubscribed" },
