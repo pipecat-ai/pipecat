@@ -38,9 +38,16 @@ async def main():
     async with aiohttp.ClientSession() as session:
         # (room_url, token) = await configure(session)
 
+        # get persona, look up persona_name, set this as the bot name to ignore
+        persona_name = TavusVideoService._get_persona_name(
+            api_key=os.getenv("TAVUS_API_KEY"),
+            persona_id=os.getenv("TAVUS_PERSONA_ID"),
+        )
+
         room_url, conversation_id = TavusVideoService._initiate_conversation(
             api_key=os.getenv("TAVUS_API_KEY"),
             replica_id=os.getenv("TAVUS_REPLICA_ID"),
+            persona_id=os.getenv("TAVUS_PERSONA_ID", "pipecat0"),
             custom_greeting='Hello, I am pipecat',
 
         )
@@ -108,7 +115,7 @@ async def main():
 
         @transport.event_handler("on_participant_joined")
         async def on_participant_joined(transport: DailyTransport, participant):
-            if participant.get("info", {}).get("userName", "") == "Ari":
+            if participant.get("info", {}).get("userName", "") == persona_name:
                 transport._client._client.update_subscriptions(
                     participant_settings={
                         participant["id"]: {
