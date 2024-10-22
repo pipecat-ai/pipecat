@@ -19,10 +19,10 @@ from pipecat.processors.aggregators.llm_response import (
 )
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.deepgram import DeepgramSTTService
+# from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.tavus import TavusVideoService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
+# from pipecat.vad.silero import SileroVADAnalyzer
 
 from loguru import logger
 
@@ -41,7 +41,7 @@ async def main():
         room_url, conversation_id = TavusVideoService._initiate_conversation(
             api_key=os.getenv("TAVUS_API_KEY"),
             replica_id=os.getenv("TAVUS_REPLICA_ID"),
-            properties={'greeting': "Hello, I'm pipecat"}
+            properties={"enable_transcription": True}
         )
 
         transport = DailyTransport(
@@ -49,14 +49,14 @@ async def main():
             token=None,
             bot_name="Respond bot",
             params=DailyParams(
-                audio_out_enabled=True,
+                # audio_out_enabled=False,
                 transcription_enabled=True,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
+                # vad_enabled=True,
+                # vad_analyzer=SileroVADAnalyzer(),
             ),
         )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        # stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
@@ -66,10 +66,10 @@ async def main():
         llm = OpenAILLMService(model="gpt-4o-mini")
 
         messages = [
-            # {
-            #     "role": "system",
-            #     "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
-            # },
+            {
+                "role": "system",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            },
         ]
 
         tma_in = LLMUserResponseAggregator(messages)
@@ -84,7 +84,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                stt,  # STT
+                # stt,  # STT
                 tma_in,  # User responses
                 llm,  # LLM
                 tts,  # TTS
@@ -104,12 +104,12 @@ async def main():
             ),
         )
 
-        # @transport.event_handler("on_first_participant_joined")
-        # async def on_first_participant_joined(transport, participant):
-        #     transport.capture_participant_transcription(participant["id"])
-        #     # Kick off the conversation.
-        #     messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        #     await task.queue_frames([LLMMessagesFrame(messages)])
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            transport.capture_participant_transcription(participant["id"])
+            # Kick off the conversation.
+            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+            await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()
 
