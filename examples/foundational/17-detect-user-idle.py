@@ -14,10 +14,7 @@ from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
@@ -65,8 +62,8 @@ async def main():
             },
         ]
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         async def user_idle_callback(user_idle: UserIdleProcessor):
             messages.append(
@@ -83,11 +80,11 @@ async def main():
             [
                 transport.input(),  # Transport user input
                 user_idle,  # Idle user check-in
-                tma_in,  # User responses
+                context_aggregator.user(),
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
-                tma_out,  # Assistant spoken responses
+                context_aggregator.assistant(),
             ]
         )
 

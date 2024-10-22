@@ -5,9 +5,13 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
@@ -15,16 +19,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.assemblyai import AssemblyAISTTService
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.openpipe import OpenPipeLLMService
+from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from runner import configure
-
-from loguru import logger
-import time
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -42,10 +40,14 @@ async def main():
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
-                transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
+        )
+
+        stt = AssemblyAISTTService(
+            api_key=os.getenv("ASSEMBLYAI_API_KEY"),
         )
 
         tts = CartesiaTTSService(
@@ -53,13 +55,7 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        timestamp = int(time.time())
-        llm = OpenPipeLLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            openpipe_api_key=os.getenv("OPENPIPE_API_KEY"),
-            model="gpt-4o",
-            tags={"conversation_id": f"pipecat-{timestamp}"},
-        )
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         messages = [
             {
@@ -74,6 +70,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                stt,  # STT
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
@@ -82,7 +79,7 @@ async def main():
             ]
         )
 
-        task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

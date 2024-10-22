@@ -5,29 +5,24 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
+
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.gladia import GladiaSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -69,18 +64,18 @@ async def main():
             },
         ]
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
                 stt,  # STT
-                tma_in,  # User responses
+                context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
-                tma_out,  # Assistant spoken responses
+                context_aggregator.assistant(),  # Assistant spoken responses
             ]
         )
 
@@ -92,6 +87,11 @@ async def main():
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])
+
+        # Register an event handler to exit the application when the user leaves.
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
 
         runner = PipelineRunner()
 

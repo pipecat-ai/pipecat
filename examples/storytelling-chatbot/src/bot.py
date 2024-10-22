@@ -14,10 +14,7 @@ from pipecat.frames.frames import EndFrame, LLMMessagesFrame, StopTaskFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.services.openai import OpenAILLMService
@@ -82,8 +79,8 @@ async def main(room_url, token=None):
         story_pages = []
 
         # We need aggregators to keep track of user and LLM responses
-        llm_responses = LLMAssistantResponseAggregator(message_history)
-        user_responses = LLMUserResponseAggregator(message_history)
+        context = OpenAILLMContext(message_history)
+        context_aggregator = llm_service.create_context_aggregator(context)
 
         # -------------- Processors ------------- #
 
@@ -126,13 +123,13 @@ async def main(room_url, token=None):
         main_pipeline = Pipeline(
             [
                 transport.input(),
-                user_responses,
+                context_aggregator.user(),
                 llm_service,
                 story_processor,
                 image_processor,
                 tts_service,
                 transport.output(),
-                llm_responses,
+                context_aggregator.assistant(),
             ]
         )
 

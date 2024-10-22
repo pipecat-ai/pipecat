@@ -4,8 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from loguru import logger
+import warnings
 
-logger.warning("DEPRECATED: Package `pipecat.vad` is deprecated, use `pipecat.audio.vad` instead.")
+with warnings.catch_warnings():
+    warnings.simplefilter("always")
+    warnings.warn(
+        "Package `pipecat.vad` is deprecated, use `pipecat.audio.vad` instead", DeprecationWarning
+    )
 
-from ..audio.vad.silero import SileroVAD, SileroVADAnalyzer
+from ..audio.vad.silero import SileroVADAnalyzer
+from ..processors.audio.vad.silero import SileroVAD

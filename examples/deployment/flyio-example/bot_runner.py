@@ -124,7 +124,7 @@ async def spawn_fly_machine(room_url: str, token: str):
     print(f"Machine joined room: {room_url}")
 
 
-@app.post("/start_bot")
+@app.post("/")
 async def start_bot(request: Request) -> JSONResponse:
     try:
         data = await request.json()

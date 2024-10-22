@@ -5,7 +5,31 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.47] - 2024-10-22
+
+### Added
+
+- Added `AssemblyAISTTService` and corresponding foundational examples
+  `07o-interruptible-assemblyai.py` and `13d-assemblyai-transcription.py`.
+
+- Added a foundational example for Gladia transcription:
+  `13c-gladia-transcription.py`
+
+### Changed
+
+- Updated `GladiaSTTService` to use the V2 API.
+
+- Changed `DailyTransport` transcription model to `nova-2-general`.
+
+### Fixed
+
+- Fixed an issue that would cause an import error when importing
+  `SileroVADAnalyzer` from the old package `pipecat.vad.silero`.
+
+- Fixed `enable_usage_metrics` to control LLM/TTS usage metrics separately
+  from `enable_metrics`.
+
+## [0.0.46] - 2024-10-19
 
 ### Added
 
@@ -16,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PlayHTHttpTTSService`.
 
 ### Changed
+
+- Changed `DeepgramSTTService` model to `nova-2-general`.
+
+- Moved `SileroVAD` audio processor to `processors.audio.vad`.
 
 - Module `utils.audio` is now `audio.utils`. A new `resample_audio` function has
   been added.
@@ -30,6 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Renamed `OpenAILLMServiceRealtimeBeta` to `OpenAIRealtimeBetaLLMService` to
   match other services.
+
+### Deprecated
+
+- `LLMUserResponseAggregator` and `LLMAssistantResponseAggregator` are
+  mostly deprecated, use `OpenAILLMContext` instead.
 
 - The `vad` package is now deprecated and `audio.vad` should be used
   instead. The `avd` package will get removed in a future release.

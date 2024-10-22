@@ -21,9 +21,9 @@ classifiers = [
 ]
 dependencies = [
     "aiohttp~=3.10.3",
+    "loguru~=0.7.2",
     "Markdown~=3.7",
     "numpy~=1.26.4",
-    "loguru~=0.7.2",
     "Pillow~=10.4.0",
     "protobuf~=4.25.4",
     "pydantic~=2.8.2",
@@ -37,6 +37,7 @@ Website = "https://pipecat.ai"
 
 [project.optional-dependencies]
 anthropic = [ "anthropic~=0.34.0" ]
+assemblyai = [ "assemblyai~=0.34.0" ]
 aws = [ "boto3~=1.35.27" ]
 azure = [ "azure-cognitiveservices-speech~=1.40.0" ]
 canonical = [ "aiofiles~=24.1.0" ]
