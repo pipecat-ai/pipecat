@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added audio filter `NoisereduceFilter`.
+
 - Introduce input transport audio filters (`BaseAudioFilter`). Audio filters can
   be used to remove background noises before audio is sent to VAD.
 
