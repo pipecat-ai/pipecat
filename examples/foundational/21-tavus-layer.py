@@ -37,15 +37,15 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        # (room_url, token) = await configure(session)
-
         # get persona, look up persona_name, set this as the bot name to ignore
-        persona_name = TavusVideoService._get_persona_name(
+        persona_name = await TavusVideoService.get_persona_name(
+            session=session,
             api_key=os.getenv("TAVUS_API_KEY"),
             persona_id=os.getenv("TAVUS_PERSONA_ID", "pipecat0"),
         )
 
-        room_url, conversation_id = TavusVideoService._initiate_conversation(
+        room_url, conversation_id = await TavusVideoService.initiate_conversation(
+            session=session,
             api_key=os.getenv("TAVUS_API_KEY"),
             replica_id=os.getenv("TAVUS_REPLICA_ID"),
             persona_id=os.getenv("TAVUS_PERSONA_ID", "pipecat0"),
@@ -83,12 +83,7 @@ async def main():
 
         tma_in = LLMUserResponseAggregator(messages)
         tma_out = LLMAssistantResponseAggregator(messages)
-
-        tavus = TavusVideoService(
-            conversation_id=conversation_id,
-            client=transport._client,
-            params=transport._params
-        )
+        tavus = TavusVideoService(conversation_id=conversation_id)
 
         pipeline = Pipeline(
             [
@@ -98,7 +93,7 @@ async def main():
                 llm,  # LLM
                 tts,  # TTS
                 tavus, # Tavus output layer
-                # transport.output(),  # Transport bot output
+                transport.output(),  # Transport bot output
                 tma_out,  # Assistant spoken responses
             ]
         )
@@ -128,8 +123,8 @@ async def main():
         async def on_first_participant_joined(transport: DailyTransport, participant: dict[str, Any]) -> None:
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([LLMMessagesFrame(messages)])
+            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+            await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()
 
