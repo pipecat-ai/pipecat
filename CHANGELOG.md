@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated `GladiaSTTService` to use the V2 API.
 
+- Changed `DailyTransport` transcription model to `nova-2-general`.
+
 ### Fixed
 
 - Fixed `enable_usage_metrics` to control LLM/TTS usage metrics separately
@@ -35,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PlayHTHttpTTSService`.
 
 ### Changed
+
+- Changed `DeepgramSTTService` model to `nova-2-general`.
 
 - Moved `SileroVAD` audio processor to `processors.audio.vad`.
 

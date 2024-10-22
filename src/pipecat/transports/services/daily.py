@@ -6,6 +6,7 @@
 
 import asyncio
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, Optional
@@ -20,7 +21,7 @@ from daily import (
     VirtualSpeakerDevice,
 )
 from loguru import logger
-from pydantic.main import BaseModel
+from pydantic import BaseModel, model_validator
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
@@ -93,14 +94,22 @@ class DailyDialinSettings(BaseModel):
 
 class DailyTranscriptionSettings(BaseModel):
     language: str = "en"
-    tier: str = "nova"
-    model: str = "2-conversationalai"
+    tier: Optional[str] = None
+    model: str = "nova-2-general"
     profanity_filter: bool = True
     redact: bool = False
     endpointing: bool = True
     punctuate: bool = True
     includeRawResponse: bool = True
     extra: Mapping[str, Any] = {"interim_results": True}
+
+    @model_validator(mode="before")
+    def check_deprecated_fields(cls, values):
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            if "tier" in values:
+                warnings.warn("'tier' is deprecated, use 'model' instead", DeprecationWarning)
+        return values
 
 
 class DailyParams(TransportParams):

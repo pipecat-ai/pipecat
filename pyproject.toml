@@ -21,9 +21,9 @@ classifiers = [
 ]
 dependencies = [
     "aiohttp~=3.10.3",
+    "loguru~=0.7.2",
     "Markdown~=3.7",
     "numpy~=1.26.4",
-    "loguru~=0.7.2",
     "Pillow~=10.4.0",
     "protobuf~=4.25.4",
     "pydantic~=2.8.2",
