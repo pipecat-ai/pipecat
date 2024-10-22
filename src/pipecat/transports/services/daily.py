@@ -478,7 +478,7 @@ class DailyTransportClient(EventHandler):
         color_format: str = "RGB",
     ):
         # Only enable camera subscription on this participant
-        self._client.update_subscriptions(
+        await self.update_subscriptions(
             participant_settings={participant_id: {"media": "subscribed"}}
         )
 
@@ -490,6 +490,18 @@ class DailyTransportClient(EventHandler):
             video_source=video_source,
             color_format=color_format,
         )
+
+    async def update_subscriptions(self, participant_settings=None, profile_settings=None):
+        if not self._joined or self._leaving:
+            return
+
+        future = self._loop.create_future()
+        self._client.update_subscriptions(
+            participant_settings=participant_settings,
+            profile_settings=profile_settings,
+            completion=completion_callback(future),
+        )
+        await future
 
     #
     #
@@ -900,6 +912,11 @@ class DailyTransport(BaseTransport):
             self._input.capture_participant_video(
                 participant_id, framerate, video_source, color_format
             )
+
+    async def update_subscriptions(self, participant_settings=None, profile_settings=None):
+        await self._client.update_subscriptions(
+            participant_settings=participant_settings, profile_settings=profile_settings
+        )
 
     async def _on_joined(self, data):
         await self._call_event_handler("on_joined", data)
