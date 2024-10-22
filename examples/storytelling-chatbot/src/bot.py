@@ -102,7 +102,6 @@ async def main(room_url, token=None):
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             logger.debug("Participant joined, storytime commence!")
-            transport.capture_participant_transcription(participant["id"])
             await intro_task.queue_frames(
                 [
                     images["book1"],

@@ -141,7 +141,6 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             messages.append(
                 {

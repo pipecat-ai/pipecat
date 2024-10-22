@@ -352,7 +352,6 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
             print(f"Context is: {context}")
             await task.queue_frames([OpenAILLMContextFrame(context)])
 

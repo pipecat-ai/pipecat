@@ -85,7 +85,6 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             await tts.say("Hi there! Feel free to ask me what I see.")
             transport.capture_participant_video(participant["id"], framerate=0)
-            transport.capture_participant_transcription(participant["id"])
             image_requester.set_participant_id(participant["id"])
 
         pipeline = Pipeline(

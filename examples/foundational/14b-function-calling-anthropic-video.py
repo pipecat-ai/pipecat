@@ -160,7 +160,6 @@ If you need to use a tool, simply use the tool. Do not tell the user the tool yo
         async def on_first_participant_joined(transport, participant):
             global video_participant_id
             video_participant_id = participant["id"]
-            transport.capture_participant_transcription(video_participant_id)
             transport.capture_participant_video(video_participant_id, framerate=0)
             # Kick off the conversation.
             await task.queue_frames([context_aggregator.user().get_context_frame()])

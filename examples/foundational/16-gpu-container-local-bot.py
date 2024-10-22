@@ -88,12 +88,6 @@ async def main():
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
 
-        # When a participant joins, start transcription for that participant so the
-        # bot can "hear" and respond to them.
-        @transport.event_handler("on_participant_joined")
-        async def on_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
-
         # When the first participant joins, the bot should introduce itself.
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
