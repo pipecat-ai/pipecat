@@ -108,7 +108,9 @@ class DailyTranscriptionSettings(BaseModel):
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             if "tier" in values:
-                warnings.warn("'tier' is deprecated, use 'model' instead", DeprecationWarning)
+                warnings.warn(
+                    "Field 'tier' is deprecated, use 'model' instead.", DeprecationWarning
+                )
         return values
 
 
