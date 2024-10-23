@@ -34,7 +34,6 @@ class TavusVideoService(FrameProcessor):
     ) -> None:
         super().__init__(**kwargs)
         self._conversation_id = conversation_id
-        self._tavus_audio_buffer = b""
 
     def can_generate_metrics(self) -> bool:
         return True
