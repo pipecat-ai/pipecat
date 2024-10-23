@@ -23,7 +23,7 @@ from pipecat.services.openai import OpenAILLMService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.tavus import TavusVideoService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 
 from loguru import logger
 
@@ -113,7 +113,8 @@ async def main():
             ) -> None:
                 # Ignore the Tavus replica's microphone
                 if participant.get("info", {}).get("userName", "") == persona_name:
-                    await transport._client._client.update_subscriptions(
+                    logger.debug(f"Ignoring {participant['id']}'s microphone")
+                    transport._client._client.update_subscriptions(
                         participant_settings={
                             participant["id"]: {
                                 "media": {"microphone": "unsubscribed"},
@@ -121,17 +122,25 @@ async def main():
                         }
                     )
 
-            @transport.event_handler("on_first_participant_joined")
-            async def on_first_participant_joined(
-                transport: DailyTransport, participant: dict[str, Any]
-            ) -> None:
-                transport.capture_participant_transcription(participant["id"])
-                # Kick off the conversation.
                 if participant.get("info", {}).get("userName", "") != persona_name:
+                    # Kick off the conversation.
                     messages.append(
                         {"role": "system", "content": "Please introduce yourself to the user."}
                     )
                     await task.queue_frames([LLMMessagesFrame(messages)])
+
+            @transport.event_handler("on_first_participant_joined")
+            async def on_first_participant_joined(
+                transport: DailyTransport, participant: dict[str, Any]
+            ) -> None:
+                pass
+                # transport.capture_participant_transcription(participant["id"])
+
+                # if participant.get("info", {}).get("userName", "") != persona_name:
+                #     messages.append(
+                #         {"role": "system", "content": "Please introduce yourself to the user."}
+                #     )
+                #     await task.queue_frames([LLMMessagesFrame(messages)])
 
             runner = PipelineRunner()
 
