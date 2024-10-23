@@ -58,6 +58,19 @@ class TavusVideoService(FrameProcessor):
         return response_json["persona_name"]
 
     @classmethod
+    async def end_conversation(
+        cls,
+        *,
+        session: aiohttp.ClientSession,
+        api_key: str,
+        conversation_id: str,
+    ):
+        url = f"https://tavusapi.com/v2/conversations/{conversation_id}/end"
+        headers = {"Content-Type": "application/json", "x-api-key": api_key}
+        async with session.post(url, headers=headers) as r:
+            r.raise_for_status()
+
+    @classmethod
     async def initiate_conversation(
         cls,
         *,
@@ -65,14 +78,14 @@ class TavusVideoService(FrameProcessor):
         api_key: str,
         replica_id: str,
         persona_id: str = "pipecat0",
-        custom_greeting: str = {},
+        # custom_greeting: str = {},
     ) -> tuple[str, str]:
         url = "https://tavusapi.com/v2/conversations"
         headers = {"Content-Type": "application/json", "x-api-key": api_key}
         payload = {
             "replica_id": replica_id,
             "persona_id": persona_id,
-            "custom_greeting": custom_greeting,
+            # "custom_greeting": custom_greeting,
         }
         async with session.post(url, headers=headers, json=payload) as r:
             r.raise_for_status()
