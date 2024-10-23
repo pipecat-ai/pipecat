@@ -67,7 +67,7 @@ async def main():
 
             tts = CartesiaTTSService(
                 api_key=os.getenv("CARTESIA_API_KEY"),
-                voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+                voice_id="a167e0f3-df7e-4d52-a9c3-f949145efdab",
             )
 
             llm = OpenAILLMService(model="gpt-4o-mini")
