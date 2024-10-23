@@ -38,7 +38,9 @@ ENDOFSENTENCES_PATTERN_STR = r"""
 ENDOFSENTENCES_PATTERN = re.compile(ENDOFSENTENCES_PATTERN_STR, re.VERBOSE)
 
 
-def find_endofsentences(text: str) -> list[int]:
-    end_indices = [match.end() for match in ENDOFSENTENCES_PATTERN.finditer(text)]
+def find_endofsentences(text: str) -> int:
+    end_indices = [
+        match.end() for match in ENDOFSENTENCES_PATTERN.finditer(text.strip())
+    ]
     # debug print
     return end_indices[-1] if end_indices else 0

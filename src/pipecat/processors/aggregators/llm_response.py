@@ -179,8 +179,8 @@ class LLMResponseAggregator(FrameProcessor):
             text = self._aggregation
             eos_end_marker = find_endofsentences(text)
             if eos_end_marker:
-                self._aggregation = text[eos_end_marker:]
-                text = text[:eos_end_marker]
+                self._aggregation = text[eos_end_marker:].lstrip(".")
+                text = text[:eos_end_marker].strip()
             else:
                 self._aggregation = ""
 
