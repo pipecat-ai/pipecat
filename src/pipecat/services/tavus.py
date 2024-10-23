@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     TransportMessageUrgentFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    StartInterruptionFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -126,8 +127,20 @@ class TavusVideoService(FrameProcessor):
             await self._flush_audio_buffer(done=True)
             await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
+        elif isinstance(frame, StartInterruptionFrame):
+            await self._send_interrupt_message()
         else:
             await self.push_frame(frame, direction)
+
+    async def _send_interrupt_message(self) -> None:
+        transport_frame = TransportMessageUrgentFrame(
+            message={
+                "message_type": "conversation",
+                "event_type": "conversation.interrupt",
+                "conversation_id": self._conversation_id,
+            }
+        )
+        await self.push_frame(transport_frame)
 
     async def _send_audio_message(self, audio_base64: str, done: bool) -> None:
         transport_frame = TransportMessageUrgentFrame(
