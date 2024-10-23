@@ -8,6 +8,7 @@
 """This module implements Tavus as a sink transport layer"""
 
 import aiohttp
+import base64
 
 from pipecat.frames.frames import (
     Frame,
@@ -19,7 +20,6 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from loguru import logger
-import base64
 
 MIN_AUDIO_BUFFER_SIZE = int(16000 * 2 * 0.05)  # 50ms
 
