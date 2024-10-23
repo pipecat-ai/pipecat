@@ -50,7 +50,6 @@ async def main():
                 api_key=os.getenv("TAVUS_API_KEY"),
                 replica_id=os.getenv("TAVUS_REPLICA_ID"),
                 persona_id=os.getenv("TAVUS_PERSONA_ID", "pipecat0"),
-                # custom_greeting="Hello, I am pipecat",
             )
 
             transport = DailyTransport(
@@ -128,19 +127,6 @@ async def main():
                         {"role": "system", "content": "Please introduce yourself to the user."}
                     )
                     await task.queue_frames([LLMMessagesFrame(messages)])
-
-            @transport.event_handler("on_first_participant_joined")
-            async def on_first_participant_joined(
-                transport: DailyTransport, participant: dict[str, Any]
-            ) -> None:
-                pass
-                # transport.capture_participant_transcription(participant["id"])
-
-                # if participant.get("info", {}).get("userName", "") != persona_name:
-                #     messages.append(
-                #         {"role": "system", "content": "Please introduce yourself to the user."}
-                #     )
-                #     await task.queue_frames([LLMMessagesFrame(messages)])
 
             runner = PipelineRunner()
 
