@@ -85,14 +85,14 @@ class TavusVideoService(FrameProcessor):
         """Encodes audio to base64 and sends it to Tavus"""
         self._tavus_audio_buffer += audio
         if len(self._tavus_audio_buffer) >= MIN_AUDIO_BUFFER_SIZE:
-            await self._flush_audio_buffer()
+            await self._flush_audio_buffer(done=False)
 
-    async def _flush_audio_buffer(self) -> None:
+    async def _flush_audio_buffer(self, done: bool = False) -> None:
         """Flushes the audio buffer"""
         if len(self._tavus_audio_buffer) > 0:
             audio_base64 = base64.b64encode(self._tavus_audio_buffer).decode("utf-8")
             logger.debug(f"TavusVideoService sending {len(audio_base64)} bytes")
-            await self._send_audio_message(audio_base64)
+            await self._send_audio_message(audio_base64, done)
             self._tavus_audio_buffer = b""
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -104,13 +104,13 @@ class TavusVideoService(FrameProcessor):
         elif isinstance(frame, TTSAudioRawFrame):
             await self._encode_audio_and_send(frame.audio)
         elif isinstance(frame, TTSStoppedFrame):
-            await self._flush_audio_buffer()
+            await self._flush_audio_buffer(done=True)
             await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
         else:
             await self.push_frame(frame, direction)
 
-    async def _send_audio_message(self, audio_base64: str) -> None:
+    async def _send_audio_message(self, audio_base64: str, done: bool) -> None:
         transport_frame = TransportMessageUrgentFrame(
             message={
                 "message_type": "conversation",
@@ -120,6 +120,7 @@ class TavusVideoService(FrameProcessor):
                     "type": "audio",
                     "inference_id": self._current_idx_str,
                     "audio": audio_base64,
+                    "done": done,
                 },
             }
         )
