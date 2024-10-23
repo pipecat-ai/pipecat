@@ -7,7 +7,6 @@
 
 """This module implements Tavus as a sink transport layer"""
 
-import base64
 import aiohttp
 
 from pipecat.frames.frames import (
@@ -20,8 +19,9 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from loguru import logger
+import base64
 
-MIN_AUDIO_BUFFER_SIZE = int(16000 * 2 * 0.5)  # 0.5 seconds
+MIN_AUDIO_BUFFER_SIZE = int(16000 * 2 * 0.05)  # 50ms
 
 
 class TavusVideoService(FrameProcessor):
@@ -80,6 +80,12 @@ class TavusVideoService(FrameProcessor):
 
         logger.debug(f"TavusVideoService joined {response_json['conversation_url']}")
         return response_json["conversation_url"], response_json["conversation_id"]
+
+    # async def _encode_audio_and_send_no_buffer(self, audio: bytes) -> None:
+    #     """Encodes audio to base64 and sends it to Tavus"""
+    #     audio_base64 = base64.b64encode(audio).decode("utf-8")
+    #     logger.debug(f"TavusVideoService sending {len(audio_base64)} bytes")
+    #     await self._send_audio_message(audio_base64, done=False)
 
     async def _encode_audio_and_send(self, audio: bytes) -> None:
         """Encodes audio to base64 and sends it to Tavus"""

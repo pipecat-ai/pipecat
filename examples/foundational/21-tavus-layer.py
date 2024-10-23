@@ -57,8 +57,7 @@ async def main():
             token=None,
             bot_name="Pipecat bot",
             params=DailyParams(
-                audio_out_enabled=True,
-                transcription_enabled=True,
+                # transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True,
@@ -127,8 +126,11 @@ async def main():
         ) -> None:
             transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            if participant.get("info", {}).get("userName", "") != persona_name:
+                messages.append(
+                    {"role": "system", "content": "Please introduce yourself to the user."}
+                )
+                await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()
 
