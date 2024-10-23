@@ -21,7 +21,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from loguru import logger
 
-MIN_AUDIO_BUFFER_SIZE = int(16000 * 2 * 0.5)  # 0.5 seconds
+MIN_AUDIO_BUFFER_SIZE = int(16000 * 2 * 0.05)  # 0.05 seconds
 
 
 class TavusVideoService(FrameProcessor):

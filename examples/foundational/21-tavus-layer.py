@@ -113,7 +113,7 @@ async def main():
             transport: DailyTransport, participant: dict[str, Any]
         ) -> None:
             if participant.get("info", {}).get("userName", "") == persona_name:
-                await transport.update_subscriptions(
+                await transport._client._client.update_subscriptions(
                     participant_settings={
                         participant["id"]: {
                             "media": {"microphone": "unsubscribed"},
