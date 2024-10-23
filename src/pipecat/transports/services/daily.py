@@ -138,6 +138,7 @@ class DailyCallbacks(BaseModel):
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_transcription_message: Callable[[Mapping[str, Any]], Awaitable[None]]
 
 
 def completion_callback(future):
@@ -187,7 +188,8 @@ class DailyTransportClient(EventHandler):
 
         self._participant_id: str = ""
         self._video_renderers = {}
-        self._transcription_renderers = {}
+        self._transcription_ids = []
+        self._transcription_status = None
         self._other_participant_has_joined = False
 
         self._joined = False
@@ -343,6 +345,7 @@ class DailyTransportClient(EventHandler):
         error = await future
         if error:
             logger.error(f"Unable to start transcription: {error}")
+            return
 
     async def _join(self):
         future = self._loop.create_future()
@@ -463,11 +466,13 @@ class DailyTransportClient(EventHandler):
     def stop_recording(self, stream_id):
         self._client.stop_recording(stream_id)
 
-    def capture_participant_transcription(self, participant_id: str, callback: Callable):
+    def capture_participant_transcription(self, participant_id: str):
         if not self._params.transcription_enabled:
             return
 
-        self._transcription_renderers[participant_id] = callback
+        self._transcription_ids.append(participant_id)
+        if self._joined and self._transcription_status:
+            self.update_transcription(self._transcription_ids)
 
     def capture_participant_video(
         self,
@@ -490,6 +495,9 @@ class DailyTransportClient(EventHandler):
             video_source=video_source,
             color_format=color_format,
         )
+
+    def update_transcription(self, participants=None, instance_id=None):
+        self._client.update_transcription(participants, instance_id)
 
     async def update_subscriptions(self, participant_settings=None, profile_settings=None):
         if not self._joined or self._leaving:
@@ -551,23 +559,19 @@ class DailyTransportClient(EventHandler):
     def on_participant_updated(self, participant):
         self._call_async_callback(self._callbacks.on_participant_updated, participant)
 
-    def on_transcription_message(self, message: Mapping[str, Any]):
-        participant_id = ""
-        if "participantId" in message:
-            participant_id = message["participantId"]
+    def on_transcription_started(self, status):
+        logger.debug(f"Transcription started: {status}")
+        self._transcription_status = status
+        self.update_transcription(self._transcription_ids)
 
-        if participant_id in self._transcription_renderers:
-            callback = self._transcription_renderers[participant_id]
-            self._call_async_callback(callback, participant_id, message)
+    def on_transcription_stopped(self, stopped_by, stopped_by_error):
+        logger.debug("Transcription stopped")
 
     def on_transcription_error(self, message):
         logger.error(f"Transcription error: {message}")
 
-    def on_transcription_started(self, status):
-        logger.debug(f"Transcription started: {status}")
-
-    def on_transcription_stopped(self, stopped_by, stopped_by_error):
-        logger.debug("Transcription stopped")
+    def on_transcription_message(self, message):
+        self._call_async_callback(self._callbacks.on_transcription_message, message)
 
     #
     # Daily (CallClient callbacks)
@@ -802,6 +806,7 @@ class DailyTransport(BaseTransport):
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
+            on_transcription_message=self._on_transcription_message,
         )
         self._params = params
 
@@ -877,9 +882,7 @@ class DailyTransport(BaseTransport):
         self._client.stop_recording(stream_id)
 
     def capture_participant_transcription(self, participant_id: str):
-        self._client.capture_participant_transcription(
-            participant_id, self._on_transcription_message
-        )
+        self._client.capture_participant_transcription(participant_id)
 
     def capture_participant_video(
         self,
@@ -983,7 +986,13 @@ class DailyTransport(BaseTransport):
     async def _on_first_participant_joined(self, participant):
         await self._call_event_handler("on_first_participant_joined", participant)
 
-    async def _on_transcription_message(self, participant_id, message):
+    async def _on_transcription_message(self, message):
+        participant_id = ""
+        if "participantId" in message:
+            participant_id = message["participantId"]
+        if not participant_id:
+            return
+
         text = message["text"]
         timestamp = message["timestamp"]
         is_final = message["rawResponse"]["is_final"]
