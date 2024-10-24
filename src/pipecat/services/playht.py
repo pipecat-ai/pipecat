@@ -115,7 +115,7 @@ class PlayHTTTSService(TTSService):
         user_id: str,
         voice_url: str,
         voice_engine: str = "PlayHT3.0-mini",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         output_format: str = "wav",
         params: InputParams = InputParams(),
         **kwargs,
@@ -310,7 +310,7 @@ class PlayHTHttpTTSService(TTSService):
         user_id: str,
         voice_url: str,
         voice_engine: str = "PlayHT3.0-mini",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         params: InputParams = InputParams(),
         **kwargs,
     ):

@@ -63,6 +63,7 @@ async def main():
             "Test",
             DailyParams(
                 audio_in_enabled=True,
+                audio_in_sample_rate=24000,
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_is_live=True,

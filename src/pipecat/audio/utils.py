@@ -11,6 +11,8 @@ from scipy import signal
 
 
 def resample_audio(audio: bytes, original_rate: int, target_rate: int) -> bytes:
+    if original_rate == target_rate:
+        return audio
     audio_data = np.frombuffer(audio, dtype=np.int16)
     num_samples = int(len(audio) * target_rate / original_rate)
     resampled_audio = signal.resample(audio_data, num_samples)

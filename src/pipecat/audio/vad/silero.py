@@ -52,7 +52,7 @@ class SileroOnnxModel:
 
         if sr not in self.sample_rates:
             raise ValueError(
-                f"Supported sampling rates: {self.sample_rates} (or multiply of 16000)"
+                f"Supported sampling rates: {self.sample_rates} (or multiple of 16000)"
             )
         if sr / np.shape(x)[1] > 31.25:
             raise ValueError("Input audio chunk is too short")

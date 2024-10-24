@@ -80,7 +80,7 @@ class CartesiaTTSService(WordTTSService):
         cartesia_version: str = "2024-06-10",
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str = "sonic-english",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: InputParams = InputParams(),
@@ -99,6 +99,7 @@ class CartesiaTTSService(WordTTSService):
         super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,
+            sample_rate=sample_rate,
             **kwargs,
         )
 
@@ -298,13 +299,13 @@ class CartesiaHttpTTSService(TTSService):
         voice_id: str,
         model: str = "sonic-english",
         base_url: str = "https://api.cartesia.ai",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._settings = {
