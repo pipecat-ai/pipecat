@@ -36,6 +36,8 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
+ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
+
 
 def sample_rate_from_output_format(output_format: str) -> int:
     match output_format:
@@ -97,7 +99,7 @@ class ElevenLabsTTSService(WordTTSService):
         voice_id: str,
         model: str = "eleven_turbo_v2_5",
         url: str = "wss://api.elevenlabs.io",
-        output_format: Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"] = "pcm_16000",
+        output_format: ElevenLabsOutputFormat = "pcm_16000",
         params: InputParams = InputParams(),
         **kwargs,
     ):
