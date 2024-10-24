@@ -89,7 +89,21 @@ async def main():
                             },
                             "required": ["location", "format"],
                         },
-                    }
+                    },
+                    {
+                        "name": "get_image",
+                        "description": "Get and image from the camera or video stream.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "question": {
+                                    "type": "string",
+                                    "description": "The question to to use when running inference on the acquired image.",
+                                },
+                            },
+                            "required": ["question"],
+                        },
+                    },
                 ]
             }
         ]
