@@ -70,6 +70,8 @@ class OpenAILLMContext:
             context.add_message(message)
         return context
 
+    # todo: deprecate from_image_frame. It's only used to create a single-use
+    # context, which isn't useful for most real-world applications.
     @staticmethod
     def from_image_frame(frame: VisionImageRawFrame) -> "OpenAILLMContext":
         """
@@ -77,6 +79,10 @@ class OpenAILLMContext:
         expects images to be base64 encoded, but other vision models may not.
         So we'll store the image as bytes and do the base64 encoding as needed
         in the LLM service.
+
+        NOTE: the above only applies to the deprecated use of this method. The
+        add_image_frame_message() below does the base64 encoding as expected
+        in the OpenAI format.
         """
         context = OpenAILLMContext()
         buffer = io.BytesIO()

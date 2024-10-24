@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import base64
 from dataclasses import dataclass
 import json
 import io
@@ -56,7 +57,9 @@ except ModuleNotFoundError as e:
 class GoogleUserContextAggregator(OpenAIUserContextAggregator):
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:
-            self._context.add_message({"role": "user", "parts": [glm.Part(text=self._aggregation)]})
+            self._context.add_message(
+                glm.Content(role="user", parts=[glm.Part(text=self._aggregation)])
+            )
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
@@ -88,35 +91,37 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
                 if frame.result:
                     logger.debug(f"FunctionCallResultFrame result: {frame.arguments}")
                     self._context.add_message(
-                        {
-                            "role": "model",
-                            "parts": [
+                        glm.Content(
+                            role="model",
+                            parts=[
                                 glm.Part(
                                     function_call=glm.FunctionCall(
                                         name=frame.function_name, args=frame.arguments
                                     )
                                 )
                             ],
-                        }
+                        )
                     )
                     response = frame.result
                     if isinstance(response, str):
                         response = {"response": response}
                     self._context.add_message(
-                        {
-                            "role": "user",
-                            "parts": [
+                        glm.Content(
+                            role="user",
+                            parts=[
                                 glm.Part(
                                     function_response=glm.FunctionResponse(
                                         name=frame.function_name, response=response
                                     )
                                 )
                             ],
-                        }
+                        )
                     )
                     run_llm = not bool(self._function_calls_in_progress)
             else:
-                self._context.add_message({"role": "model", "parts": [glm.Part(text=aggregation)]})
+                self._context.add_message(
+                    glm.Content(role="model", parts=[glm.Part(text=aggregation)])
+                )
 
             if self._pending_image_frame_message:
                 frame = self._pending_image_frame_message
@@ -160,21 +165,70 @@ class GoogleLLMContext(OpenAILLMContext):
             obj._restructure_from_openai_messages()
         return obj
 
+    def set_messages(self, messages: List):
+        self._messages[:] = messages
+        self._restructure_from_openai_messages()
+
+    def get_messages_for_logging(self):
+        msgs = []
+        for message in self.messages:
+            obj = glm.Content.to_dict(message)
+            try:
+                if "parts" in obj:
+                    for part in obj["parts"]:
+                        if "inline_data" in part:
+                            part["inline_data"]["data"] = "..."
+            except Exception as e:
+                logger.debug(f"Error: {e}")
+            msgs.append(obj)
+        return msgs
+
     def from_standard_message(self, message):
         role = message["role"]
-        content = message["content"]
+        content = message.get("content", [])
         if role == "system":
             role = "user"
         elif role == "assistant":
             role = "model"
 
         parts = []
-        if isinstance(content, str):
+        if message.get("tool_calls"):
+            for tc in message["tool_calls"]:
+                parts.append(
+                    glm.Part(
+                        function_call=glm.FunctionCall(
+                            name=tc["function"]["name"],
+                            args=json.loads(tc["function"]["arguments"]),
+                        )
+                    )
+                )
+        elif role == "tool":
+            role = "model"
+            parts.append(
+                glm.Part(
+                    function_response=glm.FunctionResponse(
+                        name="tool_call_result",  # seems to work to hard-code the same name every time
+                        response=json.loads(message["content"]),
+                    )
+                )
+            )
+        elif isinstance(content, str):
             parts.append(glm.Part(text=content))
         elif isinstance(content, list):
-            logger.debug("!!!NEED TO IMPL CONTENT LIST")
+            for c in content:
+                if c["type"] == "text":
+                    parts.append(glm.Part(text=c["text"]))
+                elif c["type"] == "image_url":
+                    parts.append(
+                        glm.Part(
+                            inline_data=glm.Blob(
+                                mime_type="image/jpeg",
+                                data=base64.b64decode(c["image_url"]["url"].split(",")[1]),
+                            )
+                        )
+                    )
 
-        message = {"role": role, "parts": parts}
+        message = glm.Content(role=role, parts=parts)
         return message
 
     def add_image_frame_message(
@@ -189,10 +243,58 @@ class GoogleLLMContext(OpenAILLMContext):
         parts.append(
             glm.Part(inline_data=glm.Blob(mime_type="image/jpeg", data=buffer.getvalue())),
         )
-        self.add_message({"role": "user", "parts": parts})
+        self.add_message(glm.Content(role="user", parts=parts))
+
+    def to_standard_messages(self, obj) -> list:
+        msg = {"role": obj.role, "content": []}
+        if msg["role"] == "model":
+            msg["role"] = "assistant"
+
+        for part in obj.parts:
+            if part.text:
+                msg["content"].append({"type": "text", "text": part.text})
+            elif part.inline_data:
+                encoded = base64.b64encode(part.inline_data.data).decode("utf-8")
+                msg["content"].append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{part.inline_data.mime_type};base64,{encoded}"},
+                    }
+                )
+            elif part.function_call:
+                args = type(part.function_call).to_dict(part.function_call).get("args", {})
+                msg["tool_calls"] = [
+                    {
+                        "id": part.function_call.name,
+                        "type": "function",
+                        "function": {
+                            "name": part.function_call.name,
+                            "arguments": json.dumps(args),
+                        },
+                    }
+                ]
+
+            elif part.function_response:
+                msg["role"] = "tool"
+                resp = (
+                    type(part.function_response).to_dict(part.function_response).get("response", {})
+                )
+                msg["tool_call_id"] = part.function_response.name
+                msg["content"] = json.dumps(resp)
+
+        # there might be no content parts for tool_calls messages
+        if not msg["content"]:
+            del msg["content"]
+        return [msg]
 
     def _restructure_from_openai_messages(self):
-        self._messages[:] = [self.from_standard_message(m) for m in self._messages]
+        # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
+        try:
+            self._messages[:] = [self.from_standard_message(m) for m in self._messages]
+        except Exception as e:
+            logger.error(f"Error mapping messages: {e}")
+        # iterate over messages and remove any messages that have an empty content list
+        self._messages = [m for m in self._messages if m.parts]
 
 
 class GoogleLLMService(LLMService):
@@ -248,7 +350,7 @@ class GoogleLLMService(LLMService):
     async def _process_context(self, context: OpenAILLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
         try:
-            logger.debug(f"Generating chat: {context.messages}")
+            logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
 
             # todo: move this into the new context code structure, convert from openai context one time
             # todo: add system instructions
