@@ -935,7 +935,9 @@ class DailyTransport(BaseTransport):
             url = f"{self._params.api_url}/dialin/pinlessCallUpdate"
 
             try:
-                async with session.post(url, headers=headers, json=data, timeout=10) as r:
+                async with session.post(
+                    url, headers=headers, json=data, timeout=aiohttp.ClientTimeout(total=10)
+                ) as r:
                     if r.status != 200:
                         text = await r.text()
                         logger.error(
