@@ -6,11 +6,10 @@
 
 import asyncio
 import base64
-from dataclasses import dataclass
-import json
 import io
+import json
+from dataclasses import dataclass
 from typing import AsyncGenerator, List, Literal, Optional
-
 
 from loguru import logger
 from PIL import Image
@@ -29,16 +28,17 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     VisionImageRawFrame,
 )
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import LLMService, TTSService
 from pipecat.services.openai import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService, TTSService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -361,6 +361,14 @@ class GoogleLLMService(LLMService):
 
             tools = context.tools if context.tools else []
             response = self._client.generate_content(contents=messages, tools=tools, stream=True)
+
+            tokens = LLMTokenUsage(
+                prompt_tokens=response.usage_metadata.prompt_token_count,
+                completion_tokens=response.usage_metadata.candidates_token_count,
+                total_tokens=response.usage_metadata.total_token_count,
+            )
+
+            await self.start_llm_usage_metrics(tokens)
 
             await self.stop_ttfb_metrics()
 
