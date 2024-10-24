@@ -20,11 +20,13 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService
@@ -120,7 +122,11 @@ class PlayHTTTSService(TTSService):
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            block_on_frames=(TTSTextFrame, LLMFullResponseEndFrame),
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._user_id = user_id
@@ -244,6 +250,7 @@ class PlayHTTTSService(TTSService):
                         msg = json.loads(message)
                         if "request_id" in msg:
                             await self.push_frame(TTSStoppedFrame())
+                            await self.resume_processing_frames()
                             header_received = False  # Reset for the next audio stream
                         elif "error" in msg:
                             logger.error(f"{self} error: {msg}")
@@ -283,6 +290,7 @@ class PlayHTTTSService(TTSService):
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
+                await self.resume_processing_frames()
                 await self._disconnect()
                 await self._connect()
                 return

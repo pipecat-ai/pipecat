@@ -8,6 +8,7 @@ import asyncio
 import inspect
 
 from enum import Enum
+from typing import Awaitable, Callable, Optional
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
@@ -36,6 +37,7 @@ class FrameProcessor:
         self,
         *,
         name: str | None = None,
+        block_on_frames: tuple = (),
         metrics: FrameProcessorMetrics | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
         **kwargs,
@@ -61,6 +63,13 @@ class FrameProcessor:
         # Metrics
         self._metrics = metrics or FrameProcessorMetrics()
         self._metrics.set_processor_name(self.name)
+
+        # Processors have an input queue. The input queue can be processed
+        # immediately (default) or it can be processed when the processor asks
+        # to process a new frame (via process_next_frame()).
+        self._block_on_frames = block_on_frames
+        self._should_queue_input_frames = False
+        self.__create_input_task()
 
         # Every processor in Pipecat should only output frames from a single
         # task. This avoid problems like audio overlapping. System frames are
@@ -145,6 +154,29 @@ class FrameProcessor:
     def get_clock(self) -> BaseClock:
         return self._clock
 
+    async def queue_frame(
+        self,
+        frame: Frame,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+        callback: Optional[
+            Callable[["FrameProcessor", Frame, FrameDirection], Awaitable[None]]
+        ] = None,
+    ):
+        if self._should_queue_input_frames:
+            await self.__input_queue.put((frame, direction, callback))
+        else:
+            await self.process_frame(frame, direction)
+
+        if isinstance(frame, self._block_on_frames):
+            self._should_queue_input_frames = True
+
+    async def pause_processing_frames(self):
+        self._should_queue_input_frames = True
+
+    async def resume_processing_frames(self):
+        self.__input_event.set()
+        self._should_queue_input_frames = False
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
             self._clock = frame.clock
@@ -189,7 +221,11 @@ class FrameProcessor:
     #
 
     async def _start_interruption(self):
-        # Cancel the task. This will stop pushing frames downstream.
+        # Cancel the input task. This will stop processing queued frames.
+        self.__input_frame_task.cancel()
+        await self.__input_frame_task
+
+        # Cancel the push frame task. This will stop pushing frames downstream.
         self.__push_frame_task.cancel()
         await self.__push_frame_task
 
@@ -204,12 +240,34 @@ class FrameProcessor:
         try:
             if direction == FrameDirection.DOWNSTREAM and self._next:
                 logger.trace(f"Pushing {frame} from {self} to {self._next}")
-                await self._next.process_frame(frame, direction)
+                await self._next.queue_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
                 logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
-                await self._prev.process_frame(frame, direction)
+                await self._prev.queue_frame(frame, direction)
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
+
+    def __create_input_task(self):
+        self.__input_queue = asyncio.Queue()
+        self.__input_frame_task = self.get_event_loop().create_task(
+            self.__input_frame_task_handler()
+        )
+        self.__input_event = asyncio.Event()
+
+    async def __input_frame_task_handler(self):
+        running = True
+        while running:
+            try:
+                await self.__input_event.wait()
+                self.__input_event.clear()
+                (frame, direction, callback) = await self.__input_queue.get()
+                await self.process_frame(frame, direction)
+                if callback:
+                    await callback(self, frame, direction)
+                running = not isinstance(frame, EndFrame)
+                self.__input_queue.task_done()
+            except asyncio.CancelledError:
+                break
 
     def __create_push_task(self):
         self.__push_queue = asyncio.Queue()
