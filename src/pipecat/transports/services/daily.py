@@ -584,8 +584,15 @@ class DailyTransportClient(EventHandler):
         )
 
     def _call_async_callback(self, callback, *args):
-        future = asyncio.run_coroutine_threadsafe(callback(*args), self._loop)
-        future.result()
+        # Don't wait on the coroutine, otherwise if we call a `CallClient`
+        # function and wait for its completion this will currently result in a
+        # deadlock. This is because `_call_async_callback` is used inside
+        # `CallClient` event handlers which are holding the GIL in
+        # `daily-python`. So if the `callback` passed here makes a `CallClient`
+        # call and waits for it to finish using completions (and a future) we
+        # will deadlock because completions use event handlers (which are
+        # holding the GIL).
+        asyncio.run_coroutine_threadsafe(callback(*args), self._loop)
 
 
 class DailyInputTransport(BaseInputTransport):
