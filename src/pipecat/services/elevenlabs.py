@@ -74,7 +74,6 @@ def calculate_word_times(
 class ElevenLabsTTSService(WordTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
-        output_format: Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"] = "pcm_16000"
         optimize_streaming_latency: Optional[str] = None
         stability: Optional[float] = None
         similarity_boost: Optional[float] = None
@@ -98,6 +97,7 @@ class ElevenLabsTTSService(WordTTSService):
         voice_id: str,
         model: str = "eleven_turbo_v2_5",
         url: str = "wss://api.elevenlabs.io",
+        output_format: Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"] = "pcm_16000",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -120,18 +120,18 @@ class ElevenLabsTTSService(WordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
-            sample_rate=sample_rate_from_output_format(params.output_format),
+            sample_rate=sample_rate_from_output_format(output_format),
             **kwargs,
         )
 
         self._api_key = api_key
         self._url = url
         self._settings = {
-            "sample_rate": sample_rate_from_output_format(params.output_format),
+            "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
             else Language.EN,
-            "output_format": params.output_format,
+            "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
             "similarity_boost": params.similarity_boost,

@@ -68,9 +68,6 @@ def language_to_cartesia_language(language: Language) -> str | None:
 
 class CartesiaTTSService(WordTTSService):
     class InputParams(BaseModel):
-        encoding: Optional[str] = "pcm_s16le"
-        sample_rate: Optional[int] = 16000
-        container: Optional[str] = "raw"
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
@@ -83,6 +80,9 @@ class CartesiaTTSService(WordTTSService):
         cartesia_version: str = "2024-06-10",
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str = "sonic-english",
+        sample_rate: int = 16000,
+        encoding: str = "pcm_s16le",
+        container: str = "raw",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -99,7 +99,6 @@ class CartesiaTTSService(WordTTSService):
         super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,
-            sample_rate=params.sample_rate,
             **kwargs,
         )
 
@@ -108,9 +107,9 @@ class CartesiaTTSService(WordTTSService):
         self._url = url
         self._settings = {
             "output_format": {
-                "container": params.container,
-                "encoding": params.encoding,
-                "sample_rate": params.sample_rate,
+                "container": container,
+                "encoding": encoding,
+                "sample_rate": sample_rate,
             },
             "language": self.language_to_service_language(params.language)
             if params.language
@@ -288,9 +287,6 @@ class CartesiaTTSService(WordTTSService):
 
 class CartesiaHttpTTSService(TTSService):
     class InputParams(BaseModel):
-        encoding: Optional[str] = "pcm_s16le"
-        sample_rate: Optional[int] = 16000
-        container: Optional[str] = "raw"
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
@@ -302,6 +298,9 @@ class CartesiaHttpTTSService(TTSService):
         voice_id: str,
         model: str = "sonic-english",
         base_url: str = "https://api.cartesia.ai",
+        sample_rate: int = 16000,
+        encoding: str = "pcm_s16le",
+        container: str = "raw",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -310,9 +309,9 @@ class CartesiaHttpTTSService(TTSService):
         self._api_key = api_key
         self._settings = {
             "output_format": {
-                "container": params.container,
-                "encoding": params.encoding,
-                "sample_rate": params.sample_rate,
+                "container": container,
+                "encoding": encoding,
+                "sample_rate": sample_rate,
             },
             "language": self.language_to_service_language(params.language)
             if params.language
