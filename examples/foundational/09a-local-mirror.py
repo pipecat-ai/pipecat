@@ -65,7 +65,7 @@ async def main():
         tk_root.title("Local Mirror")
 
         daily_transport = DailyTransport(
-            room_url, token, "Test", DailyParams(audio_in_enabled=True)
+            room_url, token, "Test", DailyParams(audio_in_enabled=True, audio_in_sample_rate=24000)
         )
 
         tk_transport = TkLocalTransport(

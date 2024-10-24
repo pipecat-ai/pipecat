@@ -78,9 +78,6 @@ async def main():
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
-            params=CartesiaTTSService.InputParams(
-                sample_rate=16000,
-            ),
         )
 
         @transport.event_handler("on_first_participant_joined")

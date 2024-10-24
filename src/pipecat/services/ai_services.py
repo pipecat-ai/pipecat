@@ -205,7 +205,7 @@ class TTSService(AIService):
         # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
         stop_frame_timeout_s: float = 1.0,
         # TTS output sample rate
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         text_filter: Optional[BaseTextFilter] = None,
         **kwargs,
     ):
@@ -514,7 +514,7 @@ class SegmentedSTTService(STTService):
         min_volume: float = 0.6,
         max_silence_secs: float = 0.3,
         max_buffer_secs: float = 1.5,
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         num_channels: int = 1,
         **kwargs,
     ):

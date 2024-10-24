@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grained control of what media subscriptions you want for each participant in a
   room.
 
+### Changed
+
+- Changed default output sample rate to 24000. This changes all TTS service to
+  output to 24000 and also the default output transport sample rate. This
+  improves audio quality at the cost of some extra bandwidth.
+
 ## [0.0.47] - 2024-10-22
 
 ### Added
