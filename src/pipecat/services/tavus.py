@@ -130,7 +130,7 @@ class TavusVideoService(FrameProcessor):
                 "event_type": "conversation.echo",
                 "conversation_id": self._conversation_id,
                 "properties": {
-                    "type": "audio",
+                    "modality": "audio",
                     "inference_id": self._current_idx_str,
                     "audio": audio_base64,
                     "done": done,
