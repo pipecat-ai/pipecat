@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable, List
 from pydantic import BaseModel
 
 from pipecat.audio.utils import resample_audio
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
