@@ -10,7 +10,7 @@ import os
 import sys
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import LLMMessagesFrame, TTSUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -19,7 +19,6 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.whisper import Model, WhisperSTTService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from openai.types.chat import ChatCompletionToolParam
@@ -61,15 +60,13 @@ async def main():
             token,
             "Pipecat",
             DailyParams(
-                audio_in_enabled=True,
                 audio_out_enabled=True,
+                transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True,
             ),
         )
-
-        stt = WhisperSTTService(model=Model.LARGE)
 
         english_tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
@@ -116,7 +113,6 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                stt,  # STT
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 ParallelPipeline(  # TTS (bot will speak the chosen language)
