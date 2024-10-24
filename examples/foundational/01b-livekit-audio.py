@@ -81,7 +81,7 @@ async def main():
             url=url,
             token=token,
             room_name=room_name,
-            params=LiveKitParams(audio_out_enabled=True, audio_out_sample_rate=16000),
+            params=LiveKitParams(audio_out_enabled=True),
         )
 
         tts = CartesiaTTSService(

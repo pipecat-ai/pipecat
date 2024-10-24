@@ -88,7 +88,7 @@ class AzureTTSService(TTSService):
         api_key: str,
         region: str,
         voice="en-US-SaraNeural",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -283,7 +283,7 @@ class AzureSTTService(STTService):
         api_key: str,
         region: str,
         language=Language.EN_US,
-        sample_rate=16000,
+        sample_rate=24000,
         channels=1,
         **kwargs,
     ):
