@@ -741,37 +741,21 @@ class DailyOutputTransport(BaseOutputTransport):
 
         self._client = client
 
-        # Task to process outgoing messages.
-        self._messages_task = None
-        self._messages_queue = asyncio.Queue()
-
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
         # Join the room.
         await self._client.join()
-        # Start messages task
-        self._messages_task = self.get_event_loop().create_task(self._messages_task_handler())
 
     async def stop(self, frame: EndFrame):
         # Parent stop.
         await super().stop(frame)
-        # Cancel messages task
-        if self._messages_task:
-            self._messages_task.cancel()
-            await self._messages_task
-            self._messages_task = None
         # Leave the room.
         await self._client.leave()
 
     async def cancel(self, frame: CancelFrame):
         # Parent stop.
         await super().cancel(frame)
-        # Cancel messages task
-        if self._messages_task:
-            self._messages_task.cancel()
-            await self._messages_task
-            self._messages_task = None
         # Leave the room.
         await self._client.leave()
 
@@ -780,24 +764,13 @@ class DailyOutputTransport(BaseOutputTransport):
         await self._client.cleanup()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
-        await self._messages_queue.put(frame)
+        await self._client.send_message(frame)
 
     async def write_raw_audio_frames(self, frames: bytes):
         await self._client.write_raw_audio_frames(frames)
 
     async def write_frame_to_camera(self, frame: OutputImageRawFrame):
         await self._client.write_frame_to_camera(frame)
-
-    async def _messages_task_handler(self):
-        while True:
-            try:
-                message = await self._messages_queue.get()
-                await self._client.send_message(message)
-                self._messages_queue.task_done()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.exception(f"{self} error processing message queue: {e}")
 
 
 class DailyTransport(BaseTransport):
