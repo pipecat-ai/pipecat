@@ -533,6 +533,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     self._context.add_message(
                         {
                             "role": "assistant",
+                            "content": "",  # content field required for Grok function calling
                             "tool_calls": [
                                 {
                                     "id": frame.tool_call_id,
