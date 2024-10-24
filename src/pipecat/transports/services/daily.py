@@ -584,8 +584,15 @@ class DailyTransportClient(EventHandler):
         )
 
     def _call_async_callback(self, callback, *args):
-        future = asyncio.run_coroutine_threadsafe(callback(*args), self._loop)
-        future.result()
+        # Don't wait on the coroutine, otherwise if we call a `CallClient`
+        # function and wait for its completion this will currently result in a
+        # deadlock. This is because `_call_async_callback` is used inside
+        # `CallClient` event handlers which are holding the GIL in
+        # `daily-python`. So if the `callback` passed here makes a `CallClient`
+        # call and waits for it to finish using completions (and a future) we
+        # will deadlock because completions use event handlers (which are
+        # holding the GIL).
+        asyncio.run_coroutine_threadsafe(callback(*args), self._loop)
 
 
 class DailyInputTransport(BaseInputTransport):
@@ -734,37 +741,21 @@ class DailyOutputTransport(BaseOutputTransport):
 
         self._client = client
 
-        # Task to process outgoing messages.
-        self._messages_task = None
-        self._messages_queue = asyncio.Queue()
-
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
         # Join the room.
         await self._client.join()
-        # Start messages task
-        self._messages_task = self.get_event_loop().create_task(self._messages_task_handler())
 
     async def stop(self, frame: EndFrame):
         # Parent stop.
         await super().stop(frame)
-        # Cancel messages task
-        if self._messages_task:
-            self._messages_task.cancel()
-            await self._messages_task
-            self._messages_task = None
         # Leave the room.
         await self._client.leave()
 
     async def cancel(self, frame: CancelFrame):
         # Parent stop.
         await super().cancel(frame)
-        # Cancel messages task
-        if self._messages_task:
-            self._messages_task.cancel()
-            await self._messages_task
-            self._messages_task = None
         # Leave the room.
         await self._client.leave()
 
@@ -773,24 +764,13 @@ class DailyOutputTransport(BaseOutputTransport):
         await self._client.cleanup()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
-        await self._messages_queue.put(frame)
+        await self._client.send_message(frame)
 
     async def write_raw_audio_frames(self, frames: bytes):
         await self._client.write_raw_audio_frames(frames)
 
     async def write_frame_to_camera(self, frame: OutputImageRawFrame):
         await self._client.write_frame_to_camera(frame)
-
-    async def _messages_task_handler(self):
-        while True:
-            try:
-                message = await self._messages_queue.get()
-                await self._client.send_message(message)
-                self._messages_queue.task_done()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.exception(f"{self} error processing message queue: {e}")
 
 
 class DailyTransport(BaseTransport):
@@ -955,7 +935,9 @@ class DailyTransport(BaseTransport):
             url = f"{self._params.api_url}/dialin/pinlessCallUpdate"
 
             try:
-                async with session.post(url, headers=headers, json=data, timeout=10) as r:
+                async with session.post(
+                    url, headers=headers, json=data, timeout=aiohttp.ClientTimeout(total=10)
+                ) as r:
                     if r.status != 200:
                         text = await r.text()
                         logger.error(
