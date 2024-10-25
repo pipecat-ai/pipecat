@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -165,6 +167,14 @@ class AWSTTSService(TTSService):
         return ssml
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        def read_audio_data(**args):
+            response = self._polly_client.synthesize_speech(**args)
+            if "AudioStream" in response:
+                audio_data = response["AudioStream"].read()
+                resampled = resample_audio(audio_data, 16000, self._settings["sample_rate"])
+                return resampled
+            return None
+
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
@@ -186,23 +196,24 @@ class AWSTTSService(TTSService):
             # Filter out None values
             filtered_params = {k: v for k, v in params.items() if v is not None}
 
-            response = self._polly_client.synthesize_speech(**filtered_params)
+            audio_data = await asyncio.to_thread(read_audio_data, **filtered_params)
+
+            if not audio_data:
+                logger.error(f"{self} No audio data returned")
+                yield None
+                return
 
             await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()
 
-            if "AudioStream" in response:
-                with response["AudioStream"] as stream:
-                    audio_data = stream.read()
-                    chunk_size = 8192
-                    for i in range(0, len(audio_data), chunk_size):
-                        chunk = audio_data[i : i + chunk_size]
-                        if len(chunk) > 0:
-                            await self.stop_ttfb_metrics()
-                            resampled = resample_audio(chunk, 16000, self._settings["sample_rate"])
-                            frame = TTSAudioRawFrame(resampled, self._settings["sample_rate"], 1)
-                            yield frame
+            chunk_size = 8192
+            for i in range(0, len(audio_data), chunk_size):
+                chunk = audio_data[i : i + chunk_size]
+                if len(chunk) > 0:
+                    await self.stop_ttfb_metrics()
+                    frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                    yield frame
 
             yield TTSStoppedFrame()
 
