@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     StartInterruptionFrame,
     EndFrame,
+    CancelFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AIService
@@ -44,10 +45,6 @@ class TavusVideoService(AIService):
         self._session = session
 
         self._conversation_id: str
-        # self._room_url: str
-
-    # def get_room_url(self) -> str:
-    #     return self._room_url
 
     async def initialize(self) -> str:
         url = "https://tavusapi.com/v2/conversations"
@@ -77,7 +74,7 @@ class TavusVideoService(AIService):
         logger.debug(f"TavusVideoService persona grabbed {response_json}")
         return response_json["persona_name"]
 
-    async def end_conversation(self) -> None:
+    async def _end_conversation(self) -> None:
         url = f"https://tavusapi.com/v2/conversations/{self._conversation_id}/end"
         headers = {"Content-Type": "application/json", "x-api-key": self._api_key}
         async with self._session.post(url, headers=headers) as r:
@@ -103,8 +100,8 @@ class TavusVideoService(AIService):
             await self.stop_processing_metrics()
         elif isinstance(frame, StartInterruptionFrame):
             await self._send_interrupt_message()
-        elif isinstance(frame, EndFrame):
-            await self.end_conversation()
+        elif isinstance(frame, (EndFrame, CancelFrame)):
+            await self._end_conversation()
         else:
             await self.push_frame(frame, direction)
 
