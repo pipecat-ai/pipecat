@@ -454,27 +454,37 @@ class DailyTransportClient(EventHandler):
     def participant_counts(self):
         return self._client.participant_counts()
 
-    def start_dialout(self, settings):
-        self._client.start_dialout(settings)
+    async def start_dialout(self, settings):
+        future = self._loop.create_future()
+        self._client.start_dialout(settings, completion=completion_callback(future))
+        await future
 
-    def stop_dialout(self, participant_id):
-        self._client.stop_dialout(participant_id)
+    async def stop_dialout(self, participant_id):
+        future = self._loop.create_future()
+        self._client.stop_dialout(participant_id, completion=completion_callback(future))
+        await future
 
-    def start_recording(self, streaming_settings, stream_id, force_new):
-        self._client.start_recording(streaming_settings, stream_id, force_new)
+    async def start_recording(self, streaming_settings, stream_id, force_new):
+        future = self._loop.create_future()
+        self._client.start_recording(
+            streaming_settings, stream_id, force_new, completion=completion_callback(future)
+        )
+        await future
 
-    def stop_recording(self, stream_id):
-        self._client.stop_recording(stream_id)
+    async def stop_recording(self, stream_id):
+        future = self._loop.create_future()
+        self._client.stop_recording(stream_id, completion=completion_callback(future))
+        await future
 
-    def capture_participant_transcription(self, participant_id: str):
+    async def capture_participant_transcription(self, participant_id: str):
         if not self._params.transcription_enabled:
             return
 
         self._transcription_ids.append(participant_id)
         if self._joined and self._transcription_status:
-            self.update_transcription(self._transcription_ids)
+            await self.update_transcription(self._transcription_ids)
 
-    def capture_participant_video(
+    async def capture_participant_video(
         self,
         participant_id: str,
         callback: Callable,
@@ -483,7 +493,7 @@ class DailyTransportClient(EventHandler):
         color_format: str = "RGB",
     ):
         # Only enable camera subscription on this participant
-        self._client.update_subscriptions(
+        await self.update_subscriptions(
             participant_settings={participant_id: {"media": "subscribed"}}
         )
 
@@ -496,8 +506,12 @@ class DailyTransportClient(EventHandler):
             color_format=color_format,
         )
 
-    def update_transcription(self, participants=None, instance_id=None):
-        self._client.update_transcription(participants, instance_id)
+    async def update_transcription(self, participants=None, instance_id=None):
+        future = self._loop.create_future()
+        self._client.update_transcription(
+            participants, instance_id, completion=completion_callback(future)
+        )
+        await future
 
     async def update_subscriptions(self, participant_settings=None, profile_settings=None):
         future = self._loop.create_future()
@@ -559,7 +573,7 @@ class DailyTransportClient(EventHandler):
     def on_transcription_started(self, status):
         logger.debug(f"Transcription started: {status}")
         self._transcription_status = status
-        self.update_transcription(self._transcription_ids)
+        self._call_async_callback(self.update_transcription, self._transcription_ids)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
         logger.debug("Transcription stopped")
@@ -662,7 +676,7 @@ class DailyInputTransport(BaseInputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, UserImageRequestFrame):
-            self.request_participant_image(frame.user_id)
+            await self.request_participant_image(frame.user_id)
 
     #
     # Frames
@@ -692,7 +706,7 @@ class DailyInputTransport(BaseInputTransport):
     # Camera in
     #
 
-    def capture_participant_video(
+    async def capture_participant_video(
         self,
         participant_id: str,
         framerate: int = 30,
@@ -705,11 +719,11 @@ class DailyInputTransport(BaseInputTransport):
             "render_next_frame": False,
         }
 
-        self._client.capture_participant_video(
+        await self._client.capture_participant_video(
             participant_id, self._on_participant_video_frame, framerate, video_source, color_format
         )
 
-    def request_participant_image(self, participant_id: str):
+    async def request_participant_image(self, participant_id: str):
         if participant_id in self._video_renderers:
             self._video_renderers[participant_id]["render_next_frame"] = True
 
@@ -866,22 +880,22 @@ class DailyTransport(BaseTransport):
     def participant_counts(self):
         return self._client.participant_counts()
 
-    def start_dialout(self, settings=None):
-        self._client.start_dialout(settings)
+    async def start_dialout(self, settings=None):
+        await self._client.start_dialout(settings)
 
-    def stop_dialout(self, participant_id):
-        self._client.stop_dialout(participant_id)
+    async def stop_dialout(self, participant_id):
+        await self._client.stop_dialout(participant_id)
 
-    def start_recording(self, streaming_settings=None, stream_id=None, force_new=None):
-        self._client.start_recording(streaming_settings, stream_id, force_new)
+    async def start_recording(self, streaming_settings=None, stream_id=None, force_new=None):
+        await self._client.start_recording(streaming_settings, stream_id, force_new)
 
-    def stop_recording(self, stream_id=None):
-        self._client.stop_recording(stream_id)
+    async def stop_recording(self, stream_id=None):
+        await self._client.stop_recording(stream_id)
 
-    def capture_participant_transcription(self, participant_id: str):
-        self._client.capture_participant_transcription(participant_id)
+    async def capture_participant_transcription(self, participant_id: str):
+        await self._client.capture_participant_transcription(participant_id)
 
-    def capture_participant_video(
+    async def capture_participant_video(
         self,
         participant_id: str,
         framerate: int = 30,
@@ -889,7 +903,7 @@ class DailyTransport(BaseTransport):
         color_format: str = "RGB",
     ):
         if self._input:
-            self._input.capture_participant_video(
+            await self._input.capture_participant_video(
                 participant_id, framerate, video_source, color_format
             )
 
