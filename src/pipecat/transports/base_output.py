@@ -13,6 +13,7 @@ from typing import List
 from loguru import logger
 from PIL import Image
 
+from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
@@ -348,11 +349,16 @@ class BaseOutputTransport(FrameProcessor):
         def push_bot_stopped_speaking():
             self.get_event_loop().create_task(push_bot_stopped_speaking_async())
 
-        # Schedule a bot stopped speaking to be pushed in half a second (unless
-        # we get another bot started speaking).
+        # Schedule a bot stopped speaking to be pushed after VAD stop secs
+        # (unless we get another bot started speaking).
+        wait_time = (
+            self._params.vad_analyzer.params.stop_secs
+            if self._params.vad_analyzer
+            else VAD_STOP_SECS
+        )
         if not self._bot_stopped_speaking_handle:
             self._bot_stopped_speaking_handle = self.get_event_loop().call_later(
-                0.5, push_bot_stopped_speaking
+                wait_time, push_bot_stopped_speaking
             )
 
     #
