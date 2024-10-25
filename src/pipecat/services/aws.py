@@ -9,6 +9,7 @@ from typing import AsyncGenerator, Optional
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.utils import resample_audio
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -45,7 +46,7 @@ class AWSTTSService(TTSService):
         aws_access_key_id: str,
         region: str,
         voice_id: str = "Joanna",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -178,7 +179,8 @@ class AWSTTSService(TTSService):
                 "OutputFormat": "pcm",
                 "VoiceId": self._voice_id,
                 "Engine": self._settings["engine"],
-                "SampleRate": str(self._settings["sample_rate"]),
+                # AWS only supports 8000 and 16000 for PCM. We select 16000.
+                "SampleRate": "16000",
             }
 
             # Filter out None values
@@ -198,7 +200,8 @@ class AWSTTSService(TTSService):
                         chunk = audio_data[i : i + chunk_size]
                         if len(chunk) > 0:
                             await self.stop_ttfb_metrics()
-                            frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                            resampled = resample_audio(chunk, 16000, self._settings["sample_rate"])
+                            frame = TTSAudioRawFrame(resampled, self._settings["sample_rate"], 1)
                             yield frame
 
             yield TTSStoppedFrame()
