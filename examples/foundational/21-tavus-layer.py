@@ -6,9 +6,10 @@
 
 import asyncio
 import aiohttp
-from typing import Any
 import os
 import sys
+
+from typing import Any, Mapping
 
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -103,12 +104,12 @@ async def main():
 
         @transport.event_handler("on_participant_joined")
         async def on_participant_joined(
-            transport: DailyTransport, participant: dict[str, Any]
+            transport: DailyTransport, participant: Mapping[str, Any]
         ) -> None:
             # Ignore the Tavus replica's microphone
             if participant.get("info", {}).get("userName", "") == persona_name:
                 logger.debug(f"Ignoring {participant['id']}'s microphone")
-                transport.update_subscriptions(
+                await transport.update_subscriptions(
                     participant_settings={
                         participant["id"]: {
                             "media": {"microphone": "unsubscribed"},
