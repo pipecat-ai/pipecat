@@ -81,10 +81,12 @@ class TavusVideoService(AIService):
         async with self._session.post(url, headers=headers) as r:
             r.raise_for_status()
 
-    async def _encode_audio_and_send(self, audio: bytes, done: bool) -> None:
+    async def _encode_audio_and_send(
+        self, audio: bytes, original_sample_rate: int, done: bool
+    ) -> None:
         """Encodes audio to base64 and sends it to Tavus"""
         if not done:
-            audio = resample_audio(audio, 24000, 16000)
+            audio = resample_audio(audio, original_sample_rate, 16000)
         audio_base64 = base64.b64encode(audio).decode("utf-8")
         logger.trace(f"TavusVideoService sending {len(audio)} bytes")
         await self._send_audio_message(audio_base64, done=done)
@@ -96,9 +98,9 @@ class TavusVideoService(AIService):
             await self.start_ttfb_metrics()
             self._current_idx_str = str(frame.id)
         elif isinstance(frame, TTSAudioRawFrame):
-            await self._encode_audio_and_send(frame.audio, done=False)
+            await self._encode_audio_and_send(frame.audio, frame.sample_rate, done=False)
         elif isinstance(frame, TTSStoppedFrame):
-            await self._encode_audio_and_send(b"\x00", done=True)
+            await self._encode_audio_and_send(b"\x00", 16000, done=True)
             await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
         elif isinstance(frame, StartInterruptionFrame):
