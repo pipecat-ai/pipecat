@@ -70,9 +70,14 @@ class BaseOutputTransport(FrameProcessor):
         self._stopped_event = asyncio.Event()
 
         # Indicates if the bot is currently speaking. This is useful when we
-        # have an interruption since all the queued messages will be thrown
-        # away and we would lose the TTSStoppedFrame.
+        # have an interruption since all the queued messages will be thrown away
+        # and we would lose the TTSStoppedFrame. We also keep a scheduler handle
+        # which is used to schedule pushing bot stopped speaking frames. With
+        # some services (HTTP TTS services) we will get a bunch of
+        # TTSStartedFrame and TTSStoppedFrame and we don't want to constantly
+        # generate bot started/stopped speaking frames.
         self._bot_speaking = False
+        self._bot_stopped_speaking_handle = None
 
         # Create sink frame task. This is the task that will actually write
         # audio or video frames. We write audio/video in a task so we can keep
@@ -320,14 +325,35 @@ class BaseOutputTransport(FrameProcessor):
                 logger.exception(f"{self} error processing sink clock queue: {e}")
 
     async def _bot_started_speaking(self):
-        logger.debug("Bot started speaking")
-        self._bot_speaking = True
-        await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+        # If we scheduled bot stopped speaking, cancel it.
+        if self._bot_stopped_speaking_handle:
+            self._bot_stopped_speaking_handle.cancel()
+            self._bot_stopped_speaking_handle = None
+
+        if not self._bot_speaking:
+            logger.debug("Bot started speaking")
+            await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+            self._bot_speaking = True
 
     async def _bot_stopped_speaking(self):
-        logger.debug("Bot stopped speaking")
-        self._bot_speaking = False
-        await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+        async def push_bot_stopped_speaking_async():
+            try:
+                logger.debug("Bot stopped speaking")
+                await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+                self._bot_speaking = False
+            except asyncio.CancelledError:
+                logger.debug("We've been cancelled")
+                pass
+
+        def push_bot_stopped_speaking():
+            self.get_event_loop().create_task(push_bot_stopped_speaking_async())
+
+        # Schedule a bot stopped speaking to be pushed in half a second (unless
+        # we get another bot started speaking).
+        if not self._bot_stopped_speaking_handle:
+            self._bot_stopped_speaking_handle = self.get_event_loop().call_later(
+                0.5, push_bot_stopped_speaking
+            )
 
     #
     # Camera out
