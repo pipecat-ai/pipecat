@@ -9,11 +9,11 @@ import base64
 import io
 import json
 from dataclasses import dataclass
-from typing import AsyncGenerator, List, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 
 from loguru import logger
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -45,6 +45,7 @@ try:
     import google.ai.generativelanguage as glm
     import google.generativeai as gai
     from google.cloud import texttospeech_v1
+    from google.generativeai.types import GenerationConfig
     from google.oauth2 import service_account
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -305,10 +306,31 @@ class GoogleLLMService(LLMService):
     franca for all LLM services, so that it is easy to switch between different LLMs.
     """
 
-    def __init__(self, *, api_key: str, model: str = "gemini-1.5-flash-latest", **kwargs):
+    class InputParams(BaseModel):
+        max_tokens: Optional[int] = Field(default=4096, ge=1)
+        temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+        top_k: Optional[int] = Field(default=None, ge=0)
+        top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+        extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = "gemini-1.5-flash-latest",
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         gai.configure(api_key=api_key)
         self._create_client(model)
+        self._settings = {
+            "max_tokens": params.max_tokens,
+            "temperature": params.temperature,
+            "top_k": params.top_k,
+            "top_p": params.top_p,
+            "extra": params.extra if isinstance(params.extra, dict) else {},
+        }
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -357,10 +379,26 @@ class GoogleLLMService(LLMService):
             # messages = self._get_messages_from_openai_context(context)
             messages = context.messages
 
+            # Filter out None values and create GenerationConfig
+            generation_params = {
+                k: v
+                for k, v in {
+                    "temperature": self._settings["temperature"],
+                    "top_p": self._settings["top_p"],
+                    "top_k": self._settings["top_k"],
+                    "max_output_tokens": self._settings["max_tokens"],
+                }.items()
+                if v is not None
+            }
+
+            generation_config = GenerationConfig(**generation_params) if generation_params else None
+
             await self.start_ttfb_metrics()
 
             tools = context.tools if context.tools else []
-            response = self._client.generate_content(contents=messages, tools=tools, stream=True)
+            response = self._client.generate_content(
+                contents=messages, tools=tools, stream=True, generation_config=generation_config
+            )
 
             tokens = LLMTokenUsage(
                 prompt_tokens=response.usage_metadata.prompt_token_count,
