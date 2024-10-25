@@ -92,7 +92,7 @@ async def main():
         # bot can "hear" and respond to them.
         @transport.event_handler("on_participant_joined")
         async def on_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
 
         # When the first participant joins, the bot should introduce itself.
         @transport.event_handler("on_first_participant_joined")

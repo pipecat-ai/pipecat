@@ -109,7 +109,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             lc.set_participant_id(participant["id"])
             # Kick off the conversation.
             # the `LLMMessagesFrame` will be picked up by the LangchainProcessor using

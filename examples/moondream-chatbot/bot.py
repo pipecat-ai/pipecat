@@ -203,8 +203,8 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
-            transport.capture_participant_video(participant["id"], framerate=0)
+            await transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_video(participant["id"], framerate=0)
             ir.set_participant_id(participant["id"])
             await task.queue_frames([LLMMessagesFrame(messages)])
 
