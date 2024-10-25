@@ -134,7 +134,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             await tts.say("Hi, I'm listening!")
             await transport.send_audio(sounds["ding1.wav"])
 
