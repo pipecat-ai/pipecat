@@ -47,10 +47,10 @@ async def main():
 
             # get persona, look up persona_name, set this as the bot name to ignore
             persona_name = await tavus.get_persona_name()
-            await tavus.initialize()
+            room_url = await tavus.initialize()
 
             transport = DailyTransport(
-                room_url=tavus.get_room_url(),
+                room_url=room_url,
                 token=None,
                 bot_name="Pipecat bot",
                 params=DailyParams(

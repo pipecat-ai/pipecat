@@ -44,12 +44,12 @@ class TavusVideoService(AIService):
         self._session = session
 
         self._conversation_id: str
-        self._room_url: str
+        # self._room_url: str
 
-    def get_room_url(self) -> str:
-        return self._room_url
+    # def get_room_url(self) -> str:
+    #     return self._room_url
 
-    async def initialize(self) -> None:
+    async def initialize(self) -> str:
         url = "https://tavusapi.com/v2/conversations"
         headers = {"Content-Type": "application/json", "x-api-key": self._api_key}
         payload = {
@@ -61,8 +61,8 @@ class TavusVideoService(AIService):
             response_json = await r.json()
 
         logger.debug(f"TavusVideoService joined {response_json['conversation_url']}")
-        self._room_url = response_json["conversation_url"]
         self._conversation_id = response_json["conversation_id"]
+        return response_json["conversation_url"]
 
     def can_generate_metrics(self) -> bool:
         return True
