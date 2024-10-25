@@ -500,9 +500,6 @@ class DailyTransportClient(EventHandler):
         self._client.update_transcription(participants, instance_id)
 
     async def update_subscriptions(self, participant_settings=None, profile_settings=None):
-        if not self._joined or self._leaving:
-            return
-
         future = self._loop.create_future()
         self._client.update_subscriptions(
             participant_settings=participant_settings,
