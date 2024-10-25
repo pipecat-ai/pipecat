@@ -128,7 +128,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     #
 
     async def _handle_interruption(self):
-        if self._session_properties.turn_detection is None:
+        if self._session_properties.turn_detection is False:
             await self.send_client_event(events.InputAudioBufferClearEvent())
             await self.send_client_event(events.ResponseCancelEvent())
         await self._truncate_current_audio_response()
@@ -138,11 +138,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             await self.push_frame(TTSStoppedFrame())
 
     async def _handle_user_started_speaking(self, frame):
-        if self._session_properties.turn_detection is None:
-            await self._handle_interruption()
+        pass
 
     async def _handle_user_stopped_speaking(self, frame):
-        if self._session_properties.turn_detection is None:
+        if self._session_properties.turn_detection is False:
             await self.send_client_event(events.InputAudioBufferCommitEvent())
             await self.send_client_event(events.ResponseCreateEvent())
 
