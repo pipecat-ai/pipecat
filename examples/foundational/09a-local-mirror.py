@@ -81,7 +81,7 @@ async def main():
 
         @daily_transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_video(participant["id"])
+            await transport.capture_participant_video(participant["id"])
 
         pipeline = Pipeline([daily_transport.input(), MirrorProcessor(), tk_transport.output()])
 
