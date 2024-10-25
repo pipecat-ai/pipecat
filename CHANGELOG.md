@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that was generating constant bot started/stopped speaking
+  frames for HTTP TTS services.
+
 - Fixed an issue that was causing stuttering with AWS TTS service.
 
 ## [0.0.47] - 2024-10-22
