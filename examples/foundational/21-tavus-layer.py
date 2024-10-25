@@ -38,22 +38,19 @@ logger.add(sys.stderr, level="DEBUG")
 async def main():
     try:
         async with aiohttp.ClientSession() as session:
-            # get persona, look up persona_name, set this as the bot name to ignore
-            persona_name = await TavusVideoService.get_persona_name(
-                session=session,
-                api_key=os.getenv("TAVUS_API_KEY"),
-                persona_id=os.getenv("TAVUS_PERSONA_ID", "pipecat0"),
-            )
-
-            room_url, conversation_id = await TavusVideoService.initiate_conversation(
-                session=session,
+            tavus = TavusVideoService(
                 api_key=os.getenv("TAVUS_API_KEY"),
                 replica_id=os.getenv("TAVUS_REPLICA_ID"),
                 persona_id=os.getenv("TAVUS_PERSONA_ID", "pipecat0"),
+                session=session,
             )
 
+            # get persona, look up persona_name, set this as the bot name to ignore
+            persona_name = await tavus.get_persona_name()
+            await tavus.initialize()
+
             transport = DailyTransport(
-                room_url=room_url,
+                room_url=tavus.get_room_url(),
                 token=None,
                 bot_name="Pipecat bot",
                 params=DailyParams(
@@ -81,7 +78,6 @@ async def main():
 
             tma_in = LLMUserResponseAggregator(messages)
             tma_out = LLMAssistantResponseAggregator(messages)
-            tavus = TavusVideoService(conversation_id=conversation_id)
 
             pipeline = Pipeline(
                 [
@@ -113,7 +109,7 @@ async def main():
                 # Ignore the Tavus replica's microphone
                 if participant.get("info", {}).get("userName", "") == persona_name:
                     logger.debug(f"Ignoring {participant['id']}'s microphone")
-                    transport._client._client.update_subscriptions(
+                    transport.update_subscriptions(
                         participant_settings={
                             participant["id"]: {
                                 "media": {"microphone": "unsubscribed"},
@@ -132,11 +128,7 @@ async def main():
 
             await runner.run(task)
     except Exception as e:
-        TavusVideoService.end_conversation(
-            session=session,
-            api_key=os.getenv("TAVUS_API_KEY"),
-            conversation_id=conversation_id,
-        )
+        await tavus.end_conversation()
 
 
 if __name__ == "__main__":
