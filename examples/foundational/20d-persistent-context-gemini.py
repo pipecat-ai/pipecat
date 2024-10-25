@@ -111,8 +111,8 @@ async def load_conversation(function_name, tool_call_id, args, llm, context, res
 messages = [
     {
         "role": "system",
-        "content": """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your 
-capabilities in a succinct way. Your output will be converted to audio so don't include special 
+        "content": """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your
+capabilities in a succinct way. Your output will be converted to audio so don't include special
 characters in your answers. Respond to what the user said in a creative and helpful way.
 
 You have several tools you can use to help you.
@@ -276,8 +276,8 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             global video_participant_id
             video_participant_id = participant["id"]
-            transport.capture_participant_transcription(participant["id"])
-            transport.capture_participant_video(video_participant_id, framerate=0)
+            await transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_video(video_participant_id, framerate=0)
             # Kick off the conversation.
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 

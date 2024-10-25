@@ -127,7 +127,7 @@ async def main():
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             participant_name = participant.get("info", {}).get("userName", "")
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             await task.queue_frames([TextFrame(f"Hi there {participant_name}!")])
 
         runner = PipelineRunner()
