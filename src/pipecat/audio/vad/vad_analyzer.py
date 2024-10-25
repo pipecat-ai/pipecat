@@ -12,6 +12,11 @@ from pydantic.main import BaseModel
 
 from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 
+VAD_CONFIDENCE = 0.7
+VAD_START_SECS = 0.2
+VAD_STOP_SECS = 0.8
+VAD_MIN_VOLUME = 0.6
+
 
 class VADState(Enum):
     QUIET = 1
@@ -21,10 +26,10 @@ class VADState(Enum):
 
 
 class VADParams(BaseModel):
-    confidence: float = 0.7
-    start_secs: float = 0.2
-    stop_secs: float = 0.8
-    min_volume: float = 0.6
+    confidence: float = VAD_CONFIDENCE
+    start_secs: float = VAD_START_SECS
+    stop_secs: float = VAD_STOP_SECS
+    min_volume: float = VAD_MIN_VOLUME
 
 
 class VADAnalyzer:
@@ -41,12 +46,16 @@ class VADAnalyzer:
         self._prev_volume = 0
 
     @property
-    def sample_rate(self):
+    def sample_rate(self) -> int:
         return self._sample_rate
 
     @property
-    def num_channels(self):
+    def num_channels(self) -> int:
         return self._num_channels
+
+    @property
+    def params(self) -> VADParams:
+        return self._params
 
     @abstractmethod
     def num_frames_required(self) -> int:
