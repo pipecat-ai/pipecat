@@ -9,17 +9,20 @@ import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import Frame, TextFrame, UserImageRequestFrame
+TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.user_response import UserResponseAggregator
 from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.azure import AzureTTSService, AzureLLMService
 from pipecat.services.google import GoogleLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.vad.vad_analyzer import VADParams
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from main.utils.prompts import agent_system_prompt
 
 from runner import configure
 
@@ -64,7 +67,7 @@ async def main():
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
+                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
             ),
         )
 
@@ -75,30 +78,56 @@ async def main():
         vision_aggregator = VisionImageFrameAggregator()
 
         google = GoogleLLMService(
-            model="gemini-1.5-flash-latest", api_key=os.getenv("GOOGLE_API_KEY")
+            model="gemini-1.5-pro-002", api_key='AIzaSyCOq3Qny27BU5I9XC2Qsu73DtQ85vxXJ6E'
         )
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+        tts = AzureTTSService(
+            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+            region="eastus",
+            voice="en-US-AvaMultilingualNeural", # en-US-AvaMultilingualNeural en-US-ShimmerMultilingualNeural
+            
         )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await tts.say("Hi there! Feel free to ask me what I see.")
-            transport.capture_participant_video(participant["id"], framerate=0)
             transport.capture_participant_transcription(participant["id"])
-            image_requester.set_participant_id(participant["id"])
+            # transport.capture_participant_video(participant["id"], framerate=0, video_source="screenVideo")
+            # transport.capture_participant_transcription(participant["id"])
+            # image_requester.set_participant_id(participant["id"])
+
+        @transport.event_handler("on_participant_updated")
+        async def on_participant_updated(transport, participant):
+
+            screen_video = participant.get("media", {}).get("screenVideo", {})
+            subscribed = screen_video.get("subscribed")
+            state = screen_video.get("state")
+            if subscribed == "unsubscribed" and state == "receivable":
+                transport.capture_participant_video(
+                    participant["id"], framerate=0, video_source="screenVideo")
+                image_requester.set_participant_id(participant["id"])
+
+
+        messages = [
+            {
+                "role": "system",
+                "content": agent_system_prompt
+            },
+        ]
+
+        context = OpenAILLMContext(messages)
+        context_aggregator = google.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),
-                user_response,
+                context_aggregator.user(),
                 image_requester,
                 vision_aggregator,
                 google,
                 tts,
                 transport.output(),
+                context_aggregator.assistant()
             ]
         )
 
