@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Improved bot speaking detection for all TTS services by using actual bot
+  audio.
+
 - Fixed an issue that was generating constant bot started/stopped speaking
   frames for HTTP TTS services.
 
