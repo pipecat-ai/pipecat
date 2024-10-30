@@ -61,12 +61,13 @@ class AzureLLMService(BaseOpenAILLMService):
         endpoint: str,
         model: str,
         api_version: str = "2023-12-01-preview",
+        **kwargs,
     ):
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
         self._endpoint = endpoint
         self._api_version = api_version
-        super().__init__(api_key=api_key, model=model)
+        super().__init__(api_key=api_key, model=model, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncAzureOpenAI(

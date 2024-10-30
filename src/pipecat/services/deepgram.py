@@ -19,7 +19,6 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.services.ai_services import STTService, TTSService
@@ -215,14 +214,14 @@ class DeepgramSTTService(STTService):
             logger.debug(f"{self}: Disconnected from Deepgram")
 
     async def _on_speech_started(self, *args, **kwargs):
-        await self.push_frame(UserStartedSpeakingFrame())
+        # logger.debug("Deepgram: Speech Started")
+        # await self.push_frame(UserStartedSpeakingFrame())
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
     async def _on_utterance_end(self, *args, **kwargs):
-        await self.push_frame(UserStoppedSpeakingFrame())
+        # await self.push_frame(UserStoppedSpeakingFrame())
         await self.stop_processing_metrics()
-        logger.debug("Utterance ended")
 
     async def _on_message(self, *args, **kwargs):
         result: LiveResultResponse = kwargs["result"]
@@ -238,6 +237,7 @@ class DeepgramSTTService(STTService):
         if len(transcript) > 0:
             await self.stop_ttfb_metrics()
             if is_final:
+                logger.debug(f"Deepgram: Final: {transcript}")
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )

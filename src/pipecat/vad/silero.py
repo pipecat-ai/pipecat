@@ -7,6 +7,7 @@
 import time
 
 import numpy as np
+from loguru import logger
 
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -17,8 +18,6 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams, VADState
 
-from loguru import logger
-
 # How often should we reset internal model state
 _MODEL_RESET_STATES_TIME = 5.0
 
@@ -27,7 +26,9 @@ try:
 
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Silero VAD, you need to `pip install pipecat-ai[silero]`.")
+    logger.error(
+        "In order to use Silero VAD, you need to `pip install pipecat-ai[silero]`."
+    )
     raise Exception(f"Missing module(s): {e}")
 
 
@@ -41,7 +42,10 @@ class SileroOnnxModel:
         opts.inter_op_num_threads = 1
         opts.intra_op_num_threads = 1
 
-        if force_onnx_cpu and "CPUExecutionProvider" in onnxruntime.get_available_providers():
+        if (
+            force_onnx_cpu
+            and "CPUExecutionProvider" in onnxruntime.get_available_providers()
+        ):
             self.session = onnxruntime.InferenceSession(
                 path, providers=["CPUExecutionProvider"], sess_options=opts
             )
@@ -97,7 +101,11 @@ class SileroOnnxModel:
         x = np.concatenate((self._context, x), axis=1)
 
         if sr in [8000, 16000]:
-            ort_inputs = {"input": x, "state": self._state, "sr": np.array(sr, dtype="int64")}
+            ort_inputs = {
+                "input": x,
+                "state": self._state,
+                "sr": np.array(sr, dtype="int64"),
+            }
             ort_outs = self.session.run(None, ort_inputs)
             out, state = ort_outs
             self._state = state
@@ -134,7 +142,9 @@ class SileroVADAnalyzer(VADAnalyzer):
                 with impresources.path(package_path, model_name) as f:
                     model_file_path = f
             except BaseException:
-                model_file_path = str(impresources.files(package_path).joinpath(model_name))
+                model_file_path = str(
+                    impresources.files(package_path).joinpath(model_name)
+                )
 
         self._model = SileroOnnxModel(model_file_path, force_onnx_cpu=True)
 
@@ -153,7 +163,9 @@ class SileroVADAnalyzer(VADAnalyzer):
         try:
             audio_int16 = np.frombuffer(buffer, np.int16)
             # Divide by 32768 because we have signed 16-bit data.
-            audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
+            audio_float32 = (
+                np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
+            )
             new_confidence = self._model(audio_float32, self.sample_rate)[0]
 
             # We need to reset the model from time to time because it doesn't
@@ -181,7 +193,9 @@ class SileroVAD(FrameProcessor):
     ):
         super().__init__()
 
-        self._vad_analyzer = SileroVADAnalyzer(sample_rate=sample_rate, params=vad_params)
+        self._vad_analyzer = SileroVADAnalyzer(
+            sample_rate=sample_rate, params=vad_params
+        )
         self._audio_passthrough = audio_passthrough
 
         self._processor_vad_state: VADState = VADState.QUIET
