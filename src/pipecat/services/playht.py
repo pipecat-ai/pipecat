@@ -8,6 +8,7 @@ import asyncio
 import io
 import json
 import struct
+import uuid
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -127,6 +128,7 @@ class PlayHTTTSService(TTSService):
         self._websocket_url = None
         self._websocket = None
         self._receive_task = None
+        self._request_id = None
 
         self._settings = {
             "sample_rate": sample_rate,
@@ -191,6 +193,7 @@ class PlayHTTTSService(TTSService):
                 await self._receive_task
                 self._receive_task = None
 
+            self._request_id = None
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
@@ -221,6 +224,7 @@ class PlayHTTTSService(TTSService):
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
+        self._request_id = None
 
     async def _receive_task_handler(self):
         try:
@@ -242,9 +246,10 @@ class PlayHTTTSService(TTSService):
                     logger.debug(f"Received text message: {message}")
                     try:
                         msg = json.loads(message)
-                        if "request_id" in msg:
+                        if "request_id" in msg and msg["request_id"] == self._request_id:
                             await self.push_frame(TTSStoppedFrame())
                             header_received = False  # Reset for the next audio stream
+                            self._request_id = None
                         elif "error" in msg:
                             logger.error(f"{self} error: {msg}")
                             await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
@@ -263,8 +268,10 @@ class PlayHTTTSService(TTSService):
             if not self._websocket or self._websocket.closed:
                 await self._connect()
 
-            await self.start_ttfb_metrics()
-            yield TTSStartedFrame()
+            if not self._request_id:
+                await self.start_ttfb_metrics()
+                yield TTSStartedFrame()
+                self._request_id = str(uuid.uuid4())
 
             tts_command = {
                 "text": text,
@@ -275,6 +282,7 @@ class PlayHTTTSService(TTSService):
                 "language": self._settings["language"],
                 "speed": self._settings["speed"],
                 "seed": self._settings["seed"],
+                "request_id": self._request_id,
             }
 
             try:
