@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `GatedOpenAILLMContextAggregator`. This aggregator keeps the last
+  received OpenAI LLM context frame and it doesn't let it through until the
+  notifier is notified.
+
+- Added `WakeNotifierFilter`. This processor expects a list of frame types and
+  will execute a given callback predicate when a frame of any of those type is
+  being processed. If the callback returns true the notifier will be notified.
+
+- Added `NullFilter`. A null filter doesn't push any frames upstream or
+  downstream. This is usually used to disable one of the pipelines in
+  `ParallelPipeline`.
+
+- Added `EventNotifier`. This can be used as a very simple synchronization
+  feature between processors.
+
 - Added `TavusVideoService`. This is an integration for Tavus digital twins.
   (see https://www.tavus.io/)
 
