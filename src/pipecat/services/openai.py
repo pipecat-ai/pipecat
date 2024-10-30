@@ -223,6 +223,9 @@ class BaseOpenAILLMService(LLMService):
 
             await self.stop_ttfb_metrics()
 
+            if not chunk.choices[0].delta:
+                continue
+
             if chunk.choices[0].delta.tool_calls:
                 # We're streaming the LLM response to enable the fastest response times.
                 # For text, we just yield each chunk as we receive it and count on consumers
