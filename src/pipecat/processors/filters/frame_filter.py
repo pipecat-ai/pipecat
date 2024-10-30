@@ -4,14 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import List
+from typing import Tuple, Type
 
 from pipecat.frames.frames import AppFrame, ControlFrame, Frame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class FrameFilter(FrameProcessor):
-    def __init__(self, types: List[type]):
+    def __init__(self, types: Tuple[Type[Frame]]):
         super().__init__()
         self._types = types
 
@@ -20,9 +20,8 @@ class FrameFilter(FrameProcessor):
     #
 
     def _should_passthrough_frame(self, frame):
-        for t in self._types:
-            if isinstance(frame, t):
-                return True
+        if isinstance(frame, self._types):
+            return True
 
         return (
             isinstance(frame, AppFrame)
