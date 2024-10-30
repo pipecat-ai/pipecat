@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue that was causing stuttering with AWS TTS service.
 
+- Fixed an issue with PlayHTTTSService, where the TTFB metrics were reporting
+  very small time values.
+
 ## [0.0.47] - 2024-10-22
 
 ### Added
