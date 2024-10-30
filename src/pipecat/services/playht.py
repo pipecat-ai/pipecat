@@ -293,8 +293,6 @@ class PlayHTTTSService(TTSService):
         except Exception as e:
             logger.error(f"{self} error generating TTS: {e}")
             yield ErrorFrame(f"{self} error: {str(e)}")
-        finally:
-            await self.stop_all_metrics()
 
 
 class PlayHTHttpTTSService(TTSService):
