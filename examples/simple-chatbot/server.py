@@ -17,6 +17,10 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomParams
 
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
 MAX_BOTS_PER_ROOM = 1
 
 # Bot sub-process dict for status reporting and concurrency control
