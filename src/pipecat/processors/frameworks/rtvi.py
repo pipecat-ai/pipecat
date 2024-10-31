@@ -590,12 +590,12 @@ class RTVIProcessor(FrameProcessor):
         self._registered_services: Dict[str, RTVIService] = {}
 
         # A task to process incoming action frames.
-        self._action_task = self.get_event_loop().create_task(self._action_task_handler())
         self._action_queue = asyncio.Queue()
+        self._action_task = self.get_event_loop().create_task(self._action_task_handler())
 
         # A task to process incoming transport messages.
-        self._message_task = self.get_event_loop().create_task(self._message_task_handler())
         self._message_queue = asyncio.Queue()
+        self._message_task = self.get_event_loop().create_task(self._message_task_handler())
 
         self._register_event_handler("on_bot_ready")
 
