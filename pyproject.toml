@@ -74,3 +74,7 @@ pythonpath = ["src"]
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
 fallback_version = "0.0.0-dev"
+
+[tool.ruff]
+exclude = ["*_pb2.py"]
+line-length = 100
