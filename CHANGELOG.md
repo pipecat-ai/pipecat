@@ -64,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Add `23-bot-background-sound.py` foundational example.
+
 - Added a new foundational example 22-natural-conversation.py. This examples
   shows how to achieve a more natural conversation detecting when the user ends
   statement.
