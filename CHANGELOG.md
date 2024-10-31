@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `BotBackgroundSound` processor. This processors allows you to add
+  background sound to the bots output. The background sound will always be
+  playing even if the bot is not talking. The volume of the background sound and
+  the sample rate can be configure. You can load any file format supported by
+  the `soundfile` library.
+  (see https://github.com/bastibe/python-soundfile)
+
 - Added `GatedOpenAILLMContextAggregator`. This aggregator keeps the last
   received OpenAI LLM context frame and it doesn't let it through until the
   notifier is notified.
