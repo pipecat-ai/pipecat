@@ -175,9 +175,10 @@ class BaseOutputTransport(FrameProcessor):
         if self._params.audio_out_is_live:
             await self._audio_out_queue.put(frame)
         else:
+            cls = type(frame)
             self._audio_buffer.extend(frame.audio)
             while len(self._audio_buffer) >= self._audio_chunk_size:
-                chunk = OutputAudioRawFrame(
+                chunk = cls(
                     bytes(self._audio_buffer[: self._audio_chunk_size]),
                     sample_rate=frame.sample_rate,
                     num_channels=frame.num_channels,
