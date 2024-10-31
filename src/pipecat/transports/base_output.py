@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
+    TTSAudioRawFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
@@ -397,13 +398,15 @@ class BaseOutputTransport(FrameProcessor):
                 frame = await asyncio.wait_for(self._audio_out_queue.get(), timeout=wait_time)
 
                 # Notify the bot started speaking upstream if necessary.
-                await self._bot_started_speaking()
+                if isinstance(frame, TTSAudioRawFrame):
+                    await self._bot_started_speaking()
 
                 # Send audio.
                 await self.write_raw_audio_frames(frame.audio)
 
                 # Notify the bot is speaking upstream.
-                await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+                if isinstance(frame, TTSAudioRawFrame):
+                    await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
 
                 # Push frame downstream in case anyone else needs it.
                 await self.push_frame(frame)
