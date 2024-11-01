@@ -6,6 +6,8 @@
 
 import asyncio
 
+from typing import Any, Dict, Mapping
+
 import numpy as np
 
 from pipecat.audio.utils import resample_audio
@@ -36,17 +38,19 @@ except ModuleNotFoundError as e:
 class BotBackgroundSound(FrameProcessor):
     def __init__(
         self,
-        file_name: str,
+        sound_files: Mapping[str, str],
+        default_sound: str,
         volume: float = 0.4,
         sample_rate: int = 24000,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._file_name = file_name
+        self._sound_files = sound_files
         self._volume = volume
         self._sample_rate = sample_rate
 
-        self._sound = np.array([], dtype=np.int16)
+        self._sounds: Dict[str, Any] = {}
+        self._current_sound = default_sound
         self._sound_pos = 0
 
         self._bot_speaking = False
@@ -72,9 +76,20 @@ class BotBackgroundSound(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def _start(self):
+        for sound_name, file_name in self._sound_files.items():
+            await asyncio.to_thread(self._load_sound_file, sound_name, file_name)
+
+        self._audio_queue = asyncio.Queue()
+        self._audio_task = self.get_event_loop().create_task(self._audio_task_handler())
+
+    async def _stop(self):
+        self._audio_task.cancel()
+        await self._audio_task
+
+    def _load_sound_file(self, sound_name: str, file_name: str):
         try:
-            logger.debug(f"{self} loading background sound from {self._file_name}")
-            sound, sample_rate = sf.read(self._file_name, dtype="int16")
+            logger.debug(f"{self} loading background sound from {file_name}")
+            sound, sample_rate = sf.read(file_name, dtype="int16")
 
             audio = sound.tobytes()
             if sample_rate != self._sample_rate:
@@ -82,16 +97,9 @@ class BotBackgroundSound(FrameProcessor):
                 audio = resample_audio(audio, sample_rate, self._sample_rate)
 
             # Convert from np to bytes again.
-            self._sound = np.frombuffer(audio, dtype=np.int16)
-
-            self._audio_queue = asyncio.Queue()
-            self._audio_task = self.get_event_loop().create_task(self._audio_task_handler())
+            self._sounds[sound_name] = np.frombuffer(audio, dtype=np.int16)
         except Exception as ex:
-            logger.error(f"{self} unable to open file {self._file_name}")
-
-    async def _stop(self):
-        self._audio_task.cancel()
-        await self._audio_task
+            logger.error(f"{self} unable to open file {file_name}")
 
     def _mix_with_sound(self, audio: bytes):
         """Mixes raw audio frames with chunks of the same length from the sound
@@ -106,15 +114,18 @@ class BotBackgroundSound(FrameProcessor):
 
         chunk_size = len(audio_np)
 
+        # Sound currently playing.
+        sound = self._sounds[self._current_sound]
+
         # Go back to the beginning if we don't have enough data.
-        if self._sound_pos + chunk_size > len(self._sound):
+        if self._sound_pos + chunk_size > len(sound):
             self._sound_pos = 0
 
         start_pos = self._sound_pos
         end_pos = self._sound_pos + chunk_size
         self._sound_pos = end_pos
 
-        sound_np = self._sound[start_pos:end_pos]
+        sound_np = sound[start_pos:end_pos]
 
         mixed_audio = np.clip(audio_np + sound_np * self._volume, -32768, 32767).astype(np.int16)
 

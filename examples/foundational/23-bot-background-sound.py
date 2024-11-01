@@ -16,7 +16,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.audio.background_sound import BotBackgroundSound
+from pipecat.processors.audio.bot_background_sound import BotBackgroundSound
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -69,7 +69,9 @@ async def main():
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
-        background_sound = BotBackgroundSound(file_name=args.input)
+        background_sound = BotBackgroundSound(
+            sound_files={"office": args.input}, default_sound="office"
+        )
 
         pipeline = Pipeline(
             [
