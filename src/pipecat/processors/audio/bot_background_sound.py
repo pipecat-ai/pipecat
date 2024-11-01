@@ -40,8 +40,18 @@ except ModuleNotFoundError as e:
 
 
 @dataclass
-class ChangeBotBackgroundFrame(ControlFrame):
+class ChangeBotBackgroundSoundFrame(ControlFrame):
     sound_name: str
+
+
+@dataclass
+class PlayBotBackgroundSoundFrame(ControlFrame):
+    pass
+
+
+@dataclass
+class PauseBotBackgroundSoundFrame(ControlFrame):
+    pass
 
 
 class BotBackgroundSound(FrameProcessor):
@@ -58,9 +68,10 @@ class BotBackgroundSound(FrameProcessor):
         self._volume = volume
         self._sample_rate = sample_rate
 
+        self._sound_pos = 0
         self._sounds: Dict[str, Any] = {}
         self._current_sound = default_sound
-        self._sound_pos = 0
+        self._playing = True
 
         self._bot_speaking = False
         self._sleep_time = 0.02
@@ -81,8 +92,12 @@ class BotBackgroundSound(FrameProcessor):
         elif isinstance(frame, TTSAudioRawFrame):
             frame.audio = self._mix_with_sound(frame.audio)
             await self.push_frame(frame)
-        elif isinstance(frame, ChangeBotBackgroundFrame):
+        elif isinstance(frame, ChangeBotBackgroundSoundFrame):
             await self._change_background_sound(frame)
+        elif isinstance(frame, PlayBotBackgroundSoundFrame):
+            await self._play_background_sound(True)
+        elif isinstance(frame, PauseBotBackgroundSoundFrame):
+            await self._play_background_sound(False)
         else:
             await self.push_frame(frame, direction)
 
@@ -97,7 +112,10 @@ class BotBackgroundSound(FrameProcessor):
         self._audio_task.cancel()
         await self._audio_task
 
-    async def _change_background_sound(self, frame: ChangeBotBackgroundFrame):
+    async def _play_background_sound(self, play: bool):
+        self._playing = play
+
+    async def _change_background_sound(self, frame: ChangeBotBackgroundSoundFrame):
         if frame.sound_name in self._sound_files:
             self._current_sound = frame.sound_name
             self._sound_pos = 0
@@ -154,7 +172,7 @@ class BotBackgroundSound(FrameProcessor):
     async def _audio_task_handler(self):
         while True:
             try:
-                if not self._bot_speaking:
+                if self._playing and not self._bot_speaking:
                     audio = self._mix_with_sound(b"")
                     frame = OutputAudioRawFrame(
                         audio=audio, sample_rate=self._sample_rate, num_channels=1
