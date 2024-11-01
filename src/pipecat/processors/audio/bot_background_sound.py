@@ -7,9 +7,8 @@
 import asyncio
 
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, Optional
 
-from botocore.model import instance_cache
 import numpy as np
 
 from pipecat.audio.utils import resample_audio
@@ -42,6 +41,12 @@ except ModuleNotFoundError as e:
 @dataclass
 class ChangeBotBackgroundSoundFrame(ControlFrame):
     sound_name: str
+    volume: Optional[float] = None
+
+
+@dataclass
+class UpdateBotBackgroundSoundVolumeFrame(ControlFrame):
+    volume: float
 
 
 @dataclass
@@ -94,6 +99,8 @@ class BotBackgroundSound(FrameProcessor):
             await self.push_frame(frame)
         elif isinstance(frame, ChangeBotBackgroundSoundFrame):
             await self._change_background_sound(frame)
+        elif isinstance(frame, UpdateBotBackgroundSoundVolumeFrame):
+            await self._update_background_volume(frame.volume)
         elif isinstance(frame, PlayBotBackgroundSoundFrame):
             await self._play_background_sound(True)
         elif isinstance(frame, PauseBotBackgroundSoundFrame):
@@ -117,12 +124,17 @@ class BotBackgroundSound(FrameProcessor):
 
     async def _change_background_sound(self, frame: ChangeBotBackgroundSoundFrame):
         if frame.sound_name in self._sound_files:
+            if frame.volume:
+                await self._update_background_volume(frame.volume)
             self._current_sound = frame.sound_name
             self._sound_pos = 0
         else:
             error_msg = f"{self} sound {frame.sound_name} is not available"
             logger.error(error_msg)
             await self.push_error(ErrorFrame(error_msg))
+
+    async def _update_background_volume(self, volume: float):
+        self._volume = volume
 
     def _load_sound_file(self, sound_name: str, file_name: str):
         try:
