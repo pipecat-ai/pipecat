@@ -148,7 +148,7 @@ class DeepgramSTTService(STTService):
                 options={"keepalive": "true"},  # verbose=logging.DEBUG
             ),
         )
-        self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
+        self._connection: AsyncListenWebSocketClient = self._client.listen.live.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
         if self.vad_enabled:
             self._connection.on(LiveTranscriptionEvents.SpeechStarted, self._on_speech_started)
