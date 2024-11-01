@@ -6,14 +6,18 @@
 
 import asyncio
 
+from dataclasses import dataclass
 from typing import Any, Dict, Mapping
 
+from botocore.model import instance_cache
 import numpy as np
 
 from pipecat.audio.utils import resample_audio
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 from pipecat.frames.frames import (
     CancelFrame,
+    ControlFrame,
+    ErrorFrame,
     OutputAudioRawFrame,
     Frame,
     EndFrame,
@@ -33,6 +37,11 @@ except ModuleNotFoundError as e:
         "In order to use background sound, you need to `pip install pipecat-ai[soundfile]`."
     )
     raise Exception(f"Missing module: {e}")
+
+
+@dataclass
+class ChangeBotBackgroundFrame(ControlFrame):
+    sound_name: str
 
 
 class BotBackgroundSound(FrameProcessor):
@@ -72,6 +81,8 @@ class BotBackgroundSound(FrameProcessor):
         elif isinstance(frame, TTSAudioRawFrame):
             frame.audio = self._mix_with_sound(frame.audio)
             await self.push_frame(frame)
+        elif isinstance(frame, ChangeBotBackgroundFrame):
+            await self._change_background_sound(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -85,6 +96,15 @@ class BotBackgroundSound(FrameProcessor):
     async def _stop(self):
         self._audio_task.cancel()
         await self._audio_task
+
+    async def _change_background_sound(self, frame: ChangeBotBackgroundFrame):
+        if frame.sound_name in self._sound_files:
+            self._current_sound = frame.sound_name
+            self._sound_pos = 0
+        else:
+            error_msg = f"{self} sound {frame.sound_name} is not available"
+            logger.error(error_msg)
+            await self.push_error(ErrorFrame(error_msg))
 
     def _load_sound_file(self, sound_name: str, file_name: str):
         try:
