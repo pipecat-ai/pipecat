@@ -139,6 +139,9 @@ class DailyCallbacks(BaseModel):
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_transcription_message: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_recording_started: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_recording_stopped: Callable[[str], Awaitable[None]]
+    on_recording_error: Callable[[str, str], Awaitable[None]]
 
 
 def completion_callback(future):
@@ -584,6 +587,18 @@ class DailyTransportClient(EventHandler):
     def on_transcription_message(self, message):
         self._call_async_callback(self._callbacks.on_transcription_message, message)
 
+    def on_recording_started(self, status):
+        logger.debug(f"Recording started: {status}")
+        self._call_async_callback(self._callbacks.on_recording_started, status)
+
+    def on_recording_stopped(self, stream_id):
+        logger.debug(f"Recording stopped: {stream_id}")
+        self._call_async_callback(self._callbacks.on_recording_stopped, stream_id)
+
+    def on_recording_error(self, stream_id, message):
+        logger.error(f"Recording error for {stream_id}: {message}")
+        self._call_async_callback(self._callbacks.on_recording_error, stream_id, message)
+
     #
     # Daily (CallClient callbacks)
     #
@@ -818,6 +833,9 @@ class DailyTransport(BaseTransport):
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
             on_transcription_message=self._on_transcription_message,
+            on_recording_started=self._on_recording_started,
+            on_recording_stopped=self._on_recording_stopped,
+            on_recording_error=self._on_recording_error,
         )
         self._params = params
 
@@ -843,6 +861,10 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
         self._register_event_handler("on_participant_updated")
+        self._register_event_handler("on_transcription_message")
+        self._register_event_handler("on_recording_started")
+        self._register_event_handler("on_recording_stopped")
+        self._register_event_handler("on_recording_error")
 
     #
     # BaseTransport
@@ -1020,3 +1042,12 @@ class DailyTransport(BaseTransport):
 
         if self._input:
             await self._input.push_transcription_frame(frame)
+
+    async def _on_recording_started(self, status):
+        await self._call_event_handler("on_recording_started", status)
+
+    async def _on_recording_stopped(self, stream_id):
+        await self._call_event_handler("on_recording_stopped", stream_id)
+
+    async def _on_recording_error(self, stream_id, message):
+        await self._call_event_handler("on_recording_error", stream_id, message)
