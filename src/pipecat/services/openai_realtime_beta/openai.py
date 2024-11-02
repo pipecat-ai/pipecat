@@ -128,6 +128,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     #
 
     async def _handle_interruption(self):
+        # None and False are different. Check for False. None means we're using OpenAI's
+        # built-in turn detection defaults.
         if self._session_properties.turn_detection is False:
             await self.send_client_event(events.InputAudioBufferClearEvent())
             await self.send_client_event(events.ResponseCancelEvent())
@@ -141,6 +143,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         pass
 
     async def _handle_user_stopped_speaking(self, frame):
+        # None and False are different. Check for False. None means we're using OpenAI's
+        # built-in turn detection defaults.
         if self._session_properties.turn_detection is False:
             await self.send_client_event(events.InputAudioBufferCommitEvent())
             await self.send_client_event(events.ResponseCreateEvent())
