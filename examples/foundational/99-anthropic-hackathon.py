@@ -18,12 +18,27 @@ from PIL import Image
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, ImageRawFrame, TranscriptionFrame
+from pipecat.frames.frames import (
+    Frame,
+    ImageRawFrame,
+    LLMFullResponseEndFrame,
+    LLMMessagesFrame,
+    TextFrame,
+    TranscriptionFrame,
+)
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frameworks.rtvi import (
+    RTVIBotTranscriptionProcessor,
+    RTVIUserTranscriptionProcessor,
+)
 from pipecat.services.anthropic import AnthropicLLMContext, AnthropicLLMService
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -38,10 +53,9 @@ FRAMES_PER_SECOND = 0.2
 
 
 video_participant_id = None
-
 anthropic_context = None
-
 recent_image_frames = deque(maxlen=MAX_FRAMES)
+most_recent_image_summary = ""
 
 
 class ImageFrameCatcher(FrameProcessor):
@@ -66,6 +80,47 @@ class TranscriptFrameCatcher(FrameProcessor):
                 add_message_with_images(
                     anthropic_context, frame.text, frames=list(recent_image_frames)
                 )
+        await self.push_frame(frame, direction)
+
+
+class MessageFrameCatcher(FrameProcessor):
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, OpenAILLMContextFrame):
+            last_message = frame.context.messages[-1]
+
+            system_message = """
+Give me a concise summary of the images supplied.
+            """
+            frame = LLMMessagesFrame(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_message,
+                    },
+                    last_message,
+                ],
+            )
+            await self.push_frame(frame, direction)
+            return
+
+
+class MessageFrameCatcher2(FrameProcessor):
+    def __init__(self):
+        super().__init__()
+        self.text_blob = ""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        global most_recent_image_summary
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TextFrame):
+            self.text_blob += f" {frame.text}"
+
+        if isinstance(frame, LLMFullResponseEndFrame):
+            logger.debug(f"MessageFrameCatcher2: {self.text_blob}")
+            most_recent_image_summary = self.text_blob
+            self.text_blob = ""
+
         await self.push_frame(frame, direction)
 
 
@@ -99,6 +154,12 @@ async def main():
             enable_prompt_caching_beta=True,
         )
 
+        vision_llm = AnthropicLLMService(
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            model="claude-3-5-sonnet-20240620",
+            enable_prompt_caching_beta=True,
+        )
+
         # todo: test with very short initial user message
 
         system_prompt = """\
@@ -125,16 +186,26 @@ Your response will be turned into speech so use only simple words and punctuatio
         anthropic_context = AnthropicLLMContext.upgrade_to_anthropic(context)
         context_aggregator = llm.create_context_aggregator(context)
 
+        rtvi_user_transcription = RTVIUserTranscriptionProcessor()
+        rtvi_bot_transcription = RTVIBotTranscriptionProcessor()
+
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
                 ImageFrameCatcher(),
                 TranscriptFrameCatcher(),
+                rtvi_user_transcription,
                 context_aggregator.user(),  # User speech to text
-                llm,  # LLM
-                tts,  # TTS
-                transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses and tool context
+                ParallelPipeline(
+                    [
+                        llm,  # LLM
+                        rtvi_bot_transcription,
+                        tts,  # TTS
+                        transport.output(),  # Transport bot output
+                        context_aggregator.assistant(),  # Assistant spoken responses and tool context
+                    ],
+                    [MessageFrameCatcher(), vision_llm, MessageFrameCatcher2()],
+                ),
             ],
         )
 
@@ -200,7 +271,20 @@ def add_message_with_images(c, message, frames=None):
     if message:
         content.append({"type": "text", "text": message})
 
-    logger.debug(f"Adding message: {content}")
+    # Go through all messages and replace user messages containing images
+    if c.messages:
+        for i, msg in enumerate(c.messages):
+            if (
+                msg["role"] == "user"
+                and isinstance(msg["content"], list)
+                and len(msg["content"]) > 0
+            ):
+                if msg["content"][0].get("type") == "image":
+                    logger.debug(
+                        f"Replacing user message {i} containing images with summary: {most_recent_image_summary}"
+                    )
+                    c.messages[i] = {"role": "user", "content": most_recent_image_summary}
+
     c.add_message({"role": "user", "content": content})
 
 
