@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Introduce output transport audio mixers. Output transport audio mixers can be
+  used, for example, to add background sounds or any other audio mixing
+  functionality before the output audio is actually written to the transport.
+
 - Added `GatedOpenAILLMContextAggregator`. This aggregator keeps the last
   received OpenAI LLM context frame and it doesn't let it through until the
   notifier is notified.

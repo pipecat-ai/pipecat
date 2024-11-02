@@ -8,10 +8,12 @@ import asyncio
 import inspect
 
 from abc import ABC, abstractmethod
+from typing import Optional
 
 from pydantic import ConfigDict
 from pydantic.main import BaseModel
 
+from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.processors.frame_processor import FrameProcessor
 
@@ -33,6 +35,7 @@ class TransportParams(BaseModel):
     audio_out_sample_rate: int = 24000
     audio_out_channels: int = 1
     audio_out_bitrate: int = 96000
+    audio_out_mixer: Optional[BaseAudioMixer] = None
     audio_in_enabled: bool = False
     audio_in_sample_rate: int = 16000
     audio_in_channels: int = 1

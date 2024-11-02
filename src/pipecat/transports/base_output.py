@@ -8,19 +8,21 @@ import asyncio
 import itertools
 import sys
 import time
-from typing import List
+from typing import AsyncGenerator, List
 
 from loguru import logger
 from PIL import Image
 
 from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import (
+    AudioRawFrame,
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
+    MixerControlFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     SpriteFrame,
@@ -73,11 +75,15 @@ class BaseOutputTransport(FrameProcessor):
         self._bot_speaking = False
 
     async def start(self, frame: StartFrame):
+        if self._params.audio_out_mixer:
+            await self._params.audio_out_mixer.start(self._params.audio_out_sample_rate)
         self._create_output_tasks()
         self._create_sink_tasks()
 
     async def stop(self, frame: EndFrame):
         await self._cancel_output_tasks()
+        if self._params.audio_out_mixer:
+            await self._params.audio_out_mixer.stop()
 
     async def cancel(self, frame: CancelFrame):
         # Since we are cancelling everything it doesn't matter if we cancel sink
@@ -129,6 +135,8 @@ class BaseOutputTransport(FrameProcessor):
             await self.stop(frame)
             # We finally push EndFrame down so PipelineTask stops nicely.
             await self.push_frame(frame, direction)
+        elif isinstance(frame, MixerControlFrame) and self._params.audio_out_mixer:
+            await self._params.audio_out_mixer.process_frame(frame)
         # Other frames.
         elif isinstance(frame, OutputAudioRawFrame):
             await self._handle_audio(frame)
@@ -386,35 +394,70 @@ class BaseOutputTransport(FrameProcessor):
     async def send_audio(self, frame: OutputAudioRawFrame):
         await self.process_frame(frame, FrameDirection.DOWNSTREAM)
 
+    def _next_audio_frame(self) -> AsyncGenerator[AudioRawFrame, None]:
+        async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[AudioRawFrame, None]:
+            while True:
+                try:
+                    frame = await asyncio.wait_for(
+                        self._audio_out_queue.get(), timeout=vad_stop_secs
+                    )
+                    yield frame
+                except asyncio.TimeoutError:
+                    # Notify the bot stopped speaking upstream if necessary.
+                    await self._bot_stopped_speaking()
+
+        async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[AudioRawFrame, None]:
+            last_frame_time = 0
+            silence = b"\x00" * self._audio_chunk_size
+            while True:
+                try:
+                    frame = self._audio_out_queue.get_nowait()
+                    frame.audio = await self._params.audio_out_mixer.mix(frame.audio)
+                    last_frame_time = time.time()
+                    yield frame
+                except asyncio.QueueEmpty:
+                    # Notify the bot stopped speaking upstream if necessary.
+                    diff_time = time.time() - last_frame_time
+                    if diff_time > vad_stop_secs:
+                        await self._bot_stopped_speaking()
+                    # Generate an audio frame with only the mixer's part.
+                    frame = OutputAudioRawFrame(
+                        audio=await self._params.audio_out_mixer.mix(silence),
+                        sample_rate=self._params.audio_out_sample_rate,
+                        num_channels=self._params.audio_out_channels,
+                    )
+                    yield frame
+
+        vad_stop_secs = (
+            self._params.vad_analyzer.params.stop_secs
+            if self._params.vad_analyzer
+            else VAD_STOP_SECS
+        )
+        if self._params.audio_out_mixer:
+            return with_mixer(vad_stop_secs)
+        else:
+            return without_mixer(vad_stop_secs)
+
     async def _audio_out_task_handler(self):
         wait_time = (
             self._params.vad_analyzer.params.stop_secs
             if self._params.vad_analyzer
             else VAD_STOP_SECS
         )
-        while True:
-            try:
-                # If we don't have an audio frame for VAD stop secs we will
-                # consider the bot is not speaking.
-                frame = await asyncio.wait_for(self._audio_out_queue.get(), timeout=wait_time)
-
-                # Notify the bot started speaking upstream if necessary.
+        try:
+            async for frame in self._next_audio_frame():
+                # Notify the bot started speaking upstream if necessary and that
+                # it's actually speaking.
                 if isinstance(frame, TTSAudioRawFrame):
                     await self._bot_started_speaking()
+                    await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+
+                # Also, push frame downstream in case anyone else needs it.
+                await self.push_frame(frame)
 
                 # Send audio.
                 await self.write_raw_audio_frames(frame.audio)
-
-                # Notify the bot is speaking upstream.
-                if isinstance(frame, TTSAudioRawFrame):
-                    await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
-
-                # Push frame downstream in case anyone else needs it.
-                await self.push_frame(frame)
-            except asyncio.TimeoutError:
-                # Notify the bot stopped speaking upstream if necessary.
-                await self._bot_stopped_speaking()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.exception(f"{self} error writing to camera: {e}")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.exception(f"{self} error writing to microphone: {e}")
