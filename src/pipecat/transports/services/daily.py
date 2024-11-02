@@ -495,9 +495,12 @@ class DailyTransportClient(EventHandler):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
-        # Only enable camera subscription on this participant
+        # Try to enable camera and screen subscription on this participant
         await self.update_subscriptions(
-            participant_settings={participant_id: {"media": "subscribed"}}
+            # participant_settings={participant_id: {"media": "subscribed"}}
+            participant_settings={
+                participant_id: {"media": {"camera": "subscribed", "screenVideo": "subscribed"}}
+            }
         )
 
         self._video_renderers[participant_id] = callback
