@@ -19,6 +19,7 @@ from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     Frame,
     ImageRawFrame,
     LLMFullResponseEndFrame,
@@ -209,9 +210,7 @@ Your response will be turned into speech so use only simple words and punctuatio
             ],
         )
 
-        task = PipelineTask(
-            pipeline, PipelineParams(allow_interruptions=False, enable_metrics=True)
-        )
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
@@ -227,6 +226,7 @@ Your response will be turned into speech so use only simple words and punctuatio
         @transport.event_handler("on_app_message")
         async def on_app_message(transport, message, sender):
             logger.debug(f"Received app message: {message} - {context}")
+
             if not recent_image_frames:
                 logger.debug("No image frames to send")
                 return
@@ -235,7 +235,13 @@ Your response will be turned into speech so use only simple words and punctuatio
                 anthropic_context, message["message"], frames=list(recent_image_frames)
             )
 
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+            interrupt_message = "STOP"
+
+            if interrupt_message == message["message"]:
+                logger.debug("Interrupting")
+                await task.queue_frames([BotInterruptionFrame()])
+            else:
+                await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
         await runner.run(task)
