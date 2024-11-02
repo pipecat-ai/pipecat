@@ -31,7 +31,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.string import find_endofsentences, find_endofsentences_eager
+from pipecat.utils.string import find_endofsentences_eager
 
 
 class LLMResponseAggregator(FrameProcessor):
@@ -97,10 +97,8 @@ class LLMResponseAggregator(FrameProcessor):
         send_aggregation = False
 
         if isinstance(frame, self._start_frame):
-            # if self._start_frame == UserStartedSpeakingFrame:
-            #     logger.debug(f"LLM frame received {frame}")
-            # if self._start_frame != LLMFullResponseStartFrame:
-            self._aggregation = ""
+            if self._start_frame != UserStartedSpeakingFrame:
+                self._aggregation = ""
             self._aggregating = True
             self._seen_start_frame = True
             self._seen_end_frame = False
@@ -167,11 +165,11 @@ class LLMResponseAggregator(FrameProcessor):
             await self.push_frame(frame, direction)
 
         if send_aggregation:
-            await self._push_aggregation()
-            # if self._start_frame == UserStartedSpeakingFrame:
-            #     await self._modified_push_aggregation()
-            # else:
-            #     await self._push_aggregation()
+            # await self._push_aggregation()
+            if self._start_frame == UserStartedSpeakingFrame:
+                await self._modified_push_aggregation()
+            else:
+                await self._push_aggregation()
 
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:
@@ -187,7 +185,8 @@ class LLMResponseAggregator(FrameProcessor):
     async def _modified_push_aggregation(self):
         if self._start_frame == UserStartedSpeakingFrame and len(self._aggregation) > 0:
             text = self._aggregation
-            eos_end_marker = find_endofsentences(text)
+            # eos_end_marker = find_endofsentences(text)
+            eos_end_marker = len(text)
             if eos_end_marker:
                 self._aggregation = text[eos_end_marker:].lstrip(".").lstrip("?")
                 text = text[:eos_end_marker].strip()
