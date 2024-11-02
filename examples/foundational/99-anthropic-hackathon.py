@@ -33,7 +33,10 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-MAX_FRAMES = 5  # Constant to control number of frames to keep
+MAX_FRAMES = 5
+FRAMES_PER_SECOND = 0.2
+
+
 video_participant_id = None
 
 anthropic_context = None
@@ -47,7 +50,6 @@ class ImageFrameCatcher(FrameProcessor):
 
         await super().process_frame(frame, direction)
         if isinstance(frame, ImageRawFrame):
-            # logger.debug(f"ImageLogger: {frame}")
             recent_image_frames.append(frame)
         else:
             await self.push_frame(frame, direction)
@@ -64,6 +66,7 @@ class TranscriptFrameCatcher(FrameProcessor):
                 add_message_with_images(
                     anthropic_context, frame.text, frames=list(recent_image_frames)
                 )
+        await self.push_frame(frame, direction)
 
 
 async def main():
@@ -135,7 +138,9 @@ Your response will be turned into speech so use only simple words and punctuatio
             ],
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
+        task = PipelineTask(
+            pipeline, PipelineParams(allow_interruptions=False, enable_metrics=True)
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
@@ -143,7 +148,7 @@ Your response will be turned into speech so use only simple words and punctuatio
             video_participant_id = participant["id"]
             await transport.capture_participant_transcription(video_participant_id)
             await transport.capture_participant_video(
-                video_participant_id, framerate=1, video_source="screenVideo"
+                video_participant_id, framerate=FRAMES_PER_SECOND, video_source="screenVideo"
             )
             # Kick off the conversation.
             await task.queue_frames([context_aggregator.user().get_context_frame()])
@@ -195,6 +200,7 @@ def add_message_with_images(c, message, frames=None):
     if message:
         content.append({"type": "text", "text": message})
 
+    logger.debug(f"Adding message: {content}")
     c.add_message({"role": "user", "content": content})
 
 
