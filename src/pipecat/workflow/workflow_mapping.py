@@ -2,16 +2,15 @@ from ..services.cartesia import CartesiaTTSService
 from ..services.openai import OpenAILLMService
 from ..services.deepgram import DeepgramSTTService
 from ..transports.services.daily import DailyTransport
-from ..processors.aggregators.openai_llm_context import OpenAILLMContext
 from ..processors.frame_processor import FrameProcessor
 
 # Map workflow types to their corresponding Python classes
 WORKFLOW_MAPPING = {
-    "frames/audio_input": DailyTransport,
-    "frame_processors/speech_to_text": DeepgramSTTService,
-    "frame_processors/llm": OpenAILLMService,
-    "frame_processors/text_to_speech": CartesiaTTSService,
-    "frame_processors/audio_output_transport": DailyTransport,
+    "inputs/audio_input": DailyTransport,
+    "processors/speech_to_text": DeepgramSTTService,
+    "processors/llm": OpenAILLMService,
+    "processors/text_to_speech": CartesiaTTSService,
+    "outputs/audio_output": DailyTransport,
 }
 
 

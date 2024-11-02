@@ -5,8 +5,8 @@ from ..pipeline.pipeline import Pipeline
 from ..pipeline.runner import PipelineRunner
 from ..pipeline.task import PipelineTask, PipelineParams
 from .workflow_translator import translate_workflow
-from ..frames.frames import LLMMessagesFrame
-from ..transports.services.daily import DailyTransport
+from ..services.openai import OpenAIUserContextAggregator
+
 
 load_dotenv(override=True)
 
@@ -21,7 +21,7 @@ async def main():
 
     # Translate the workflow to a list of processors
     print("Translating workflow to processors")
-    processors = translate_workflow(workflow_path)
+    processors, daily_transport = translate_workflow(workflow_path)
     print(f"Processors created: {processors}")
 
     # Create a pipeline from the processors
@@ -39,15 +39,14 @@ async def main():
     runner = PipelineRunner()
     print(f"Pipeline runner created: {runner}")
 
-    # # Add event handler
-    # daily_transport = next(p for p in processors if isinstance(p, DailyTransport))
+    user_context_aggregator = next(
+        p for p in processors if isinstance(p, OpenAIUserContextAggregator)
+    )
 
-    # @daily_transport.event_handler("on_first_participant_joined")
-    # async def on_first_participant_joined(transport, participant):
-    #     transport.capture_participant_transcription(participant["id"])
-    #     # Kick off the conversation.
-    #     messages = [{"role": "system", "content": "Please introduce yourself to the user."}]
-    #     await task.queue_frames([LLMMessagesFrame(messages)])
+    @daily_transport.event_handler("on_first_participant_joined")
+    async def on_first_participant_joined(transport, participant):
+        transport.capture_participant_transcription(participant["id"])
+        await task.queue_frames([user_context_aggregator.get_context_frame()])
 
     # Run the pipeline
     print("Running the pipeline")
