@@ -57,11 +57,18 @@ class TranscriptFrameCatcher(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, TranscriptionFrame):
-            logger.debug(f"TranscriptLogger: {frame}")
+            logger.debug(
+                f"TranscriptLogger: {frame}, num frames: {len(recent_image_frames)}, anthropic context: {anthropic_context}"
+            )
+            if anthropic_context:
+                add_message_with_images(
+                    anthropic_context, frame.text, frames=list(recent_image_frames)
+                )
 
 
 async def main():
     global llm
+    global anthropic_context
 
     async with aiohttp.ClientSession() as session:
         (room_url, token) = await configure(session)
@@ -112,18 +119,20 @@ Your response will be turned into speech so use only simple words and punctuatio
         ]
 
         context = OpenAILLMContext(messages)
+        anthropic_context = AnthropicLLMContext.upgrade_to_anthropic(context)
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
                 ImageFrameCatcher(),
+                TranscriptFrameCatcher(),
                 context_aggregator.user(),  # User speech to text
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses and tool context
-            ]
+            ],
         )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
@@ -141,8 +150,6 @@ Your response will be turned into speech so use only simple words and punctuatio
 
         @transport.event_handler("on_app_message")
         async def on_app_message(transport, message, sender):
-            global anthropic_context
-            anthropic_context = AnthropicLLMContext.upgrade_to_anthropic(context)
             logger.debug(f"Received app message: {message} - {context}")
             if not recent_image_frames:
                 logger.debug("No image frames to send")
@@ -157,37 +164,38 @@ Your response will be turned into speech so use only simple words and punctuatio
         runner = PipelineRunner()
         await runner.run(task)
 
-        def add_message_with_images(c, message, frames=None):
-            if frames is None:
-                frames = list(recent_image_frames)
 
-            if not frames:
-                logger.debug("No image frames to send")
-                return
+def add_message_with_images(c, message, frames=None):
+    if frames is None:
+        frames = list(recent_image_frames)
 
-            # Create content list starting with all images
-            content = []
-            for frame in frames:
-                buffer = io.BytesIO()
-                Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
-                encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    if not frames:
+        logger.debug("No image frames to send")
+        return
 
-                content.append(
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": encoded_image,
-                        },
-                    }
-                )
+    # Create content list starting with all images
+    content = []
+    for frame in frames:
+        buffer = io.BytesIO()
+        Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
+        encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-            # Add text message at the end if provided
-            if message:
-                content.append({"type": "text", "text": message})
+        content.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": encoded_image,
+                },
+            }
+        )
 
-            c.add_message({"role": "user", "content": content})
+    # Add text message at the end if provided
+    if message:
+        content.append({"type": "text", "text": message})
+
+    c.add_message({"role": "user", "content": content})
 
 
 if __name__ == "__main__":
