@@ -5,27 +5,24 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
+
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import Frame, ImageRawFrame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.anthropic import AnthropicLLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.frames.frames import Frame, ImageRawFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.anthropic import AnthropicLLMContext
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
+from pipecat.services.anthropic import AnthropicLLMContext, AnthropicLLMService
+from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -43,15 +40,17 @@ class ImageFrameCatcher(FrameProcessor):
 
         await super().process_frame(frame, direction)
         if isinstance(frame, ImageRawFrame):
-            logger.debug(f"ImageLogger: {frame}")
+            # logger.debug(f"ImageLogger: {frame}")
             most_recent_image_frame = frame
         else:
             await self.push_frame(frame, direction)
 
 
-async def get_weather(function_name, tool_call_id, arguments, llm, context, result_callback):
-    location = arguments["location"]
-    await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
+class TranscriptFrameCatcher(FrameProcessor):
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TranscriptionFrame):
+            logger.debug(f"TranscriptLogger: {frame}")
 
 
 async def main():
@@ -82,24 +81,6 @@ async def main():
             model="claude-3-5-sonnet-20240620",
             enable_prompt_caching_beta=True,
         )
-        llm.register_function("get_weather", get_weather)
-
-        tools = [
-            {
-                "name": "get_weather",
-                "description": "Get the current weather in a given location",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "location": {
-                            "type": "string",
-                            "description": "The city and state, e.g. San Francisco, CA",
-                        }
-                    },
-                    "required": ["location"],
-                },
-            },
-        ]
 
         # todo: test with very short initial user message
 
@@ -123,7 +104,7 @@ Your response will be turned into speech so use only simple words and punctuatio
             {"role": "user", "content": "Start the conversation by saying 'hello'."},
         ]
 
-        context = OpenAILLMContext(messages, tools)
+        context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
