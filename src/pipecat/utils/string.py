@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import os
 import re
+
+import httpx
+from loguru import logger
 
 ENDOFSENTENCE_PATTERN_STR = r"""
     (?<![A-Z])       # Negative lookbehind: not preceded by an uppercase letter (e.g., "U.S.A.")
@@ -53,3 +57,55 @@ def find_endofsentences_eager(text: str) -> int:
     ]
     # debug print
     return end_indices[0] if end_indices else 0
+
+
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+from pydantic import BaseModel
+
+
+class CompletionFormat(BaseModel):
+    complete_part: str
+    incomplete_part: str
+
+
+async def get_complete_and_incomplete_parts(sentence: str) -> (str, str):
+    if not sentence:
+        return "", ""
+    client = AsyncOpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        # azure_endpoint=os.getenv("AZURE_OPENAI_MINI_ENDPOINT"),
+        # api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+        http_client=DefaultAsyncHttpxClient(
+            limits=httpx.Limits(
+                max_keepalive_connections=100,
+                max_connections=1000,
+                keepalive_expiry=None,
+            )
+        ),
+    )
+    try:
+        completion = await client.beta.chat.completions.parse(
+            model="gpt-4o-mini-2024-07-18",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a smart transcriber and your job is to take user's sentence and determine which parts are complete and which parts are incomplete. Start from the beginning and capture complete part; whatever is leftover is deemed incomplete. In order to do your job effectively, you can try to understand the intent and rephrase to preserve the meaning. Try to only return complete sentences or phrases as complete",
+                },
+                {
+                    "role": "user",
+                    "content": sentence.strip(),
+                },
+            ],
+            response_format=CompletionFormat,
+        )
+        response = completion.choices[0].message
+        if response.parsed:
+            logger.debug(response.parsed)
+            return response.parsed.complete_part, response.parsed.incomplete_part
+        elif response.refusal:
+            # handle refusal
+            logger.debug(response.refusal)
+    except Exception as e:
+        logger.error(e)
+        pass
+    return sentence, ""

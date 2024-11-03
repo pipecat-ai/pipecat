@@ -31,7 +31,9 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.string import find_endofsentences_eager
+from pipecat.utils.string import (
+    match_endofsentence,
+)
 
 
 class LLMResponseAggregator(FrameProcessor):
@@ -97,8 +99,8 @@ class LLMResponseAggregator(FrameProcessor):
         send_aggregation = False
 
         if isinstance(frame, self._start_frame):
-            if self._start_frame != UserStartedSpeakingFrame:
-                self._aggregation = ""
+            # if self._start_frame != UserStartedSpeakingFrame:
+            self._aggregation = ""
             self._aggregating = True
             self._seen_start_frame = True
             self._seen_end_frame = False
@@ -139,7 +141,7 @@ class LLMResponseAggregator(FrameProcessor):
                 # if we are not supposed to send the aggregation and the Start frame is UserStartedSpeaking
                 # then , let's try to send the aggregation eagerly
                 # if (
-                #     send_aggregation == False
+                #     not send_aggregation
                 #     and self._start_frame == UserStartedSpeakingFrame
                 # ):
                 #     await self._eager_push_aggregation()
@@ -185,33 +187,40 @@ class LLMResponseAggregator(FrameProcessor):
     async def _modified_push_aggregation(self):
         if self._start_frame == UserStartedSpeakingFrame and len(self._aggregation) > 0:
             text = self._aggregation
-            # eos_end_marker = find_endofsentences(text)
-            eos_end_marker = len(text)
-            if eos_end_marker:
-                self._aggregation = text[eos_end_marker:].lstrip(".").lstrip("?")
-                text = text[:eos_end_marker].strip()
-            else:
-                self._aggregation = ""
-            logger.debug(f"pushing: {text} , leftover: {self._aggregation}")
-            self._messages.append({"role": self._role, "content": text})
 
-            timestamp = datetime.utcnow().timestamp()
-            frame = LLMMessagesFrame(self._messages)
-            frame.pts = int(timestamp)
-            await self.push_frame(frame)
-            await self.push_frame(
-                CustomUserTranscriptionFrame(
-                    self._messages[-1]["content"], str(int(timestamp))
+            # eos_end_marker = find_endofsentences(text)
+            # if eos_end_marker:
+            #     complete = text[eos_end_marker:].lstrip(".").lstrip("?")
+            #     incomplete = text[:eos_end_marker].strip()
+            # else:
+            #     complete = text
+            #     incomplete = ""
+            complete = text
+            incomplete = ""
+            # complete, incomplete = await get_complete_and_incomplete_parts(text)
+            if len(complete):
+                text = complete
+                self._aggregation = incomplete
+                self._messages.append({"role": self._role, "content": text})
+
+                timestamp = datetime.utcnow().timestamp()
+                frame = LLMMessagesFrame(self._messages)
+                frame.pts = int(timestamp)
+                await self.push_frame(frame)
+                await self.push_frame(
+                    CustomUserTranscriptionFrame(
+                        self._messages[-1]["content"], str(int(timestamp))
+                    )
                 )
-            )
 
     async def _eager_push_aggregation(self):
         if self._start_frame == UserStartedSpeakingFrame and len(self._aggregation) > 0:
-            text = self._aggregation
-            eos_end_marker = find_endofsentences_eager(text)
-            if eos_end_marker:
-                self._aggregation = text[eos_end_marker:].lstrip(".").lstrip("?")
-                text = text[:eos_end_marker].strip()
+            eos_end_marker = match_endofsentence(self._aggregation)
+            if eos_end_marker and len(self._aggregation[:eos_end_marker].strip()):
+                self._aggregation = (
+                    self._aggregation[eos_end_marker:].lstrip(".").lstrip("?")
+                )
+                text = self._aggregation[:eos_end_marker].strip()
 
                 logger.debug(f"pushing: {text} , leftover: {self._aggregation}")
                 self._messages.append({"role": self._role, "content": text})

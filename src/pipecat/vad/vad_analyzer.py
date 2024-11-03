@@ -7,11 +7,10 @@
 from abc import abstractmethod
 from enum import Enum
 
+from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.utils.audio import calculate_audio_volume, exp_smoothing
-
-from loguru import logger
 
 
 class VADState(Enum):
@@ -90,7 +89,9 @@ class VADAnalyzer:
         volume = self._get_smoothed_volume(audio_frames)
         self._prev_volume = volume
 
-        speaking = confidence >= self._params.confidence and volume >= self._params.min_volume
+        speaking = (
+            confidence >= self._params.confidence and volume >= self._params.min_volume
+        )
 
         if speaking:
             match self._vad_state:

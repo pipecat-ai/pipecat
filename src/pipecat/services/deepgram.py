@@ -19,7 +19,6 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    UserStoppedSpeakingFrame,
 )
 from pipecat.services.ai_services import STTService, TTSService
 from pipecat.transcriptions.language import Language
@@ -220,7 +219,7 @@ class DeepgramSTTService(STTService):
         await self.start_processing_metrics()
 
     async def _on_utterance_end(self, *args, **kwargs):
-        await self.push_frame(UserStoppedSpeakingFrame())
+        # await self.push_frame(UserStoppedSpeakingFrame())
         await self.stop_processing_metrics()
 
     async def _on_message(self, *args, **kwargs):
@@ -241,12 +240,9 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
-                # if speech_final:
-                #     logger.debug(f"Deepgram: Final - Speech Final: {transcript}")
-
-            # if not self.utterance_end:
-            #     await self.push_frame(UserStoppedSpeakingFrame())
-            #     await self.stop_processing_metrics()
+                # if not self.utterance_end:
+                #     await self.push_frame(UserStoppedSpeakingFrame())
+                #     await self.stop_processing_metrics()
             # if not self.utterance_end:
             #     if speech_final:
             #         await self.push_frame(UserStoppedSpeakingFrame())
