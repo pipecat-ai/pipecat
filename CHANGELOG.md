@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Websocket transports (FastAPI and Websocket) now synchronize with time before
+  sending data. This allows for interruptions to just work out of the box.
+
 - Improved bot speaking detection for all TTS services by using actual bot
   audio.
 

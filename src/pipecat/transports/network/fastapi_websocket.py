@@ -7,6 +7,7 @@
 
 import asyncio
 import io
+import time
 import wave
 
 from typing import Awaitable, Callable
@@ -42,7 +43,6 @@ except ModuleNotFoundError as e:
 
 class FastAPIWebsocketParams(TransportParams):
     add_wav_header: bool = False
-    audio_frame_size: int = 6400  # 200ms
     serializer: FrameSerializer
 
 
@@ -105,44 +105,52 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
         self._websocket = websocket
         self._params = params
-        self._websocket_audio_buffer = bytes()
+
+        self._send_interval = (self._audio_chunk_size / self._params.audio_out_sample_rate) / 2
+        self._next_send_time = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartInterruptionFrame):
             await self._write_frame(frame)
+            self._next_send_time = 0
 
     async def write_raw_audio_frames(self, frames: bytes):
-        self._websocket_audio_buffer += frames
-        while len(self._websocket_audio_buffer):
-            frame = AudioRawFrame(
-                audio=self._websocket_audio_buffer[: self._params.audio_frame_size],
-                sample_rate=self._params.audio_out_sample_rate,
-                num_channels=self._params.audio_out_channels,
+        frame = AudioRawFrame(
+            audio=frames,
+            sample_rate=self._params.audio_out_sample_rate,
+            num_channels=self._params.audio_out_channels,
+        )
+
+        if self._params.add_wav_header:
+            content = io.BytesIO()
+            ww = wave.open(content, "wb")
+            ww.setsampwidth(2)
+            ww.setnchannels(frame.num_channels)
+            ww.setframerate(frame.sample_rate)
+            ww.writeframes(frame.audio)
+            ww.close()
+            content.seek(0)
+            wav_frame = AudioRawFrame(
+                content.read(), sample_rate=frame.sample_rate, num_channels=frame.num_channels
             )
+            frame = wav_frame
 
-            if self._params.add_wav_header:
-                content = io.BytesIO()
-                ww = wave.open(content, "wb")
-                ww.setsampwidth(2)
-                ww.setnchannels(frame.num_channels)
-                ww.setframerate(frame.sample_rate)
-                ww.writeframes(frame.audio)
-                ww.close()
-                content.seek(0)
-                wav_frame = AudioRawFrame(
-                    content.read(), sample_rate=frame.sample_rate, num_channels=frame.num_channels
-                )
-                frame = wav_frame
+        payload = self._params.serializer.serialize(frame)
+        if payload and self._websocket.client_state == WebSocketState.CONNECTED:
+            await self._websocket.send_text(payload)
 
-            payload = self._params.serializer.serialize(frame)
-            if payload and self._websocket.client_state == WebSocketState.CONNECTED:
-                await self._websocket.send_text(payload)
+        # Simulate a clock.
+        current_time = time.monotonic()
+        sleep_duration = max(0, self._next_send_time - current_time)
+        await asyncio.sleep(sleep_duration)
+        if sleep_duration == 0:
+            self._next_send_time = time.monotonic() + self._send_interval
+        else:
+            self._next_send_time += self._send_interval
 
-            self._websocket_audio_buffer = self._websocket_audio_buffer[
-                self._params.audio_frame_size :
-            ]
+        self._websocket_audio_buffer = bytes()
 
     async def _write_frame(self, frame: Frame):
         payload = self._params.serializer.serialize(frame)
