@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Introduce output transport audio mixers. Output transport audio mixers can be
+  used, for example, to add background sounds or any other audio mixing
+  functionality before the output audio is actually written to the transport.
+
 - Added `GatedOpenAILLMContextAggregator`. This aggregator keeps the last
   received OpenAI LLM context frame and it doesn't let it through until the
   notifier is notified.
@@ -44,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Websocket transports (FastAPI and Websocket) now synchronize with time before
+  sending data. This allows for interruptions to just work out of the box.
+
 - Improved bot speaking detection for all TTS services by using actual bot
   audio.
 
@@ -57,7 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
-- Added a new foundational example 22-natural-conversation.py. This examples
+- Add `23-bot-background-sound.py` foundational example.
+
+- Added a new foundational example `22-natural-conversation.py`. This example
   shows how to achieve a more natural conversation detecting when the user ends
   statement.
 
