@@ -12,7 +12,7 @@ import numpy as np
 
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.utils import resample_audio
-from pipecat.frames.frames import Frame, MixerUpdateSettingsFrame, MixerEnableFrame
+from pipecat.frames.frames import MixerControlFrame, MixerUpdateSettingsFrame, MixerEnableFrame
 
 from loguru import logger
 
@@ -65,7 +65,7 @@ class SoundfileMixer(BaseAudioMixer):
     async def stop(self):
         pass
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: MixerControlFrame):
         if isinstance(frame, MixerUpdateSettingsFrame):
             await self._update_settings(frame)
         elif isinstance(frame, MixerEnableFrame):
