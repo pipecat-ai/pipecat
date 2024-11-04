@@ -12,7 +12,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
@@ -35,6 +35,7 @@ logger.add(sys.stderr, level="DEBUG")
 async def main():
     transport = WebsocketServerTransport(
         params=WebsocketServerParams(
+            audio_out_sample_rate=16000,
             audio_out_enabled=True,
             add_wav_header=True,
             vad_enabled=True,
@@ -50,6 +51,7 @@ async def main():
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+        sample_rate=16000,
     )
 
     messages = [
@@ -74,7 +76,7 @@ async def main():
         ]
     )
 
-    task = PipelineTask(pipeline)
+    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
