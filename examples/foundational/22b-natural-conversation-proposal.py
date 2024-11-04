@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     StartInterruptionFrame,
+    StopInterruptionFrame,
     SystemFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -39,6 +40,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.processors.filters.function_filter import FunctionFilter
+from pipecat.processors.user_idle_processor import UserIdleProcessor
 
 
 from runner import configure
@@ -53,10 +55,14 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-classifier_statement = "Determine if the user's statement ends with a complete sentence or question. The user text is transcribed speech. It may contain multiple fragments concatentated together. Categorize the text as either complete with the user now expecting a response, or incomplete. Return 'YES' if text is likely complete and the user is expecting a response. Return 'NO' if the text seems to be a partial expression or unfinished thought."
+classifier_statement = "Determine if the user's statement ends with a complete thought and you should respond. The user text is transcribed speech. It may contain multiple fragments concatentated together. You are trying to determine only the completeness of the last user statement. The previous assistant statement is provided only for context. Categorize the text as either complete with the user now expecting a response, or incomplete. Return 'YES' if text is likely complete and the user is expecting a response. Return 'NO' if the text seems to be a partial expression or unfinished thought."
 
 
 class StatementJudgeContextFilter(FrameProcessor):
+    def __init__(self, notifier: BaseNotifier, **kwargs):
+        super().__init__(**kwargs)
+        self._notifier = notifier
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         # We must not block system frames.
@@ -64,7 +70,12 @@ class StatementJudgeContextFilter(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
-        # We only want to handle OpenAILLMContextFrames, and only want to push a simple
+        # Just treat an LLMMessagesFrame as complete, no matter what.
+        if isinstance(frame, LLMMessagesFrame):
+            await self._notifier.notify()
+            return
+
+        # Otherwise, we only want to handle OpenAILLMContextFrames, and only want to push a simple
         # messages frame that contains a system prompt and the most recent user messages,
         # concatenated.
         if isinstance(frame, OpenAILLMContextFrame):
@@ -102,31 +113,26 @@ class StatementJudgeContextFilter(FrameProcessor):
 
 
 class CompletenessCheck(FrameProcessor):
-    def __init__(self, complete_notifier: BaseNotifier, incomplete_notifier: BaseNotifier):
+    def __init__(self, notifier: BaseNotifier):
         super().__init__()
-        self._complete_notifier = complete_notifier
-        self._incomplete_notifier = incomplete_notifier
+        self._notifier = notifier
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, TextFrame) and frame.text == "YES":
             logger.debug("Completeness check YES")
             await self.push_frame(UserStoppedSpeakingFrame())
-            await self._complete_notifier.notify()
+            await self._notifier.notify()
         elif isinstance(frame, TextFrame) and frame.text == "NO":
             logger.debug("Completeness check NO")
-            await self._incomplete_notifier.notify()
 
 
 class OutputGate(FrameProcessor):
-    def __init__(
-        self, complete_notifier: BaseNotifier, incomplete_notifier: BaseNotifier, **kwargs
-    ):
+    def __init__(self, notifier: BaseNotifier, **kwargs):
         super().__init__(**kwargs)
         self._gate_open = False
         self._frames_buffer = []
-        self._complete_notifier = complete_notifier
-        self._incomplete_notifier = incomplete_notifier
+        self._notifier = notifier
 
     def close_gate(self):
         self._gate_open = False
@@ -163,7 +169,6 @@ class OutputGate(FrameProcessor):
     async def _start(self):
         self._frames_buffer = []
         self._gate_task = self.get_event_loop().create_task(self._gate_task_handler())
-        self._interrupt_task = self.get_event_loop().create_task(self._interrupt_task_handler())
 
     async def _stop(self):
         self._gate_task.cancel()
@@ -172,21 +177,11 @@ class OutputGate(FrameProcessor):
     async def _gate_task_handler(self):
         while True:
             try:
-                await self._complete_notifier.wait()
+                await self._notifier.wait()
                 self.open_gate()
                 for frame, direction in self._frames_buffer:
                     await self.push_frame(frame, direction)
                 self._frames_buffer = []
-            except asyncio.CancelledError:
-                break
-
-    async def _interrupt_task_handler(self):
-        while True:
-            try:
-                await self._incomplete_notifier.wait()
-                await self.push_frame(StartInterruptionFrame(), FrameDirection.UPSTREAM)
-                self._frames_buffer = []
-
             except asyncio.CancelledError:
                 break
 
@@ -241,37 +236,39 @@ async def main():
 
         # This is a notifier that we use to synchronize the two LLMs.
         notifier = EventNotifier()
-        # rename/comment?
-        interrupt_notifier = EventNotifier()
+
+        # This turns the LLM context into an inference request to classify the user's speech
+        # as complete or incomplete.
+        statement_judge_context_filter = StatementJudgeContextFilter(notifier=notifier)
 
         # This sends a UserStoppedSpeakingFrame and triggers the notifier event
-        completeness_check = CompletenessCheck(
-            complete_notifier=notifier, incomplete_notifier=interrupt_notifier
-        )
+        completeness_check = CompletenessCheck(notifier=notifier)
 
         # # Notify if the user hasn't said anything.
-        # async def user_idle_notifier(frame):
-        #     await notifier.notify()
+        async def user_idle_notifier(frame):
+            await notifier.notify()
 
-        # # Sometimes the LLM will fail detecting if a user has completed a
-        # # sentence, this will wake up the notifier if that happens.
-        # user_idle = UserIdleProcessor(callback=user_idle_notifier, timeout=10.0)
+        # Sometimes the LLM will fail detecting if a user has completed a
+        # sentence, this will wake up the notifier if that happens.
+        user_idle = UserIdleProcessor(callback=user_idle_notifier, timeout=5.0)
 
-        bot_output_gate = OutputGate(
-            complete_notifier=notifier, incomplete_notifier=interrupt_notifier
-        )
+        bot_output_gate = OutputGate(notifier=notifier)
 
         async def block_user_stopped_speaking(frame):
             return not isinstance(frame, UserStoppedSpeakingFrame)
 
         async def pass_only_llm_trigger_frames(frame):
-            return isinstance(frame, OpenAILLMContextFrame) or isinstance(frame, LLMMessagesFrame)
+            return (
+                isinstance(frame, OpenAILLMContextFrame)
+                or isinstance(frame, LLMMessagesFrame)
+                or isinstance(frame, StartInterruptionFrame)
+                or isinstance(frame, StopInterruptionFrame)
+            )
 
         pipeline = Pipeline(
             [
                 transport.input(),
                 stt,
-                # user_idle,
                 context_aggregator.user(),
                 ParallelPipeline(
                     [
@@ -283,7 +280,7 @@ async def main():
                         # Ignore everything except an OpenAILLMContextFrame. Pass a specially constructed
                         # LLMMessagesFrame to the statement classifier LLM. The only frame this
                         # sub-pipeline will output is a UserStoppedSpeakingFrame.
-                        StatementJudgeContextFilter(),
+                        statement_judge_context_filter,
                         statement_llm,
                         completeness_check,
                     ],
@@ -291,10 +288,11 @@ async def main():
                         # Block everything except OpenAILLMContextFrame and LLMMessagesFrame
                         FunctionFilter(filter=pass_only_llm_trigger_frames),
                         llm,
-                        tts,
                         bot_output_gate,  # Buffer all llm/tts output until notified.
                     ],
                 ),
+                tts,
+                user_idle,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
