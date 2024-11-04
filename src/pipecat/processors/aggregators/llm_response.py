@@ -204,14 +204,14 @@ class LLMResponseAggregator(FrameProcessor):
                 self._messages.append({"role": self._role, "content": text})
 
                 timestamp = datetime.utcnow().timestamp()
-                frame = LLMMessagesFrame(self._messages)
-                frame.pts = int(timestamp)
-                await self.push_frame(frame)
                 await self.push_frame(
                     CustomUserTranscriptionFrame(
                         self._messages[-1]["content"], str(int(timestamp))
                     )
                 )
+                frame = LLMMessagesFrame(self._messages)
+                frame.pts = int(timestamp)
+                await self.push_frame(frame)
 
     async def _eager_push_aggregation(self):
         if self._start_frame == UserStartedSpeakingFrame and len(self._aggregation) > 0:
