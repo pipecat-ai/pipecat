@@ -6,7 +6,7 @@
 
 from abc import ABC, abstractmethod
 
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import MixerControlFrame
 
 
 class BaseAudioMixer(ABC):
@@ -36,7 +36,7 @@ class BaseAudioMixer(ABC):
         pass
 
     @abstractmethod
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: MixerControlFrame):
         """This will be called when the output transport receives a
         MixerControlFrame.
 
