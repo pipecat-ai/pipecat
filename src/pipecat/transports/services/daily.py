@@ -497,7 +497,7 @@ class DailyTransportClient(EventHandler):
     ):
         # Only enable camera subscription on this participant
         await self.update_subscriptions(
-            participant_settings={participant_id: {"media": "subscribed"}}
+            participant_settings={participant_id: {"media": {"camera": "subscribed"}}}
         )
 
         self._video_renderers[participant_id] = callback
