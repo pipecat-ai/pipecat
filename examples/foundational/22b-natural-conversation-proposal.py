@@ -94,7 +94,7 @@ class StatementJudgeContextFilter(FrameProcessor):
                 elif isinstance(message["content"], list):
                     for content in message["content"]:
                         if content["type"] == "text":
-                            user_text_messages.append(content["text"])
+                            user_text_messages.insert(0, content["text"])
             # If we have any user text content, push an LLMMessagesFrame
             if user_text_messages:
                 logger.debug(f"User text messages: {user_text_messages}")
