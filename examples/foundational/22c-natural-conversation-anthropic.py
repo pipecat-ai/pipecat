@@ -26,7 +26,6 @@ from pipecat.sync.event_notifier import EventNotifier
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 from pipecat.frames.frames import (
-    BotSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -58,13 +57,22 @@ logger.add(sys.stderr, level="DEBUG")
 
 classifier_statement = """Determine if the user's statement ends with a complete thought and you should respond.
 
-The user text is transcribed speech. It may contain multiple fragments concatentated together.
+The user text is transcribed speech. You are trying to determine if:
 
-You are trying to determine only the completeness of the last user statement. The previous assistant statement is provided only for context. Categorize the text as either complete with the user now expecting a response, or incomplete.
+1. the user has finished talking and expects a response from you, or
+2. this statement is incomplete and the user will continue talking
+
+A previous assistant response is provided for additional context. But you are only evaluating the user text. 
+
+The user text may contain multiple fragments concatentated together. There may be repeated words or mistakes in the transcription. There may be grammatical errors. There may be extra punctuation. Ignore all of that. Interpret the transcribed text as text that would have been spoken. Then consider only whether the user has finished speaking and is expecting a response.
+
+Categorize the last user statement as either complete with the user now expecting a response, or incomplete.
 
 Return 'YES' if text is likely complete and the user is expecting a response. Return 'NO' if the text seems to be a partial expression or unfinished thought.
 
-Respond only with either YES or NO
+If you are not sure, respond with your best guess. If the user is expecting a response, respond with YES. If the user is not expecting a response, respond with NO. Always output either YES or NO and no other text.
+
+Respond only YES or NO
 
 Examples:
 
@@ -91,6 +99,47 @@ Assistant: YES
 
 User: When is the longest day of the year?
 Assistant: YES
+
+User: When when is the longest day of the year
+Assistant: YES
+
+User: When when is the
+ASSISTANT: NO
+
+User: What is the um I u
+Assistant: NO
+
+User: What is the um i u largest city in the world
+Assistant: YES
+
+User: How much does a how much does an adult elephant weigh?
+Assistant: YES
+
+User: How much does a how much does
+Assistant: NO
+
+User: What can you tell me All the
+Assistant: NO
+
+User: What can you tell me All the prime numbers less than 100
+Assistant: YES
+
+User: What's the what's the length of the Amazon River?
+Assistant: YES
+
+User: What's what's the length of the Amazon River?
+Assistant: YES
+
+User: What's what's the length of the Amazon River
+Assistant: YES
+
+User: What's what's the best way to get a coffee stain out of a white shirt
+Assistant: YES
+"""
+
+conversational_system_message = """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.
+
+Please be very concise in your responses. Unless you are explicitly asked to do otherwise, give me the shortest complete answer possible without unnecessary elaboration. Generally you should answer with a single sentence.
 """
 
 
@@ -115,7 +164,6 @@ class StatementJudgeContextFilter(FrameProcessor):
         # messages frame that contains a system prompt and the most recent user messages,
         # concatenated.
         if isinstance(frame, OpenAILLMContextFrame):
-            logger.debug(f"Context Frame: {frame}")
             # Take text content from the most recent user messages.
             messages = frame.context.messages
             user_text_messages = []
@@ -133,9 +181,8 @@ class StatementJudgeContextFilter(FrameProcessor):
                             user_text_messages.insert(0, content["text"])
             # If we have any user text content, push an LLMMessagesFrame
             if user_text_messages:
-                logger.debug(f"User text messages: {user_text_messages}")
                 user_message = " ".join(reversed(user_text_messages))
-                logger.debug(f"User message: {user_message}")
+                logger.debug(f"!!! {user_message}")
                 messages = [
                     {
                         "role": "system",
@@ -156,15 +203,12 @@ class CompletenessCheck(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if not isinstance(frame, BotSpeakingFrame):
-            logger.debug(f"!!! RESULT Completeness check frame: {frame}")
-
         if isinstance(frame, TextFrame) and frame.text == "YES":
-            logger.debug("Completeness check YES")
+            logger.debug("!!! Completeness check YES")
             await self.push_frame(UserStoppedSpeakingFrame())
             await self._notifier.notify()
         elif isinstance(frame, TextFrame) and frame.text == "NO":
-            logger.debug("Completeness check NO")
+            logger.debug("!!! Completeness check NO")
 
 
 class OutputGate(FrameProcessor):
@@ -253,18 +297,21 @@ async def main():
         # statement. This doesn't really need to be an LLM, we could use NLP
         # libraries for that, but we have the machinery to use an LLM, so we might as well!
         statement_llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-5-haiku-20241022"
+            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-5-haiku-20241022", name="Haiku"
         )
 
         # This is the regular LLM.
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-5-sonnet-20241022"
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            model="claude-3-5-sonnet-20241022",
+            name="Sonnet",
+            params=AnthropicLLMService.InputParams(enable_prompt_caching_beta=True),
         )
 
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": conversational_system_message,
             },
         ]
 
@@ -275,7 +322,6 @@ async def main():
         # completed a sentence. So, if it's 'YES' we will return true in this
         # predicate which will wake up the notifier.
         async def wake_check_filter(frame):
-            logger.debug(f"Completeness check frame: {frame}")
             return frame.text == "YES"
 
         # This is a notifier that we use to synchronize the two LLMs.
@@ -348,7 +394,6 @@ async def main():
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
             ),
         )
 
@@ -356,7 +401,12 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            messages.append({"role": "user", "content": "Please introduce yourself to the user."})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Start by just saying \"Hello I'm ready.\" Don't say anything else.",
+                }
+            )
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         @transport.event_handler("on_app_message")
