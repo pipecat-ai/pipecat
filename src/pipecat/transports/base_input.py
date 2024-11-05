@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     BotInterruptionFrame,
     CancelFrame,
     EndFrame,
+    FilterUpdateSettingsFrame,
     Frame,
     InputAudioRawFrame,
     StartFrame,
@@ -106,6 +107,8 @@ class BaseInputTransport(FrameProcessor):
             vad_analyzer = self.vad_analyzer()
             if vad_analyzer:
                 vad_analyzer.set_params(frame.params)
+        elif isinstance(frame, FilterUpdateSettingsFrame) and self._params.audio_in_filter:
+            await self._params.audio_in_filter.process_frame(frame)
         # Other frames
         else:
             await self.push_frame(frame, direction)
@@ -173,14 +176,7 @@ class BaseInputTransport(FrameProcessor):
 
                 # If an audio filter is available, run it before VAD.
                 if self._params.audio_in_filter:
-                    audio = await self._params.audio_in_filter.filter(
-                        frame.audio, frame.sample_rate, frame.num_channels
-                    )
-                    frame = InputAudioRawFrame(
-                        audio=audio,
-                        sample_rate=frame.sample_rate,
-                        num_channels=frame.num_channels,
-                    )
+                    frame.audio = await self._params.audio_in_filter.filter(frame.audio)
 
                 # Check VAD and push event if necessary. We just care about
                 # changes from QUIET to SPEAKING and vice versa.
