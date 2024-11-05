@@ -10,7 +10,7 @@ from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 
 from loguru import logger
 
-from pipecat.frames.frames import FilterControlFrame
+from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 
 try:
     import noisereduce as nr
@@ -24,6 +24,7 @@ except ModuleNotFoundError as e:
 
 class NoisereduceFilter(BaseAudioFilter):
     def __init__(self) -> None:
+        self._filtering = True
         self._sample_rate = 0
 
     async def start(self, sample_rate: int):
@@ -33,9 +34,13 @@ class NoisereduceFilter(BaseAudioFilter):
         pass
 
     async def process_frame(self, frame: FilterControlFrame):
-        pass
+        if isinstance(frame, FilterEnableFrame):
+            self._filtering = frame.enable
 
     async def filter(self, audio: bytes) -> bytes:
+        if not self._filtering:
+            return audio
+
         data = np.frombuffer(audio, dtype=np.int16)
 
         # Add a small epsilon to avoid division by zero.
