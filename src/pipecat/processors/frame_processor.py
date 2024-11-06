@@ -217,17 +217,17 @@ class FrameProcessor:
     #
 
     async def _start_interruption(self):
-        # Cancel the input task. This will stop processing queued frames.
-        await self.__cancel_input_task()
-
         # Cancel the push frame task. This will stop pushing frames downstream.
         await self.__cancel_push_task()
 
-        # Create a new output queue and task.
-        self.__create_push_task()
+        # Cancel the input task. This will stop processing queued frames.
+        await self.__cancel_input_task()
 
         # Create a new input queue and task.
         self.__create_input_task()
+
+        # Create a new output queue and task.
+        self.__create_push_task()
 
     async def _stop_interruption(self):
         # Nothing to do right now.
