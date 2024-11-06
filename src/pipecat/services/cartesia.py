@@ -14,6 +14,7 @@ from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -102,7 +103,6 @@ class CartesiaTTSService(WordTTSService):
             aggregate_sentences=True,
             push_text_frames=False,
             sample_rate=sample_rate,
-            block_on_frames=(TTSSpeakFrame, LLMFullResponseEndFrame),
             **kwargs,
         )
 
@@ -260,6 +260,19 @@ class CartesiaTTSService(WordTTSService):
             pass
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # If we received a TTSSpeakFrame and the LLM response included text (it
+        # might be that it's only a function calling response) we pause
+        # processing more frames until we receive a BotStoppedSpeakingFrame.
+        if isinstance(frame, TTSSpeakFrame):
+            await self.pause_processing_frames()
+        elif isinstance(frame, LLMFullResponseEndFrame) and self._context_id:
+            await self.pause_processing_frames()
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self.resume_processing_frames()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
