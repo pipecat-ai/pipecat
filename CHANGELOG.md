@@ -14,12 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FrameProcessor.queue_frame()` on the next processor (upstream or downstream)
   and the frame will be internally queued (except system frames). Then, the
   queued frames will get processed. With this input queue it is also possible
-  for FrameProcessors to block processing more frames via a list of blocking
-  frames. For example, some TTS services now block processing more frames if
-  they see a `TTSSpeakFrame` or a `LLMFullResponseEndFrame` until the bot has
-  stopped speaking. This makes sure we don't mix audio from different
-  sentences. The way to resume processing frames is by calling
-  `FrameProcessor.resume_processing_frames()`.
+  for FrameProcessors to block processing more frames by calling
+  `FrameProcessor.pause_processing_frames()`. The way to resume processing
+  frames is by calling `FrameProcessor.resume_processing_frames()`.
 
 - Added audio filter `NoisereduceFilter`.
 

@@ -37,7 +37,6 @@ class FrameProcessor:
         self,
         *,
         name: str | None = None,
-        block_on_frames: tuple = (),
         metrics: FrameProcessorMetrics | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
         **kwargs,
@@ -65,10 +64,10 @@ class FrameProcessor:
         self._metrics.set_processor_name(self.name)
 
         # Processors have an input queue. The input queue will be processed
-        # immediately (default) or it will block if one of the `block_on_frames`
-        # is found. To resume processing frames we need to call
+        # immediately (default) or it will block if `pause_processing_frames()`
+        # is called. To resume processing frames we need to call
         # `resume_processing_frames()`.
-        self._block_on_frames = block_on_frames
+        self.__should_block_frames = False
         self.__create_input_task()
 
         # Every processor in Pipecat should only output frames from a single
@@ -170,8 +169,12 @@ class FrameProcessor:
             # We queue everything else.
             await self.__input_queue.put((frame, direction, callback))
 
+    async def pause_processing_frames(self):
+        self.__should_block_frames = True
+
     async def resume_processing_frames(self):
         self.__input_event.set()
+        self.__should_block_frames = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
@@ -257,13 +260,11 @@ class FrameProcessor:
 
     async def __input_frame_task_handler(self):
         running = True
-        should_block_frames = False
         while running:
             try:
-                if should_block_frames:
+                if self.__should_block_frames:
                     await self.__input_event.wait()
                     self.__input_event.clear()
-                    should_block_frames = False
 
                 (frame, direction, callback) = await self.__input_queue.get()
 
@@ -273,11 +274,6 @@ class FrameProcessor:
                 # If this frame has an associated callback, call it now.
                 if callback:
                     await callback(self, frame, direction)
-
-                # Check if we should block incoming frames from now on (until we
-                # resume processing).
-                if isinstance(frame, self._block_on_frames):
-                    should_block_frames = True
 
                 running = not isinstance(frame, EndFrame)
 
