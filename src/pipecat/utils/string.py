@@ -50,15 +50,6 @@ def find_endofsentences(text: str) -> int:
     return end_indices[-1] if end_indices else 0
 
 
-def find_endofsentences_eager(text: str) -> int:
-    end_indices = [
-        match.end()
-        for match in ENDOFSENTENCES_PATTERN.finditer(text.strip().strip(",").strip("?"))
-    ]
-    # debug print
-    return end_indices[0] if end_indices else 0
-
-
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 from pydantic import BaseModel
 
