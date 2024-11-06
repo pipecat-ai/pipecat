@@ -17,6 +17,10 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomParams
 
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
 MAX_BOTS_PER_ROOM = 1
 
 # Bot sub-process dict for status reporting and concurrency control
@@ -57,7 +61,7 @@ app.add_middleware(
 )
 
 
-@app.get("/start")
+@app.get("/")
 async def start_agent(request: Request):
     print(f"!!! Creating room")
     room = await daily_helpers["rest"].create_room(DailyRoomParams())

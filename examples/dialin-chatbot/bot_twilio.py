@@ -3,18 +3,15 @@ import os
 import sys
 import argparse
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
 from pipecat.frames.frames import LLMMessagesFrame, EndFrame
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from twilio.rest import Client
 
@@ -69,17 +66,17 @@ async def main(room_url: str, token: str, callId: str, sipUri: str):
         },
     ]
 
-    tma_in = LLMUserResponseAggregator(messages)
-    tma_out = LLMAssistantResponseAggregator(messages)
+    context = OpenAILLMContext(messages)
+    context_aggregator = llm.create_context_aggregator(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            tma_in,
+            context_aggregator.user(),
             llm,
             tts,
             transport.output(),
-            tma_out,
+            context_aggregator.assistant(),
         ]
     )
 
@@ -87,7 +84,7 @@ async def main(room_url: str, token: str, callId: str, sipUri: str):
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
-        transport.capture_participant_transcription(participant["id"])
+        await transport.capture_participant_transcription(participant["id"])
         await task.queue_frames([LLMMessagesFrame(messages)])
 
     @transport.event_handler("on_participant_left")

@@ -24,7 +24,7 @@ cp env.example .env # and add your credentials
 python server.py
 ```
 
-Then, visit `http://localhost:7860/start` in your browser to start a chatbot
+Then, visit `http://localhost:7860/` in your browser to start a chatbot
 session.
 
 ## Build and test the Docker image
@@ -41,4 +41,4 @@ docker build -t moonbot -f Dockerfile.intel .
 docker run --env-file .env -p 7860:7860 --device /dev/dri moonbot
 ```
 
-You can try to visit `http://localhost:7860/start` again.
+You can try to visit `http://localhost:7860/` again.

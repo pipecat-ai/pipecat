@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -24,13 +26,11 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.services.openai_realtime_beta import (
     InputAudioTranscription,
-    OpenAILLMServiceRealtimeBeta,
+    OpenAIRealtimeBetaLLMService,
     SessionProperties,
     TurnDetection,
 )
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
-from pipecat.vad.vad_analyzer import VADParams
 
 load_dotenv(override=True)
 
@@ -211,7 +211,7 @@ unless specifically asked to elaborate on a topic.
 Remember, your responses should be short. Just one or two sentences, usually.""",
         )
 
-        llm = OpenAILLMServiceRealtimeBeta(
+        llm = OpenAIRealtimeBetaLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
             session_properties=session_properties,
             start_audio_paused=False,
@@ -249,7 +249,7 @@ Remember, your responses should be short. Just one or two sentences, usually."""
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 

@@ -10,6 +10,7 @@ import os
 import sys
 import wave
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
@@ -19,16 +20,12 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMUserResponseAggregator,
-    LLMAssistantResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.logger import FrameLogger
 from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -113,8 +110,8 @@ async def main():
             },
         ]
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
         out_sound = OutboundSoundEffectWrapper()
         in_sound = InboundSoundEffectWrapper()
         fl = FrameLogger("LLM Out")
@@ -123,7 +120,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),
-                tma_in,
+                context_aggregator.user(),
                 in_sound,
                 fl2,
                 llm,
@@ -131,13 +128,13 @@ async def main():
                 tts,
                 out_sound,
                 transport.output(),
-                tma_out,
+                context_aggregator.assistant(),
             ]
         )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             await tts.say("Hi, I'm listening!")
             await transport.send_audio(sounds["ding1.wav"])
 

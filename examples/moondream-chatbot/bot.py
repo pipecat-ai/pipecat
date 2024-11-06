@@ -11,6 +11,7 @@ import sys
 
 from PIL import Image
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     ImageRawFrame,
     OutputImageRawFrame,
@@ -23,12 +24,11 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserImageRequestFrame,
 )
-
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMUserResponseAggregator
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -36,7 +36,6 @@ from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.moondream import MoondreamService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -183,17 +182,19 @@ async def main():
             },
         ]
 
-        ura = LLMUserResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),
-                ura,
+                context_aggregator.user(),
                 llm,
                 ParallelPipeline([sa, ir, va, moondream], [tf, imgf]),
                 tts,
                 ta,
                 transport.output(),
+                context_aggregator.assistant(),
             ]
         )
 
@@ -202,8 +203,8 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
-            transport.capture_participant_video(participant["id"], framerate=0)
+            await transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_video(participant["id"], framerate=0)
             ir.set_participant_id(participant["id"])
             await task.queue_frames([LLMMessagesFrame(messages)])
 

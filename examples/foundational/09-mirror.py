@@ -63,6 +63,7 @@ async def main():
             "Test",
             DailyParams(
                 audio_in_enabled=True,
+                audio_in_sample_rate=24000,
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_is_live=True,
@@ -73,7 +74,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_video(participant["id"])
+            await transport.capture_participant_video(participant["id"])
 
         pipeline = Pipeline([transport.input(), MirrorProcessor(), transport.output()])
 

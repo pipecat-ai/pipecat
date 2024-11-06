@@ -9,7 +9,7 @@ import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import TextFrame
+from pipecat.frames.frames import EndFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -51,11 +51,11 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            # Note that we do not put an EndFrame() item in the pipeline for this demo.
-            # This means that the bot will stay in the channel until it times out.
-            # An EndFrame() in the pipeline would cause the transport to shut
-            # down.
-            await task.queue_frames([TextFrame("a cat in the style of picasso")])
+            await task.queue_frame(TextFrame("a cat in the style of picasso"))
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
 
         await runner.run(task)
 

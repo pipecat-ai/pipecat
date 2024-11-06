@@ -5,35 +5,30 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, LLMMessagesFrame, MetricsFrame
 from pipecat.metrics.metrics import (
-    TTFBMetricsData,
-    ProcessingMetricsData,
     LLMUsageMetricsData,
+    ProcessingMetricsData,
+    TTFBMetricsData,
     TTSUsageMetricsData,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -92,26 +87,30 @@ async def main():
                 "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
             },
         ]
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),
-                tma_in,
+                context_aggregator.user(),
                 llm,
                 tts,
                 ml,
                 transport.output(),
-                tma_out,
+                context_aggregator.assistant(),
             ]
         )
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(
+            pipeline,
+            PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])

@@ -9,6 +9,7 @@ import aiohttp
 import os
 import sys
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, TextFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -19,7 +20,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.moondream import MoondreamService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -84,8 +84,8 @@ async def main():
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await tts.say("Hi there! Feel free to ask me what I see.")
-            transport.capture_participant_video(participant["id"], framerate=0)
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_video(participant["id"], framerate=0)
+            await transport.capture_participant_transcription(participant["id"])
             image_requester.set_participant_id(participant["id"])
 
         pipeline = Pipeline(

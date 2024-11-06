@@ -25,8 +25,14 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     URLImageRawFrame,
 )
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.ai_services import ImageGenService, STTService, TTSService
-from pipecat.services.openai import BaseOpenAILLMService
+from pipecat.services.openai import (
+    BaseOpenAILLMService,
+    OpenAIAssistantContextAggregator,
+    OpenAIContextAggregatorPair,
+    OpenAIUserContextAggregator,
+)
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
@@ -37,6 +43,7 @@ try:
         ResultReason,
         SpeechConfig,
         SpeechRecognizer,
+        SpeechSynthesisOutputFormat,
         SpeechSynthesizer,
     )
     from azure.cognitiveservices.speech.audio import (
@@ -76,6 +83,33 @@ class AzureLLMService(BaseOpenAILLMService):
             api_version=self._api_version,
         )
 
+    @staticmethod
+    def create_context_aggregator(
+        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+    ) -> OpenAIContextAggregatorPair:
+        user = OpenAIUserContextAggregator(context)
+        assistant = OpenAIAssistantContextAggregator(
+            user, expect_stripped_words=assistant_expect_stripped_words
+        )
+        return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
+
+
+def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputFormat:
+    match sample_rate:
+        case 8000:
+            return SpeechSynthesisOutputFormat.Raw8Khz16BitMonoPcm
+        case 16000:
+            return SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm
+        case 22050:
+            return SpeechSynthesisOutputFormat.Raw22050Hz16BitMonoPcm
+        case 24000:
+            return SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm
+        case 44100:
+            return SpeechSynthesisOutputFormat.Raw44100Hz16BitMonoPcm
+        case 48000:
+            return SpeechSynthesisOutputFormat.Raw48Khz16BitMonoPcm
+    return SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm
+
 
 class AzureTTSService(TTSService):
     class InputParams(BaseModel):
@@ -97,16 +131,16 @@ class AzureTTSService(TTSService):
         api_key: str,
         region: str,
         voice="en-US-SaraNeural",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         params: InputParams = InputParams(),
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         speech_config = SpeechConfig(subscription=api_key, region=region)
-        self._speech_synthesizer = SpeechSynthesizer(
-            speech_config=speech_config, audio_config=None
-        )
+        speech_config.set_speech_synthesis_output_format(sample_rate_to_output_format(sample_rate))
+
+        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
 
         self._settings = {
             "sample_rate": sample_rate,
@@ -300,7 +334,7 @@ class AzureSTTService(STTService):
             "en-US"  # USE THIS!! necessary for compatibility with languages supported by azure but not by other service
         ),
         language=Language.EN_US,
-        sample_rate=16000,
+        sample_rate=24000,
         channels=1,
         **kwargs,
     ):
@@ -309,9 +343,7 @@ class AzureSTTService(STTService):
         speech_config = SpeechConfig(subscription=api_key, region=region)
         speech_config.speech_recognition_language = language_code
 
-        stream_format = AudioStreamFormat(
-            samples_per_second=sample_rate, channels=channels
-        )
+        stream_format = AudioStreamFormat(samples_per_second=sample_rate, channels=channels)
         self._audio_stream = PushAudioInputStream(stream_format)
 
         audio_config = AudioConfig(stream=self._audio_stream)
@@ -344,14 +376,9 @@ class AzureSTTService(STTService):
         self._speech_recognizer.recognizing.connect(callback)
 
     def _on_handle_recognized(self, event):
-        if (
-            event.result.reason == ResultReason.RecognizedSpeech
-            and len(event.result.text) > 0
-        ):
+        if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
             frame = TranscriptionFrame(event.result.text, "", time_now_iso8601())
-            asyncio.run_coroutine_threadsafe(
-                self.push_frame(frame), self.get_event_loop()
-            )
+            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
 
 
 class AzureImageGenServiceREST(ImageGenService):
@@ -386,9 +413,7 @@ class AzureImageGenServiceREST(ImageGenService):
             "n": 1,
         }
 
-        async with self._aiohttp_session.post(
-            url, headers=headers, json=body
-        ) as submission:
+        async with self._aiohttp_session.post(url, headers=headers, json=body) as submission:
             # We never get past this line, because this header isn't
             # defined on a 429 response, but something is eating our
             # exceptions!
@@ -405,16 +430,12 @@ class AzureImageGenServiceREST(ImageGenService):
 
                 await asyncio.sleep(1)
 
-                response = await self._aiohttp_session.get(
-                    operation_location, headers=headers
-                )
+                response = await self._aiohttp_session.get(operation_location, headers=headers)
 
                 json_response = await response.json()
                 status = json_response["status"]
 
-            image_url = (
-                json_response["result"]["data"][0]["url"] if json_response else None
-            )
+            image_url = json_response["result"]["data"][0]["url"] if json_response else None
             if not image_url:
                 logger.error(f"{self} error: image generation failed")
                 yield ErrorFrame("Image generation failed")

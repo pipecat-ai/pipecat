@@ -9,10 +9,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 from loguru import logger
 
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     CancelFrame,
     EndFrame,
+    FilterUpdateSettingsFrame,
     Frame,
     InputAudioRawFrame,
     StartFrame,
@@ -25,7 +27,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
-from pipecat.vad.vad_analyzer import VADAnalyzer, VADState
 
 
 class BaseInputTransport(FrameProcessor):
@@ -41,6 +42,9 @@ class BaseInputTransport(FrameProcessor):
         self._audio_task = None
 
     async def start(self, frame: StartFrame):
+        # Start audio filter.
+        if self._params.audio_in_filter:
+            await self._params.audio_in_filter.start(self._params.audio_in_sample_rate)
         # Create audio input queue and task if needed.
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_queue = asyncio.Queue()
@@ -52,6 +56,9 @@ class BaseInputTransport(FrameProcessor):
             self._audio_task.cancel()
             await self._audio_task
             self._audio_task = None
+        # Stop audio filter.
+        if self._params.audio_in_filter:
+            await self._params.audio_in_filter.stop()
 
     async def cancel(self, frame: CancelFrame):
         # Cancel and wait for the audio input task to finish.
@@ -100,6 +107,8 @@ class BaseInputTransport(FrameProcessor):
             vad_analyzer = self.vad_analyzer()
             if vad_analyzer:
                 vad_analyzer.set_params(frame.params)
+        elif isinstance(frame, FilterUpdateSettingsFrame) and self._params.audio_in_filter:
+            await self._params.audio_in_filter.process_frame(frame)
         # Other frames
         else:
             await self.push_frame(frame, direction)
@@ -164,6 +173,10 @@ class BaseInputTransport(FrameProcessor):
                 frame: InputAudioRawFrame = await self._audio_in_queue.get()
 
                 audio_passthrough = True
+
+                # If an audio filter is available, run it before VAD.
+                if self._params.audio_in_filter:
+                    frame.audio = await self._params.audio_in_filter.filter(frame.audio)
 
                 # Check VAD and push event if necessary. We just care about
                 # changes from QUIET to SPEAKING and vice versa.

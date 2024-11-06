@@ -10,6 +10,7 @@ import sys
 
 import aiohttp
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -21,7 +22,6 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.frameworks.langchain import LangchainProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.chat_message_histories import ChatMessageHistory
@@ -109,7 +109,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             lc.set_participant_id(participant["id"])
             # Kick off the conversation.
             # the `LLMMessagesFrame` will be picked up by the LangchainProcessor using

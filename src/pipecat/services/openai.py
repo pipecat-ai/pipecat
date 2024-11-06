@@ -98,12 +98,13 @@ class BaseOpenAILLMService(LLMService):
             default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0
         )
         seed: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
-        temperature: Optional[float] = Field(
-            default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0
-        )
-        top_p: Optional[float] = Field(
-            default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0
-        )
+        temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
+        # Note: top_k is currently not supported by the OpenAI client library,
+        # so top_k is ignore right now.
+        top_k: Optional[int] = Field(default=None, ge=0)
+        top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        max_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
+        max_completion_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
@@ -122,6 +123,8 @@ class BaseOpenAILLMService(LLMService):
             "seed": params.seed,
             "temperature": params.temperature,
             "top_p": params.top_p,
+            "max_tokens": params.max_tokens,
+            "max_completion_tokens": params.max_completion_tokens,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
         self.set_model_name(model)
@@ -158,6 +161,8 @@ class BaseOpenAILLMService(LLMService):
             "seed": self._settings["seed"],
             "temperature": self._settings["temperature"],
             "top_p": self._settings["top_p"],
+            "max_tokens": self._settings["max_tokens"],
+            "max_completion_tokens": self._settings["max_completion_tokens"],
         }
 
         params.update(self._settings["extra"])
@@ -175,9 +180,7 @@ class BaseOpenAILLMService(LLMService):
         # base64 encode any images
         for message in messages:
             if message.get("mime_type") == "image/jpeg":
-                encoded_image = base64.b64encode(message["data"].getvalue()).decode(
-                    "utf-8"
-                )
+                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
                 text = message["content"]
                 message["content"] = [
                     {"type": "text", "text": text},
@@ -204,9 +207,9 @@ class BaseOpenAILLMService(LLMService):
 
         await self.start_ttfb_metrics()
 
-        chunk_stream: AsyncStream[
-            ChatCompletionChunk
-        ] = await self._stream_chat_completions(context)
+        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
+            context
+        )
 
         async for chunk in chunk_stream:
             if chunk.usage:
@@ -221,6 +224,9 @@ class BaseOpenAILLMService(LLMService):
                 continue
 
             await self.stop_ttfb_metrics()
+
+            if not chunk.choices[0].delta:
+                continue
 
             if chunk.choices[0].delta.tool_calls:
                 # We're streaming the LLM response to enable the fastest response times.
@@ -345,9 +351,7 @@ class OpenAIImageGenService(ImageGenService):
         *,
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
-        image_size: Literal[
-            "256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"
-        ],
+        image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"],
         model: str = "dall-e-3",
     ):
         super().__init__()
@@ -374,9 +378,7 @@ class OpenAIImageGenService(ImageGenService):
         async with self._aiohttp_session.get(image_url) as response:
             image_stream = io.BytesIO(await response.content.read())
             image = Image.open(image_stream)
-            frame = URLImageRawFrame(
-                image_url, image.tobytes(), image.size, image.format
-            )
+            frame = URLImageRawFrame(image_url, image.tobytes(), image.size, image.format)
             yield frame
 
 
@@ -414,7 +416,7 @@ class OpenAITTSService(TTSService):
         return True
 
     async def set_model(self, model: str):
-        logger.debug(f"Switching TTS model to: [{model}]")
+        logger.info(f"Switching TTS model to: [{model}]")
         self.set_model_name(model)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -444,9 +446,7 @@ class OpenAITTSService(TTSService):
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(
-                            chunk, self._settings["sample_rate"], 1
-                        )
+                        frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
                         yield frame
                 yield TTSStoppedFrame()
         except BadRequestError as e:
@@ -475,9 +475,7 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
                 # context aggregator.
                 if frame.context:
                     if isinstance(frame.context, str):
-                        self._context._user_image_request_context[frame.user_id] = (
-                            frame.context
-                        )
+                        self._context._user_image_request_context[frame.user_id] = frame.context
                     else:
                         logger.error(
                             f"Unexpected UserImageRequestFrame context type: {type(frame.context)}"
@@ -490,9 +488,7 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
                 # Push a new OpenAIImageMessageFrame with the text context we cached
                 # downstream to be handled by our assistant context aggregator. This is
                 # necessary so that we add the message to the context in the right order.
-                text = (
-                    self._context._user_image_request_context.get(frame.user_id) or ""
-                )
+                text = self._context._user_image_request_context.get(frame.user_id) or ""
                 if text:
                     del self._context._user_image_request_context[frame.user_id]
                 frame = OpenAIImageMessageFrame(user_image_raw_frame=frame, text=text)
@@ -536,9 +532,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
 
     async def _push_aggregation(self):
         if not (
-            self._aggregation
-            or self._function_call_result
-            or self._pending_image_frame_message
+            self._aggregation or self._function_call_result or self._pending_image_frame_message
         ):
             return
 
@@ -555,6 +549,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     self._context.add_message(
                         {
                             "role": "assistant",
+                            "content": "",  # content field required for Grok function calling
                             "tool_calls": [
                                 {
                                     "id": frame.tool_call_id,

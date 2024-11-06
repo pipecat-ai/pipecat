@@ -18,7 +18,6 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
@@ -69,9 +68,6 @@ def language_to_cartesia_language(language: Language) -> str | None:
 
 class CartesiaTTSService(WordTTSService):
     class InputParams(BaseModel):
-        encoding: Optional[str] = "pcm_s16le"
-        sample_rate: Optional[int] = 16000
-        container: Optional[str] = "raw"
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
@@ -84,6 +80,9 @@ class CartesiaTTSService(WordTTSService):
         cartesia_version: str = "2024-06-10",
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str = "sonic-english",
+        sample_rate: int = 24000,
+        encoding: str = "pcm_s16le",
+        container: str = "raw",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -100,7 +99,7 @@ class CartesiaTTSService(WordTTSService):
         super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,
-            sample_rate=params.sample_rate,
+            sample_rate=sample_rate,
             **kwargs,
         )
 
@@ -109,9 +108,9 @@ class CartesiaTTSService(WordTTSService):
         self._url = url
         self._settings = {
             "output_format": {
-                "container": params.container,
-                "encoding": params.encoding,
-                "sample_rate": params.sample_rate,
+                "container": container,
+                "encoding": encoding,
+                "sample_rate": sample_rate,
             },
             "language": self.language_to_service_language(params.language)
             if params.language
@@ -132,7 +131,7 @@ class CartesiaTTSService(WordTTSService):
     async def set_model(self, model: str):
         self._model_id = model
         await super().set_model(model)
-        logger.debug(f"Switching TTS model to: [{model}]")
+        logger.info(f"Switching TTS model to: [{model}]")
 
     def language_to_service_language(self, language: Language) -> str | None:
         return language_to_cartesia_language(language)
@@ -289,9 +288,6 @@ class CartesiaTTSService(WordTTSService):
 
 class CartesiaHttpTTSService(TTSService):
     class InputParams(BaseModel):
-        encoding: Optional[str] = "pcm_s16le"
-        sample_rate: Optional[int] = 16000
-        container: Optional[str] = "raw"
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
@@ -303,17 +299,20 @@ class CartesiaHttpTTSService(TTSService):
         voice_id: str,
         model: str = "sonic-english",
         base_url: str = "https://api.cartesia.ai",
+        sample_rate: int = 24000,
+        encoding: str = "pcm_s16le",
+        container: str = "raw",
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._settings = {
             "output_format": {
-                "container": params.container,
-                "encoding": params.encoding,
-                "sample_rate": params.sample_rate,
+                "container": container,
+                "encoding": encoding,
+                "sample_rate": sample_rate,
             },
             "language": self.language_to_service_language(params.language)
             if params.language

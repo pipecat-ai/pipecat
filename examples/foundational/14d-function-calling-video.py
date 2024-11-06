@@ -9,13 +9,13 @@ import aiohttp
 import os
 import sys
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from openai.types.chat import ChatCompletionToolParam
 
@@ -153,8 +153,8 @@ indicate you should use the get_image tool are:
         async def on_first_participant_joined(transport, participant):
             global video_participant_id
             video_participant_id = participant["id"]
-            transport.capture_participant_transcription(participant["id"])
-            transport.capture_participant_video(video_participant_id, framerate=0)
+            await transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_video(video_participant_id, framerate=0)
             # Kick off the conversation.
             await tts.say("Hi! Ask me about the weather in San Francisco.")
 

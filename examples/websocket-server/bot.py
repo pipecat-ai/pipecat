@@ -8,14 +8,12 @@ import asyncio
 import os
 import sys
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
@@ -23,7 +21,6 @@ from pipecat.transports.network.websocket_server import (
     WebsocketServerParams,
     WebsocketServerTransport,
 )
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from loguru import logger
 
@@ -38,6 +35,7 @@ logger.add(sys.stderr, level="DEBUG")
 async def main():
     transport = WebsocketServerTransport(
         params=WebsocketServerParams(
+            audio_out_sample_rate=16000,
             audio_out_enabled=True,
             add_wav_header=True,
             vad_enabled=True,
@@ -53,6 +51,7 @@ async def main():
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+        sample_rate=16000,
     )
 
     messages = [
@@ -62,22 +61,22 @@ async def main():
         },
     ]
 
-    tma_in = LLMUserResponseAggregator(messages)
-    tma_out = LLMAssistantResponseAggregator(messages)
+    context = OpenAILLMContext(messages)
+    context_aggregator = llm.create_context_aggregator(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Websocket input from client
             stt,  # Speech-To-Text
-            tma_in,  # User responses
+            context_aggregator.user(),
             llm,  # LLM
             tts,  # Text-To-Speech
             transport.output(),  # Websocket output to client
-            tma_out,  # LLM responses
+            context_aggregator.assistant(),
         ]
     )
 
-    task = PipelineTask(pipeline)
+    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):

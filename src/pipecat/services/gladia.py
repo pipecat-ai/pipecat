@@ -8,6 +8,7 @@ import base64
 import json
 from typing import AsyncGenerator, Optional
 
+import aiohttp
 from loguru import logger
 from pydantic.main import BaseModel
 
@@ -23,7 +24,6 @@ from pipecat.services.ai_services import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
-# See .env.example for Gladia configuration needed
 try:
     import websockets
 except ModuleNotFoundError as e:
@@ -38,15 +38,16 @@ class GladiaSTTService(STTService):
     class InputParams(BaseModel):
         sample_rate: Optional[int] = 16000
         language: Optional[Language] = Language.EN
-        transcription_hint: Optional[str] = None
-        endpointing: Optional[int] = 200
-        prosody: Optional[bool] = None
+        endpointing: Optional[float] = 0.2
+        maximum_duration_without_endpointing: Optional[int] = 10
+        audio_enhancer: Optional[bool] = None
+        words_accurate_timestamps: Optional[bool] = None
 
     def __init__(
         self,
         *,
         api_key: str,
-        url: str = "wss://api.gladia.io/audio/text/audio-transcription",
+        url: str = "https://api.gladia.io/v2/live",
         confidence: float = 0.5,
         params: InputParams = InputParams(),
         **kwargs,
@@ -56,101 +57,82 @@ class GladiaSTTService(STTService):
         self._api_key = api_key
         self._url = url
         self._settings = {
+            "encoding": "wav/pcm",
+            "bit_depth": 16,
             "sample_rate": params.sample_rate,
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else Language.EN,
-            "transcription_hint": params.transcription_hint,
+            "channels": 1,
+            "language_config": {
+                "languages": [self.language_to_service_language(params.language)]
+                if params.language
+                else [],
+                "code_switching": False,
+            },
             "endpointing": params.endpointing,
-            "prosody": params.prosody,
+            "maximum_duration_without_endpointing": params.maximum_duration_without_endpointing,
+            "pre_processing": {
+                "audio_enhancer": params.audio_enhancer,
+            },
+            "realtime_processing": {
+                "words_accurate_timestamps": params.words_accurate_timestamps,
+            },
         }
         self._confidence = confidence
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.BG:
-                return "bulgarian"
-            case Language.CA:
-                return "catalan"
-            case Language.ZH:
-                return "chinese"
-            case Language.CS:
-                return "czech"
-            case Language.DA:
-                return "danish"
-            case Language.NL:
-                return "dutch"
-            case (
-                Language.EN
-                | Language.EN_US
-                | Language.EN_AU
-                | Language.EN_GB
-                | Language.EN_NZ
-                | Language.EN_IN
-            ):
-                return "english"
-            case Language.ET:
-                return "estonian"
-            case Language.FI:
-                return "finnish"
-            case Language.FR | Language.FR_CA:
-                return "french"
-            case Language.DE | Language.DE_CH:
-                return "german"
-            case Language.EL:
-                return "greek"
-            case Language.HI:
-                return "hindi"
-            case Language.HU:
-                return "hungarian"
-            case Language.ID:
-                return "indonesian"
-            case Language.IT:
-                return "italian"
-            case Language.JA:
-                return "japanese"
-            case Language.KO:
-                return "korean"
-            case Language.LV:
-                return "latvian"
-            case Language.LT:
-                return "lithuanian"
-            case Language.MS:
-                return "malay"
-            case Language.NO:
-                return "norwegian"
-            case Language.PL:
-                return "polish"
-            case Language.PT | Language.PT_BR:
-                return "portuguese"
-            case Language.RO:
-                return "romanian"
-            case Language.RU:
-                return "russian"
-            case Language.SK:
-                return "slovak"
-            case Language.ES:
-                return "spanish"
-            case Language.SV:
-                return "slovenian"
-            case Language.TH:
-                return "thai"
-            case Language.TR:
-                return "turkish"
-            case Language.UK:
-                return "ukrainian"
-            case Language.VI:
-                return "vietnamese"
-        return None
+        language_map = {
+            Language.BG: "bg",
+            Language.CA: "ca",
+            Language.ZH: "zh",
+            Language.CS: "cs",
+            Language.DA: "da",
+            Language.NL: "nl",
+            Language.EN: "en",
+            Language.EN_US: "en",
+            Language.EN_AU: "en",
+            Language.EN_GB: "en",
+            Language.EN_NZ: "en",
+            Language.EN_IN: "en",
+            Language.ET: "et",
+            Language.FI: "fi",
+            Language.FR: "fr",
+            Language.FR_CA: "fr",
+            Language.DE: "de",
+            Language.DE_CH: "de",
+            Language.EL: "el",
+            Language.HI: "hi",
+            Language.HU: "hu",
+            Language.ID: "id",
+            Language.IT: "it",
+            Language.JA: "ja",
+            Language.KO: "ko",
+            Language.LV: "lv",
+            Language.LT: "lt",
+            Language.MS: "ms",
+            Language.NO: "no",
+            Language.PL: "pl",
+            Language.PT: "pt",
+            Language.PT_BR: "pt",
+            Language.RO: "ro",
+            Language.RU: "ru",
+            Language.SK: "sk",
+            Language.ES: "es",
+            Language.SV: "sv",
+            Language.TH: "th",
+            Language.TR: "tr",
+            Language.UK: "uk",
+            Language.VI: "vi",
+        }
+        return language_map.get(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        self._websocket = await websockets.connect(self._url)
+        response = await self._setup_gladia()
+        self._websocket = await websockets.connect(response["url"])
         self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
-        await self._setup_gladia()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
+        await self._send_stop_recording()
         await self._websocket.close()
 
     async def cancel(self, frame: CancelFrame):
@@ -164,39 +146,37 @@ class GladiaSTTService(STTService):
         yield None
 
     async def _setup_gladia(self):
-        configuration = {
-            "x_gladia_key": self._api_key,
-            "encoding": "WAV/PCM",
-            "model_type": "fast",
-            "language_behaviour": "manual",
-            "sample_rate": self._settings["sample_rate"],
-            "language": self._settings["language"],
-            "transcription_hint": self._settings["transcription_hint"],
-            "endpointing": self._settings["endpointing"],
-            "prosody": self._settings["prosody"],
-        }
-
-        await self._websocket.send(json.dumps(configuration))
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                self._url,
+                headers={"X-Gladia-Key": self._api_key, "Content-Type": "application/json"},
+                json=self._settings,
+            ) as response:
+                if response.ok:
+                    return await response.json()
+                else:
+                    logger.error(
+                        f"Gladia error: {response.status}: {response.text or response.reason}"
+                    )
+                    raise Exception(f"Failed to initialize Gladia session: {response.status}")
 
     async def _send_audio(self, audio: bytes):
-        message = {"frames": base64.b64encode(audio).decode("utf-8")}
+        data = base64.b64encode(audio).decode("utf-8")
+        message = {"type": "audio_chunk", "data": {"chunk": data}}
         await self._websocket.send(json.dumps(message))
+
+    async def _send_stop_recording(self):
+        await self._websocket.send(json.dumps({"type": "stop_recording"}))
 
     async def _receive_task_handler(self):
         async for message in self._websocket:
-            utterance = json.loads(message)
-            if not utterance:
-                continue
-
-            if "error" in utterance:
-                message = utterance["message"]
-                logger.error(f"Gladia error: {message}")
-            elif "confidence" in utterance:
-                type = utterance["type"]
-                confidence = utterance["confidence"]
-                transcript = utterance["transcription"]
+            content = json.loads(message)
+            if content["type"] == "transcript":
+                utterance = content["data"]["utterance"]
+                confidence = utterance.get("confidence", 0)
+                transcript = utterance["text"]
                 if confidence >= self._confidence:
-                    if type == "final":
+                    if content["data"]["is_final"]:
                         await self.push_frame(
                             TranscriptionFrame(transcript, "", time_now_iso8601())
                         )

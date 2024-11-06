@@ -4,11 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.utils import resample_audio
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -45,7 +48,7 @@ class AWSTTSService(TTSService):
         aws_access_key_id: str,
         region: str,
         voice_id: str = "Joanna",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -164,6 +167,14 @@ class AWSTTSService(TTSService):
         return ssml
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        def read_audio_data(**args):
+            response = self._polly_client.synthesize_speech(**args)
+            if "AudioStream" in response:
+                audio_data = response["AudioStream"].read()
+                resampled = resample_audio(audio_data, 16000, self._settings["sample_rate"])
+                return resampled
+            return None
+
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
@@ -178,28 +189,31 @@ class AWSTTSService(TTSService):
                 "OutputFormat": "pcm",
                 "VoiceId": self._voice_id,
                 "Engine": self._settings["engine"],
-                "SampleRate": str(self._settings["sample_rate"]),
+                # AWS only supports 8000 and 16000 for PCM. We select 16000.
+                "SampleRate": "16000",
             }
 
             # Filter out None values
             filtered_params = {k: v for k, v in params.items() if v is not None}
 
-            response = self._polly_client.synthesize_speech(**filtered_params)
+            audio_data = await asyncio.to_thread(read_audio_data, **filtered_params)
+
+            if not audio_data:
+                logger.error(f"{self} No audio data returned")
+                yield None
+                return
 
             await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()
 
-            if "AudioStream" in response:
-                with response["AudioStream"] as stream:
-                    audio_data = stream.read()
-                    chunk_size = 8192
-                    for i in range(0, len(audio_data), chunk_size):
-                        chunk = audio_data[i : i + chunk_size]
-                        if len(chunk) > 0:
-                            await self.stop_ttfb_metrics()
-                            frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
-                            yield frame
+            chunk_size = 8192
+            for i in range(0, len(audio_data), chunk_size):
+                chunk = audio_data[i : i + chunk_size]
+                if len(chunk) > 0:
+                    await self.stop_ttfb_metrics()
+                    frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                    yield frame
 
             yield TTSStoppedFrame()
 

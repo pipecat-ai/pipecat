@@ -12,6 +12,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -35,11 +36,9 @@ from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
-from pipecat.utils.audio import calculate_audio_volume
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.time import seconds_to_nanoseconds
-from pipecat.utils.utils import exp_smoothing
 
 
 class AIService(FrameProcessor):
@@ -77,7 +76,7 @@ class AIService(FrameProcessor):
             print("Update request for:", key, value)
 
             if key in self._settings:
-                logger.debug(f"Updating LLM setting {key} to: [{value}]")
+                logger.info(f"Updating LLM setting {key} to: [{value}]")
                 self._settings[key] = value
             elif key in SessionProperties.model_fields:
                 print("Attempting to update", key, value)
@@ -103,14 +102,14 @@ class AIService(FrameProcessor):
                     validated_properties = SessionProperties.model_validate(
                         current_properties.model_dump()
                     )
-                    logger.debug(f"Updating LLM setting {key} to: [{value}]")
+                    logger.info(f"Updating LLM setting {key} to: [{value}]")
                     self._session_properties = validated_properties.model_dump()
                 except Exception as e:
                     logger.warning(
                         f"Unexpected error updating session property {key}: {e}"
                     )
             elif key == "model":
-                logger.debug(f"Updating LLM setting {key} to: [{value}]")
+                logger.info(f"Updating LLM setting {key} to: [{value}]")
                 self.set_model_name(value)
             else:
                 logger.warning(f"Unknown setting for {self.name} service: {key}")
@@ -217,7 +216,7 @@ class TTSService(AIService):
         # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
         stop_frame_timeout_s: float = 1.0,
         # TTS output sample rate
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         text_filter: Optional[BaseTextFilter] = None,
         **kwargs,
     ):
@@ -284,7 +283,7 @@ class TTSService(AIService):
     async def _update_settings(self, settings: Dict[str, Any]):
         for key, value in settings.items():
             if key in self._settings:
-                logger.debug(f"Updating TTS setting {key} to: [{value}]")
+                logger.info(f"Updating TTS setting {key} to: [{value}]")
                 self._settings[key] = value
                 if key == "language":
                     self._settings[key] = self.language_to_service_language(value)
@@ -474,8 +473,9 @@ class WordTTSService(TTSService):
 class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, audio_passthrough=False, **kwargs):
         super().__init__(**kwargs)
+        self._audio_passthrough = audio_passthrough
         self._settings: Dict[str, Any] = {}
 
     @abstractmethod
@@ -492,10 +492,10 @@ class STTService(AIService):
         pass
 
     async def _update_settings(self, settings: Dict[str, Any]):
-        logger.debug(f"Updating STT settings: {self._settings}")
+        logger.info(f"Updating STT settings: {self._settings}")
         for key, value in settings.items():
             if key in self._settings:
-                logger.debug(f"Updating STT setting {key} to: [{value}]")
+                logger.info(f"Updating STT setting {key} to: [{value}]")
                 self._settings[key] = value
                 if key == "language":
                     await self.set_language(value)
@@ -513,8 +513,11 @@ class STTService(AIService):
 
         if isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
-            # push a TextFrame. We don't really want to push audio frames down.
+            # push a TextFrame. We also push audio downstream in case someone
+            # else needs it.
             await self.process_audio_frame(frame)
+            if self._audio_passthrough:
+                await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
@@ -533,7 +536,7 @@ class SegmentedSTTService(STTService):
         min_volume: float = 0.6,
         max_silence_secs: float = 0.3,
         max_buffer_secs: float = 1.5,
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         num_channels: int = 1,
         **kwargs,
     ):
