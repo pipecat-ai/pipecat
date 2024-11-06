@@ -5,16 +5,14 @@
 #
 
 import asyncio
-
 from typing import Any, Dict, Mapping
 
 import numpy as np
+from loguru import logger
 
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.utils import resample_audio
-from pipecat.frames.frames import MixerControlFrame, MixerUpdateSettingsFrame, MixerEnableFrame
-
-from loguru import logger
+from pipecat.frames.frames import MixerControlFrame, MixerEnableFrame, MixerUpdateSettingsFrame
 
 try:
     import soundfile as sf
@@ -45,6 +43,7 @@ class SoundfileMixer(BaseAudioMixer):
         sound_files: Mapping[str, str],
         default_sound: str,
         volume: float = 0.4,
+        loop: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -56,6 +55,7 @@ class SoundfileMixer(BaseAudioMixer):
         self._sounds: Dict[str, Any] = {}
         self._current_sound = default_sound
         self._mixing = True
+        self._loop = loop
 
     async def start(self, sample_rate: int):
         self._sample_rate = sample_rate
@@ -85,6 +85,8 @@ class SoundfileMixer(BaseAudioMixer):
                     await self._change_sound(value)
                 case "volume":
                     await self._update_volume(value)
+                case "loop":
+                    await self._update_loop(value)
 
     async def _change_sound(self, sound: str):
         if sound in self._sound_files:
@@ -95,6 +97,9 @@ class SoundfileMixer(BaseAudioMixer):
 
     async def _update_volume(self, volume: float):
         self._volume = volume
+
+    async def _update_loop(self, loop: bool):
+        self._loop = loop
 
     def _load_sound_file(self, sound_name: str, file_name: str):
         try:
@@ -108,7 +113,7 @@ class SoundfileMixer(BaseAudioMixer):
 
             # Convert from np to bytes again.
             self._sounds[sound_name] = np.frombuffer(audio, dtype=np.int16)
-        except Exception as ex:
+        except Exception:
             logger.error(f"Unable to open file {file_name}")
 
     def _mix_with_sound(self, audio: bytes):
@@ -127,6 +132,8 @@ class SoundfileMixer(BaseAudioMixer):
 
         # Go back to the beginning if we don't have enough data.
         if self._sound_pos + chunk_size > len(sound):
+            if not self._loop:
+                return audio
             self._sound_pos = 0
 
         start_pos = self._sound_pos
