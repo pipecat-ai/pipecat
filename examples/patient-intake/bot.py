@@ -182,7 +182,7 @@ class IntakeProcessor:
             }
         )
         print(f"!!! about to await llm process frame in start prescrpitions")
-        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+        await llm.queue_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
         print(f"!!! past await process frame in start prescriptions")
 
     async def start_allergies(self, function_name, llm, context):
@@ -222,7 +222,7 @@ class IntakeProcessor:
                 "content": "Now ask the user if they have any medical conditions the doctor should know about. Once they've answered the question, call the list_conditions function.",
             }
         )
-        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+        await llm.queue_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
     async def start_conditions(self, function_name, llm, context):
         print("!!! doing start conditions")
@@ -261,7 +261,7 @@ class IntakeProcessor:
                 "content": "Finally, ask the user the reason for their doctor visit today. Once they answer, call the list_visit_reasons function.",
             }
         )
-        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+        await llm.queue_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
     async def start_visit_reasons(self, function_name, llm, context):
         print("!!! doing start visit reasons")
@@ -270,7 +270,7 @@ class IntakeProcessor:
         context.add_message(
             {"role": "system", "content": "Now, thank the user and end the conversation."}
         )
-        await llm.process_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+        await llm.queue_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
 
     async def save_data(self, function_name, tool_call_id, args, llm, context, result_callback):
         logger.info(f"!!! Saving data: {args}")

@@ -325,7 +325,7 @@ class BaseOutputTransport(FrameProcessor):
     #
 
     async def send_image(self, frame: OutputImageRawFrame | SpriteFrame):
-        await self.process_frame(frame, FrameDirection.DOWNSTREAM)
+        await self.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def _draw_image(self, frame: OutputImageRawFrame):
         desired_size = (self._params.camera_out_width, self._params.camera_out_height)
@@ -396,7 +396,7 @@ class BaseOutputTransport(FrameProcessor):
     #
 
     async def send_audio(self, frame: OutputAudioRawFrame):
-        await self.process_frame(frame, FrameDirection.DOWNSTREAM)
+        await self.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     def _next_audio_frame(self) -> AsyncGenerator[AudioRawFrame, None]:
         async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[AudioRawFrame, None]:
