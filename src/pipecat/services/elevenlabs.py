@@ -13,12 +13,15 @@ from loguru import logger
 from pydantic import BaseModel, model_validator
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -284,6 +287,19 @@ class ElevenLabsTTSService(WordTTSService):
             self._started = False
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("LLMFullResponseEndFrame", 0)])
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # If we received a TTSSpeakFrame and the LLM response included text (it
+        # might be that it's only a function calling response) we pause
+        # processing more frames until we receive a BotStoppedSpeakingFrame.
+        if isinstance(frame, TTSSpeakFrame):
+            await self.pause_processing_frames()
+        elif isinstance(frame, LLMFullResponseEndFrame) and self._started:
+            await self.pause_processing_frames()
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self.resume_processing_frames()
 
     async def _connect(self):
         try:
