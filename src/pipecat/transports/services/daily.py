@@ -1020,6 +1020,8 @@ class DailyTransport(BaseTransport):
         await self._call_event_handler("on_first_participant_joined", participant)
 
     async def _on_transcription_message(self, message):
+        await self._call_event_handler("on_transcription_message", message)
+
         participant_id = ""
         if "participantId" in message:
             participant_id = message["participantId"]
