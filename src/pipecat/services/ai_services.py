@@ -285,11 +285,7 @@ class TTSService(AIService):
                 logger.warning(f"Unknown setting for TTS service: {key}")
 
     async def say(self, text: str):
-        aggregate_sentences = self._aggregate_sentences
-        self._aggregate_sentences = False
-        await self.process_frame(TextFrame(text=text), FrameDirection.DOWNSTREAM)
-        self._aggregate_sentences = aggregate_sentences
-        await self.flush_audio()
+        await self.queue_frame(TTSSpeakFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
