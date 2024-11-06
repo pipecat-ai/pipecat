@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -34,7 +35,6 @@ try:
         LiveResultResponse,
         LiveTranscriptionEvents,
         SpeakOptions,
-        logging,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -101,9 +101,7 @@ class DeepgramTTSService(TTSService):
                 if not chunk:
                     break
                 frame = TTSAudioRawFrame(
-                    audio=chunk,
-                    sample_rate=self._settings["sample_rate"],
-                    num_channels=1,
+                    audio=chunk, sample_rate=self._settings["sample_rate"], num_channels=1
                 )
                 yield frame
 
@@ -139,35 +137,24 @@ class DeepgramSTTService(STTService):
 
         merged_options = default_options
         if live_options:
-            merged_options = LiveOptions(
-                **{**default_options.to_dict(), **live_options.to_dict()}
-            )
+            merged_options = LiveOptions(**{**default_options.to_dict(), **live_options.to_dict()})
         self._settings = merged_options.to_dict()
 
         self._client = DeepgramClient(
             api_key,
-            config=DeepgramClientOptions(url=url, options={"keepalive": "true"}),
+            config=DeepgramClientOptions(
+                url=url,
+                options={"keepalive": "true"},  # verbose=logging.DEBUG
+            ),
         )
-        self._connection: AsyncListenWebSocketClient = (
-            self._client.listen.asyncwebsocket.v("1")
-        )
+        self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
         if self.vad_enabled:
-            self._connection.on(
-                LiveTranscriptionEvents.SpeechStarted, self._on_speech_started
-            )
-        if self.utterance_end:
-            self._connection.on(
-                LiveTranscriptionEvents.UtteranceEnd, self._on_utterance_end
-            )
+            self._connection.on(LiveTranscriptionEvents.SpeechStarted, self._on_speech_started)
 
     @property
     def vad_enabled(self):
         return self._settings["vad_events"]
-
-    @property
-    def utterance_end(self):
-        return self._settings.get("utterance_end_ms")
 
     def can_generate_metrics(self) -> bool:
         return self.vad_enabled
@@ -213,21 +200,14 @@ class DeepgramSTTService(STTService):
             logger.info(f"{self}: Disconnected from Deepgram")
 
     async def _on_speech_started(self, *args, **kwargs):
-        # logger.debug("Deepgram: Speech Started")
-        # await self.push_frame(UserStartedSpeakingFrame())
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
-
-    async def _on_utterance_end(self, *args, **kwargs):
-        # await self.push_frame(UserStoppedSpeakingFrame())
-        await self.stop_processing_metrics()
 
     async def _on_message(self, *args, **kwargs):
         result: LiveResultResponse = kwargs["result"]
         if len(result.channel.alternatives) == 0:
             return
         is_final = result.is_final
-        speech_final = result.speech_final
         transcript = result.channel.alternatives[0].transcript
         language = None
         if result.channel.alternatives[0].languages:
@@ -236,22 +216,11 @@ class DeepgramSTTService(STTService):
         if len(transcript) > 0:
             await self.stop_ttfb_metrics()
             if is_final:
-                logger.debug(f"Deepgram: Final: {transcript}")
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
-                # if not self.utterance_end:
-                #     await self.push_frame(UserStoppedSpeakingFrame())
-                #     await self.stop_processing_metrics()
-            # if not self.utterance_end:
-            #     if speech_final:
-            #         await self.push_frame(UserStoppedSpeakingFrame())
-            #         await self.push_frame(UserStartedSpeakingFrame())
-            #         await self.stop_processing_metrics()
-
-            # else:
-            #     await self.push_frame(
-            #         InterimTranscriptionFrame(
-            #             transcript, "", time_now_iso8601(), language
-            #         )
-            #     )
+                await self.stop_processing_metrics()
+            else:
+                await self.push_frame(
+                    InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                )
