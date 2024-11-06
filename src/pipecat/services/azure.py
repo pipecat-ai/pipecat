@@ -77,21 +77,20 @@ class AzureLLMService(BaseOpenAILLMService):
         )
 
 
-class InputParams(BaseModel):
-    emphasis: Optional[str] = None
-    language_code: Optional[str] = (
-        "en-US"  # USE THIS!! necessary for compatibility with languages supported by azure but not by other service
-    )
-    language: Optional[Language] = Language.EN_US
-    pitch: Optional[str] = None
-    rate: Optional[str] = "1.05"
-    role: Optional[str] = None
-    style: Optional[str] = None
-    style_degree: Optional[str] = None
-    volume: Optional[str] = None
-
-
 class AzureTTSService(TTSService):
+    class InputParams(BaseModel):
+        emphasis: Optional[str] = None
+        language_code: Optional[str] = (
+            "en-US"  # USE THIS!! necessary for compatibility with languages supported by azure but not by other service
+        )
+        language: Optional[Language] = Language.EN_US
+        pitch: Optional[str] = None
+        rate: Optional[str] = "1.05"
+        role: Optional[str] = None
+        style: Optional[str] = None
+        style_degree: Optional[str] = None
+        volume: Optional[str] = None
+
     def __init__(
         self,
         *,
