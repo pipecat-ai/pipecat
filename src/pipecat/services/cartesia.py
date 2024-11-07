@@ -234,7 +234,7 @@ class CartesiaTTSService(WordTTSService):
                     # timestamp to set send context frames.
                     self._context_id = None
                     await self.add_word_timestamps(
-                        [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0)]
+                        [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0), ("Reset", 0)]
                     )
                 elif msg["type"] == "timestamps":
                     await self.add_word_timestamps(

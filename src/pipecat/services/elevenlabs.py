@@ -286,7 +286,7 @@ class ElevenLabsTTSService(WordTTSService):
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
             self._started = False
             if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("LLMFullResponseEndFrame", 0)])
+                await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
