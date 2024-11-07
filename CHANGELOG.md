@@ -68,6 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue with PlayHTTTSService, where the TTFB metrics were reporting
   very small time values.
 
+- Fixed an issue where AzureTTSService wasn't initializing the specified
+  language.
+
 ### Other
 
 - Add `23-bot-background-sound.py` foundational example.
