@@ -113,8 +113,8 @@ class SoundfileMixer(BaseAudioMixer):
 
             # Convert from np to bytes again.
             self._sounds[sound_name] = np.frombuffer(audio, dtype=np.int16)
-        except Exception:
-            logger.error(f"Unable to open file {file_name}")
+        except Exception as e:
+            logger.error(f"Unable to open file {file_name}: {e}")
 
     def _mix_with_sound(self, audio: bytes):
         """Mixes raw audio frames with chunks of the same length from the sound
