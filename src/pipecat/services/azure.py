@@ -43,8 +43,8 @@ try:
         ResultReason,
         SpeechConfig,
         SpeechRecognizer,
-        SpeechSynthesizer,
         SpeechSynthesisOutputFormat,
+        SpeechSynthesizer,
     )
     from azure.cognitiveservices.speech.audio import (
         AudioStreamFormat,
@@ -128,11 +128,6 @@ class AzureTTSService(TTSService):
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        speech_config = SpeechConfig(subscription=api_key, region=region)
-        speech_config.set_speech_synthesis_output_format(sample_rate_to_output_format(sample_rate))
-
-        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
-
         self._settings = {
             "sample_rate": sample_rate,
             "emphasis": params.emphasis,
@@ -146,6 +141,15 @@ class AzureTTSService(TTSService):
             "style_degree": params.style_degree,
             "volume": params.volume,
         }
+
+        speech_config = SpeechConfig(
+            subscription=api_key,
+            region=region,
+            speech_recognition_language=self._settings["language"],
+        )
+        speech_config.set_speech_synthesis_output_format(sample_rate_to_output_format(sample_rate))
+
+        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
 
         self.set_voice(voice)
 
