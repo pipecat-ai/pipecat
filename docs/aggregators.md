@@ -37,6 +37,7 @@ Combines LLM responses into complete messages:
 
 Sequence examples:
 ```plaintext
+here X stands for final TextFrame
 S E -> None              (Start-End only)
 S T E -> X              (Start-Text-End)
 S I T E -> X           (Start-Interim-Text-End)
