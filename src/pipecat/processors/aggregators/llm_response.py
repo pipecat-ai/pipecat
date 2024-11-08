@@ -4,12 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from datetime import datetime
 from typing import List, Type
 
 from pipecat.frames.frames import (
-    CustomAssistantTranscriptionFrame,
-    CustomUserTranscriptionFrame,
     Frame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
@@ -104,26 +101,19 @@ class LLMResponseAggregator(FrameProcessor):
             self._seen_end_frame = True
             self._seen_start_frame = False
 
-            if self._start_frame == UserStartedSpeakingFrame:
-                send_aggregation = True
-            else:
-                # We might have received the end frame but we might still be
-                # aggregating (i.e. we have seen interim results but not the final
-                # text).
-                self._aggregating = (
-                    self._seen_interim_results or len(self._aggregation) == 0
-                )
-                # Send the aggregation if we are not aggregating anymore (i.e. no
-                # more interim results received).
-                send_aggregation = not self._aggregating
+            # We might have received the end frame but we might still be
+            # aggregating (i.e. we have seen interim results but not the final
+            # text).
+            self._aggregating = self._seen_interim_results or len(self._aggregation) == 0
+
+            # Send the aggregation if we are not aggregating anymore (i.e. no
+            # more interim results received).
+            send_aggregation = not self._aggregating
             await self.push_frame(frame, direction)
         elif isinstance(frame, self._accumulator_frame):
             if self._aggregating:
                 if self._expect_stripped_words:
-                    self._aggregation += (
-                        f" {frame.text}" if self._aggregation else frame.text
-                    )
-
+                    self._aggregation += f" {frame.text}" if self._aggregation else frame.text
                 else:
                     self._aggregation += frame.text
                 # We have recevied a complete sentence, so if we have seen the
@@ -133,9 +123,7 @@ class LLMResponseAggregator(FrameProcessor):
 
             # We just got our final result, so let's reset interim results.
             self._seen_interim_results = False
-        elif self._interim_accumulator_frame and isinstance(
-            frame, self._interim_accumulator_frame
-        ):
+        elif self._interim_accumulator_frame and isinstance(frame, self._interim_accumulator_frame):
             self._seen_interim_results = True
         elif self._handle_interruptions and isinstance(frame, StartInterruptionFrame):
             await self._push_aggregation()
@@ -152,10 +140,7 @@ class LLMResponseAggregator(FrameProcessor):
             await self.push_frame(frame, direction)
 
         if send_aggregation:
-            if self._start_frame == UserStartedSpeakingFrame:
-                await self._modified_push_aggregation()
-            else:
-                await self._push_aggregation()
+            await self._push_aggregation()
 
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:
@@ -167,35 +152,6 @@ class LLMResponseAggregator(FrameProcessor):
 
             frame = LLMMessagesFrame(self._messages)
             await self.push_frame(frame)
-
-    async def _modified_push_aggregation(self):
-        if self._start_frame == UserStartedSpeakingFrame and len(self._aggregation) > 0:
-            text = self._aggregation
-
-            # eos_end_marker = find_endofsentences(text)
-            # if eos_end_marker:
-            #     complete = text[eos_end_marker:].lstrip(".").lstrip("?")
-            #     incomplete = text[:eos_end_marker].strip()
-            # else:
-            #     complete = text
-            #     incomplete = ""
-            complete = text
-            incomplete = ""
-            # complete, incomplete = await get_complete_and_incomplete_parts(text)
-            if len(complete):
-                text = complete
-                self._aggregation = incomplete
-                self._messages.append({"role": self._role, "content": text})
-
-                timestamp = datetime.utcnow().timestamp()
-                await self.push_frame(
-                    CustomUserTranscriptionFrame(
-                        self._messages[-1]["content"], str(int(timestamp))
-                    )
-                )
-                frame = LLMMessagesFrame(self._messages)
-                frame.pts = int(timestamp)
-                await self.push_frame(frame)
 
     # TODO-CB: Types
     def _add_messages(self, messages):
@@ -279,10 +235,8 @@ class LLMFullResponseAggregator(FrameProcessor):
     LLMFullResponseEndFrame
     """
 
-    def __init__(self, messages: List[dict] = []):
+    def __init__(self):
         super().__init__()
-        self._role = "assistant"
-        self._messages = messages
         self._aggregation = ""
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -291,16 +245,7 @@ class LLMFullResponseAggregator(FrameProcessor):
         if isinstance(frame, TextFrame):
             self._aggregation += frame.text
         elif isinstance(frame, LLMFullResponseEndFrame):
-            text_frame = TextFrame(self._aggregation)
-            self._messages.append({"role": self._role, "content": self._aggregation})
-            llm_message_frame = LLMMessagesUpdateFrame(
-                [{"role": self._role, "content": self._aggregation}]
-            )
-            await self.push_frame(llm_message_frame)
-            await self.push_frame(text_frame)
-            await self.push_frame(
-                CustomAssistantTranscriptionFrame(self._aggregation, str(frame.pts))
-            )
+            await self.push_frame(TextFrame(self._aggregation))
             await self.push_frame(frame)
             self._aggregation = ""
         else:
@@ -335,9 +280,7 @@ class LLMContextAggregator(LLMResponseAggregator):
 
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:
-            self._context.add_message(
-                {"role": self._role, "content": self._aggregation}
-            )
+            self._context.add_message({"role": self._role, "content": self._aggregation})
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
@@ -351,9 +294,7 @@ class LLMContextAggregator(LLMResponseAggregator):
 
 
 class LLMAssistantContextAggregator(LLMContextAggregator):
-    def __init__(
-        self, context: OpenAILLMContext, *, expect_stripped_words: bool = True
-    ):
+    def __init__(self, context: OpenAILLMContext, *, expect_stripped_words: bool = True):
         super().__init__(
             messages=[],
             context=context,
