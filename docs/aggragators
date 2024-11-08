@@ -1,0 +1,93 @@
+# Frame Aggregators
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+## Types of Aggregators
+
+### 1. Gated Aggregator
+Controls the flow of frames using custom gates:
+
+- Accumulates frames based on gate conditions
+- Custom open/close functions determine flow
+- Maintains gate state (open/closed)
+- Supports directional frame flow
+- Blocks or passes frames based on gate state
+
+Example:
+```plaintext
+Gate closed -> Accumulate frames
+Gate opens -> Release accumulated frames
+System frames always pass through
+```
+
+### 2. Gated OpenAI LLM Context Aggregator
+Manages OpenAI LLM context with controlled release:
+
+- Holds last received context frame
+- Releases context on notifier signal
+- Handles start and cancel frames
+- Maintains context state between releases
+
+### 3. LLM Response Aggregator
+Combines LLM responses into complete messages:
+
+- Processes start/end response signals
+- Accumulates text during active state
+- Handles interim results
+- Supports interruption handling
+
+Sequence examples:
+```plaintext
+S E -> None              (Start-End only)
+S T E -> X              (Start-Text-End)
+S I T E -> X           (Start-Interim-Text-End)
+```
+
+### 4. OpenAI LLM Context Aggregator
+Manages OpenAI-specific context and messages:
+
+- Maintains message history
+- Handles tool calls and functions
+- Processes image content
+- Provides context serialization
+
+### 5. Sentence Aggregator
+Combines text into complete sentences:
+
+- Detects sentence endings
+- Aggregates partial text
+- Emits on complete sentences
+- Handles end conditions
+
+Example:
+```plaintext
+Input: "Hello," -> None
+Input: " world." -> "Hello, world."
+```
+
+### 6. User Response Aggregator
+Processes user speech input:
+
+- Handles speaking start/stop events
+- Processes transcriptions
+- Manages interim results
+- Creates unified output
+
+### 7. Vision Image Frame Aggregator
+Pairs text descriptions with images:
+
+- Combines text and image data
+- Creates unified vision outputs
+- Sequential processing
+- Maintains pairing relationship
+
+Example:
+```plaintext
+Input: Description text
+Input: Image data
+Output: Combined vision content
+```
+
