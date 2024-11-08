@@ -16,6 +16,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
+    AudioRawFrame,
     ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
@@ -184,11 +185,53 @@ class GoogleLLMContext(OpenAILLMContext):
             msgs.append(obj)
         return msgs
 
+    def add_image_frame_message(
+        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
+    ):
+        buffer = io.BytesIO()
+        Image.frombytes(format, size, image).save(buffer, format="JPEG")
+
+        parts = []
+        if text:
+            parts.append(glm.Part(text=text))
+        parts.append(
+            glm.Part(inline_data=glm.Blob(mime_type="image/jpeg", data=buffer.getvalue())),
+        )
+        self.add_message(glm.Content(role="user", parts=parts))
+
+    def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: str = None):
+        if not audio_frames:
+            return
+
+        sample_rate = audio_frames[0].sample_rate
+        num_channels = audio_frames[0].num_channels
+
+        parts = []
+        data = b"".join(frame.audio for frame in audio_frames)
+        if text:
+            parts.append(glm.Part(text=text))
+        parts.append(
+            glm.Part(
+                inline_data=glm.Blob(
+                    mime_type="audio/wav",
+                    data=(
+                        bytes(
+                            self.create_wav_header(sample_rate, num_channels, 16, len(data)) + data
+                        )
+                    ),
+                )
+            ),
+        )
+        self.add_message(glm.Content(role="user", parts=parts))
+        # message = {"mime_type": "audio/mp3", "data": bytes(data + create_wav_header(sample_rate, num_channels, 16, len(data)))}
+        # self.add_message(message)
+
     def from_standard_message(self, message):
         role = message["role"]
         content = message.get("content", [])
         if role == "system":
-            role = "user"
+            self.system_message = content
+            return None
         elif role == "assistant":
             role = "model"
 
@@ -231,20 +274,6 @@ class GoogleLLMContext(OpenAILLMContext):
 
         message = glm.Content(role=role, parts=parts)
         return message
-
-    def add_image_frame_message(
-        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
-    ):
-        buffer = io.BytesIO()
-        Image.frombytes(format, size, image).save(buffer, format="JPEG")
-
-        parts = []
-        if text:
-            parts.append(glm.Part(text=text))
-        parts.append(
-            glm.Part(inline_data=glm.Blob(mime_type="image/jpeg", data=buffer.getvalue())),
-        )
-        self.add_message(glm.Content(role="user", parts=parts))
 
     def to_standard_messages(self, obj) -> list:
         msg = {"role": obj.role, "content": []}
@@ -289,9 +318,20 @@ class GoogleLLMContext(OpenAILLMContext):
         return [msg]
 
     def _restructure_from_openai_messages(self):
+        self.system_message = None
         # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
         try:
-            self._messages[:] = [self.from_standard_message(m) for m in self._messages]
+            self._messages[:] = [
+                msg
+                for msg in (self.from_standard_message(m) for m in self._messages)
+                if msg is not None
+            ]
+            # We might have been given a messages list with only a system message. If so, let's put that back in
+            # the messages list as a user message.
+            if self.system_message and not self._messages:
+                self.add_message(
+                    glm.Content(role="user", parts=[glm.Part(text=self.system_message)])
+                )
         except Exception as e:
             logger.error(f"Error mapping messages: {e}")
         # iterate over messages and remove any messages that have an empty content list
@@ -319,11 +359,14 @@ class GoogleLLMService(LLMService):
         api_key: str,
         model: str = "gemini-1.5-flash-latest",
         params: InputParams = InputParams(),
+        system_instruction: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         gai.configure(api_key=api_key)
-        self._create_client(model)
+        self.set_model_name(model)
+        self._system_instruction = system_instruction
+        self._create_client()
         self._settings = {
             "max_tokens": params.max_tokens,
             "temperature": params.temperature,
@@ -335,34 +378,10 @@ class GoogleLLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def _create_client(self, model: str):
-        self.set_model_name(model)
-        self._client = gai.GenerativeModel(model)
-
-    def _get_messages_from_openai_context(self, context: OpenAILLMContext) -> List[glm.Content]:
-        openai_messages = context.get_messages()
-        google_messages = []
-
-        for message in openai_messages:
-            role = message["role"]
-            content = message["content"]
-            if role == "system":
-                role = "user"
-            elif role == "assistant":
-                role = "model"
-
-            parts = [glm.Part(text=content)]
-            if "mime_type" in message:
-                parts.append(
-                    glm.Part(
-                        inline_data=glm.Blob(
-                            mime_type=message["mime_type"], data=message["data"].getvalue()
-                        )
-                    )
-                )
-            google_messages.append({"role": role, "parts": parts})
-
-        return google_messages
+    def _create_client(self):
+        self._client = gai.GenerativeModel(
+            self._model_name, system_instruction=self._system_instruction
+        )
 
     async def _async_generator_wrapper(self, sync_generator):
         for item in sync_generator:
@@ -374,10 +393,11 @@ class GoogleLLMService(LLMService):
         try:
             logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
 
-            # todo: move this into the new context code structure, convert from openai context one time
-            # todo: add system instructions
-            # messages = self._get_messages_from_openai_context(context)
             messages = context.messages
+            if self._system_instruction != context.system_message:
+                logger.debug(f"System instruction changed: {context.system_message}")
+                self._system_instruction = context.system_message
+                self._create_client()
 
             # Filter out None values and create GenerationConfig
             generation_params = {
@@ -394,24 +414,21 @@ class GoogleLLMService(LLMService):
             generation_config = GenerationConfig(**generation_params) if generation_params else None
 
             await self.start_ttfb_metrics()
-
             tools = context.tools if context.tools else []
             response = self._client.generate_content(
                 contents=messages, tools=tools, stream=True, generation_config=generation_config
             )
-
-            tokens = LLMTokenUsage(
-                prompt_tokens=response.usage_metadata.prompt_token_count,
-                completion_tokens=response.usage_metadata.candidates_token_count,
-                total_tokens=response.usage_metadata.total_token_count,
-            )
-
-            await self.start_llm_usage_metrics(tokens)
-
             await self.stop_ttfb_metrics()
 
+            prompt_tokens = response.usage_metadata.prompt_token_count
+            completion_tokens = response.usage_metadata.candidates_token_count
+            total_tokens = response.usage_metadata.total_token_count
+
             async for chunk in self._async_generator_wrapper(response):
-                # todo: usage
+                if chunk.usage_metadata:
+                    prompt_tokens += response.usage_metadata.prompt_token_count
+                    completion_tokens += response.usage_metadata.candidates_token_count
+                    total_tokens += response.usage_metadata.total_token_count
                 try:
                     for c in chunk.parts:
                         if c.text:
@@ -436,6 +453,13 @@ class GoogleLLMService(LLMService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
+            await self.start_llm_usage_metrics(
+                LLMTokenUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                )
+            )
             await self.push_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
