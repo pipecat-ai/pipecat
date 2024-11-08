@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grained control of what media subscriptions you want for each participant in a
   room.
 
+- Added audio filter `KrispFilter`.
+
 ### Changed
 
 - The following `DailyTransport` functions are now `async` which means they need
