@@ -5,14 +5,14 @@
 #
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Tuple
 
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
-from pipecat.vad.vad_analyzer import VADParams
 
 
 def format_pts(pts: int | None):
@@ -274,6 +274,17 @@ class TransportMessageFrame(DataFrame):
         return f"{self.name}(message: {self.message})"
 
 
+@dataclass
+class FunctionCallResultFrame(DataFrame):
+    """A frame containing the result of an LLM function (tool) call."""
+
+    function_name: str
+    tool_call_id: str
+    arguments: str
+    result: Any
+    run_llm: bool = True
+
+
 #
 # App frames. Application user-defined frames.
 #
@@ -394,6 +405,25 @@ class StopInterruptionFrame(SystemFrame):
 
 
 @dataclass
+class UserStartedSpeakingFrame(SystemFrame):
+    """Emitted by VAD to indicate that a user has started speaking. This can be
+    used for interruptions or other times when detecting that someone is
+    speaking is more important than knowing what they're saying (as you will
+    with a TranscriptionFrame)
+
+    """
+
+    pass
+
+
+@dataclass
+class UserStoppedSpeakingFrame(SystemFrame):
+    """Emitted by the VAD to indicate that a user stopped speaking."""
+
+    pass
+
+
+@dataclass
 class BotInterruptionFrame(SystemFrame):
     """Emitted by when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the
@@ -402,6 +432,52 @@ class BotInterruptionFrame(SystemFrame):
     """
 
     pass
+
+
+@dataclass
+class BotStartedSpeakingFrame(SystemFrame):
+    """Emitted upstream by transport outputs to indicate the bot started speaking."""
+
+    pass
+
+
+@dataclass
+class BotStoppedSpeakingFrame(SystemFrame):
+    """Emitted upstream by transport outputs to indicate the bot stopped speaking."""
+
+    pass
+
+
+@dataclass
+class BotSpeakingFrame(SystemFrame):
+    """Emitted upstream by transport outputs while the bot is still
+    speaking. This can be used, for example, to detect when a user is idle. That
+    is, while the bot is speaking we don't want to trigger any user idle timeout
+    since the user might be listening.
+
+    """
+
+    pass
+
+
+@dataclass
+class UserImageRequestFrame(SystemFrame):
+    """A frame user to request an image from the given user."""
+
+    user_id: str
+    context: Optional[Any] = None
+
+    def __str__(self):
+        return f"{self.name}, user: {self.user_id}"
+
+
+@dataclass
+class FunctionCallInProgressFrame(SystemFrame):
+    """A frame signaling that a function call is in progress."""
+
+    function_name: str
+    tool_call_id: str
+    arguments: str
 
 
 @dataclass
@@ -458,51 +534,6 @@ class LLMFullResponseEndFrame(ControlFrame):
 
 
 @dataclass
-class UserStartedSpeakingFrame(ControlFrame):
-    """Emitted by VAD to indicate that a user has started speaking. This can be
-    used for interruptions or other times when detecting that someone is
-    speaking is more important than knowing what they're saying (as you will
-    with a TranscriptionFrame)
-
-    """
-
-    pass
-
-
-@dataclass
-class UserStoppedSpeakingFrame(ControlFrame):
-    """Emitted by the VAD to indicate that a user stopped speaking."""
-
-    pass
-
-
-@dataclass
-class BotStartedSpeakingFrame(ControlFrame):
-    """Emitted upstream by transport outputs to indicate the bot started speaking."""
-
-    pass
-
-
-@dataclass
-class BotStoppedSpeakingFrame(ControlFrame):
-    """Emitted upstream by transport outputs to indicate the bot stopped speaking."""
-
-    pass
-
-
-@dataclass
-class BotSpeakingFrame(ControlFrame):
-    """Emitted upstream by transport outputs while the bot is still
-    speaking. This can be used, for example, to detect when a user is idle. That
-    is, while the bot is speaking we don't want to trigger any user idle timeout
-    since the user might be listening.
-
-    """
-
-    pass
-
-
-@dataclass
 class TTSStartedFrame(ControlFrame):
     """Used to indicate the beginning of a TTS response. Following
     TTSAudioRawFrames are part of the TTS response until an
@@ -523,21 +554,10 @@ class TTSStoppedFrame(ControlFrame):
 
 
 @dataclass
-class UserImageRequestFrame(ControlFrame):
-    """A frame user to request an image from the given user."""
-
-    user_id: str
-    context: Optional[Any] = None
-
-    def __str__(self):
-        return f"{self.name}, user: {self.user_id}"
-
-
-@dataclass
 class ServiceUpdateSettingsFrame(ControlFrame):
     """A control frame containing a request to update service settings."""
 
-    settings: Dict[str, Any]
+    settings: Mapping[str, Any]
 
 
 @dataclass
@@ -556,29 +576,51 @@ class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame):
 
 
 @dataclass
-class FunctionCallInProgressFrame(SystemFrame):
-    """A frame signaling that a function call is in progress."""
-
-    function_name: str
-    tool_call_id: str
-    arguments: str
-
-
-@dataclass
-class FunctionCallResultFrame(DataFrame):
-    """A frame containing the result of an LLM function (tool) call."""
-
-    function_name: str
-    tool_call_id: str
-    arguments: str
-    result: Any
-    run_llm: bool = True
-
-
-@dataclass
 class VADParamsUpdateFrame(ControlFrame):
     """A control frame containing a request to update VAD params. Intended
     to be pushed upstream from RTVI processor.
     """
 
     params: VADParams
+
+
+@dataclass
+class FilterControlFrame(ControlFrame):
+    """Base control frame for other audio filter frames."""
+
+    pass
+
+
+@dataclass
+class FilterUpdateSettingsFrame(FilterControlFrame):
+    """Control frame to update filter settings."""
+
+    settings: Mapping[str, Any]
+
+
+@dataclass
+class FilterEnableFrame(FilterControlFrame):
+    """Control frame to enable or disable the filter at runtime."""
+
+    enable: bool
+
+
+@dataclass
+class MixerControlFrame(ControlFrame):
+    """Base control frame for other audio mixer frames."""
+
+    pass
+
+
+@dataclass
+class MixerUpdateSettingsFrame(MixerControlFrame):
+    """Control frame to update mixer settings."""
+
+    settings: Mapping[str, Any]
+
+
+@dataclass
+class MixerEnableFrame(MixerControlFrame):
+    """Control frame to enable or disable the mixer at runtime."""
+
+    enable: bool

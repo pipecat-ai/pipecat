@@ -51,11 +51,11 @@ class DeepgramTTSService(TTSService):
         *,
         api_key: str,
         voice: str = "aura-helios-en",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         encoding: str = "linear16",
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = {
             "sample_rate": sample_rate,
@@ -126,7 +126,7 @@ class DeepgramSTTService(STTService):
         default_options = LiveOptions(
             encoding="linear16",
             language=Language.EN,
-            model="nova-2-conversationalai",
+            model="nova-2-general",
             sample_rate=16000,
             channels=1,
             interim_results=True,
@@ -162,13 +162,13 @@ class DeepgramSTTService(STTService):
 
     async def set_model(self, model: str):
         await super().set_model(model)
-        logger.debug(f"Switching STT model to: [{model}]")
+        logger.info(f"Switching STT model to: [{model}]")
         self._settings["model"] = model
         await self._disconnect()
         await self._connect()
 
     async def set_language(self, language: Language):
-        logger.debug(f"Switching STT language to: [{language}]")
+        logger.info(f"Switching STT language to: [{language}]")
         self._settings["language"] = language
         await self._disconnect()
         await self._connect()
@@ -191,14 +191,14 @@ class DeepgramSTTService(STTService):
 
     async def _connect(self):
         if await self._connection.start(self._settings):
-            logger.debug(f"{self}: Connected to Deepgram")
+            logger.info(f"{self}: Connected to Deepgram")
         else:
             logger.error(f"{self}: Unable to connect to Deepgram")
 
     async def _disconnect(self):
         if self._connection.is_connected:
             await self._connection.finish()
-            logger.debug(f"{self}: Disconnected from Deepgram")
+            logger.info(f"{self}: Disconnected from Deepgram")
 
     async def _on_speech_started(self, *args, **kwargs):
         await self.start_ttfb_metrics()

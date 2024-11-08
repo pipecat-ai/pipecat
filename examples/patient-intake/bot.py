@@ -10,6 +10,7 @@ import os
 import sys
 import wave
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import OutputAudioRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -19,7 +20,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMContextFrame, OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -352,7 +352,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             print(f"Context is: {context}")
             await task.queue_frames([OpenAILLMContextFrame(context)])
 

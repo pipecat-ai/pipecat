@@ -69,7 +69,7 @@ STATIC_DIR = "frontend/out"
 app.mount("/static", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 
-@app.post("/start_bot")
+@app.post("/")
 async def start_bot(request: Request) -> JSONResponse:
     if os.getenv("ENV", "dev") == "production":
         # Only allow requests from the specified domain

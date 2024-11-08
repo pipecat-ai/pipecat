@@ -38,7 +38,7 @@ pip install "pipecat-ai[option,...]"
 
 Your project may or may not need these, so they're made available as optional requirements. Here is a list:
 
-- **AI services**: `anthropic`, `aws`, `azure`, `deepgram`, `gladia`, `google`, `fal`, `lmnt`, `moondream`, `openai`, `openpipe`, `playht`, `silero`, `whisper`, `xtts`
+- **AI services**: `anthropic`, `assemblyai`, `aws`, `azure`, `deepgram`, `gladia`, `google`, `fal`, `lmnt`, `moondream`, `openai`, `openpipe`, `playht`, `silero`, `whisper`, `xtts`
 - **Transports**: `local`, `websocket`, `daily`
 
 ## Code examples
@@ -51,10 +51,7 @@ Your project may or may not need these, so they're made available as optional re
 Here is a very basic Pipecat bot that greets a user when they join a real-time session. We'll use [Daily](https://daily.co) for real-time media transport, and [Cartesia](https://cartesia.ai/) for text-to-speech.
 
 ```python
-#app.py
-
 import asyncio
-import aiohttp
 
 from pipecat.frames.frames import EndFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -64,39 +61,43 @@ from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 async def main():
-  async with aiohttp.ClientSession() as session:
-    # Use Daily as a real-time media transport (WebRTC)
-    transport = DailyTransport(
-      room_url=...,
-      token=...,
-      bot_name="Bot Name",
-      params=DailyParams(audio_out_enabled=True))
+  # Use Daily as a real-time media transport (WebRTC)
+  transport = DailyTransport(
+    room_url=...,
+    token="", # leave empty. Note: token is _not_ your api key
+    bot_name="Bot Name",
+    params=DailyParams(audio_out_enabled=True))
 
-    # Use Cartesia for Text-to-Speech
-    tts = CartesiaTTSService(
-        api_key=...,
-        voice_id=...
-      )
+  # Use Cartesia for Text-to-Speech
+  tts = CartesiaTTSService(
+    api_key=...,
+    voice_id=...
+  )
 
-    # Simple pipeline that will process text to speech and output the result
-    pipeline = Pipeline([tts, transport.output()])
+  # Simple pipeline that will process text to speech and output the result
+  pipeline = Pipeline([tts, transport.output()])
 
-    # Create Pipecat processor that can run one or more pipelines tasks
-    runner = PipelineRunner()
+  # Create Pipecat processor that can run one or more pipelines tasks
+  runner = PipelineRunner()
 
-    # Assign the task callable to run the pipeline
-    task = PipelineTask(pipeline)
+  # Assign the task callable to run the pipeline
+  task = PipelineTask(pipeline)
 
-    # Register an event handler to play audio when a
-    # participant joins the transport WebRTC session
-    @transport.event_handler("on_participant_joined")
-    async def on_new_participant_joined(transport, participant):
-      participant_name = participant["info"]["userName"] or ''
-      # Queue a TextFrame that will get spoken by the TTS service (Cartesia)
-      await task.queue_frames([TextFrame(f"Hello there, {participant_name}!"), EndFrame()])
+  # Register an event handler to play audio when a
+  # participant joins the transport WebRTC session
+  @transport.event_handler("on_first_participant_joined")
+  async def on_first_participant_joined(transport, participant):
+    participant_name = participant.get("info", {}).get("userName", "")
+    # Queue a TextFrame that will get spoken by the TTS service (Cartesia)
+    await task.queue_frame(TextFrame(f"Hello there, {participant_name}!"))
 
-    # Run the pipeline task
-    await runner.run(task)
+  # Register an event handler to exit the application when the user leaves.
+  @transport.event_handler("on_participant_left")
+  async def on_participant_left(transport, participant, reason):
+    await task.queue_frame(EndFrame())
+
+  # Run the pipeline task
+  await runner.run(task)
 
 if __name__ == "__main__":
   asyncio.run(main())
@@ -127,8 +128,6 @@ Pipecat makes use of WebRTC VAD by default when using a WebRTC transport layer. 
 ```shell
 pip install pipecat-ai[silero]
 ```
-
-The first time your run your bot with Silero, startup may take a while whilst it downloads and caches the model in the background. You can check the progress of this in the console.
 
 ## Hacking on the framework itself
 
@@ -179,7 +178,7 @@ You can use [use-package](https://github.com/jwiegley/use-package) to install [e
   :ensure t
   :hook ((python-mode . lazy-ruff-mode))
   :config
-  (setq lazy-ruff-format-command "ruff format --config line-length=100")
+  (setq lazy-ruff-format-command "ruff format")
   (setq lazy-ruff-only-format-block t)
   (setq lazy-ruff-only-format-region t)
   (setq lazy-ruff-only-format-buffer t))
@@ -198,14 +197,13 @@ You can use [use-package](https://github.com/jwiegley/use-package) to install [e
 ### Visual Studio Code
 
 Install the
-[Ruff](https://marketplace.visualstudio.com/items?itemName=charliermarsh.ruff) extension. Then edit the user settings (_Ctrl-Shift-P_ `Open User Settings (JSON)`) and set it as the default Python formatter, enable formatting on save and configure `ruff` arguments:
+[Ruff](https://marketplace.visualstudio.com/items?itemName=charliermarsh.ruff) extension. Then edit the user settings (_Ctrl-Shift-P_ `Open User Settings (JSON)`) and set it as the default Python formatter, and enable formatting on save:
 
 ```json
 "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true
-},
-"ruff.format.args": ["--config", "line-length=100"]
+}
 ```
 
 ## Getting help

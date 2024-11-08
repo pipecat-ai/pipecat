@@ -9,28 +9,41 @@ import os
 import sys
 
 import aiohttp
+import datetime
+import wave
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+
+async def save_audio(audiobuffer):
+    if audiobuffer.has_audio():
+        merged_audio = audiobuffer.merge_audio_buffers()
+        filename = f"conversation_recording{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+        with wave.open(filename, "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(audiobuffer._sample_rate)
+            wf.writeframes(merged_audio)
+        print(f"Merged audio saved to {filename}")
+    else:
+        print("No audio data to save")
 
 
 async def main():
@@ -90,19 +103,19 @@ async def main():
             },
         ]
 
-        user_response = LLMUserResponseAggregator()
-        assistant_response = LLMAssistantResponseAggregator()
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         audiobuffer = AudioBufferProcessor()
         pipeline = Pipeline(
             [
                 transport.input(),  # microphone
-                user_response,
+                context_aggregator.user(),
                 llm,
                 tts,
                 transport.output(),
                 audiobuffer,  # used to buffer the audio in the pipeline
-                assistant_response,
+                context_aggregator.assistant(),
             ]
         )
 
@@ -110,18 +123,14 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
             await task.queue_frame(EndFrame())
-
-        @transport.event_handler("on_call_state_updated")
-        async def on_call_state_updated(transport, state):
-            if state == "left":
-                await task.queue_frame(EndFrame())
+            await save_audio(audiobuffer)
 
         runner = PipelineRunner()
 

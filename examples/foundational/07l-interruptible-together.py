@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -21,7 +22,6 @@ from pipecat.services.ai_services import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.together import TogetherLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 load_dotenv(override=True)
 
@@ -52,7 +52,7 @@ async def main():
 
         llm = TogetherLLMService(
             api_key=os.getenv("TOGETHER_API_KEY"),
-            model=os.getenv("TOGETHER_MODEL"),
+            model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
             params=TogetherLLMService.InputParams(
                 temperature=1.0,
                 top_p=0.9,
@@ -96,7 +96,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             await task.queue_frames([LLMMessagesFrame(messages)])
 

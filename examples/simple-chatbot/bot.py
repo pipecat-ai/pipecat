@@ -11,13 +11,10 @@ import sys
 
 from PIL import Image
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
 from pipecat.frames.frames import (
     OutputImageRawFrame,
     SpriteFrame,
@@ -26,11 +23,11 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from runner import configure
 
@@ -143,20 +140,20 @@ async def main():
             },
         ]
 
-        user_response = LLMUserResponseAggregator()
-        assistant_response = LLMAssistantResponseAggregator()
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         ta = TalkingAnimation()
 
         pipeline = Pipeline(
             [
                 transport.input(),
-                user_response,
+                context_aggregator.user(),
                 llm,
                 tts,
                 ta,
                 transport.output(),
-                assistant_response,
+                context_aggregator.assistant(),
             ]
         )
 

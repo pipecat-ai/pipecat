@@ -11,19 +11,16 @@ import sys
 
 from PIL import Image
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, OutputImageRawFrame, SystemFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
 
 from pipecat.transports.services.daily import DailyParams
 from runner import configure
@@ -105,8 +102,8 @@ async def main():
             },
         ]
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         image_sync_aggregator = ImageSyncAggregator(
             os.path.join(os.path.dirname(__file__), "assets", "speaking.png"),
@@ -117,11 +114,11 @@ async def main():
             [
                 transport.input(),
                 image_sync_aggregator,
-                tma_in,
+                context_aggregator.user(),
                 llm,
                 tts,
                 transport.output(),
-                tma_out,
+                context_aggregator.assistant(),
             ]
         )
 
@@ -129,8 +126,8 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            participant_name = participant["info"]["userName"] or ""
-            transport.capture_participant_transcription(participant["id"])
+            participant_name = participant.get("info", {}).get("userName", "")
+            await transport.capture_participant_transcription(participant["id"])
             await task.queue_frames([TextFrame(f"Hi there {participant_name}!")])
 
         runner = PipelineRunner()

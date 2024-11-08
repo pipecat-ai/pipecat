@@ -1,44 +1,41 @@
 #
 # Copyright (c) 2024, Daily
-
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
 import itertools
-import time
 import sys
+import time
+from typing import AsyncGenerator, List
 
+from loguru import logger
 from PIL import Image
-from typing import List
 
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import (
+    AudioRawFrame,
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
-    MetricsFrame,
+    EndFrame,
+    Frame,
+    MixerControlFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     SpriteFrame,
     StartFrame,
-    EndFrame,
-    Frame,
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
-    TextFrame,
+    TTSAudioRawFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
-
-from loguru import logger
-
 from pipecat.utils.time import nanoseconds_to_seconds
 
 
@@ -74,85 +71,29 @@ class BaseOutputTransport(FrameProcessor):
 
         self._stopped_event = asyncio.Event()
 
-        # Indicates if the bot is currently speaking. This is useful when we
-        # have an interruption since all the queued messages will be thrown
-        # away and we would lose the TTSStoppedFrame.
+        # Indicates if the bot is currently speaking.
         self._bot_speaking = False
 
-        # Create sink frame task. This is the task that will actually write
-        # audio or video frames. We write audio/video in a task so we can keep
-        # generating frames upstream while, for example, the audio is playing.
+    async def start(self, frame: StartFrame):
+        # Start audio mixer.
+        if self._params.audio_out_mixer:
+            await self._params.audio_out_mixer.start(self._params.audio_out_sample_rate)
+        self._create_output_tasks()
         self._create_sink_tasks()
 
-    async def start(self, frame: StartFrame):
-        # Create camera output queue and task if needed.
-        if self._params.camera_out_enabled:
-            self._camera_out_queue = asyncio.Queue()
-            self._camera_out_task = self.get_event_loop().create_task(
-                self._camera_out_task_handler()
-            )
-        # Create audio output queue and task if needed.
-        if self._params.audio_out_enabled and self._params.audio_out_is_live:
-            self._audio_out_queue = asyncio.Queue()
-            self._audio_out_task = self.get_event_loop().create_task(self._audio_out_task_handler())
-
     async def stop(self, frame: EndFrame):
-        # At this point we have enqueued an EndFrame and we need to wait for
-        # that EndFrame to be processed by the sink tasks. We also need to wait
-        # for these tasks before cancelling the camera and audio tasks below
-        # because they might be still rendering.
-        if self._sink_task:
-            await self._sink_task
-        if self._sink_clock_task:
-            await self._sink_clock_task
-
-        # Cancel and wait for the camera output task to finish.
-        if self._camera_out_task and self._params.camera_out_enabled:
-            self._camera_out_task.cancel()
-            await self._camera_out_task
-            self._camera_out_task = None
-
-        # Cancel and wait for the audio output task to finish.
-        if (
-            self._audio_out_task
-            and self._params.audio_out_enabled
-            and self._params.audio_out_is_live
-        ):
-            self._audio_out_task.cancel()
-            await self._audio_out_task
-            self._audio_out_task = None
+        await self._cancel_output_tasks()
+        # Stop audio mixer.
+        if self._params.audio_out_mixer:
+            await self._params.audio_out_mixer.stop()
 
     async def cancel(self, frame: CancelFrame):
         # Since we are cancelling everything it doesn't matter if we cancel sink
         # tasks first or not.
-        if self._sink_task:
-            self._sink_task.cancel()
-            await self._sink_task
-            self._sink_task = None
-
-        if self._sink_clock_task:
-            self._sink_clock_task.cancel()
-            await self._sink_clock_task
-            self._sink_clock_task = None
-
-        # Cancel and wait for the camera output task to finish.
-        if self._camera_out_task and self._params.camera_out_enabled:
-            self._camera_out_task.cancel()
-            await self._camera_out_task
-            self._camera_out_task = None
-
-        # Cancel and wait for the audio output task to finish.
-        if self._audio_out_task and (
-            self._params.audio_out_enabled and self._params.audio_out_is_live
-        ):
-            self._audio_out_task.cancel()
-            await self._audio_out_task
-            self._audio_out_task = None
+        await self._cancel_sink_tasks()
+        await self._cancel_output_tasks()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
-        pass
-
-    async def send_metrics(self, frame: MetricsFrame):
         pass
 
     async def write_frame_to_camera(self, frame: OutputImageRawFrame):
@@ -184,18 +125,20 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, (StartInterruptionFrame, StopInterruptionFrame)):
             await self.push_frame(frame, direction)
             await self._handle_interruptions(frame)
-        elif isinstance(frame, MetricsFrame):
-            await self.push_frame(frame, direction)
-            await self.send_metrics(frame)
         elif isinstance(frame, TransportMessageUrgentFrame):
             await self.send_message(frame)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames.
         elif isinstance(frame, EndFrame):
-            await self._sink_clock_queue.put((sys.maxsize, frame.id, frame))
-            await self._sink_queue.put(frame)
+            # Process sink tasks.
+            await self._stop_sink_tasks(frame)
+            # Now we can stop.
             await self.stop(frame)
+            # We finally push EndFrame down so PipelineTask stops nicely.
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, MixerControlFrame) and self._params.audio_out_mixer:
+            await self._params.audio_out_mixer.process_frame(frame)
         # Other frames.
         elif isinstance(frame, OutputAudioRawFrame):
             await self._handle_audio(frame)
@@ -207,24 +150,33 @@ class BaseOutputTransport(FrameProcessor):
         else:
             await self._sink_queue.put(frame)
 
+    async def _stop_sink_tasks(self, frame: EndFrame):
+        # Let the sink tasks process the queue until they reach this EndFrame.
+        await self._sink_clock_queue.put((sys.maxsize, frame.id, frame))
+        await self._sink_queue.put(frame)
+
+        # At this point we have enqueued an EndFrame and we need to wait for
+        # that EndFrame to be processed by the sink tasks. We also need to wait
+        # for these tasks before cancelling the camera and audio tasks below
+        # because they might be still rendering.
+        if self._sink_task:
+            await self._sink_task
+        if self._sink_clock_task:
+            await self._sink_clock_task
+
     async def _handle_interruptions(self, frame: Frame):
         if not self.interruptions_allowed:
             return
 
         if isinstance(frame, StartInterruptionFrame):
-            # Stop sink tasks.
-            if self._sink_task:
-                self._sink_task.cancel()
-                await self._sink_task
-            # Stop sink clock tasks.
-            if self._sink_clock_task:
-                self._sink_clock_task.cancel()
-                await self._sink_clock_task
-            # Create sink tasks.
+            # Cancel sink and output tasks.
+            await self._cancel_sink_tasks()
+            await self._cancel_output_tasks()
+            # Create sink and output tasks.
+            self._create_output_tasks()
             self._create_sink_tasks()
             # Let's send a bot stopped speaking if we have to.
-            if self._bot_speaking:
-                await self._bot_stopped_speaking()
+            await self._bot_stopped_speaking()
 
     async def _handle_audio(self, frame: OutputAudioRawFrame):
         if not self._params.audio_out_enabled:
@@ -233,9 +185,10 @@ class BaseOutputTransport(FrameProcessor):
         if self._params.audio_out_is_live:
             await self._audio_out_queue.put(frame)
         else:
+            cls = type(frame)
             self._audio_buffer.extend(frame.audio)
             while len(self._audio_buffer) >= self._audio_chunk_size:
-                chunk = OutputAudioRawFrame(
+                chunk = cls(
                     bytes(self._audio_buffer[: self._audio_chunk_size]),
                     sample_rate=frame.sample_rate,
                     num_channels=frame.num_channels,
@@ -252,6 +205,18 @@ class BaseOutputTransport(FrameProcessor):
         else:
             await self._sink_queue.put(frame)
 
+    async def _bot_started_speaking(self):
+        if not self._bot_speaking:
+            logger.debug("Bot started speaking")
+            await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+            self._bot_speaking = True
+
+    async def _bot_stopped_speaking(self):
+        if self._bot_speaking:
+            logger.debug("Bot stopped speaking")
+            await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+            self._bot_speaking = False
+
     #
     # Sink tasks
     #
@@ -263,24 +228,29 @@ class BaseOutputTransport(FrameProcessor):
         self._sink_clock_queue = asyncio.PriorityQueue()
         self._sink_clock_task = loop.create_task(self._sink_clock_task_handler())
 
+    async def _cancel_sink_tasks(self):
+        # Stop sink tasks.
+        if self._sink_task:
+            self._sink_task.cancel()
+            await self._sink_task
+            self._sink_task = None
+        # Stop sink clock tasks.
+        if self._sink_clock_task:
+            self._sink_clock_task.cancel()
+            await self._sink_clock_task
+            self._sink_clock_task = None
+
     async def _sink_frame_handler(self, frame: Frame):
         if isinstance(frame, OutputAudioRawFrame):
-            await self.write_raw_audio_frames(frame.audio)
-            await self.push_frame(frame)
-            await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+            await self._audio_out_queue.put(frame)
         elif isinstance(frame, OutputImageRawFrame):
             await self._set_camera_image(frame)
         elif isinstance(frame, SpriteFrame):
             await self._set_camera_images(frame.images)
         elif isinstance(frame, TransportMessageFrame):
             await self.send_message(frame)
-        elif isinstance(frame, TTSStartedFrame):
-            await self._bot_started_speaking()
-            await self.push_frame(frame)
-        elif isinstance(frame, TTSStoppedFrame):
-            await self._bot_stopped_speaking()
-            await self.push_frame(frame)
-        else:
+        # We will push EndFrame later.
+        elif not isinstance(frame, EndFrame):
             await self.push_frame(frame)
 
     async def _sink_task_handler(self):
@@ -296,12 +266,6 @@ class BaseOutputTransport(FrameProcessor):
             except Exception as e:
                 logger.exception(f"{self} error processing sink queue: {e}")
 
-    async def _sink_clock_frame_handler(self, frame: Frame):
-        # TODO(aleix): For now we just process TextFrame. But we should process
-        # audio and video as well.
-        if isinstance(frame, TextFrame):
-            await self.push_frame(frame)
-
     async def _sink_clock_task_handler(self):
         running = True
         while running:
@@ -316,12 +280,10 @@ class BaseOutputTransport(FrameProcessor):
                 # time to process it.
                 if running:
                     current_time = self.get_clock().get_time()
-                    if timestamp <= current_time:
-                        await self._sink_clock_frame_handler(frame)
-                    else:
+                    if timestamp > current_time:
                         wait_time = nanoseconds_to_seconds(timestamp - current_time)
                         await asyncio.sleep(wait_time)
-                        await self._sink_frame_handler(frame)
+                    await self._sink_frame_handler(frame)
 
                 self._sink_clock_queue.task_done()
             except asyncio.CancelledError:
@@ -329,15 +291,32 @@ class BaseOutputTransport(FrameProcessor):
             except Exception as e:
                 logger.exception(f"{self} error processing sink clock queue: {e}")
 
-    async def _bot_started_speaking(self):
-        logger.debug("Bot started speaking")
-        self._bot_speaking = True
-        await self.push_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+    #
+    # Output tasks
+    #
 
-    async def _bot_stopped_speaking(self):
-        logger.debug("Bot stopped speaking")
-        self._bot_speaking = False
-        await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+    def _create_output_tasks(self):
+        loop = self.get_event_loop()
+        # Create camera output queue and task if needed.
+        if self._params.camera_out_enabled:
+            self._camera_out_queue = asyncio.Queue()
+            self._camera_out_task = loop.create_task(self._camera_out_task_handler())
+        # Create audio output queue and task if needed.
+        if self._params.audio_out_enabled:
+            self._audio_out_queue = asyncio.Queue()
+            self._audio_out_task = loop.create_task(self._audio_out_task_handler())
+
+    async def _cancel_output_tasks(self):
+        # Stop camera output task.
+        if self._camera_out_task and self._params.camera_out_enabled:
+            self._camera_out_task.cancel()
+            await self._camera_out_task
+            self._camera_out_task = None
+        # Stop audio output task.
+        if self._audio_out_task and self._params.audio_out_enabled:
+            self._audio_out_task.cancel()
+            await self._audio_out_task
+            self._audio_out_task = None
 
     #
     # Camera out
@@ -417,14 +396,70 @@ class BaseOutputTransport(FrameProcessor):
     async def send_audio(self, frame: OutputAudioRawFrame):
         await self.process_frame(frame, FrameDirection.DOWNSTREAM)
 
+    def _next_audio_frame(self) -> AsyncGenerator[AudioRawFrame, None]:
+        async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[AudioRawFrame, None]:
+            while True:
+                try:
+                    frame = await asyncio.wait_for(
+                        self._audio_out_queue.get(), timeout=vad_stop_secs
+                    )
+                    yield frame
+                except asyncio.TimeoutError:
+                    # Notify the bot stopped speaking upstream if necessary.
+                    await self._bot_stopped_speaking()
+
+        async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[AudioRawFrame, None]:
+            last_frame_time = 0
+            silence = b"\x00" * self._audio_chunk_size
+            while True:
+                try:
+                    frame = self._audio_out_queue.get_nowait()
+                    frame.audio = await self._params.audio_out_mixer.mix(frame.audio)
+                    last_frame_time = time.time()
+                    yield frame
+                except asyncio.QueueEmpty:
+                    # Notify the bot stopped speaking upstream if necessary.
+                    diff_time = time.time() - last_frame_time
+                    if diff_time > vad_stop_secs:
+                        await self._bot_stopped_speaking()
+                    # Generate an audio frame with only the mixer's part.
+                    frame = OutputAudioRawFrame(
+                        audio=await self._params.audio_out_mixer.mix(silence),
+                        sample_rate=self._params.audio_out_sample_rate,
+                        num_channels=self._params.audio_out_channels,
+                    )
+                    yield frame
+
+        vad_stop_secs = (
+            self._params.vad_analyzer.params.stop_secs
+            if self._params.vad_analyzer
+            else VAD_STOP_SECS
+        )
+        if self._params.audio_out_mixer:
+            return with_mixer(vad_stop_secs)
+        else:
+            return without_mixer(vad_stop_secs)
+
     async def _audio_out_task_handler(self):
-        while True:
-            try:
-                frame = await self._audio_out_queue.get()
-                await self.write_raw_audio_frames(frame.audio)
+        wait_time = (
+            self._params.vad_analyzer.params.stop_secs
+            if self._params.vad_analyzer
+            else VAD_STOP_SECS
+        )
+        try:
+            async for frame in self._next_audio_frame():
+                # Notify the bot started speaking upstream if necessary and that
+                # it's actually speaking.
+                if isinstance(frame, TTSAudioRawFrame):
+                    await self._bot_started_speaking()
+                    await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+
+                # Also, push frame downstream in case anyone else needs it.
                 await self.push_frame(frame)
-                await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.exception(f"{self} error writing to camera: {e}")
+
+                # Send audio.
+                await self.write_raw_audio_frames(frame.audio)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.exception(f"{self} error writing to microphone: {e}")

@@ -4,14 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import time
-
+import warnings
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, Optional
-from concurrent.futures import ThreadPoolExecutor
 
+import aiohttp
 from daily import (
     CallClient,
     Daily,
@@ -20,15 +20,16 @@ from daily import (
     VirtualMicrophoneDevice,
     VirtualSpeakerDevice,
 )
-from pydantic.main import BaseModel
+from loguru import logger
+from pydantic import BaseModel, model_validator
 
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
-    MetricsFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     SpriteFrame,
@@ -39,23 +40,14 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserImageRequestFrame,
 )
-from pipecat.metrics.metrics import (
-    LLMUsageMetricsData,
-    ProcessingMetricsData,
-    TTFBMetricsData,
-    TTSUsageMetricsData,
-)
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.vad.vad_analyzer import VADAnalyzer, VADParams
-
-from loguru import logger
 
 try:
-    from daily import EventHandler, CallClient, Daily
+    from daily import CallClient, Daily, EventHandler
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -102,14 +94,24 @@ class DailyDialinSettings(BaseModel):
 
 class DailyTranscriptionSettings(BaseModel):
     language: str = "en"
-    tier: str = "nova"
-    model: str = "2-conversationalai"
+    tier: Optional[str] = None
+    model: str = "nova-2-general"
     profanity_filter: bool = True
     redact: bool = False
     endpointing: bool = True
     punctuate: bool = True
     includeRawResponse: bool = True
     extra: Mapping[str, Any] = {"interim_results": True}
+
+    @model_validator(mode="before")
+    def check_deprecated_fields(cls, values):
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            if "tier" in values:
+                warnings.warn(
+                    "Field 'tier' is deprecated, use 'model' instead.", DeprecationWarning
+                )
+        return values
 
 
 class DailyParams(TransportParams):
@@ -136,6 +138,10 @@ class DailyCallbacks(BaseModel):
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_transcription_message: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_recording_started: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_recording_stopped: Callable[[str], Awaitable[None]]
+    on_recording_error: Callable[[str, str], Awaitable[None]]
 
 
 def completion_callback(future):
@@ -185,7 +191,8 @@ class DailyTransportClient(EventHandler):
 
         self._participant_id: str = ""
         self._video_renderers = {}
-        self._transcription_renderers = {}
+        self._transcription_ids = []
+        self._transcription_status = None
         self._other_participant_has_joined = False
 
         self._joined = False
@@ -241,7 +248,7 @@ class DailyTransportClient(EventHandler):
         self._callbacks = callbacks
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
-        if not self._client:
+        if not self._joined or self._leaving:
             return
 
         participant_id = None
@@ -341,6 +348,7 @@ class DailyTransportClient(EventHandler):
         error = await future
         if error:
             logger.error(f"Unable to start transcription: {error}")
+            return
 
     async def _join(self):
         future = self._loop.create_future()
@@ -449,25 +457,37 @@ class DailyTransportClient(EventHandler):
     def participant_counts(self):
         return self._client.participant_counts()
 
-    def start_dialout(self, settings):
-        self._client.start_dialout(settings)
+    async def start_dialout(self, settings):
+        future = self._loop.create_future()
+        self._client.start_dialout(settings, completion=completion_callback(future))
+        await future
 
-    def stop_dialout(self, participant_id):
-        self._client.stop_dialout(participant_id)
+    async def stop_dialout(self, participant_id):
+        future = self._loop.create_future()
+        self._client.stop_dialout(participant_id, completion=completion_callback(future))
+        await future
 
-    def start_recording(self, streaming_settings, stream_id, force_new):
-        self._client.start_recording(streaming_settings, stream_id, force_new)
+    async def start_recording(self, streaming_settings, stream_id, force_new):
+        future = self._loop.create_future()
+        self._client.start_recording(
+            streaming_settings, stream_id, force_new, completion=completion_callback(future)
+        )
+        await future
 
-    def stop_recording(self, stream_id):
-        self._client.stop_recording(stream_id)
+    async def stop_recording(self, stream_id):
+        future = self._loop.create_future()
+        self._client.stop_recording(stream_id, completion=completion_callback(future))
+        await future
 
-    def capture_participant_transcription(self, participant_id: str, callback: Callable):
+    async def capture_participant_transcription(self, participant_id: str):
         if not self._params.transcription_enabled:
             return
 
-        self._transcription_renderers[participant_id] = callback
+        self._transcription_ids.append(participant_id)
+        if self._joined and self._transcription_status:
+            await self.update_transcription(self._transcription_ids)
 
-    def capture_participant_video(
+    async def capture_participant_video(
         self,
         participant_id: str,
         callback: Callable,
@@ -476,8 +496,8 @@ class DailyTransportClient(EventHandler):
         color_format: str = "RGB",
     ):
         # Only enable camera subscription on this participant
-        self._client.update_subscriptions(
-            participant_settings={participant_id: {"media": "subscribed"}}
+        await self.update_subscriptions(
+            participant_settings={participant_id: {"media": {"camera": "subscribed"}}}
         )
 
         self._video_renderers[participant_id] = callback
@@ -488,6 +508,22 @@ class DailyTransportClient(EventHandler):
             video_source=video_source,
             color_format=color_format,
         )
+
+    async def update_transcription(self, participants=None, instance_id=None):
+        future = self._loop.create_future()
+        self._client.update_transcription(
+            participants, instance_id, completion=completion_callback(future)
+        )
+        await future
+
+    async def update_subscriptions(self, participant_settings=None, profile_settings=None):
+        future = self._loop.create_future()
+        self._client.update_subscriptions(
+            participant_settings=participant_settings,
+            profile_settings=profile_settings,
+            completion=completion_callback(future),
+        )
+        await future
 
     #
     #
@@ -537,23 +573,31 @@ class DailyTransportClient(EventHandler):
     def on_participant_updated(self, participant):
         self._call_async_callback(self._callbacks.on_participant_updated, participant)
 
-    def on_transcription_message(self, message: Mapping[str, Any]):
-        participant_id = ""
-        if "participantId" in message:
-            participant_id = message["participantId"]
+    def on_transcription_started(self, status):
+        logger.debug(f"Transcription started: {status}")
+        self._transcription_status = status
+        self._call_async_callback(self.update_transcription, self._transcription_ids)
 
-        if participant_id in self._transcription_renderers:
-            callback = self._transcription_renderers[participant_id]
-            self._call_async_callback(callback, participant_id, message)
+    def on_transcription_stopped(self, stopped_by, stopped_by_error):
+        logger.debug("Transcription stopped")
 
     def on_transcription_error(self, message):
         logger.error(f"Transcription error: {message}")
 
-    def on_transcription_started(self, status):
-        logger.debug(f"Transcription started: {status}")
+    def on_transcription_message(self, message):
+        self._call_async_callback(self._callbacks.on_transcription_message, message)
 
-    def on_transcription_stopped(self, stopped_by, stopped_by_error):
-        logger.debug("Transcription stopped")
+    def on_recording_started(self, status):
+        logger.debug(f"Recording started: {status}")
+        self._call_async_callback(self._callbacks.on_recording_started, status)
+
+    def on_recording_stopped(self, stream_id):
+        logger.debug(f"Recording stopped: {stream_id}")
+        self._call_async_callback(self._callbacks.on_recording_stopped, stream_id)
+
+    def on_recording_error(self, stream_id, message):
+        logger.error(f"Recording error for {stream_id}: {message}")
+        self._call_async_callback(self._callbacks.on_recording_error, stream_id, message)
 
     #
     # Daily (CallClient callbacks)
@@ -570,8 +614,15 @@ class DailyTransportClient(EventHandler):
         )
 
     def _call_async_callback(self, callback, *args):
-        future = asyncio.run_coroutine_threadsafe(callback(*args), self._loop)
-        future.result()
+        # Don't wait on the coroutine, otherwise if we call a `CallClient`
+        # function and wait for its completion this will currently result in a
+        # deadlock. This is because `_call_async_callback` is used inside
+        # `CallClient` event handlers which are holding the GIL in
+        # `daily-python`. So if the `callback` passed here makes a `CallClient`
+        # call and waits for it to finish using completions (and a future) we
+        # will deadlock because completions use event handlers (which are
+        # holding the GIL).
+        asyncio.run_coroutine_threadsafe(callback(*args), self._loop)
 
 
 class DailyInputTransport(BaseInputTransport):
@@ -640,7 +691,7 @@ class DailyInputTransport(BaseInputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, UserImageRequestFrame):
-            self.request_participant_image(frame.user_id)
+            await self.request_participant_image(frame.user_id)
 
     #
     # Frames
@@ -670,7 +721,7 @@ class DailyInputTransport(BaseInputTransport):
     # Camera in
     #
 
-    def capture_participant_video(
+    async def capture_participant_video(
         self,
         participant_id: str,
         framerate: int = 30,
@@ -683,11 +734,11 @@ class DailyInputTransport(BaseInputTransport):
             "render_next_frame": False,
         }
 
-        self._client.capture_participant_video(
+        await self._client.capture_participant_video(
             participant_id, self._on_participant_video_frame, framerate, video_source, color_format
         )
 
-    def request_participant_image(self, participant_id: str):
+    async def request_participant_image(self, participant_id: str):
         if participant_id in self._video_renderers:
             self._video_renderers[participant_id]["render_next_frame"] = True
 
@@ -745,31 +796,6 @@ class DailyOutputTransport(BaseOutputTransport):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._client.send_message(frame)
 
-    async def send_metrics(self, frame: MetricsFrame):
-        metrics = {}
-        for d in frame.data:
-            if isinstance(d, TTFBMetricsData):
-                if "ttfb" not in metrics:
-                    metrics["ttfb"] = []
-                metrics["ttfb"].append(d.model_dump(exclude_none=True))
-            elif isinstance(d, ProcessingMetricsData):
-                if "processing" not in metrics:
-                    metrics["processing"] = []
-                metrics["processing"].append(d.model_dump(exclude_none=True))
-            elif isinstance(d, LLMUsageMetricsData):
-                if "tokens" not in metrics:
-                    metrics["tokens"] = []
-                metrics["tokens"].append(d.value.model_dump(exclude_none=True))
-            elif isinstance(d, TTSUsageMetricsData):
-                if "characters" not in metrics:
-                    metrics["characters"] = []
-                metrics["characters"].append(d.model_dump(exclude_none=True))
-
-        message = DailyTransportMessageFrame(
-            message={"type": "pipecat-metrics", "metrics": metrics}
-        )
-        await self._client.send_message(message)
-
     async def write_raw_audio_frames(self, frames: bytes):
         await self._client.write_raw_audio_frames(frames)
 
@@ -806,6 +832,10 @@ class DailyTransport(BaseTransport):
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
+            on_transcription_message=self._on_transcription_message,
+            on_recording_started=self._on_recording_started,
+            on_recording_stopped=self._on_recording_stopped,
+            on_recording_error=self._on_recording_error,
         )
         self._params = params
 
@@ -831,6 +861,10 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_participant_joined")
         self._register_event_handler("on_participant_left")
         self._register_event_handler("on_participant_updated")
+        self._register_event_handler("on_transcription_message")
+        self._register_event_handler("on_recording_started")
+        self._register_event_handler("on_recording_stopped")
+        self._register_event_handler("on_recording_error")
 
     #
     # BaseTransport
@@ -868,24 +902,22 @@ class DailyTransport(BaseTransport):
     def participant_counts(self):
         return self._client.participant_counts()
 
-    def start_dialout(self, settings=None):
-        self._client.start_dialout(settings)
+    async def start_dialout(self, settings=None):
+        await self._client.start_dialout(settings)
 
-    def stop_dialout(self, participant_id):
-        self._client.stop_dialout(participant_id)
+    async def stop_dialout(self, participant_id):
+        await self._client.stop_dialout(participant_id)
 
-    def start_recording(self, streaming_settings=None, stream_id=None, force_new=None):
-        self._client.start_recording(streaming_settings, stream_id, force_new)
+    async def start_recording(self, streaming_settings=None, stream_id=None, force_new=None):
+        await self._client.start_recording(streaming_settings, stream_id, force_new)
 
-    def stop_recording(self, stream_id=None):
-        self._client.stop_recording(stream_id)
+    async def stop_recording(self, stream_id=None):
+        await self._client.stop_recording(stream_id)
 
-    def capture_participant_transcription(self, participant_id: str):
-        self._client.capture_participant_transcription(
-            participant_id, self._on_transcription_message
-        )
+    async def capture_participant_transcription(self, participant_id: str):
+        await self._client.capture_participant_transcription(participant_id)
 
-    def capture_participant_video(
+    async def capture_participant_video(
         self,
         participant_id: str,
         framerate: int = 30,
@@ -893,9 +925,14 @@ class DailyTransport(BaseTransport):
         color_format: str = "RGB",
     ):
         if self._input:
-            self._input.capture_participant_video(
+            await self._input.capture_participant_video(
                 participant_id, framerate, video_source, color_format
             )
+
+    async def update_subscriptions(self, participant_settings=None, profile_settings=None):
+        await self._client.update_subscriptions(
+            participant_settings=participant_settings, profile_settings=profile_settings
+        )
 
     async def _on_joined(self, data):
         await self._call_event_handler("on_joined", data)
@@ -934,7 +971,9 @@ class DailyTransport(BaseTransport):
             url = f"{self._params.api_url}/dialin/pinlessCallUpdate"
 
             try:
-                async with session.post(url, headers=headers, json=data, timeout=10) as r:
+                async with session.post(
+                    url, headers=headers, json=data, timeout=aiohttp.ClientTimeout(total=10)
+                ) as r:
                     if r.status != 200:
                         text = await r.text()
                         logger.error(
@@ -980,7 +1019,15 @@ class DailyTransport(BaseTransport):
     async def _on_first_participant_joined(self, participant):
         await self._call_event_handler("on_first_participant_joined", participant)
 
-    async def _on_transcription_message(self, participant_id, message):
+    async def _on_transcription_message(self, message):
+        await self._call_event_handler("on_transcription_message", message)
+
+        participant_id = ""
+        if "participantId" in message:
+            participant_id = message["participantId"]
+        if not participant_id:
+            return
+
         text = message["text"]
         timestamp = message["timestamp"]
         is_final = message["rawResponse"]["is_final"]
@@ -997,3 +1044,12 @@ class DailyTransport(BaseTransport):
 
         if self._input:
             await self._input.push_transcription_frame(frame)
+
+    async def _on_recording_started(self, status):
+        await self._call_event_handler("on_recording_started", status)
+
+    async def _on_recording_stopped(self, stream_id):
+        await self._call_event_handler("on_recording_stopped", stream_id)
+
+    async def _on_recording_error(self, stream_id, message):
+        await self._call_event_handler("on_recording_error", stream_id, message)

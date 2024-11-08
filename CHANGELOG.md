@@ -5,6 +5,215 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added audio filter `NoisereduceFilter`.
+
+- Introduce input transport audio filters (`BaseAudioFilter`). Audio filters can
+  be used to remove background noises before audio is sent to VAD.
+
+- Introduce output transport audio mixers (`BaseAudioMixer`). Output transport
+  audio mixers can be used, for example, to add background sounds or any other
+  audio mixing functionality before the output audio is actually written to the
+  transport.
+
+- Added `GatedOpenAILLMContextAggregator`. This aggregator keeps the last
+  received OpenAI LLM context frame and it doesn't let it through until the
+  notifier is notified.
+
+- Added `WakeNotifierFilter`. This processor expects a list of frame types and
+  will execute a given callback predicate when a frame of any of those type is
+  being processed. If the callback returns true the notifier will be notified.
+
+- Added `NullFilter`. A null filter doesn't push any frames upstream or
+  downstream. This is usually used to disable one of the pipelines in
+  `ParallelPipeline`.
+
+- Added `EventNotifier`. This can be used as a very simple synchronization
+  feature between processors.
+
+- Added `TavusVideoService`. This is an integration for Tavus digital twins.
+  (see https://www.tavus.io/)
+
+- Added `DailyTransport.update_subscriptions()`. This allows you to have fine
+  grained control of what media subscriptions you want for each participant in a
+  room.
+
+### Changed
+
+- The following `DailyTransport` functions are now `async` which means they need
+  to be awaited: `start_dialout`, `stop_dialout`, `start_recording`,
+  `stop_recording`, `capture_participant_transcription` and
+  `capture_participant_video`.
+
+- Changed default output sample rate to 24000. This changes all TTS service to
+  output to 24000 and also the default output transport sample rate. This
+  improves audio quality at the cost of some extra bandwidth.
+
+### Fixed
+
+- Websocket transports (FastAPI and Websocket) now synchronize with time before
+  sending data. This allows for interruptions to just work out of the box.
+
+- Improved bot speaking detection for all TTS services by using actual bot
+  audio.
+
+- Fixed an issue that was generating constant bot started/stopped speaking
+  frames for HTTP TTS services.
+
+- Fixed an issue that was causing stuttering with AWS TTS service.
+
+- Fixed an issue with PlayHTTTSService, where the TTFB metrics were reporting
+  very small time values.
+
+- Fixed an issue where AzureTTSService wasn't initializing the specified
+  language.
+
+### Other
+
+- Add `23-bot-background-sound.py` foundational example.
+
+- Added a new foundational example `22-natural-conversation.py`. This example
+  shows how to achieve a more natural conversation detecting when the user ends
+  statement.
+
+## [0.0.47] - 2024-10-22
+
+### Added
+
+- Added `AssemblyAISTTService` and corresponding foundational examples
+  `07o-interruptible-assemblyai.py` and `13d-assemblyai-transcription.py`.
+
+- Added a foundational example for Gladia transcription:
+  `13c-gladia-transcription.py`
+
+### Changed
+
+- Updated `GladiaSTTService` to use the V2 API.
+
+- Changed `DailyTransport` transcription model to `nova-2-general`.
+
+### Fixed
+
+- Fixed an issue that would cause an import error when importing
+  `SileroVADAnalyzer` from the old package `pipecat.vad.silero`.
+
+- Fixed `enable_usage_metrics` to control LLM/TTS usage metrics separately
+  from `enable_metrics`.
+
+## [0.0.46] - 2024-10-19
+
+### Added
+
+- Added `audio_passthrough` parameter to `STTService`. If enabled it allows
+  audio frames to be pushed downstream in case other processors need them.
+
+- Added input parameter options for `PlayHTTTSService` and
+  `PlayHTHttpTTSService`.
+
+### Changed
+
+- Changed `DeepgramSTTService` model to `nova-2-general`.
+
+- Moved `SileroVAD` audio processor to `processors.audio.vad`.
+
+- Module `utils.audio` is now `audio.utils`. A new `resample_audio` function has
+  been added.
+
+- `PlayHTTTSService` now uses PlayHT websockets instead of HTTP requests.
+
+- The previous `PlayHTTTSService` HTTP implementation is now
+  `PlayHTHttpTTSService`.
+
+- `PlayHTTTSService` and `PlayHTHttpTTSService` now use a `voice_engine` of
+  `PlayHT3.0-mini`, which allows for multi-lingual support.
+
+- Renamed `OpenAILLMServiceRealtimeBeta` to `OpenAIRealtimeBetaLLMService` to
+  match other services.
+
+### Deprecated
+
+- `LLMUserResponseAggregator` and `LLMAssistantResponseAggregator` are
+  mostly deprecated, use `OpenAILLMContext` instead.
+
+- The `vad` package is now deprecated and `audio.vad` should be used
+  instead. The `avd` package will get removed in a future release.
+
+### Fixed
+
+- Fixed an issue that would cause an error if no VAD analyzer was passed to
+  `LiveKitTransport` params.
+
+- Fixed `SileroVAD` processor to support interruptions properly.
+
+### Other
+
+- Added `examples/foundational/07-interruptible-vad.py`. This is the same as
+  `07-interruptible.py` but using the `SileroVAD` processor instead of passing
+  the `VADAnalyzer` in the transport.
+
+## [0.0.45] - 2024-10-16
+
+### Changed
+
+- Metrics messages have moved out from the transport's base output into RTVI.
+
+## [0.0.44] - 2024-10-15
+
+### Added
+
+- Added support for OpenAI Realtime API with the new
+  `OpenAILLMServiceRealtimeBeta` processor.
+  (see https://platform.openai.com/docs/guides/realtime/overview)
+
+- Added `RTVIBotTranscriptionProcessor` which will send the RTVI
+  `bot-transcription` protocol message. These are TTS text aggregated (into
+  sentences) messages.
+
+- Added new input params to the `MarkdownTextFilter` utility. You can set
+  `filter_code` to filter code from text and `filter_tables` to filter tables
+  from text.
+
+- Added `CanonicalMetricsService`. This processor uses the new
+  `AudioBufferProcessor` to capture conversation audio and later send it to
+  Canonical AI.
+  (see https://canonical.chat/)
+
+- Added `AudioBufferProcessor`. This processor can be used to buffer mixed user and
+  bot audio. This can later be saved into an audio file or processed by some
+  audio analyzer.
+
+- Added `on_first_participant_joined` event to `LiveKitTransport`.
+
+### Changed
+
+- LLM text responses are now logged properly as unicode characters.
+
+- `UserStartedSpeakingFrame`, `UserStoppedSpeakingFrame`,
+  `BotStartedSpeakingFrame`, `BotStoppedSpeakingFrame`, `BotSpeakingFrame` and
+  `UserImageRequestFrame` are now based from `SystemFrame`
+
+### Fixed
+
+- Merge `RTVIBotLLMProcessor`/`RTVIBotLLMTextProcessor` and
+  `RTVIBotTTSProcessor`/`RTVIBotTTSTextProcessor` to avoid out of order issues.
+
+- Fixed an issue in RTVI protocol that could cause a `bot-llm-stopped` or
+  `bot-tts-stopped` message to be sent before a `bot-llm-text` or `bot-tts-text`
+  message.
+
+- Fixed `DeepgramSTTService` constructor settings not being merged with default
+  ones.
+
+- Fixed an issue in Daily transport that would cause tasks to be hanging if
+  urgent transport messages were being sent from a transport event handler.
+
+- Fixed an issue in `BaseOutputTransport` that would cause `EndFrame` to be
+  pushed downed too early and call `FrameProcessor.cleanup()` before letting the
+  transport stop properly.
+
 ## [0.0.43] - 2024-10-10
 
 ### Added
