@@ -372,9 +372,6 @@ class AzureSTTService(STTService):
         self._speech_recognizer.stop_continuous_recognition_async()
         self._audio_stream.close()
 
-    def register_recognizing_callback(self, callback):
-        self._speech_recognizer.recognizing.connect(callback)
-
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
             frame = TranscriptionFrame(event.result.text, "", time_now_iso8601())
