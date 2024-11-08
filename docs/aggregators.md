@@ -1,6 +1,7 @@
 # Frame Aggregators
 
 ## Types of Aggregators
+Aggregators are processor class.They aggragates frames rather than process it.
 
 ### 1. Gated Aggregator
 Controls the flow of frames using custom gates:
@@ -42,12 +43,55 @@ S I T E -> X           (Start-Interim-Text-End)
 ```
 
 ### 4. OpenAI LLM Context Aggregator
-Manages OpenAI-specific context and messages:
+Manages OpenAI-specific context and messages with comprehensive state handling:
 
-- Maintains message history
-- Handles tool calls and functions
-- Processes image content
-- Provides context serialization
+#### Message Management
+- Maintains ordered list of chat completion messages
+- Supports message addition, extension, and batch updates
+- Preserves message role and content structure
+- Handles standard message conversions
+
+#### Tool and Function Integration
+- Manages tool choices and parameters
+- Supports tool state transitions (NOT_GIVEN to active)
+- Processes function calls with arguments
+- Handles tool call results and callbacks
+
+#### Image Processing
+- Base64 encodes images for OpenAI format
+- Creates multi-part messages with text and images
+- Supports JPEG image conversion and storage
+- Maintains image request context
+
+#### Context Serialization
+- Custom JSON encoding for message history
+- Handles binary data in logs (truncated hex format)
+- Provides formatted context for logging
+- Supports persistent storage formatting
+
+#### Special Features
+- Function call progress tracking
+- Message format standardization
+- History initialization support
+- Clean logging of sensitive/binary data
+
+Example Message Structure:
+```plaintext
+{
+    "role": "user",
+    "content": [
+        {"type": "text", "text": "description"},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64..."}}
+    ]
+}
+```
+
+Example Function Call:
+```plaintext
+Input: Function name, arguments, tool call ID
+Process: Execute function with context
+Output: Function result frame with outcome
+```
 
 ### 5. Sentence Aggregator
 Combines text into complete sentences:
