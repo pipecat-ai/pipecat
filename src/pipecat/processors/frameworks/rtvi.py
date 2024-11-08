@@ -743,6 +743,8 @@ class RTVIProcessor(FrameProcessor):
                 case "update-config":
                     update_config = RTVIUpdateConfig.model_validate(message.data)
                     await self._handle_update_config(message.id, update_config)
+                case "disconnect-bot":
+                    await self.push_frame(EndFrame())
                 case "action":
                     action = RTVIActionRun.model_validate(message.data)
                     action_frame = RTVIActionFrame(message_id=message.id, rtvi_action_run=action)
