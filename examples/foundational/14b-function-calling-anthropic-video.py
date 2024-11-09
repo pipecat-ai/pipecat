@@ -67,7 +67,8 @@ async def main():
 
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY"),
-            model="claude-3-5-sonnet-20240620",
+            # model="claude-3-5-sonnet-20240620",
+            model="claude-3-5-sonnet-latest",
             enable_prompt_caching_beta=True,
         )
         llm.register_function("get_weather", get_weather)
