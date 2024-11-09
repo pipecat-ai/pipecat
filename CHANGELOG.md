@@ -54,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output to 24000 and also the default output transport sample rate. This
   improves audio quality at the cost of some extra bandwidth.
 
+- `AzureTTSService` now uses Azure websockets instead of HTTP requests.
+
+- The previous `AzureTTSService` HTTP implementation is now
+  `AzureHttpTTSService`.
+
 ### Fixed
 
 - Websocket transports (FastAPI and Websocket) now synchronize with time before
