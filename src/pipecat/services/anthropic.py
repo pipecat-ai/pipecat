@@ -671,6 +671,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
             ):
                 self._function_call_in_progress = None
                 self._function_call_result = frame
+                await self._push_aggregation()
             else:
                 logger.warning(
                     "FunctionCallResultFrame tool_call_id != InProgressFrame tool_call_id"
@@ -679,9 +680,12 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                 self._function_call_result = None
         elif isinstance(frame, AnthropicImageMessageFrame):
             self._pending_image_frame_message = frame
+            await self._push_aggregation()
 
     async def _push_aggregation(self):
-        if not self._aggregation:
+        if not (
+            self._aggregation or self._function_call_result or self._pending_image_frame_message
+        ):
             return
 
         run_llm = False
@@ -694,20 +698,18 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                 frame = self._function_call_result
                 self._function_call_result = None
                 if frame.result:
-                    self._context.add_message(
+                    assistant_message = {"role": "assistant", "content": []}
+                    if aggregation:
+                        assistant_message["content"].append({"type": "text", "text": aggregation})
+                    assistant_message["content"].append(
                         {
-                            "role": "assistant",
-                            "content": [
-                                {"type": "text", "text": aggregation},
-                                {
-                                    "type": "tool_use",
-                                    "id": frame.tool_call_id,
-                                    "name": frame.function_name,
-                                    "input": frame.arguments,
-                                },
-                            ],
+                            "type": "tool_use",
+                            "id": frame.tool_call_id,
+                            "name": frame.function_name,
+                            "input": frame.arguments,
                         }
                     )
+                    self._context.add_message(assistant_message)
                     self._context.add_message(
                         {
                             "role": "user",
@@ -721,7 +723,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                         }
                     )
                     run_llm = True
-            else:
+            elif aggregation:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
             if self._pending_image_frame_message:
