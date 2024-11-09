@@ -284,11 +284,7 @@ class TTSService(AIService):
                 logger.warning(f"Unknown setting for TTS service: {key}")
 
     async def say(self, text: str):
-        aggregate_sentences = self._aggregate_sentences
-        self._aggregate_sentences = False
-        await self.process_frame(TextFrame(text=text), FrameDirection.DOWNSTREAM)
-        self._aggregate_sentences = aggregate_sentences
-        await self.flush_audio()
+        await self.queue_frame(TTSSpeakFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -395,7 +391,6 @@ class WordTTSService(TTSService):
 
     def reset_word_timestamps(self):
         self._initial_word_timestamp = -1
-        self._word_timestamps = []
 
     async def add_word_timestamps(self, word_times: List[Tuple[str, float]]):
         for word, timestamp in word_times:
@@ -430,7 +425,10 @@ class WordTTSService(TTSService):
         while True:
             try:
                 (word, timestamp) = await self._words_queue.get()
-                if word == "LLMFullResponseEndFrame" and timestamp == 0:
+                if word == "Reset" and timestamp == 0:
+                    self.reset_word_timestamps()
+                    frame = None
+                elif word == "LLMFullResponseEndFrame" and timestamp == 0:
                     frame = LLMFullResponseEndFrame()
                     frame.pts = last_pts
                 elif word == "TTSStoppedFrame" and timestamp == 0:
@@ -439,8 +437,9 @@ class WordTTSService(TTSService):
                 else:
                     frame = TextFrame(word)
                     frame.pts = self._initial_word_timestamp + timestamp
-                last_pts = frame.pts
-                await self.push_frame(frame)
+                if frame:
+                    last_pts = frame.pts
+                    await self.push_frame(frame)
                 self._words_queue.task_done()
             except asyncio.CancelledError:
                 break

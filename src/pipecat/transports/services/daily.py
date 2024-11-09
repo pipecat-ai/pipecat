@@ -890,11 +890,11 @@ class DailyTransport(BaseTransport):
 
     async def send_image(self, frame: OutputImageRawFrame | SpriteFrame):
         if self._output:
-            await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def send_audio(self, frame: OutputAudioRawFrame):
         if self._output:
-            await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     def participants(self):
         return self._client.participants()
