@@ -13,7 +13,7 @@ from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.services.cartesia import CartesiaHttpTTSService
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -37,7 +37,7 @@ async def main():
             room_url, None, "Say One Thing From an LLM", DailyParams(audio_out_enabled=True)
         )
 
-        tts = CartesiaHttpTTSService(
+        tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
@@ -57,11 +57,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            await task.queue_frame(LLMMessagesFrame(messages))
-
-        @transport.event_handler("on_participant_left")
-        async def on_participant_left(transport, participant, reason):
-            await task.queue_frame(EndFrame())
+            await task.queue_frames([LLMMessagesFrame(messages), EndFrame()])
 
         await runner.run(task)
 
