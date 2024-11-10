@@ -228,14 +228,13 @@ class CartesiaTTSService(WordTTSService):
                 if not msg or msg["context_id"] != self._context_id:
                     continue
                 if msg["type"] == "done":
+                    await self.push_frame(TTSStoppedFrame())
                     await self.stop_ttfb_metrics()
                     # Unset _context_id but not the _context_id_start_timestamp
                     # because we are likely still playing out audio and need the
                     # timestamp to set send context frames.
                     self._context_id = None
-                    await self.add_word_timestamps(
-                        [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0), ("Reset", 0)]
-                    )
+                    await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
                 elif msg["type"] == "timestamps":
                     await self.add_word_timestamps(
                         list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
