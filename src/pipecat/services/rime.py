@@ -14,7 +14,7 @@ from pipecat.frames.frames import (
 from pipecat.services.ai_services import TTSService
 
 
-class RimeTTSService(TTSService):
+class RimeHttpTTSService(TTSService):
     class InputParams(BaseModel):
         pause_between_brackets: Optional[bool] = False
         phonemize_between_brackets: Optional[bool] = False
