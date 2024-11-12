@@ -55,7 +55,7 @@ Each time you answer, you should respond in three parts.
 
 1. Transcribe exactly what the user said.
 2. Output the separator field '{marker}'.
-3. Respond to the user's input in a succinct, helpful, creative way using only simple text and punctuation.
+3. Respond to the user's input in a helpful, creative way using only simple text and punctuation.
 
 Example:
 
@@ -78,9 +78,7 @@ class UserAudioCollector(FrameProcessor):
         self._context = context
         self._user_context_aggregator = user_context_aggregator
         self._audio_frames = []
-        self._start_secs = (
-            0.2  # this should match VAD_START_SECS but we'll just hardcode it for now
-        )
+        self._start_secs = 0.2  # this should match VAD start_secs (hardcoding for now)
         self._user_speaking = False
 
     async def process_frame(self, frame, direction):
