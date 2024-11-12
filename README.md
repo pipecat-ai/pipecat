@@ -129,21 +129,15 @@ Pipecat makes use of WebRTC VAD by default when using a WebRTC transport layer. 
 pip install pipecat-ai[silero]
 ```
 
-## Running the Krisp Audio Filter
+## Krisp Audio Filter
 
-To use the Krisp Filter in this project, you’ll need access to the **Krisp C++ SDK**.
+This project includes support for Krisp's noise cancellation SDK. To get started, you'll need a Krisp developer account and SDK access.
 
-### Step 1: Obtain Access to the Krisp SDK
-1. **Create a Krisp Account**: If you don’t already have an account, [sign up at Krisp](https://krisp.ai/) to access the SDK.
-2. **Download the SDK**: Once you have an account, follow the instructions on the Krisp platform to download the [Krisp's desktop SDKs](https://sdk.krisp.ai/sdk/desktop).
-3. **Export the path to you krisp SDK**:
-`export KRISP_SDK_PATH=/PATH/TO/KRISP/SDK`
+For complete setup and usage instructions, see our [Krisp Integration Guide](https://docs.pipecat.ai/guides/krisp).
 
-### Step 2: Install the `pipecat-krisp` Module
-Once the environment variable `KRISP_SDK_PATH` is exported, activate your Python virtual environment and install it with `pip`:
+Quick install (after SDK setup):
 
-```shell
-source venv/bin/activate
+```bash
 pip install pipecat-ai[krisp]
 ```
 
