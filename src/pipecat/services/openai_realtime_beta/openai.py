@@ -441,8 +441,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
-        # todo: might need to guard sending these when we fully support using either openai
-        # turn detection of Pipecat turn detection
         await self._start_interruption()  # cancels this processor task
         await self.push_frame(StartInterruptionFrame())  # cancels downstream tasks
         await self.push_frame(UserStartedSpeakingFrame())
