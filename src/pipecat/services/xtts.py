@@ -31,6 +31,34 @@ from loguru import logger
 # https://github.com/coqui-ai/xtts-streaming-server
 
 
+def language_to_xtts_language(language: Language) -> str | None:
+    language_map = {
+        Language.CS: "cs",
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.EN_US: "en",
+        Language.EN_AU: "en",
+        Language.EN_GB: "en",
+        Language.EN_NZ: "en",
+        Language.EN_IN: "en",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.HI: "hi",
+        Language.HU: "hu",
+        Language.IT: "it",
+        Language.JA: "ja",
+        Language.KO: "ko",
+        Language.NL: "nl",
+        Language.PL: "pl",
+        Language.PT: "pt",
+        Language.PT_BR: "pt",
+        Language.RU: "ru",
+        Language.TR: "tr",
+        Language.ZH: "zh-cn",
+    }
+    return language_map.get(language)
+
+
 class XTTSService(TTSService):
     def __init__(
         self,
@@ -56,47 +84,7 @@ class XTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.CS:
-                return "cs"
-            case Language.DE:
-                return "de"
-            case (
-                Language.EN
-                | Language.EN_US
-                | Language.EN_AU
-                | Language.EN_GB
-                | Language.EN_NZ
-                | Language.EN_IN
-            ):
-                return "en"
-            case Language.ES:
-                return "es"
-            case Language.FR:
-                return "fr"
-            case Language.HI:
-                return "hi"
-            case Language.HU:
-                return "hu"
-            case Language.IT:
-                return "it"
-            case Language.JA:
-                return "ja"
-            case Language.KO:
-                return "ko"
-            case Language.NL:
-                return "nl"
-            case Language.PL:
-                return "pl"
-            case Language.PT | Language.PT_BR:
-                return "pt"
-            case Language.RU:
-                return "ru"
-            case Language.TR:
-                return "tr"
-            case Language.ZH:
-                return "zh-cn"
-        return None
+        return language_to_xtts_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)

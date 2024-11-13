@@ -35,6 +35,27 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+def language_to_lmnt_language(language: Language) -> str | None:
+    language_map = {
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.EN_US: "en",
+        Language.EN_AU: "en",
+        Language.EN_GB: "en",
+        Language.EN_NZ: "en",
+        Language.EN_IN: "en",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.FR_CA: "fr",
+        Language.PT: "pt",
+        Language.PT_BR: "pt",
+        Language.ZH: "zh",
+        Language.ZH_TW: "zh",
+        Language.KO: "ko",
+    }
+    return language_map.get(language)
+
+
 class LmntTTSService(TTSService):
     def __init__(
         self,
@@ -72,29 +93,7 @@ class LmntTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.DE:
-                return "de"
-            case (
-                Language.EN
-                | Language.EN_US
-                | Language.EN_AU
-                | Language.EN_GB
-                | Language.EN_NZ
-                | Language.EN_IN
-            ):
-                return "en"
-            case Language.ES:
-                return "es"
-            case Language.FR | Language.FR_CA:
-                return "fr"
-            case Language.PT | Language.PT_BR:
-                return "pt"
-            case Language.ZH | Language.ZH_TW:
-                return "zh"
-            case Language.KO:
-                return "ko"
-        return None
+        return language_to_lmnt_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
