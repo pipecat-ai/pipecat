@@ -55,6 +55,53 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+def language_to_google_language(language: Language) -> str | None:
+    language_map = {
+        Language.BG: "bg-BG",
+        Language.CA: "ca-ES",
+        Language.ZH: "cmn-CN",
+        Language.ZH_TW: "cmn-TW",
+        Language.CS: "cs-CZ",
+        Language.DA: "da-DK",
+        Language.NL: "nl-NL",
+        Language.EN: "en-US",
+        Language.EN_US: "en-US",
+        Language.EN_AU: "en-AU",
+        Language.EN_GB: "en-GB",
+        Language.EN_IN: "en-IN",
+        Language.ET: "et-EE",
+        Language.FI: "fi-FI",
+        Language.NL_BE: "nl-BE",
+        Language.FR: "fr-FR",
+        Language.FR_CA: "fr-CA",
+        Language.DE: "de-DE",
+        Language.EL: "el-GR",
+        Language.HI: "hi-IN",
+        Language.HU: "hu-HU",
+        Language.ID: "id-ID",
+        Language.IT: "it-IT",
+        Language.JA: "ja-JP",
+        Language.KO: "ko-KR",
+        Language.LV: "lv-LV",
+        Language.LT: "lt-LT",
+        Language.MS: "ms-MY",
+        Language.NO: "nb-NO",
+        Language.PL: "pl-PL",
+        Language.PT: "pt-PT",
+        Language.PT_BR: "pt-BR",
+        Language.RO: "ro-RO",
+        Language.RU: "ru-RU",
+        Language.SK: "sk-SK",
+        Language.ES: "es-ES",
+        Language.SV: "sv-SE",
+        Language.TH: "th-TH",
+        Language.TR: "tr-TR",
+        Language.UK: "uk-UA",
+        Language.VI: "vi-VN",
+    }
+    return language_map.get(language)
+
+
 class GoogleUserContextAggregator(OpenAIUserContextAggregator):
     async def _push_aggregation(self):
         if len(self._aggregation) > 0:
@@ -530,88 +577,7 @@ class GoogleTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.BG:
-                return "bg-BG"
-            case Language.CA:
-                return "ca-ES"
-            case Language.ZH:
-                return "cmn-CN"
-            case Language.ZH_TW:
-                return "cmn-TW"
-            case Language.CS:
-                return "cs-CZ"
-            case Language.DA:
-                return "da-DK"
-            case Language.NL:
-                return "nl-NL"
-            case Language.EN | Language.EN_US:
-                return "en-US"
-            case Language.EN_AU:
-                return "en-AU"
-            case Language.EN_GB:
-                return "en-GB"
-            case Language.EN_IN:
-                return "en-IN"
-            case Language.ET:
-                return "et-EE"
-            case Language.FI:
-                return "fi-FI"
-            case Language.NL_BE:
-                return "nl-BE"
-            case Language.FR:
-                return "fr-FR"
-            case Language.FR_CA:
-                return "fr-CA"
-            case Language.DE:
-                return "de-DE"
-            case Language.EL:
-                return "el-GR"
-            case Language.HI:
-                return "hi-IN"
-            case Language.HU:
-                return "hu-HU"
-            case Language.ID:
-                return "id-ID"
-            case Language.IT:
-                return "it-IT"
-            case Language.JA:
-                return "ja-JP"
-            case Language.KO:
-                return "ko-KR"
-            case Language.LV:
-                return "lv-LV"
-            case Language.LT:
-                return "lt-LT"
-            case Language.MS:
-                return "ms-MY"
-            case Language.NO:
-                return "nb-NO"
-            case Language.PL:
-                return "pl-PL"
-            case Language.PT:
-                return "pt-PT"
-            case Language.PT_BR:
-                return "pt-BR"
-            case Language.RO:
-                return "ro-RO"
-            case Language.RU:
-                return "ru-RU"
-            case Language.SK:
-                return "sk-SK"
-            case Language.ES:
-                return "es-ES"
-            case Language.SV:
-                return "sv-SE"
-            case Language.TH:
-                return "th-TH"
-            case Language.TR:
-                return "tr-TR"
-            case Language.UK:
-                return "uk-UA"
-            case Language.VI:
-                return "vi-VN"
-        return None
+        return language_to_google_language(language)
 
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
