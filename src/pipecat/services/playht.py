@@ -210,17 +210,11 @@ class PlayHTTTSService(TTSService):
 
     async def _receive_task_handler(self):
         try:
-            header_size = 78  # Size of the WAV header + extra bytes we want to skip
-            header_received = False
             async for message in self._get_websocket():
                 if isinstance(message, bytes):
-                    chunk_size = len(message)
-
-                    # Skip the WAV header
-                    if not header_received and chunk_size == header_size:
-                        header_received = True
+                    # Skip the WAV header message
+                    if message.startswith(b"RIFF"):
                         continue
-
                     await self.stop_ttfb_metrics()
                     frame = TTSAudioRawFrame(message, self._settings["sample_rate"], 1)
                     await self.push_frame(frame)
@@ -230,7 +224,6 @@ class PlayHTTTSService(TTSService):
                         msg = json.loads(message)
                         if "request_id" in msg and msg["request_id"] == self._request_id:
                             await self.push_frame(TTSStoppedFrame())
-                            header_received = False  # Reset for the next audio stream
                             self._request_id = None
                         elif "error" in msg:
                             logger.error(f"{self} error: {msg}")
