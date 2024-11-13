@@ -99,7 +99,7 @@ class AWSTTSService(TTSService):
             "engine": params.engine,
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en-US",
             "pitch": params.pitch,
             "rate": params.rate,
             "volume": params.volume,
