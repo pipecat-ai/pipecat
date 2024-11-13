@@ -495,7 +495,7 @@ class LiveKitTransport(BaseTransport):
 
     async def send_audio(self, frame: OutputAudioRawFrame):
         if self._output:
-            await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     def get_participants(self) -> List[str]:
         return self._client.get_participants()

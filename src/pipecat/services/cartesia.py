@@ -14,13 +14,16 @@ from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -225,14 +228,13 @@ class CartesiaTTSService(WordTTSService):
                 if not msg or msg["context_id"] != self._context_id:
                     continue
                 if msg["type"] == "done":
+                    await self.push_frame(TTSStoppedFrame())
                     await self.stop_ttfb_metrics()
                     # Unset _context_id but not the _context_id_start_timestamp
                     # because we are likely still playing out audio and need the
                     # timestamp to set send context frames.
                     self._context_id = None
-                    await self.add_word_timestamps(
-                        [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0)]
-                    )
+                    await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
                 elif msg["type"] == "timestamps":
                     await self.add_word_timestamps(
                         list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
@@ -257,6 +259,19 @@ class CartesiaTTSService(WordTTSService):
             pass
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # If we received a TTSSpeakFrame and the LLM response included text (it
+        # might be that it's only a function calling response) we pause
+        # processing more frames until we receive a BotStoppedSpeakingFrame.
+        if isinstance(frame, TTSSpeakFrame):
+            await self.pause_processing_frames()
+        elif isinstance(frame, LLMFullResponseEndFrame) and self._context_id:
+            await self.pause_processing_frames()
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self.resume_processing_frames()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")

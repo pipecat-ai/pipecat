@@ -5,9 +5,25 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## Unreleased
 
 ### Added
+
+- Added `RimeHttpTTSService` and the `07q-interruptible-rime.py` foundational
+  example.
+
+## [0.0.48] - 2024-11-10 "Antonio release"
+
+### Added
+
+- There's now an input queue in each frame processor. When you call
+  `FrameProcessor.push_frame()` this will internally call
+  `FrameProcessor.queue_frame()` on the next processor (upstream or downstream)
+  and the frame will be internally queued (except system frames). Then, the
+  queued frames will get processed. With this input queue it is also possible
+  for FrameProcessors to block processing more frames by calling
+  `FrameProcessor.pause_processing_frames()`. The way to resume processing
+  frames is by calling `FrameProcessor.resume_processing_frames()`.
 
 - Added audio filter `NoisereduceFilter`.
 
@@ -41,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grained control of what media subscriptions you want for each participant in a
   room.
 
+- Added audio filter `KrispFilter`.
+
 ### Changed
 
 - The following `DailyTransport` functions are now `async` which means they need
@@ -51,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Changed default output sample rate to 24000. This changes all TTS service to
   output to 24000 and also the default output transport sample rate. This
   improves audio quality at the cost of some extra bandwidth.
+
+- `AzureTTSService` now uses Azure websockets instead of HTTP requests.
+
+- The previous `AzureTTSService` HTTP implementation is now
+  `AzureHttpTTSService`.
 
 ### Fixed
 
@@ -67,6 +90,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue with PlayHTTTSService, where the TTFB metrics were reporting
   very small time values.
+
+- Fixed an issue where AzureTTSService wasn't initializing the specified
+  language.
 
 ### Other
 

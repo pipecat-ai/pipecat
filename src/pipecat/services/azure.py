@@ -41,6 +41,7 @@ try:
     from azure.cognitiveservices.speech import (
         CancellationReason,
         ResultReason,
+        ServicePropertyChannel,
         SpeechConfig,
         SpeechRecognizer,
         SpeechSynthesisOutputFormat,
@@ -111,7 +112,7 @@ def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputForma
     return SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm
 
 
-class AzureTTSService(TTSService):
+class AzureBaseTTSService(TTSService):
     class InputParams(BaseModel):
         emphasis: Optional[str] = None
         language_code: Optional[str] = (
@@ -162,7 +163,10 @@ class AzureTTSService(TTSService):
 
         self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
 
-        self.set_voice(voice)
+        self._api_key = api_key
+        self._region = region
+        self._voice_id = voice
+        self._speech_synthesizer = None
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -300,6 +304,97 @@ class AzureTTSService(TTSService):
 
         return ssml
 
+
+class AzureTTSService(AzureBaseTTSService):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        speech_config = SpeechConfig(
+            subscription=self._api_key,
+            region=self._region,
+            speech_recognition_language=self._settings["language"],
+        )
+        speech_config.set_speech_synthesis_output_format(
+            sample_rate_to_output_format(self._settings["sample_rate"])
+        )
+        speech_config.set_service_property(
+            "synthesizer.synthesis.connection.synthesisConnectionImpl",
+            "websocket",
+            ServicePropertyChannel.UriQueryParameter,
+        )
+
+        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+
+        # Set up event handlers
+        self._audio_queue = asyncio.Queue()
+        self._speech_synthesizer.synthesizing.connect(self._handle_synthesizing)
+        self._speech_synthesizer.synthesis_completed.connect(self._handle_completed)
+        self._speech_synthesizer.synthesis_canceled.connect(self._handle_canceled)
+
+    def _handle_synthesizing(self, evt):
+        """Handle audio chunks as they arrive"""
+        if evt.result and evt.result.audio_data:
+            self._audio_queue.put_nowait(evt.result.audio_data)
+
+    def _handle_completed(self, evt):
+        """Handle synthesis completion"""
+        self._audio_queue.put_nowait(None)  # Signal completion
+
+    def _handle_canceled(self, evt):
+        """Handle synthesis cancellation"""
+        logger.error(f"Speech synthesis canceled: {evt.result.cancellation_details.reason}")
+        self._audio_queue.put_nowait(None)
+
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        logger.debug(f"Generating TTS: [{text}]")
+
+        try:
+            await self.start_ttfb_metrics()
+            yield TTSStartedFrame()
+
+            ssml = self._construct_ssml(text)
+
+            # Start synthesis
+            self._speech_synthesizer.speak_ssml_async(ssml)
+
+            await self.start_tts_usage_metrics(text)
+
+            # Stream audio chunks as they arrive
+            while True:
+                chunk = await self._audio_queue.get()
+                if chunk is None:  # End of stream
+                    break
+
+                await self.stop_ttfb_metrics()
+
+                yield TTSAudioRawFrame(
+                    audio=chunk,
+                    sample_rate=self._settings["sample_rate"],
+                    num_channels=1,
+                )
+
+            yield TTSStoppedFrame()
+
+        except Exception as e:
+            logger.error(f"{self} error generating TTS: {e}")
+            yield ErrorFrame(f"{self} error: {str(e)}")
+
+
+class AzureHttpTTSService(AzureBaseTTSService):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        speech_config = SpeechConfig(
+            subscription=self._api_key,
+            region=self._region,
+            speech_recognition_language=self._settings["language"],
+        )
+        speech_config.set_speech_synthesis_output_format(
+            sample_rate_to_output_format(self._settings["sample_rate"])
+        )
+
+        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
@@ -307,7 +402,7 @@ class AzureTTSService(TTSService):
 
         ssml = self._construct_ssml(text)
 
-        result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, (ssml))
+        result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, ssml)
 
         if result.reason == ResultReason.SynthesizingAudioCompleted:
             await self.start_tts_usage_metrics(text)

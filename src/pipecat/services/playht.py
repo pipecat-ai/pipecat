@@ -17,13 +17,16 @@ from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -121,7 +124,10 @@ class PlayHTTTSService(TTSService):
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            sample_rate=sample_rate,
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._user_id = user_id
@@ -259,6 +265,19 @@ class PlayHTTTSService(TTSService):
             pass
         except Exception as e:
             logger.error(f"{self} exception in receive task: {e}")
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # If we received a TTSSpeakFrame and the LLM response included text (it
+        # might be that it's only a function calling response) we pause
+        # processing more frames until we receive a BotStoppedSpeakingFrame.
+        if isinstance(frame, TTSSpeakFrame):
+            await self.pause_processing_frames()
+        elif isinstance(frame, LLMFullResponseEndFrame) and self._request_id:
+            await self.pause_processing_frames()
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self.resume_processing_frames()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")

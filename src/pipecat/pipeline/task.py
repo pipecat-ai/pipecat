@@ -158,19 +158,17 @@ class PipelineTask:
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             clock=self._clock,
         )
-        await self._source.process_frame(start_frame, FrameDirection.DOWNSTREAM)
+        await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
 
         if self._params.enable_metrics and self._params.send_initial_empty_metrics:
-            await self._source.process_frame(
-                self._initial_metrics_frame(), FrameDirection.DOWNSTREAM
-            )
+            await self._source.queue_frame(self._initial_metrics_frame(), FrameDirection.DOWNSTREAM)
 
         running = True
         should_cleanup = True
         while running:
             try:
                 frame = await self._push_queue.get()
-                await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
+                await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
                 if isinstance(frame, EndFrame):
                     await self._wait_for_endframe()
                 running = not isinstance(frame, (StopTaskFrame, EndFrame))

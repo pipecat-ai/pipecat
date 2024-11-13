@@ -1,0 +1,5 @@
+python-dotenv==1.0.1
+modal==0.65.48
+pipecat-ai[daily,silero,cartesia,openai]==0.0.48
+fastapi==0.115.4
+aiohttp==3.10.10
