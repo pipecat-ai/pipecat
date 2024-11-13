@@ -146,6 +146,7 @@ class AzureBaseTTSService(TTSService):
                 if params.language
                 else Language.EN_US
             ),
+            "language_code": params.language_code,
             "pitch": params.pitch,
             "rate": params.rate,
             "role": params.role,
@@ -153,15 +154,6 @@ class AzureBaseTTSService(TTSService):
             "style_degree": params.style_degree,
             "volume": params.volume,
         }
-        self._params = params
-        speech_config = SpeechConfig(
-            subscription=api_key,
-            region=region,
-            speech_recognition_language=self._params.language_code,
-        )
-        speech_config.set_speech_synthesis_output_format(sample_rate_to_output_format(sample_rate))
-
-        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
 
         self._api_key = api_key
         self._region = region
@@ -260,9 +252,9 @@ class AzureBaseTTSService(TTSService):
         return None
 
     def _construct_ssml(self, text: str) -> str:
-        language = self._settings["language"]
+        language = self._settings["language_code"]
         ssml = (
-            f"<speak version='1.0' xml:lang='{self._params.language_code}' "
+            f"<speak version='1.0' xml:lang='{language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
             "xmlns:mstts='http://www.w3.org/2001/mstts'>"
             f"<voice name='{self._voice_id}'>"
@@ -312,7 +304,7 @@ class AzureTTSService(AzureBaseTTSService):
         speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
-            speech_recognition_language=self._settings["language"],
+            speech_recognition_language=self._settings["language_code"],
         )
         speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self._settings["sample_rate"])
