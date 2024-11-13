@@ -177,7 +177,7 @@ class ElevenLabsTTSService(WordTTSService):
             "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en",
             "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,

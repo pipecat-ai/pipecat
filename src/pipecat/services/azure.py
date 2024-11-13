@@ -178,7 +178,7 @@ class AzureBaseTTSService(TTSService):
             "emphasis": params.emphasis,
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN_US,
+            else "en-US",
             "pitch": params.pitch,
             "rate": params.rate,
             "role": params.role,

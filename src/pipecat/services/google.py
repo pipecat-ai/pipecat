@@ -546,7 +546,7 @@ class GoogleTTSService(TTSService):
             "emphasis": params.emphasis,
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en-US",
             "gender": params.gender,
             "google_style": params.google_style,
         }

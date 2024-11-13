@@ -112,7 +112,7 @@ class CartesiaTTSService(WordTTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en",
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -326,7 +326,7 @@ class CartesiaHttpTTSService(TTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en",
             "speed": params.speed,
             "emotion": params.emotion,
         }
