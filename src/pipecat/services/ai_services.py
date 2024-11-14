@@ -134,20 +134,31 @@ class LLMService(AIService):
         super().__init__(**kwargs)
         self._callbacks = {}
         self._start_callbacks = {}
+        self._pre_execute_prompts = {}
 
     # TODO-CB: callback function type
-    def register_function(self, function_name: str | None, callback, start_callback=None):
+    def register_function(
+        self, 
+        function_name: str | None, 
+        callback, 
+        start_callback=None, 
+        pre_execute_prompt: str | None = None
+    ):
         # Registering a function with the function_name set to None will run that callback
         # for all functions
         self._callbacks[function_name] = callback
         # QUESTION FOR CB: maybe this isn't needed anymore?
         if start_callback:
             self._start_callbacks[function_name] = start_callback
+        if pre_execute_prompt:
+            self._pre_execute_prompts[function_name] = pre_execute_prompt
 
     def unregister_function(self, function_name: str | None):
         del self._callbacks[function_name]
-        if self._start_callbacks[function_name]:
+        if function_name in self._start_callbacks:
             del self._start_callbacks[function_name]
+        if function_name in self._pre_execute_prompts:
+            del self._pre_execute_prompts[function_name]
 
     def has_function(self, function_name: str):
         if None in self._callbacks.keys():

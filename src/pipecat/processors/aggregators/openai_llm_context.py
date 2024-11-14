@@ -100,9 +100,17 @@ class OpenAILLMContext:
     def tools(self) -> List[ChatCompletionToolParam] | NotGiven:
         return self._tools
 
+    @tools.setter
+    def tools(self, value):
+        self._tools = value
+
     @property
     def tool_choice(self) -> ChatCompletionToolChoiceOptionParam | NotGiven:
         return self._tool_choice
+
+    @tool_choice.setter
+    def tool_choice(self, value):
+        self._tool_choice = value
 
     def add_message(self, message: ChatCompletionMessageParam):
         self._messages.append(message)
