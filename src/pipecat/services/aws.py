@@ -5,7 +5,6 @@
 #
 
 import asyncio
-
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -64,7 +63,7 @@ def language_to_aws_language(language: Language) -> str | None:
         Language.SV: "sv-SE",
         Language.TR: "tr-TR",
     }
-    return language_map.get(language, "en-US")
+    return language_map.get(language)
 
 
 class AWSTTSService(TTSService):

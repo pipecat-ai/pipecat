@@ -119,7 +119,7 @@ def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputForma
         44100: SpeechSynthesisOutputFormat.Raw44100Hz16BitMonoPcm,
         48000: SpeechSynthesisOutputFormat.Raw48Khz16BitMonoPcm,
     }
-    return sample_rate_map.get(sample_rate, SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm)
+    return sample_rate_map.get(sample_rate, SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm)
 
 
 class AzureLLMService(BaseOpenAILLMService):
