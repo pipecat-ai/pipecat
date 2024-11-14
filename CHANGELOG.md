@@ -14,10 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `STTMuteProcessor`, a general-purpose processor that combines STT
   muting and interruption control. When active, it prevents both transcription
   and interruptions during bot speech. The processor supports multiple
-  strategies: `NEVER` (default), `FIRST_SPEECH` (mute only during bot's first
+  strategies: `FIRST_SPEECH` (mute only during bot's first
   speech), `ALWAYS` (mute during all bot speech), or `CUSTOM` (using provided
   callback).
-- Added STTMuteFrame, a control frame that enables/disables speech
+- Added `STTMuteFrame`, a control frame that enables/disables speech
   transcription in STT services.
 
 ## [0.0.48] - 2024-11-10 "Antonio release"
