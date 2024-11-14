@@ -47,63 +47,40 @@ except ModuleNotFoundError as e:
 
 
 def language_to_playht_language(language: Language) -> str | None:
-    match language:
-        case Language.BG:
-            return "BULGARIAN"
-        case Language.CA:
-            return "CATALAN"
-        case Language.CS:
-            return "CZECH"
-        case Language.DA:
-            return "DANISH"
-        case Language.DE:
-            return "GERMAN"
-        case (
-            Language.EN
-            | Language.EN_US
-            | Language.EN_GB
-            | Language.EN_AU
-            | Language.EN_NZ
-            | Language.EN_IN
-        ):
-            return "ENGLISH"
-        case Language.ES:
-            return "SPANISH"
-        case Language.FR | Language.FR_CA:
-            return "FRENCH"
-        case Language.EL:
-            return "GREEK"
-        case Language.HI:
-            return "HINDI"
-        case Language.HU:
-            return "HUNGARIAN"
-        case Language.ID:
-            return "INDONESIAN"
-        case Language.IT:
-            return "ITALIAN"
-        case Language.JA:
-            return "JAPANESE"
-        case Language.KO:
-            return "KOREAN"
-        case Language.MS:
-            return "MALAY"
-        case Language.NL:
-            return "DUTCH"
-        case Language.PL:
-            return "POLISH"
-        case Language.PT | Language.PT_BR:
-            return "PORTUGUESE"
-        case Language.RU:
-            return "RUSSIAN"
-        case Language.SV:
-            return "SWEDISH"
-        case Language.TH:
-            return "THAI"
-        case Language.TR:
-            return "TURKISH"
-        case Language.UK:
-            return "UKRAINIAN"
-    return None
+    language_map = {
+        Language.BG: "bulgarian",
+        Language.CA: "catalan",
+        Language.CS: "czech",
+        Language.DA: "danish",
+        Language.DE: "german",
+        Language.EN: "english",
+        Language.EN_US: "english",
+        Language.EN_GB: "english",
+        Language.EN_AU: "english",
+        Language.EN_NZ: "english",
+        Language.EN_IN: "english",
+        Language.ES: "spanish",
+        Language.FR: "french",
+        Language.FR_CA: "french",
+        Language.EL: "greek",
+        Language.HI: "hindi",
+        Language.HU: "hungarian",
+        Language.ID: "indonesian",
+        Language.IT: "italian",
+        Language.JA: "japanese",
+        Language.KO: "korean",
+        Language.MS: "malay",
+        Language.NL: "dutch",
+        Language.PL: "polish",
+        Language.PT: "portuguese",
+        Language.PT_BR: "portuguese",
+        Language.RU: "russian",
+        Language.SV: "swedish",
+        Language.TH: "thai",
+        Language.TR: "turkish",
+        Language.UK: "ukrainian",
+    }
+    return language_map.get(language)
 
 
 class PlayHTTTSService(TTSService):
@@ -118,7 +95,7 @@ class PlayHTTTSService(TTSService):
         api_key: str,
         user_id: str,
         voice_url: str,
-        voice_engine: str = "PlayHT3.0-mini",
+        voice_engine: str = "Play3.0-mini",
         sample_rate: int = 24000,
         output_format: str = "wav",
         params: InputParams = InputParams(),
@@ -140,7 +117,7 @@ class PlayHTTTSService(TTSService):
             "sample_rate": sample_rate,
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "english",
             "output_format": output_format,
             "voice_engine": voice_engine,
             "speed": params.speed,
@@ -153,8 +130,7 @@ class PlayHTTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        # Keep your existing language mapping logic here
-        pass
+        return language_to_playht_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -234,17 +210,11 @@ class PlayHTTTSService(TTSService):
 
     async def _receive_task_handler(self):
         try:
-            header_size = 78  # Size of the WAV header + extra bytes we want to skip
-            header_received = False
             async for message in self._get_websocket():
                 if isinstance(message, bytes):
-                    chunk_size = len(message)
-
-                    # Skip the WAV header
-                    if not header_received and chunk_size == header_size:
-                        header_received = True
+                    # Skip the WAV header message
+                    if message.startswith(b"RIFF"):
                         continue
-
                     await self.stop_ttfb_metrics()
                     frame = TTSAudioRawFrame(message, self._settings["sample_rate"], 1)
                     await self.push_frame(frame)
@@ -254,7 +224,6 @@ class PlayHTTTSService(TTSService):
                         msg = json.loads(message)
                         if "request_id" in msg and msg["request_id"] == self._request_id:
                             await self.push_frame(TTSStoppedFrame())
-                            header_received = False  # Reset for the next audio stream
                             self._request_id = None
                         elif "error" in msg:
                             logger.error(f"{self} error: {msg}")
@@ -334,7 +303,7 @@ class PlayHTHttpTTSService(TTSService):
         api_key: str,
         user_id: str,
         voice_url: str,
-        voice_engine: str = "PlayHT3.0-mini",
+        voice_engine: str = "Play3.0-mini",
         sample_rate: int = 24000,
         params: InputParams = InputParams(),
         **kwargs,
@@ -352,7 +321,7 @@ class PlayHTHttpTTSService(TTSService):
             "sample_rate": sample_rate,
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "english",
             "format": Format.FORMAT_WAV,
             "voice_engine": voice_engine,
             "speed": params.speed,

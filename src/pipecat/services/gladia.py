@@ -34,6 +34,53 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+def language_to_gladia_language(language: Language) -> str | None:
+    language_map = {
+        Language.BG: "bg",
+        Language.CA: "ca",
+        Language.ZH: "zh",
+        Language.CS: "cs",
+        Language.DA: "da",
+        Language.NL: "nl",
+        Language.EN: "en",
+        Language.EN_US: "en",
+        Language.EN_AU: "en",
+        Language.EN_GB: "en",
+        Language.EN_NZ: "en",
+        Language.EN_IN: "en",
+        Language.ET: "et",
+        Language.FI: "fi",
+        Language.FR: "fr",
+        Language.FR_CA: "fr",
+        Language.DE: "de",
+        Language.DE_CH: "de",
+        Language.EL: "el",
+        Language.HI: "hi",
+        Language.HU: "hu",
+        Language.ID: "id",
+        Language.IT: "it",
+        Language.JA: "ja",
+        Language.KO: "ko",
+        Language.LV: "lv",
+        Language.LT: "lt",
+        Language.MS: "ms",
+        Language.NO: "no",
+        Language.PL: "pl",
+        Language.PT: "pt",
+        Language.PT_BR: "pt",
+        Language.RO: "ro",
+        Language.RU: "ru",
+        Language.SK: "sk",
+        Language.ES: "es",
+        Language.SV: "sv",
+        Language.TH: "th",
+        Language.TR: "tr",
+        Language.UK: "uk",
+        Language.VI: "vi",
+    }
+    return language_map.get(language)
+
+
 class GladiaSTTService(STTService):
     class InputParams(BaseModel):
         sample_rate: Optional[int] = 16000
@@ -79,50 +126,7 @@ class GladiaSTTService(STTService):
         self._confidence = confidence
 
     def language_to_service_language(self, language: Language) -> str | None:
-        language_map = {
-            Language.BG: "bg",
-            Language.CA: "ca",
-            Language.ZH: "zh",
-            Language.CS: "cs",
-            Language.DA: "da",
-            Language.NL: "nl",
-            Language.EN: "en",
-            Language.EN_US: "en",
-            Language.EN_AU: "en",
-            Language.EN_GB: "en",
-            Language.EN_NZ: "en",
-            Language.EN_IN: "en",
-            Language.ET: "et",
-            Language.FI: "fi",
-            Language.FR: "fr",
-            Language.FR_CA: "fr",
-            Language.DE: "de",
-            Language.DE_CH: "de",
-            Language.EL: "el",
-            Language.HI: "hi",
-            Language.HU: "hu",
-            Language.ID: "id",
-            Language.IT: "it",
-            Language.JA: "ja",
-            Language.KO: "ko",
-            Language.LV: "lv",
-            Language.LT: "lt",
-            Language.MS: "ms",
-            Language.NO: "no",
-            Language.PL: "pl",
-            Language.PT: "pt",
-            Language.PT_BR: "pt",
-            Language.RO: "ro",
-            Language.RU: "ru",
-            Language.SK: "sk",
-            Language.ES: "es",
-            Language.SV: "sv",
-            Language.TH: "th",
-            Language.TR: "tr",
-            Language.UK: "uk",
-            Language.VI: "vi",
-        }
-        return language_map.get(language)
+        return language_to_gladia_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
