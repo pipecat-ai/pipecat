@@ -51,7 +51,7 @@ async def main():
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
         # Configure the mute processor to mute only during first speech
         stt_mute_processor = STTMuteProcessor(
-            stt_service=stt, config=STTMuteConfig(strategy=STTMuteStrategy.ALWAYS)
+            stt_service=stt, config=STTMuteConfig(strategy=STTMuteStrategy.FIRST_SPEECH)
         )
 
         tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")

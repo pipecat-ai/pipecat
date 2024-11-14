@@ -17,6 +17,8 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopInterruptionFrame,
     STTMuteFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import STTService
@@ -60,7 +62,7 @@ class STTMuteProcessor(FrameProcessor):
     async def _handle_mute_state(self, should_mute: bool):
         """Handles both STT muting and interruption control."""
         if should_mute != self.is_muted:
-            logger.info(f"STT {'muting' if should_mute else 'unmuting'}")
+            logger.debug(f"STT {'muting' if should_mute else 'unmuting'}")
             await self.push_frame(STTMuteFrame(mute=should_mute))
 
     async def _should_mute(self) -> bool:
@@ -90,12 +92,20 @@ class STTMuteProcessor(FrameProcessor):
             await self._handle_mute_state(await self._should_mute())
 
         # Handle frame propagation
-        if isinstance(frame, (StartInterruptionFrame, StopInterruptionFrame)):
-            # Only pass interruption frames when not muted
+        if isinstance(
+            frame,
+            (
+                StartInterruptionFrame,
+                StopInterruptionFrame,
+                UserStartedSpeakingFrame,
+                UserStoppedSpeakingFrame,
+            ),
+        ):
+            # Only pass VAD-related frames when not muted
             if not self.is_muted:
                 await self.push_frame(frame, direction)
             else:
-                logger.debug("Interruption frame suppressed - STT currently muted")
+                logger.debug(f"{frame.__class__.__name__} suppressed - STT currently muted")
         else:
             # Pass all other frames through
             await self.push_frame(frame, direction)
