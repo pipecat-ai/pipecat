@@ -5,7 +5,6 @@
 #
 
 import asyncio
-
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -31,6 +30,40 @@ except ModuleNotFoundError as e:
         "In order to use Deepgram, you need to `pip install pipecat-ai[aws]`. Also, set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable."
     )
     raise Exception(f"Missing module: {e}")
+
+
+def language_to_aws_language(language: Language) -> str | None:
+    language_map = {
+        Language.CA: "ca-ES",
+        Language.ZH: "cmn-CN",
+        Language.DA: "da-DK",
+        Language.NL: "nl-NL",
+        Language.NL_BE: "nl-BE",
+        Language.EN: "en-US",
+        Language.EN_US: "en-US",
+        Language.EN_AU: "en-AU",
+        Language.EN_GB: "en-GB",
+        Language.EN_NZ: "en-NZ",
+        Language.EN_IN: "en-IN",
+        Language.FI: "fi-FI",
+        Language.FR: "fr-FR",
+        Language.FR_CA: "fr-CA",
+        Language.DE: "de-DE",
+        Language.HI: "hi-IN",
+        Language.IT: "it-IT",
+        Language.JA: "ja-JP",
+        Language.KO: "ko-KR",
+        Language.NO: "nb-NO",
+        Language.PL: "pl-PL",
+        Language.PT: "pt-PT",
+        Language.PT_BR: "pt-BR",
+        Language.RO: "ro-RO",
+        Language.RU: "ru-RU",
+        Language.ES: "es-ES",
+        Language.SV: "sv-SE",
+        Language.TR: "tr-TR",
+    }
+    return language_map.get(language)
 
 
 class AWSTTSService(TTSService):
@@ -65,7 +98,7 @@ class AWSTTSService(TTSService):
             "engine": params.engine,
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en-US",
             "pitch": params.pitch,
             "rate": params.rate,
             "volume": params.volume,
@@ -77,62 +110,7 @@ class AWSTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.CA:
-                return "ca-ES"
-            case Language.ZH:
-                return "cmn-CN"
-            case Language.DA:
-                return "da-DK"
-            case Language.NL:
-                return "nl-NL"
-            case Language.NL_BE:
-                return "nl-BE"
-            case Language.EN | Language.EN_US:
-                return "en-US"
-            case Language.EN_AU:
-                return "en-AU"
-            case Language.EN_GB:
-                return "en-GB"
-            case Language.EN_NZ:
-                return "en-NZ"
-            case Language.EN_IN:
-                return "en-IN"
-            case Language.FI:
-                return "fi-FI"
-            case Language.FR:
-                return "fr-FR"
-            case Language.FR_CA:
-                return "fr-CA"
-            case Language.DE:
-                return "de-DE"
-            case Language.HI:
-                return "hi-IN"
-            case Language.IT:
-                return "it-IT"
-            case Language.JA:
-                return "ja-JP"
-            case Language.KO:
-                return "ko-KR"
-            case Language.NO:
-                return "nb-NO"
-            case Language.PL:
-                return "pl-PL"
-            case Language.PT:
-                return "pt-PT"
-            case Language.PT_BR:
-                return "pt-BR"
-            case Language.RO:
-                return "ro-RO"
-            case Language.RU:
-                return "ru-RU"
-            case Language.ES:
-                return "es-ES"
-            case Language.SV:
-                return "sv-SE"
-            case Language.TR:
-                return "tr-TR"
-        return None
+        return language_to_aws_language(language)
 
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"

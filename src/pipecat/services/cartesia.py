@@ -44,29 +44,24 @@ except ModuleNotFoundError as e:
 
 
 def language_to_cartesia_language(language: Language) -> str | None:
-    match language:
-        case Language.DE:
-            return "de"
-        case (
-            Language.EN
-            | Language.EN_US
-            | Language.EN_GB
-            | Language.EN_AU
-            | Language.EN_NZ
-            | Language.EN_IN
-        ):
-            return "en"
-        case Language.ES:
-            return "es"
-        case Language.FR | Language.FR_CA:
-            return "fr"
-        case Language.JA:
-            return "ja"
-        case Language.PT | Language.PT_BR:
-            return "pt"
-        case Language.ZH | Language.ZH_TW:
-            return "zh"
-    return None
+    language_map = {
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.EN_US: "en",
+        Language.EN_GB: "en",
+        Language.EN_AU: "en",
+        Language.EN_NZ: "en",
+        Language.EN_IN: "en",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.FR_CA: "fr",
+        Language.JA: "ja",
+        Language.PT: "pt",
+        Language.PT_BR: "pt",
+        Language.ZH: "zh",
+        Language.ZH_TW: "zh",
+    }
+    return language_map.get(language)
 
 
 class CartesiaTTSService(WordTTSService):
@@ -117,7 +112,7 @@ class CartesiaTTSService(WordTTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en",
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -331,7 +326,7 @@ class CartesiaHttpTTSService(TTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en",
             "speed": params.speed,
             "emotion": params.emotion,
         }
