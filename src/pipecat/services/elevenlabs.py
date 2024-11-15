@@ -387,6 +387,7 @@ class ElevenLabsTTSService(WordTTSService):
 
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
+                await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
