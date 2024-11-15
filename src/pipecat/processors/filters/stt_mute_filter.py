@@ -32,14 +32,14 @@ class STTMuteStrategy(Enum):
 
 @dataclass
 class STTMuteConfig:
-    """Configuration for STTMuteProcessor"""
+    """Configuration for STTMuteFilter"""
 
     strategy: STTMuteStrategy
     # Optional callback for custom muting logic
-    should_mute_callback: Optional[Callable[["STTMuteProcessor"], Awaitable[bool]]] = None
+    should_mute_callback: Optional[Callable[["STTMuteFilter"], Awaitable[bool]]] = None
 
 
-class STTMuteProcessor(FrameProcessor):
+class STTMuteFilter(FrameProcessor):
     """A general-purpose processor that handles STT muting and interruption control.
 
     This processor combines the concepts of STT muting and interruption control,
