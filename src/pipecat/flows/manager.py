@@ -26,7 +26,8 @@ class FlowManager:
     represents a state in the conversation. Each node has:
     - A message for the LLM
     - Available functions that can be called
-    - Optional actions to execute when entering the node
+    - Optional pre-actions to execute before LLM inference
+    - Optional post-actions to execute after LLM inference
 
     The flow is defined by a configuration that specifies:
     - Initial node
@@ -34,7 +35,7 @@ class FlowManager:
     - Transitions between nodes via function calls
     """
 
-    def __init__(self, flow_config: dict, task):
+    def __init__(self, flow_config: dict, task, tts=None):
         """Initialize the flow manager.
 
         Args:
@@ -45,6 +46,7 @@ class FlowManager:
         self.flow = FlowState(flow_config)
         self.initialized = False
         self.task = task
+        self.tts = tts
         self.action_handlers: Dict[str, Callable] = {}
 
         # Register built-in actions
@@ -96,46 +98,6 @@ class FlowManager:
                 function_name = function["function"]["name"]
                 llm_service.register_function(function_name, handle_function_call)
 
-    async def handle_transition(self, function_name: str):
-        """Handle node transition triggered by a function call.
-
-        This method:
-        1. Validates the function call against available functions
-        2. Transitions to the new node if appropriate
-        3. Executes any actions associated with the new node
-        4. Updates the LLM context with new messages and available functions
-
-        Args:
-            function_name: Name of the function that was called
-
-        Raises:
-            RuntimeError: If handle_transition is called before initialization
-        """
-        if not self.initialized:
-            raise RuntimeError("FlowManager must be initialized before handling transitions")
-
-        available_functions = self.flow.get_available_function_names()
-
-        if function_name in available_functions:
-            new_node = self.flow.transition(function_name)
-            if new_node:
-                if self.flow.get_current_actions():
-                    await self._execute_actions(self.flow.get_current_actions())
-
-                current_message = self.flow.get_current_message()
-
-                await self.task.queue_frame(LLMMessagesAppendFrame(messages=[current_message]))
-                await self.task.queue_frame(
-                    LLMSetToolsFrame(tools=self.flow.get_current_functions())
-                )
-
-                logger.debug(f"Transition to node {new_node} complete")
-        else:
-            logger.warning(
-                f"Received invalid function call '{function_name}' for node '{self.flow.current_node}'. "
-                f"Available functions are: {available_functions}"
-            )
-
     def register_action(self, action_type: str, handler: Callable):
         """Register a handler for a specific action type.
 
@@ -175,5 +137,58 @@ class FlowManager:
                 logger.warning(f"No handler registered for action type: {action_type}")
 
     async def _handle_tts_action(self, action: dict):
-        """Built-in handler for tts_say actions"""
-        await self.task.queue_frame(TTSSpeakFrame(text=action["text"]))
+        """Built-in handler for TTS actions"""
+        if self.tts:
+            # Direct call to TTS service to speak text
+            await self.tts.say(action["text"])
+        else:
+            # Fall back to queued TTS if no direct service available
+            await self.task.queue_frame(TTSSpeakFrame(text=action["text"]))
+
+    async def handle_transition(self, function_name: str):
+        """Handle node transition triggered by a function call.
+
+        This method:
+        1. Validates the function call against available functions
+        2. Transitions to the new node if appropriate
+        3. Executes any pre-actions before updating the LLM context
+        4. Updates the LLM context with new messages and available functions
+        5. Executes any post-actions after updating the LLM context
+
+        Args:
+            function_name: Name of the function that was called
+
+        Raises:
+            RuntimeError: If handle_transition is called before initialization
+        """
+        if not self.initialized:
+            raise RuntimeError("FlowManager must be initialized before handling transitions")
+
+        available_functions = self.flow.get_available_function_names()
+
+        if function_name in available_functions:
+            new_node = self.flow.transition(function_name)
+            if new_node:
+                # Execute pre-actions before updating LLM context
+                if self.flow.get_current_pre_actions():
+                    logger.debug(f"Executing pre-actions for node {new_node}")
+                    await self._execute_actions(self.flow.get_current_pre_actions())
+
+                # Update LLM context and tools
+                current_message = self.flow.get_current_message()
+                await self.task.queue_frame(LLMMessagesAppendFrame(messages=[current_message]))
+                await self.task.queue_frame(
+                    LLMSetToolsFrame(tools=self.flow.get_current_functions())
+                )
+
+                # Execute post-actions after updating LLM context
+                if self.flow.get_current_post_actions():
+                    logger.debug(f"Executing post-actions for node {new_node}")
+                    await self._execute_actions(self.flow.get_current_post_actions())
+
+                logger.debug(f"Transition to node {new_node} complete")
+        else:
+            logger.warning(
+                f"Received invalid function call '{function_name}' for node '{self.flow.current_node}'. "
+                f"Available functions are: {available_functions}"
+            )

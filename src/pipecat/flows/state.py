@@ -20,12 +20,14 @@ class NodeConfig:
     Attributes:
         message: Dict containing role and content for the LLM at this node
         functions: List of available function definitions for this node
-        actions: Optional list of actions to execute when entering this node
+        pre_actions: Optional list of actions to execute before LLM inference
+        post_actions: Optional list of actions to execute after LLM inference
     """
 
     message: dict
     functions: List[dict]
-    actions: Optional[List[dict]] = None
+    pre_actions: Optional[List[dict]] = None
+    post_actions: Optional[List[dict]] = None
 
 
 class FlowState:
@@ -33,8 +35,8 @@ class FlowState:
 
     This class handles the state machine logic for conversation flows, where each node
     represents a distinct state with its own message, available functions, and optional
-    actions. It manages transitions between nodes based on function calls and handles
-    both regular and terminal functions.
+    pre- and post-actions. It manages transitions between nodes based on function calls
+    and handles both regular and terminal functions.
 
     Attributes:
         nodes: Dictionary mapping node IDs to their configurations
@@ -73,7 +75,8 @@ class FlowState:
             self.nodes[node_id] = NodeConfig(
                 message=node_config["message"],
                 functions=node_config["functions"],
-                actions=node_config.get("actions"),
+                pre_actions=node_config.get("pre_actions"),
+                post_actions=node_config.get("post_actions"),
             )
 
     def get_current_message(self) -> dict:
@@ -92,13 +95,27 @@ class FlowState:
         """
         return self.nodes[self.current_node].functions
 
-    def get_current_actions(self) -> Optional[List[dict]]:
-        """Get the actions for the current node.
+    def get_current_pre_actions(self) -> Optional[List[dict]]:
+        """Get the pre-actions for the current node.
+
+        Pre-actions are executed before updating the LLM context when
+        transitioning to this node.
 
         Returns:
-            List of actions to execute when entering the node, or None if no actions
+            List of pre-actions to execute, or None if no pre-actions
         """
-        return self.nodes[self.current_node].actions
+        return self.nodes[self.current_node].pre_actions
+
+    def get_current_post_actions(self) -> Optional[List[dict]]:
+        """Get the post-actions for the current node.
+
+        Post-actions are executed after updating the LLM context when
+        transitioning to this node.
+
+        Returns:
+            List of post-actions to execute, or None if no post-actions
+        """
+        return self.nodes[self.current_node].post_actions
 
     def get_available_function_names(self) -> Set[str]:
         """Get the names of available functions for the current node.
