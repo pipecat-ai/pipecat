@@ -135,9 +135,6 @@ async def main():
         tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4")
 
-        # Initialize conversation flow processor
-        flow_processor = ConversationFlowProcessor(flow_config)
-
         # Get initial tools from the first node
         initial_tools = flow_config["nodes"]["start"]["functions"]
 
@@ -183,6 +180,12 @@ async def main():
         )
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+
+        # Initialize conversation flow processor
+        flow_processor = ConversationFlowProcessor(flow_config, task)
+
+        # Register functions with LLM service
+        await flow_processor.register_functions(llm)
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

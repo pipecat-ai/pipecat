@@ -1,21 +1,24 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 from typing import List, Optional
 
 from loguru import logger
 
 from pipecat.frames.frames import (
-    Frame,
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
     TTSSpeakFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from .flow import ConversationFlow
 
 
-# processor.py
-class ConversationFlowProcessor(FrameProcessor):
+class ConversationFlowProcessor:
     """Processor that manages conversation flow based on function calls.
 
     This processor maintains conversation state and handles transitions between states
@@ -31,7 +34,7 @@ class ConversationFlowProcessor(FrameProcessor):
     - Optional actions for each state
     """
 
-    def __init__(self, flow_config: dict):
+    def __init__(self, flow_config: dict, task, **kwargs):
         """Initialize the conversation flow processor.
 
         Args:
@@ -41,6 +44,7 @@ class ConversationFlowProcessor(FrameProcessor):
         super().__init__()
         self.flow = ConversationFlow(flow_config)
         self.initialized = False
+        self.task = task
 
     async def initialize(self, initial_messages: List[dict]):
         """Initialize the conversation with starting messages and functions.
@@ -57,12 +61,35 @@ class ConversationFlowProcessor(FrameProcessor):
         """
         if not self.initialized:
             messages = initial_messages + [self.flow.get_current_message()]
-            await self.push_frame(LLMMessagesUpdateFrame(messages=messages))
-            await self.push_frame(LLMSetToolsFrame(tools=self.flow.get_current_functions()))
+            await self.task.queue_frame(LLMMessagesUpdateFrame(messages=messages))
+            await self.task.queue_frame(LLMSetToolsFrame(tools=self.flow.get_current_functions()))
             self.initialized = True
             logger.debug(f"Initialized conversation flow at node: {self.flow.current_node}")
         else:
             logger.warning("Attempted to initialize ConversationFlowProcessor multiple times")
+
+    async def register_functions(self, llm_service):
+        """Register all functions from the flow configuration with the LLM service.
+
+        This method sets up function handlers for all functions defined in the flow
+        configuration. When a function is called, it will automatically trigger the
+        appropriate state transition.
+
+        Args:
+            llm_service: The LLM service to register functions with
+        """
+
+        async def handle_function_call(
+            function_name, tool_call_id, arguments, llm, context, result_callback
+        ):
+            await self.handle_transition(function_name)
+            await result_callback("Acknowledged")
+
+        # Register all functions from all nodes
+        for node in self.flow.nodes.values():
+            for function in node.functions:
+                function_name = function["function"]["name"]
+                llm_service.register_function(function_name, handle_function_call)
 
     async def handle_transition(self, function_name: str):
         """Handle state transition triggered by a function call.
@@ -91,8 +118,10 @@ class ConversationFlowProcessor(FrameProcessor):
 
                 current_message = self.flow.get_current_message()
 
-                await self.push_frame(LLMMessagesAppendFrame(messages=[current_message]))
-                await self.push_frame(LLMSetToolsFrame(tools=self.flow.get_current_functions()))
+                await self.task.queue_frame(LLMMessagesAppendFrame(messages=[current_message]))
+                await self.task.queue_frame(
+                    LLMSetToolsFrame(tools=self.flow.get_current_functions())
+                )
 
                 logger.debug(f"Transition to {new_node} complete")
         else:
@@ -116,18 +145,6 @@ class ConversationFlowProcessor(FrameProcessor):
         for action in actions:
             if action["type"] == "tts.say":
                 logger.debug(f"Executing TTS action: {action['text']}")
-                await self.push_frame(TTSSpeakFrame(text=action["text"]))
+                await self.task.queue_frame(TTSSpeakFrame(text=action["text"]))
             else:
                 logger.warning(f"Unknown action type: {action['type']}")
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
-        """Pass frames through the processor.
-
-        State transitions are handled via function calls rather than frames,
-        so this processor only needs to maintain the pipeline flow.
-
-        Args:
-            frame: The frame to process
-            direction: Direction the frame is flowing through the pipeline
-        """
-        await self.push_frame(frame, direction)
