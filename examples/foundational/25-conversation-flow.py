@@ -14,11 +14,11 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.flows.manager import FlowManager
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.conversation_flow import ConversationFlowProcessor
 from pipecat.services.deepgram import DeepgramSTTService, DeepgramTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -146,23 +146,6 @@ async def main():
             }
         ]
 
-        # Register function handlers
-        async def handle_function_call(
-            function_name, tool_call_id, arguments, llm, context, result_callback
-        ):
-            logger.info(f"Function called: {function_name} with arguments: {arguments}")
-            # Handle the state transition
-            await flow_processor.handle_transition(function_name)
-            # Send the acknowledgment
-            await result_callback("Acknowledged")
-            logger.info(f"Function call result sent: {function_name}")
-
-        # Register functions from all nodes
-        for node in flow_config["nodes"].values():
-            for function in node["functions"]:
-                function_name = function["function"]["name"]
-                llm.register_function(function_name, handle_function_call)
-
         context = OpenAILLMContext(messages, initial_tools)
         context_aggregator = llm.create_context_aggregator(context)
 
@@ -171,7 +154,6 @@ async def main():
                 transport.input(),  # Transport user input
                 stt,  # STT
                 context_aggregator.user(),  # User responses
-                flow_processor,  # Conversation flow management
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
@@ -181,17 +163,17 @@ async def main():
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
-        # Initialize conversation flow processor
-        flow_processor = ConversationFlowProcessor(flow_config, task)
+        # Initialize flow manager
+        flow_manager = FlowManager(flow_config, task)
 
         # Register functions with LLM service
-        await flow_processor.register_functions(llm)
+        await flow_manager.register_functions(llm)
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
             # Initialize the flow processor
-            await flow_processor.initialize(messages)
+            await flow_manager.initialize(messages)
             # Kick off the conversation using the context aggregator
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 
