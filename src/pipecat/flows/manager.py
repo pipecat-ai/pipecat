@@ -165,12 +165,16 @@ class FlowManager:
             raise RuntimeError("FlowManager must be initialized before handling transitions")
 
         available_functions = self.flow.get_available_function_names()
+        current_node = self.flow.get_current_node()
 
         if function_name in available_functions:
             new_node = self.flow.transition(function_name)
             if new_node:
+                # Only execute actions if we actually changed nodes
+                is_new_node = new_node != current_node
+
                 # Execute pre-actions before updating LLM context
-                if self.flow.get_current_pre_actions():
+                if is_new_node and self.flow.get_current_pre_actions():
                     logger.debug(f"Executing pre-actions for node {new_node}")
                     await self._execute_actions(self.flow.get_current_pre_actions())
 
@@ -182,7 +186,7 @@ class FlowManager:
                 )
 
                 # Execute post-actions after updating LLM context
-                if self.flow.get_current_post_actions():
+                if is_new_node and self.flow.get_current_post_actions():
                     logger.debug(f"Executing post-actions for node {new_node}")
                     await self._execute_actions(self.flow.get_current_post_actions())
 

@@ -146,11 +146,16 @@ class FlowState:
         if function_name in available_functions:
             if function_name in self.nodes:
                 # Regular transition to a new node
+                previous_node = self.current_node
                 self.current_node = function_name
-                logger.info(f"Transitioned to node: {self.current_node}")
+                logger.info(f"Transitioned from {previous_node} to node: {self.current_node}")
                 return self.current_node
             else:
                 # Handle terminal function calls (functions that don't lead to new nodes)
                 logger.info(f"Executed terminal function: {function_name}")
                 return self.current_node
         return None
+
+    def get_current_node(self) -> str:
+        """Get the current node ID."""
+        return self.current_node
