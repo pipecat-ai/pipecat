@@ -81,12 +81,12 @@ flow_config = {
                     },
                 }
             ],
-            "actions": [{"type": "tts_say", "text": "Let me help you order a pizza..."}],
+            "pre_actions": [{"type": "tts_say", "text": "Ok, let me pull up our pizza menu..."}],
         },
         "choose_sushi": {
             "message": {
                 "role": "system",
-                "content": "The user has chosen sushi. Immediately ask them: 'How many sushi rolls would you like to order?' If they answer provide to the question of how many rolls, use the select_roll_count function.",
+                "content": "The user has chosen sushi. Immediately say: 'How many sushi rolls would you like to order?' If they answer provide to the question of how many rolls, use the select_roll_count function.",
             },
             "functions": [
                 {
@@ -109,7 +109,7 @@ flow_config = {
                     },
                 }
             ],
-            "actions": [{"type": "tts_say", "text": "Ok, one moment..."}],
+            "pre_actions": [{"type": "tts_say", "text": "Ok, one moment..."}],
         },
     },
 }
@@ -164,7 +164,7 @@ async def main():
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
         # Initialize flow manager
-        flow_manager = FlowManager(flow_config, task)
+        flow_manager = FlowManager(flow_config, task, tts)
 
         # Register functions with LLM service
         await flow_manager.register_functions(llm)
