@@ -81,7 +81,7 @@ flow_config = {
                     },
                 }
             ],
-            "actions": [{"type": "tts.say", "text": "Let me help you order a pizza..."}],
+            "actions": [{"type": "tts_say", "text": "Let me help you order a pizza..."}],
         },
         "choose_sushi": {
             "message": {
@@ -109,7 +109,7 @@ flow_config = {
                     },
                 }
             ],
-            "actions": [{"type": "tts.say", "text": "Ok, one moment..."}],
+            "actions": [{"type": "tts_say", "text": "Ok, one moment..."}],
         },
     },
 }
