@@ -276,6 +276,9 @@ class ElevenLabsTTSService(WordTTSService):
             await self.pause_processing_frames()
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.resume_processing_frames()
+        elif isinstance(frame, StartInterruptionFrame):
+            await self._disconnect()
+            await self._connect()
 
     async def _connect(self):
         try:
