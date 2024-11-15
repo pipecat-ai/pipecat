@@ -34,88 +34,82 @@ flow_config = {
     "nodes": {
         "start": {
             "message": {
-                "role": "assistant",
-                "content": "You are starting a conversation. Ask the user if they'd like to hear a joke or get weather information.",
+                "role": "system",
+                "content": "You are an order-taking assistant. You must ALWAYS use one of the available functions to progress the conversation. For this step, ask the user if they want pizza or sushi, and wait for them to use a function to choose.",
             },
             "functions": [
                 {
-                    "name": "tell_joke",
-                    "description": "User wants to hear a joke",
-                    "parameters": {"type": "object", "properties": {}},
+                    "type": "function",
+                    "function": {
+                        "name": "choose_pizza",
+                        "description": "User wants to order pizza",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
                 },
                 {
-                    "name": "get_weather",
-                    "description": "User wants weather information",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "location": {
-                                "type": "string",
-                                "description": "The location to get weather for",
-                            }
-                        },
-                        "required": ["location"],
+                    "type": "function",
+                    "function": {
+                        "name": "choose_sushi",
+                        "description": "User wants to order sushi",
+                        "parameters": {"type": "object", "properties": {}},
                     },
                 },
             ],
         },
-        "tell_joke": {
+        "choose_pizza": {
             "message": {
-                "role": "assistant",
-                "content": "Tell a funny, clean joke and then ask if they'd like to hear another joke or get weather information.",
+                "role": "system",
+                "content": "The user has chosen pizza. You must now ask them to select a size using the select_pizza_size function. Do not proceed until they use this function. Do not assume any selections have been made.",
             },
             "functions": [
                 {
-                    "name": "tell_joke",
-                    "description": "User wants another joke",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-                {
-                    "name": "get_weather",
-                    "description": "User wants weather information",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "location": {
-                                "type": "string",
-                                "description": "The location to get weather for",
-                            }
+                    "type": "function",
+                    "function": {
+                        "name": "select_pizza_size",
+                        "description": "Select pizza size",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "size": {
+                                    "type": "string",
+                                    "enum": ["small", "medium", "large"],
+                                    "description": "Size of the pizza",
+                                }
+                            },
+                            "required": ["size"],
                         },
-                        "required": ["location"],
                     },
-                },
+                }
             ],
-            "actions": [{"type": "tts.say", "text": "Let me think of a good one..."}],
+            "actions": [{"type": "tts.say", "text": "Let me help you order a pizza..."}],
         },
-        "get_weather": {
+        "choose_sushi": {
             "message": {
-                "role": "assistant",
-                "content": "Provide the weather information and ask if they'd like to hear a joke or check another location's weather.",
+                "role": "system",
+                "content": "The user has chosen sushi. Immediately ask them: 'How many sushi rolls would you like to order?' If they answer provide to the question of how many rolls, use the select_roll_count function.",
             },
             "functions": [
                 {
-                    "name": "tell_joke",
-                    "description": "User wants to hear a joke",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-                {
-                    "name": "get_weather",
-                    "description": "User wants weather for another location",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "location": {
-                                "type": "string",
-                                "description": "The location to get weather for",
-                            }
+                    "type": "function",
+                    "function": {
+                        "name": "select_roll_count",
+                        "description": "Select number of sushi rolls",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 10,
+                                    "description": "Number of rolls to order",
+                                }
+                            },
+                            "required": ["count"],
                         },
-                        "required": ["location"],
                     },
-                },
+                }
             ],
-            "actions": [
-                {"type": "tts.say", "text": "Let me check that weather information for you..."}
-            ],
+            "actions": [{"type": "tts.say", "text": "Ok, one moment..."}],
         },
     },
 }
@@ -144,15 +138,35 @@ async def main():
         # Initialize conversation flow processor
         flow_processor = ConversationFlowProcessor(flow_config)
 
+        # Get initial tools from the first node
+        initial_tools = flow_config["nodes"]["start"]["functions"]
+
         # Create initial context
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful assistant in a WebRTC call. Your responses will be converted to audio so avoid special characters. Always use the available functions to progress the conversation.",
+                "content": "You are an order-taking assistant. You must ALWAYS use the available functions to progress the conversation. Never assume an order is complete without the proper function calls. Your responses will be converted to audio so avoid special characters.",
             }
         ]
 
-        context = OpenAILLMContext(messages)
+        # Register function handlers
+        async def handle_function_call(
+            function_name, tool_call_id, arguments, llm, context, result_callback
+        ):
+            logger.info(f"Function called: {function_name} with arguments: {arguments}")
+            # Handle the state transition
+            await flow_processor.handle_transition(function_name)
+            # Send the acknowledgment
+            await result_callback("Acknowledged")
+            logger.info(f"Function call result sent: {function_name}")
+
+        # Register functions from all nodes
+        for node in flow_config["nodes"].values():
+            for function in node["functions"]:
+                function_name = function["function"]["name"]
+                llm.register_function(function_name, handle_function_call)
+
+        context = OpenAILLMContext(messages, initial_tools)
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
@@ -175,7 +189,7 @@ async def main():
             await transport.capture_participant_transcription(participant["id"])
             # Initialize the flow processor
             await flow_processor.initialize(messages)
-            # Kick off the conversation
+            # Kick off the conversation using the context aggregator
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
