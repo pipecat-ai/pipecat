@@ -571,6 +571,13 @@ class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame):
 
 
 @dataclass
+class STTMuteFrame(ControlFrame):
+    """Control frame to mute/unmute the STT service."""
+
+    mute: bool
+
+
+@dataclass
 class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame):
     pass
 
