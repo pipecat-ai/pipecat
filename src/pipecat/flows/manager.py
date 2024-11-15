@@ -15,65 +15,66 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
 )
 
-from .flow import ConversationFlow
+from .state import FlowState
 
 
-class ConversationFlowProcessor:
-    """Processor that manages conversation flow based on function calls.
+class FlowManager:
+    """Manages conversation flows in a Pipecat pipeline.
 
-    This processor maintains conversation state and handles transitions between states
-    based on LLM function calls. Each state (node) has its own message, available
-    functions, and optional actions. The processor ensures the LLM context is updated
-    appropriately as the conversation progresses.
+    This manager handles the progression through a flow defined by nodes, where each node
+    represents a state in the conversation. Each node has:
+    - A message for the LLM
+    - Available functions that can be called
+    - Optional actions to execute when entering the node
 
     The flow is defined by a configuration that specifies:
-    - Initial state
-    - Available states (nodes)
-    - Messages for each state
-    - Available functions for each state
-    - Optional actions for each state
+    - Initial node
+    - Available nodes and their configurations
+    - Transitions between nodes via function calls
     """
 
-    def __init__(self, flow_config: dict, task, **kwargs):
-        """Initialize the conversation flow processor.
+    def __init__(self, flow_config: dict, task):
+        """Initialize the flow manager.
 
         Args:
             flow_config: Dictionary containing the complete flow configuration,
-                        including initial_node, nodes, and their configurations
+                        including initial_node and node configurations
+            task: PipelineTask instance used to queue frames into the pipeline
         """
         super().__init__()
-        self.flow = ConversationFlow(flow_config)
+        self.flow = FlowState(flow_config)
         self.initialized = False
         self.task = task
 
     async def initialize(self, initial_messages: List[dict]):
-        """Initialize the conversation with starting messages and functions.
+        """Initialize the flow with starting messages and functions.
 
-        This method sets up the initial context for the conversation, combining
-        any system-level messages with the initial node's message and functions.
+        This method sets up the initial context, combining any system-level
+        messages with the initial node's message and functions.
 
         Args:
             initial_messages: List of initial messages (typically system messages)
                             to include in the context
-
-        Note:
-            This must be called before the processor can handle any frames.
         """
         if not self.initialized:
             messages = initial_messages + [self.flow.get_current_message()]
             await self.task.queue_frame(LLMMessagesUpdateFrame(messages=messages))
             await self.task.queue_frame(LLMSetToolsFrame(tools=self.flow.get_current_functions()))
             self.initialized = True
-            logger.debug(f"Initialized conversation flow at node: {self.flow.current_node}")
+            logger.debug(f"Initialized flow at node: {self.flow.current_node}")
         else:
-            logger.warning("Attempted to initialize ConversationFlowProcessor multiple times")
+            logger.warning("Attempted to initialize FlowManager multiple times")
 
     async def register_functions(self, llm_service):
         """Register all functions from the flow configuration with the LLM service.
 
-        This method sets up function handlers for all functions defined in the flow
-        configuration. When a function is called, it will automatically trigger the
-        appropriate state transition.
+        This method sets up function handlers for all functions defined across all nodes.
+        When a function is called, it will automatically trigger the appropriate node
+        transition.
+
+        Note: This registers handlers for all possible functions, but the LLM's access
+        to functions is controlled separately through LLMSetToolsFrame. The LLM will
+        only see the functions available in the current node.
 
         Args:
             llm_service: The LLM service to register functions with
@@ -92,21 +93,22 @@ class ConversationFlowProcessor:
                 llm_service.register_function(function_name, handle_function_call)
 
     async def handle_transition(self, function_name: str):
-        """Handle state transition triggered by a function call.
+        """Handle node transition triggered by a function call.
 
         This method:
         1. Validates the function call against available functions
-        2. Transitions to the new state if appropriate
-        3. Executes any actions associated with the new state
+        2. Transitions to the new node if appropriate
+        3. Executes any actions associated with the new node
         4. Updates the LLM context with new messages and available functions
 
         Args:
             function_name: Name of the function that was called
+
+        Raises:
+            RuntimeError: If handle_transition is called before initialization
         """
         if not self.initialized:
-            raise RuntimeError(
-                "ConversationFlowProcessor must be initialized before handling transitions"
-            )
+            raise RuntimeError("FlowManager must be initialized before handling transitions")
 
         available_functions = self.flow.get_available_function_names()
 
@@ -123,7 +125,7 @@ class ConversationFlowProcessor:
                     LLMSetToolsFrame(tools=self.flow.get_current_functions())
                 )
 
-                logger.debug(f"Transition to {new_node} complete")
+                logger.debug(f"Transition to node {new_node} complete")
         else:
             logger.warning(
                 f"Received invalid function call '{function_name}' for node '{self.flow.current_node}'. "

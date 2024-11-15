@@ -12,7 +12,10 @@ from loguru import logger
 
 @dataclass
 class NodeConfig:
-    """Configuration for a single node in the conversation flow.
+    """Configuration for a single node in the flow.
+
+    A node represents a state in the conversation flow, containing all the
+    information needed for that particular point in the conversation.
 
     Attributes:
         message: Dict containing role and content for the LLM at this node
@@ -25,13 +28,13 @@ class NodeConfig:
     actions: Optional[List[dict]] = None
 
 
-class ConversationFlow:
-    """Manages state transitions in a conversation flow.
+class FlowState:
+    """Manages the state and transitions between nodes in a conversation flow.
 
-    This class handles the state machine logic for conversation flows, where each state
-    (node) has its own message, available functions, and optional actions. It manages
-    transitions between states based on function calls and handles both regular and
-    terminal functions.
+    This class handles the state machine logic for conversation flows, where each node
+    represents a distinct state with its own message, available functions, and optional
+    actions. It manages transitions between nodes based on function calls and handles
+    both regular and terminal functions.
 
     Attributes:
         nodes: Dictionary mapping node IDs to their configurations
@@ -108,7 +111,7 @@ class ConversationFlow:
         return names
 
     def transition(self, function_name: str) -> Optional[str]:
-        """Attempt to transition based on a function call.
+        """Attempt to transition to a new node based on a function call.
 
         Handles both regular transitions (where the function name matches a node)
         and terminal functions (which execute but don't change nodes).
@@ -117,8 +120,8 @@ class ConversationFlow:
             function_name: Name of the function that was called
 
         Returns:
-            The name of the new node after transition, or None if transition failed.
-            For terminal functions, returns the current node name.
+            The ID of the new node after transition, or None if transition failed.
+            For terminal functions, returns the current node ID.
         """
         available_functions = self.get_available_function_names()
         logger.debug(f"Attempting transition from {self.current_node} to {function_name}")
@@ -130,7 +133,7 @@ class ConversationFlow:
                 logger.info(f"Transitioned to node: {self.current_node}")
                 return self.current_node
             else:
-                # Handle terminal function calls
+                # Handle terminal function calls (functions that don't lead to new nodes)
                 logger.info(f"Executed terminal function: {function_name}")
                 return self.current_node
         return None
