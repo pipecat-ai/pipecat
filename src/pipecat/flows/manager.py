@@ -4,7 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import List, Optional
+from asyncio import iscoroutinefunction
+from typing import Callable, Dict, List, Optional
 
 from loguru import logger
 
@@ -41,10 +42,13 @@ class FlowManager:
                         including initial_node and node configurations
             task: PipelineTask instance used to queue frames into the pipeline
         """
-        super().__init__()
         self.flow = FlowState(flow_config)
         self.initialized = False
         self.task = task
+        self.action_handlers: Dict[str, Callable] = {}
+
+        # Register built-in actions
+        self.register_action("tts_say", self._handle_tts_action)
 
     async def initialize(self, initial_messages: List[dict]):
         """Initialize the flow with starting messages and functions.
@@ -132,21 +136,44 @@ class FlowManager:
                 f"Available functions are: {available_functions}"
             )
 
+    def register_action(self, action_type: str, handler: Callable):
+        """Register a handler for a specific action type.
+
+        Args:
+            action_type: String identifier for the action (e.g., "tts_say")
+            handler: Async or sync function that handles the action.
+                    Should accept action configuration as parameter.
+        """
+        if not callable(handler):
+            raise ValueError("Action handler must be callable")
+        self.action_handlers[action_type] = handler
+
     async def _execute_actions(self, actions: Optional[List[dict]]) -> None:
         """Execute actions specified for the current node.
 
-        Currently supports:
-        - tts.say: Sends a TTSSpeakFrame with the specified text
-
         Args:
             actions: List of action configurations to execute
+
+        Note:
+            Each action must have a 'type' field matching a registered handler
         """
         if not actions:
             return
 
         for action in actions:
-            if action["type"] == "tts.say":
-                logger.debug(f"Executing TTS action: {action['text']}")
-                await self.task.queue_frame(TTSSpeakFrame(text=action["text"]))
+            action_type = action["type"]
+            if action_type in self.action_handlers:
+                handler = self.action_handlers[action_type]
+                try:
+                    if iscoroutinefunction(handler):
+                        await handler(action)
+                    else:
+                        handler(action)
+                except Exception as e:
+                    logger.warning(f"Error executing action {action_type}: {e}")
             else:
-                logger.warning(f"Unknown action type: {action['type']}")
+                logger.warning(f"No handler registered for action type: {action_type}")
+
+    async def _handle_tts_action(self, action: dict):
+        """Built-in handler for tts_say actions"""
+        await self.task.queue_frame(TTSSpeakFrame(text=action["text"]))
