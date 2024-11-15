@@ -25,7 +25,7 @@ class FlowManager:
 
     This manager handles the progression through a flow defined by nodes, where each node
     represents a state in the conversation. Each node has:
-    - A message for the LLM
+    - Messages for the LLM (system/user/assistant messages)
     - Available functions that can be called
     - Optional pre-actions to execute before LLM inference
     - Optional post-actions to execute after LLM inference
@@ -65,7 +65,7 @@ class FlowManager:
                             to include in the context
         """
         if not self.initialized:
-            messages = initial_messages + [self.flow.get_current_message()]
+            messages = initial_messages + self.flow.get_current_messages()
             await self.task.queue_frame(LLMMessagesUpdateFrame(messages=messages))
             await self.task.queue_frame(LLMSetToolsFrame(tools=self.flow.get_current_functions()))
             self.initialized = True
@@ -204,8 +204,8 @@ class FlowManager:
                     await self._execute_actions(self.flow.get_current_pre_actions())
 
                 # Update LLM context and tools
-                current_message = self.flow.get_current_message()
-                await self.task.queue_frame(LLMMessagesAppendFrame(messages=[current_message]))
+                current_messages = self.flow.get_current_messages()
+                await self.task.queue_frame(LLMMessagesAppendFrame(messages=current_messages))
                 await self.task.queue_frame(
                     LLMSetToolsFrame(tools=self.flow.get_current_functions())
                 )
