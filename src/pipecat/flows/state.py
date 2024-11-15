@@ -18,13 +18,15 @@ class NodeConfig:
     information needed for that particular point in the conversation.
 
     Attributes:
-        message: Dict containing role and content for the LLM at this node
+        messages: List of message dicts to be added to LLM context at this node.
+                 Each message should have 'role' (system/user/assistant) and 'content'.
+                 Messages are added in order, allowing for complex prompt building.
         functions: List of available function definitions for this node
         pre_actions: Optional list of actions to execute before LLM inference
         post_actions: Optional list of actions to execute after LLM inference
     """
 
-    message: dict
+    messages: List[dict]
     functions: List[dict]
     pre_actions: Optional[List[dict]] = None
     post_actions: Optional[List[dict]] = None
@@ -34,7 +36,7 @@ class FlowState:
     """Manages the state and transitions between nodes in a conversation flow.
 
     This class handles the state machine logic for conversation flows, where each node
-    represents a distinct state with its own message, available functions, and optional
+    represents a distinct state with its own messages, available functions, and optional
     pre- and post-actions. It manages transitions between nodes based on function calls
     and handles both regular and terminal functions.
 
@@ -73,19 +75,19 @@ class FlowState:
 
         for node_id, node_config in config["nodes"].items():
             self.nodes[node_id] = NodeConfig(
-                message=node_config["message"],
+                messages=node_config["messages"],
                 functions=node_config["functions"],
                 pre_actions=node_config.get("pre_actions"),
                 post_actions=node_config.get("post_actions"),
             )
 
-    def get_current_message(self) -> dict:
-        """Get the message configuration for the current node.
+    def get_current_messages(self) -> List[dict]:
+        """Get the messages for the current node.
 
         Returns:
-            Dictionary containing role and content for the current node's message
+            List of message dictionaries for the current node
         """
-        return self.nodes[self.current_node].message
+        return self.nodes[self.current_node].messages
 
     def get_current_functions(self) -> List[dict]:
         """Get the available functions for the current node.

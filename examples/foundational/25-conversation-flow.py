@@ -61,10 +61,12 @@ flow_config = {
     "initial_node": "start",
     "nodes": {
         "start": {
-            "message": {
-                "role": "system",
-                "content": "You are an order-taking assistant. You must ALWAYS use one of the available functions to progress the conversation. For this step, ask the user if they want pizza or sushi, and wait for them to use a function to choose.",
-            },
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an order-taking assistant. You must ALWAYS use one of the available functions to progress the conversation. For this step, ask the user if they want pizza or sushi, and wait for them to use a function to choose.",
+                }
+            ],
             "functions": [
                 {
                     "type": "function",
@@ -85,15 +87,17 @@ flow_config = {
             ],
         },
         "choose_pizza": {
-            "message": {
-                "role": "system",
-                "content": """You are handling a pizza order. Use the available functions:
+            "messages": [
+                {
+                    "role": "system",
+                    "content": """You are handling a pizza order. Use the available functions:
                 - Use select_pizza_size when the user specifies a size (can be used multiple times if they change their mind)
                 - Use the end function ONLY when the user confirms they are done with their order
                 
                 After each size selection, confirm the selection and ask if they want to change it or complete their order.
                 Only use the end function after the user confirms they are satisfied with their order.""",
-            },
+                }
+            ],
             "functions": [
                 {
                     "type": "function",
@@ -127,15 +131,17 @@ flow_config = {
             ],
         },
         "choose_sushi": {
-            "message": {
-                "role": "system",
-                "content": """You are handling a sushi order. Use the available functions:
+            "messages": [
+                {
+                    "role": "system",
+                    "content": """You are handling a sushi order. Use the available functions:
                 - Use select_roll_count when the user specifies how many rolls (can be used multiple times if they change their mind)
                 - Use the end function ONLY when the user confirms they are done with their order
                 
                 After each roll count selection, confirm the count and ask if they want to change it or complete their order.
                 Only use the end function after the user confirms they are satisfied with their order.""",
-            },
+                }
+            ],
             "functions": [
                 {
                     "type": "function",
@@ -170,10 +176,12 @@ flow_config = {
             ],
         },
         "end": {
-            "message": {
-                "role": "system",
-                "content": "The order is complete. Thank the user and end the conversation.",
-            },
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "The order is complete. Thank the user and end the conversation.",
+                }
+            ],
             "functions": [],
             "pre_actions": [{"type": "tts_say", "text": "Thank you for your order! Goodbye!"}],
             "post_actions": [{"type": "end_conversation"}],
