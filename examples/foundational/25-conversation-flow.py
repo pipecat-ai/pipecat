@@ -28,7 +28,35 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-# Define our conversation flow
+# Flow Configuration
+#
+# This configuration defines a simple food ordering system with the following states:
+#
+# 1. start
+#    - Initial state where user chooses between pizza or sushi
+#    - Functions: choose_pizza, choose_sushi
+#    - Transitions to: choose_pizza or choose_sushi
+#
+# 2. choose_pizza
+#    - Handles pizza size selection and order confirmation
+#    - Functions:
+#      * select_pizza_size (terminal function, can be called multiple times)
+#      * end (transitions to end node after order confirmation)
+#    - Pre-action: Immediate TTS acknowledgment
+#
+# 3. choose_sushi
+#    - Handles sushi roll count selection and order confirmation
+#    - Functions:
+#      * select_roll_count (terminal function, can be called multiple times)
+#      * end (transitions to end node after order confirmation)
+#    - Pre-action: Immediate TTS acknowledgment
+#
+# 4. end
+#    - Final state that closes the conversation
+#    - No functions available
+#    - Pre-action: Farewell message
+#    - Post-action: Ends conversation
+
 flow_config = {
     "initial_node": "start",
     "nodes": {
@@ -59,14 +87,19 @@ flow_config = {
         "choose_pizza": {
             "message": {
                 "role": "system",
-                "content": "The user has chosen pizza. You must now ask them to select a size using the select_pizza_size function. Do not proceed until they use this function. Do not assume any selections have been made.",
+                "content": """You are handling a pizza order. Use the available functions:
+                - Use select_pizza_size when the user specifies a size (can be used multiple times if they change their mind)
+                - Use the end function ONLY when the user confirms they are done with their order
+                
+                After each size selection, confirm the selection and ask if they want to change it or complete their order.
+                Only use the end function after the user confirms they are satisfied with their order.""",
             },
             "functions": [
                 {
                     "type": "function",
                     "function": {
                         "name": "select_pizza_size",
-                        "description": "Select pizza size",
+                        "description": "Record the selected pizza size",
                         "parameters": {
                             "type": "object",
                             "properties": {
@@ -79,21 +112,36 @@ flow_config = {
                             "required": ["size"],
                         },
                     },
-                }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "end",
+                        "description": "Complete the order (use only after user confirms)",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                },
             ],
-            "pre_actions": [{"type": "tts_say", "text": "Ok, let me pull up our pizza menu..."}],
+            "pre_actions": [
+                {"type": "tts_say", "text": "Ok, let me help you with your pizza order..."}
+            ],
         },
         "choose_sushi": {
             "message": {
                 "role": "system",
-                "content": "The user has chosen sushi. Immediately say: 'How many sushi rolls would you like to order?' If they answer provide to the question of how many rolls, use the select_roll_count function.",
+                "content": """You are handling a sushi order. Use the available functions:
+                - Use select_roll_count when the user specifies how many rolls (can be used multiple times if they change their mind)
+                - Use the end function ONLY when the user confirms they are done with their order
+                
+                After each roll count selection, confirm the count and ask if they want to change it or complete their order.
+                Only use the end function after the user confirms they are satisfied with their order.""",
             },
             "functions": [
                 {
                     "type": "function",
                     "function": {
                         "name": "select_roll_count",
-                        "description": "Select number of sushi rolls",
+                        "description": "Record the number of sushi rolls",
                         "parameters": {
                             "type": "object",
                             "properties": {
@@ -107,9 +155,28 @@ flow_config = {
                             "required": ["count"],
                         },
                     },
-                }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "end",
+                        "description": "Complete the order (use only after user confirms)",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                },
             ],
-            "pre_actions": [{"type": "tts_say", "text": "Ok, one moment..."}],
+            "pre_actions": [
+                {"type": "tts_say", "text": "Ok, let me help you with your sushi order..."}
+            ],
+        },
+        "end": {
+            "message": {
+                "role": "system",
+                "content": "The order is complete. Thank the user and end the conversation.",
+            },
+            "functions": [],
+            "pre_actions": [{"type": "tts_say", "text": "Thank you for your order! Goodbye!"}],
+            "post_actions": [{"type": "end_conversation"}],
         },
     },
 }

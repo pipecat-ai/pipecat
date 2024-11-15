@@ -10,6 +10,7 @@ from typing import Callable, Dict, List, Optional
 from loguru import logger
 
 from pipecat.frames.frames import (
+    EndFrame,
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
@@ -51,6 +52,7 @@ class FlowManager:
 
         # Register built-in actions
         self.register_action("tts_say", self._handle_tts_action)
+        self.register_action("end_conversation", self._handle_end_action)
 
     async def initialize(self, initial_messages: List[dict]):
         """Initialize the flow with starting messages and functions.
@@ -137,13 +139,36 @@ class FlowManager:
                 logger.warning(f"No handler registered for action type: {action_type}")
 
     async def _handle_tts_action(self, action: dict):
-        """Built-in handler for TTS actions"""
+        """Built-in handler for TTS actions that speak immediately.
+
+        This handler attempts to use the TTS service directly to speak the text
+        immediately, bypassing the pipeline queue. If no TTS service is available,
+        it falls back to queueing the text through the pipeline.
+
+        Args:
+            action: Dictionary containing the action configuration.
+                Must include a 'text' key with the text to speak.
+        """
         if self.tts:
-            # Direct call to TTS service to speak text
+            # Direct call to TTS service to speak text immediately
             await self.tts.say(action["text"])
         else:
             # Fall back to queued TTS if no direct service available
             await self.task.queue_frame(TTSSpeakFrame(text=action["text"]))
+
+    async def _handle_end_action(self, action: dict):
+        """Built-in handler for ending the conversation.
+
+        This handler queues an EndFrame to terminate the conversation. If the action
+        includes a 'text' key, it will queue that text to be spoken before ending.
+
+        Args:
+            action: Dictionary containing the action configuration.
+                Optional 'text' key for a goodbye message.
+        """
+        if action.get("text"):  # Optional goodbye message
+            await self.task.queue_frame(TTSSpeakFrame(text=action["text"]))
+        await self.task.queue_frame(EndFrame())
 
     async def handle_transition(self, function_name: str):
         """Handle node transition triggered by a function call.
