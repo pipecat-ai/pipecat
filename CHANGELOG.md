@@ -9,14 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `DailyTransport` events `dialin-connected`, `dialin-stopped`,
+  `dialin-error` and `dialin-warning`. Needs daily-python >= 0.13.0.
+
 - Added `RimeHttpTTSService` and the `07q-interruptible-rime.py` foundational
   example.
+
 - Added `STTMuteFilter`, a general-purpose processor that combines STT
   muting and interruption control. When active, it prevents both transcription
   and interruptions during bot speech. The processor supports multiple
   strategies: `FIRST_SPEECH` (mute only during bot's first
   speech), `ALWAYS` (mute during all bot speech), or `CUSTOM` (using provided
   callback).
+
 - Added `STTMuteFrame`, a control frame that enables/disables speech
   transcription in STT services.
 
