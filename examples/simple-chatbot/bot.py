@@ -5,35 +5,32 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
 from PIL import Image
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    Frame,
+    LLMMessagesFrame,
+    OutputImageRawFrame,
+    SpriteFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.frames.frames import (
-    OutputImageRawFrame,
-    SpriteFrame,
-    Frame,
-    LLMMessagesFrame,
-    TTSAudioRawFrame,
-    TTSStoppedFrame,
-)
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -73,15 +70,15 @@ class TalkingAnimation(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TTSAudioRawFrame):
+        if isinstance(frame, BotStartedSpeakingFrame):
             if not self._is_talking:
                 await self.push_frame(talking_frame)
                 self._is_talking = True
-        elif isinstance(frame, TTSStoppedFrame):
+        elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_frame(quiet_frame)
             self._is_talking = False
 
-        await self.push_frame(frame)
+        await self.push_frame(frame, direction)
 
 
 async def main():
@@ -162,7 +159,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()
