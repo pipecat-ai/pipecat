@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -339,6 +340,7 @@ class AzureTTSService(AzureBaseTTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
+        logger.log("assistant", text)
 
         try:
             await self.start_ttfb_metrics()
@@ -441,6 +443,7 @@ class AzureSTTService(STTService):
             speech_config=speech_config, audio_config=audio_config
         )
         self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+        self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_processing_metrics()
@@ -465,6 +468,11 @@ class AzureSTTService(STTService):
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
             frame = TranscriptionFrame(event.result.text, "", time_now_iso8601())
+            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+
+    def _on_handle_recognizing(self, event):
+        if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
+            frame = InterimTranscriptionFrame(event.result.text, "", time_now_iso8601())
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
 
 

@@ -20,6 +20,8 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.services.ai_services import STTService, TTSService
 from pipecat.transcriptions.language import Language
@@ -200,6 +202,8 @@ class DeepgramSTTService(STTService):
             logger.info(f"{self}: Disconnected from Deepgram")
 
     async def _on_speech_started(self, *args, **kwargs):
+        if self.vad_enabled:
+            await self.push_frame(UserStartedSpeakingFrame())
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
@@ -219,6 +223,8 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
+                if self.vad_enabled:
+                    await self.push_frame(UserStoppedSpeakingFrame())
                 await self.stop_processing_metrics()
             else:
                 await self.push_frame(

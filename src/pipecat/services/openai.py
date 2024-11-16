@@ -173,7 +173,7 @@ class BaseOpenAILLMService(LLMService):
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
-        logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
+        # logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
 
@@ -307,9 +307,7 @@ class BaseOpenAILLMService(LLMService):
             await self.start_processing_metrics()
             await self._process_context(context)
             await self.stop_processing_metrics()
-            lfre_frame = LLMFullResponseEndFrame()
-            lfre_frame.pts = frame.pts
-            await self.push_frame(lfre_frame)
+            await self.push_frame(LLMFullResponseEndFrame())
 
 
 @dataclass
