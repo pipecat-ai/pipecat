@@ -128,7 +128,11 @@ class DailyCallbacks(BaseModel):
     on_error: Callable[[str], Awaitable[None]]
     on_app_message: Callable[[Any, str], Awaitable[None]]
     on_call_state_updated: Callable[[str], Awaitable[None]]
+    on_dialin_connected: Callable[[Any], Awaitable[None]]
     on_dialin_ready: Callable[[str], Awaitable[None]]
+    on_dialin_stopped: Callable[[Any], Awaitable[None]]
+    on_dialin_error: Callable[[Any], Awaitable[None]]
+    on_dialin_warning: Callable[[Any], Awaitable[None]]
     on_dialout_answered: Callable[[Any], Awaitable[None]]
     on_dialout_connected: Callable[[Any], Awaitable[None]]
     on_dialout_stopped: Callable[[Any], Awaitable[None]]
@@ -536,8 +540,20 @@ class DailyTransportClient(EventHandler):
     def on_call_state_updated(self, state: str):
         self._call_async_callback(self._callbacks.on_call_state_updated, state)
 
+    def on_dialin_connected(self, data: Any):
+        self._call_async_callback(self._callbacks.on_dialin_connected, data)
+
     def on_dialin_ready(self, sip_endpoint: str):
         self._call_async_callback(self._callbacks.on_dialin_ready, sip_endpoint)
+
+    def on_dialin_stopped(self, data: Any):
+        self._call_async_callback(self._callbacks.on_dialin_stopped, data)
+
+    def on_dialin_error(self, data: Any):
+        self._call_async_callback(self._callbacks.on_dialin_error, data)
+
+    def on_dialin_warning(self, data: Any):
+        self._call_async_callback(self._callbacks.on_dialin_warning, data)
 
     def on_dialout_answered(self, data: Any):
         self._call_async_callback(self._callbacks.on_dialout_answered, data)
@@ -822,7 +838,11 @@ class DailyTransport(BaseTransport):
             on_error=self._on_error,
             on_app_message=self._on_app_message,
             on_call_state_updated=self._on_call_state_updated,
+            on_dialin_connected=self._on_dialin_connected,
             on_dialin_ready=self._on_dialin_ready,
+            on_dialin_stopped=self._on_dialin_stopped,
+            on_dialin_error=self._on_dialin_error,
+            on_dialin_warning=self._on_dialin_warning,
             on_dialout_answered=self._on_dialout_answered,
             on_dialout_connected=self._on_dialout_connected,
             on_dialout_stopped=self._on_dialout_stopped,
@@ -851,7 +871,11 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_left")
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_call_state_updated")
+        self._register_event_handler("on_dialin_connected")
         self._register_event_handler("on_dialin_ready")
+        self._register_event_handler("on_dialin_stopped")
+        self._register_event_handler("on_dialin_error")
+        self._register_event_handler("on_dialin_warning")
         self._register_event_handler("on_dialout_answered")
         self._register_event_handler("on_dialout_connected")
         self._register_event_handler("on_dialout_stopped")
@@ -987,10 +1011,22 @@ class DailyTransport(BaseTransport):
             except Exception as e:
                 logger.exception(f"Error handling dialin-ready event ({url}): {e}")
 
+    async def _on_dialin_connected(self, data):
+        await self._call_event_handler("on_dialin_connected", data)
+
     async def _on_dialin_ready(self, sip_endpoint):
         if self._params.dialin_settings:
             await self._handle_dialin_ready(sip_endpoint)
         await self._call_event_handler("on_dialin_ready", sip_endpoint)
+
+    async def _on_dialin_stopped(self, data):
+        await self._call_event_handler("on_dialin_stopped", data)
+
+    async def _on_dialin_error(self, data):
+        await self._call_event_handler("on_dialin_error", data)
+
+    async def _on_dialin_warning(self, data):
+        await self._call_event_handler("on_dialin_warning", data)
 
     async def _on_dialout_answered(self, data):
         await self._call_event_handler("on_dialout_answered", data)
