@@ -5,11 +5,12 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.0.49] - 2024-11-17
 
 ### Added
 
-- Added RTVI `on_bot_started` event which is useful in single turn.
+- Added RTVI `on_bot_started` event which is useful in a single turn
+  interaction.
 
 - Added `DailyTransport` events `dialin-connected`, `dialin-stopped`,
   `dialin-error` and `dialin-warning`. Needs daily-python >= 0.13.0.
