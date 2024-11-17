@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added RTVI `on_bot_started` event which is useful in single turn.
+
 - Added `DailyTransport` events `dialin-connected`, `dialin-stopped`,
   `dialin-error` and `dialin-warning`. Needs daily-python >= 0.13.0.
 
