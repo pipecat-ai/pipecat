@@ -591,6 +591,7 @@ class RTVIProcessor(FrameProcessor):
         self._message_queue = asyncio.Queue()
         self._message_task = self.get_event_loop().create_task(self._message_task_handler())
 
+        self._register_event_handler("on_bot_started")
         self._register_event_handler("on_client_ready")
 
     def register_action(self, action: RTVIAction):
@@ -679,7 +680,7 @@ class RTVIProcessor(FrameProcessor):
             await self._pipeline.cleanup()
 
     async def _start(self, frame: StartFrame):
-        pass
+        await self._call_event_handler("on_bot_started")
 
     async def _stop(self, frame: EndFrame):
         await self._cancel_tasks()
