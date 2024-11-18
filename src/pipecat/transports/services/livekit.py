@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable, List
 from pydantic import BaseModel
 
 from pipecat.audio.utils import resample_audio
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -494,7 +495,7 @@ class LiveKitTransport(BaseTransport):
 
     async def send_audio(self, frame: OutputAudioRawFrame):
         if self._output:
-            await self._output.process_frame(frame, FrameDirection.DOWNSTREAM)
+            await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     def get_participants(self) -> List[str]:
         return self._client.get_participants()

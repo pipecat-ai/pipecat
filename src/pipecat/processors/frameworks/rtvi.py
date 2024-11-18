@@ -366,10 +366,6 @@ class RTVIMetricsMessage(BaseModel):
     data: Mapping[str, Any]
 
 
-class RTVIProcessorParams(BaseModel):
-    send_bot_ready: bool = True
-
-
 class RTVIFrameProcessor(FrameProcessor):
     def __init__(self, direction: FrameDirection = FrameDirection.DOWNSTREAM, **kwargs):
         super().__init__(**kwargs)
@@ -573,16 +569,14 @@ class RTVIProcessor(FrameProcessor):
         self,
         *,
         config: RTVIConfig = RTVIConfig(config=[]),
-        params: RTVIProcessorParams = RTVIProcessorParams(),
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._config = config
-        self._params = params
 
         self._pipeline: FrameProcessor | None = None
-        self._pipeline_started = False
 
+        self._bot_ready = False
         self._client_ready = False
         self._client_ready_id = ""
 
@@ -590,14 +584,15 @@ class RTVIProcessor(FrameProcessor):
         self._registered_services: Dict[str, RTVIService] = {}
 
         # A task to process incoming action frames.
-        self._action_task = self.get_event_loop().create_task(self._action_task_handler())
         self._action_queue = asyncio.Queue()
+        self._action_task = self.get_event_loop().create_task(self._action_task_handler())
 
         # A task to process incoming transport messages.
-        self._message_task = self.get_event_loop().create_task(self._message_task_handler())
         self._message_queue = asyncio.Queue()
+        self._message_task = self.get_event_loop().create_task(self._message_task_handler())
 
-        self._register_event_handler("on_bot_ready")
+        self._register_event_handler("on_bot_started")
+        self._register_event_handler("on_client_ready")
 
     def register_action(self, action: RTVIAction):
         id = self._action_id(action.service, action.action)
@@ -606,17 +601,21 @@ class RTVIProcessor(FrameProcessor):
     def register_service(self, service: RTVIService):
         self._registered_services[service.name] = service
 
+    async def set_client_ready(self):
+        self._client_ready = True
+        await self._call_event_handler("on_client_ready")
+
+    async def set_bot_ready(self):
+        self._bot_ready = True
+        await self._update_config(self._config, False)
+        await self._send_bot_ready()
+
     async def interrupt_bot(self):
         await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
 
     async def send_error(self, error: str):
         message = RTVIError(data=RTVIErrorData(error=error, fatal=False))
         await self._push_transport_message(message)
-
-    async def set_client_ready(self):
-        if not self._client_ready:
-            self._client_ready = True
-            await self._maybe_send_bot_ready()
 
     async def handle_message(self, message: RTVIMessage):
         await self._message_queue.put(message)
@@ -681,21 +680,15 @@ class RTVIProcessor(FrameProcessor):
             await self._pipeline.cleanup()
 
     async def _start(self, frame: StartFrame):
-        self._pipeline_started = True
-        await self._maybe_send_bot_ready()
+        await self._call_event_handler("on_bot_started")
 
     async def _stop(self, frame: EndFrame):
-        if self._action_task:
-            self._action_task.cancel()
-            await self._action_task
-            self._action_task = None
-
-        if self._message_task:
-            self._message_task.cancel()
-            await self._message_task
-            self._message_task = None
+        await self._cancel_tasks()
 
     async def _cancel(self, frame: CancelFrame):
+        await self._cancel_tasks()
+
+    async def _cancel_tasks(self):
         if self._action_task:
             self._action_task.cancel()
             await self._action_task
@@ -769,9 +762,8 @@ class RTVIProcessor(FrameProcessor):
             logger.warning(f"Exception processing message: {e}")
 
     async def _handle_client_ready(self, request_id: str):
-        self._client_ready = True
         self._client_ready_id = request_id
-        await self._maybe_send_bot_ready()
+        await self.set_client_ready()
 
     async def _handle_describe_config(self, request_id: str):
         services = list(self._registered_services.values())
@@ -841,16 +833,7 @@ class RTVIProcessor(FrameProcessor):
             message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
             await self._push_transport_message(message)
 
-    async def _maybe_send_bot_ready(self):
-        if self._pipeline_started and self._client_ready:
-            await self._update_config(self._config, False)
-            await self._send_bot_ready()
-            await self._call_event_handler("on_bot_ready")
-
     async def _send_bot_ready(self):
-        if not self._params.send_bot_ready:
-            return
-
         message = RTVIBotReady(
             id=self._client_ready_id,
             data=RTVIBotReadyData(version=RTVI_PROTOCOL_VERSION, config=self._config.config),

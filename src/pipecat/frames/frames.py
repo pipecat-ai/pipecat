@@ -5,7 +5,7 @@
 #
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Tuple
 
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.clocks.base_clock import BaseClock
@@ -557,7 +557,7 @@ class TTSStoppedFrame(ControlFrame):
 class ServiceUpdateSettingsFrame(ControlFrame):
     """A control frame containing a request to update service settings."""
 
-    settings: Dict[str, Any]
+    settings: Mapping[str, Any]
 
 
 @dataclass
@@ -568,6 +568,13 @@ class LLMUpdateSettingsFrame(ServiceUpdateSettingsFrame):
 @dataclass
 class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame):
     pass
+
+
+@dataclass
+class STTMuteFrame(ControlFrame):
+    """Control frame to mute/unmute the STT service."""
+
+    mute: bool
 
 
 @dataclass
@@ -582,3 +589,45 @@ class VADParamsUpdateFrame(ControlFrame):
     """
 
     params: VADParams
+
+
+@dataclass
+class FilterControlFrame(ControlFrame):
+    """Base control frame for other audio filter frames."""
+
+    pass
+
+
+@dataclass
+class FilterUpdateSettingsFrame(FilterControlFrame):
+    """Control frame to update filter settings."""
+
+    settings: Mapping[str, Any]
+
+
+@dataclass
+class FilterEnableFrame(FilterControlFrame):
+    """Control frame to enable or disable the filter at runtime."""
+
+    enable: bool
+
+
+@dataclass
+class MixerControlFrame(ControlFrame):
+    """Base control frame for other audio mixer frames."""
+
+    pass
+
+
+@dataclass
+class MixerUpdateSettingsFrame(MixerControlFrame):
+    """Control frame to update mixer settings."""
+
+    settings: Mapping[str, Any]
+
+
+@dataclass
+class MixerEnableFrame(MixerControlFrame):
+    """Control frame to enable or disable the mixer at runtime."""
+
+    enable: bool

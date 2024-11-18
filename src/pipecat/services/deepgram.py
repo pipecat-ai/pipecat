@@ -51,11 +51,11 @@ class DeepgramTTSService(TTSService):
         *,
         api_key: str,
         voice: str = "aura-helios-en",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         encoding: str = "linear16",
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = {
             "sample_rate": sample_rate,

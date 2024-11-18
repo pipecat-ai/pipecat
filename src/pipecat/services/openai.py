@@ -99,7 +99,12 @@ class BaseOpenAILLMService(LLMService):
         )
         seed: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
+        # Note: top_k is currently not supported by the OpenAI client library,
+        # so top_k is ignore right now.
+        top_k: Optional[int] = Field(default=None, ge=0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        max_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
+        max_completion_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
@@ -118,6 +123,8 @@ class BaseOpenAILLMService(LLMService):
             "seed": params.seed,
             "temperature": params.temperature,
             "top_p": params.top_p,
+            "max_tokens": params.max_tokens,
+            "max_completion_tokens": params.max_completion_tokens,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
         self.set_model_name(model)
@@ -152,6 +159,8 @@ class BaseOpenAILLMService(LLMService):
             "seed": self._settings["seed"],
             "temperature": self._settings["temperature"],
             "top_p": self._settings["top_p"],
+            "max_tokens": self._settings["max_tokens"],
+            "max_completion_tokens": self._settings["max_completion_tokens"],
         }
 
         params.update(self._settings["extra"])
@@ -213,6 +222,9 @@ class BaseOpenAILLMService(LLMService):
                 continue
 
             await self.stop_ttfb_metrics()
+
+            if not chunk.choices[0].delta:
+                continue
 
             if chunk.choices[0].delta.tool_calls:
                 # We're streaming the LLM response to enable the fastest response times.
@@ -533,6 +545,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     self._context.add_message(
                         {
                             "role": "assistant",
+                            "content": "",  # content field required for Grok function calling
                             "tool_calls": [
                                 {
                                     "id": frame.tool_call_id,

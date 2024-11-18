@@ -98,12 +98,13 @@ async def load_conversation(function_name, tool_call_id, args, llm, context, res
 messages = [
     {
         "role": "system",
-        "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+        "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a succinct, creative and helpful way. Prefer responses that are one sentence long unless you are asked for a longer or more detailed response.",
     },
-    {"role": "user", "content": ""},
-    {"role": "assistant", "content": []},
-    {"role": "user", "content": "Tell me"},
-    {"role": "user", "content": "a joke"},
+    {"role": "user", "content": "Start the call by saying the word 'hello'. Say only that word."},
+    # {"role": "user", "content": ""},
+    # {"role": "assistant", "content": []},
+    # {"role": "user", "content": "Tell me"},
+    # {"role": "user", "content": "a joke"},
 ]
 tools = [
     {
@@ -183,7 +184,7 @@ async def main():
         )
 
         llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-5-sonnet-20240620"
+            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-5-sonnet-latest"
         )
 
         # you can either register a single function for all function calls, or specific functions
@@ -219,7 +220,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 

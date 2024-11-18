@@ -15,6 +15,7 @@ from loguru import logger
 from PIL import Image
 
 from pipecat.frames.frames import (
+    AudioRawFrame,
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
@@ -70,6 +71,8 @@ class OpenAILLMContext:
             context.add_message(message)
         return context
 
+    # todo: deprecate from_image_frame. It's only used to create a single-use
+    # context, which isn't useful for most real-world applications.
     @staticmethod
     def from_image_frame(frame: VisionImageRawFrame) -> "OpenAILLMContext":
         """
@@ -77,6 +80,10 @@ class OpenAILLMContext:
         expects images to be base64 encoded, but other vision models may not.
         So we'll store the image as bytes and do the base64 encoding as needed
         in the LLM service.
+
+        NOTE: the above only applies to the deprecated use of this method. The
+        add_image_frame_message() below does the base64 encoding as expected
+        in the OpenAI format.
         """
         context = OpenAILLMContext()
         buffer = io.BytesIO()
@@ -168,6 +175,10 @@ class OpenAILLMContext:
             content.append({"type": "text", "text": text})
         self.add_message({"role": "user", "content": content})
 
+    def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: str = None):
+        # todo: implement for OpenAI models and others
+        pass
+
     async def call_function(
         self,
         f: Callable[
@@ -206,6 +217,29 @@ class OpenAILLMContext:
             )
 
         await f(function_name, tool_call_id, arguments, llm, self, function_call_result_callback)
+
+    def create_wav_header(self, sample_rate, num_channels, bits_per_sample, data_size):
+        # RIFF chunk descriptor
+        header = bytearray()
+        header.extend(b"RIFF")  # ChunkID
+        header.extend((data_size + 36).to_bytes(4, "little"))  # ChunkSize: total size - 8
+        header.extend(b"WAVE")  # Format
+        # "fmt " sub-chunk
+        header.extend(b"fmt ")  # Subchunk1ID
+        header.extend((16).to_bytes(4, "little"))  # Subchunk1Size (16 for PCM)
+        header.extend((1).to_bytes(2, "little"))  # AudioFormat (1 for PCM)
+        header.extend(num_channels.to_bytes(2, "little"))  # NumChannels
+        header.extend(sample_rate.to_bytes(4, "little"))  # SampleRate
+        # Calculate byte rate and block align
+        byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
+        block_align = num_channels * (bits_per_sample // 8)
+        header.extend(byte_rate.to_bytes(4, "little"))  # ByteRate
+        header.extend(block_align.to_bytes(2, "little"))  # BlockAlign
+        header.extend(bits_per_sample.to_bytes(2, "little"))  # BitsPerSample
+        # "data" sub-chunk
+        header.extend(b"data")  # Subchunk2ID
+        header.extend(data_size.to_bytes(4, "little"))  # Subchunk2Size
+        return header
 
 
 @dataclass

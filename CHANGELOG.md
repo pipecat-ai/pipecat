@@ -5,7 +5,120 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.49] - 2024-11-17
+
+### Added
+
+- Added RTVI `on_bot_started` event which is useful in a single turn
+  interaction.
+
+- Added `DailyTransport` events `dialin-connected`, `dialin-stopped`,
+  `dialin-error` and `dialin-warning`. Needs daily-python >= 0.13.0.
+
+- Added `RimeHttpTTSService` and the `07q-interruptible-rime.py` foundational
+  example.
+
+- Added `STTMuteFilter`, a general-purpose processor that combines STT
+  muting and interruption control. When active, it prevents both transcription
+  and interruptions during bot speech. The processor supports multiple
+  strategies: `FIRST_SPEECH` (mute only during bot's first
+  speech), `ALWAYS` (mute during all bot speech), or `CUSTOM` (using provided
+  callback).
+
+- Added `STTMuteFrame`, a control frame that enables/disables speech
+  transcription in STT services.
+
+## [0.0.48] - 2024-11-10 "Antonio release"
+
+### Added
+
+- There's now an input queue in each frame processor. When you call
+  `FrameProcessor.push_frame()` this will internally call
+  `FrameProcessor.queue_frame()` on the next processor (upstream or downstream)
+  and the frame will be internally queued (except system frames). Then, the
+  queued frames will get processed. With this input queue it is also possible
+  for FrameProcessors to block processing more frames by calling
+  `FrameProcessor.pause_processing_frames()`. The way to resume processing
+  frames is by calling `FrameProcessor.resume_processing_frames()`.
+
+- Added audio filter `NoisereduceFilter`.
+
+- Introduce input transport audio filters (`BaseAudioFilter`). Audio filters can
+  be used to remove background noises before audio is sent to VAD.
+
+- Introduce output transport audio mixers (`BaseAudioMixer`). Output transport
+  audio mixers can be used, for example, to add background sounds or any other
+  audio mixing functionality before the output audio is actually written to the
+  transport.
+
+- Added `GatedOpenAILLMContextAggregator`. This aggregator keeps the last
+  received OpenAI LLM context frame and it doesn't let it through until the
+  notifier is notified.
+
+- Added `WakeNotifierFilter`. This processor expects a list of frame types and
+  will execute a given callback predicate when a frame of any of those type is
+  being processed. If the callback returns true the notifier will be notified.
+
+- Added `NullFilter`. A null filter doesn't push any frames upstream or
+  downstream. This is usually used to disable one of the pipelines in
+  `ParallelPipeline`.
+
+- Added `EventNotifier`. This can be used as a very simple synchronization
+  feature between processors.
+
+- Added `TavusVideoService`. This is an integration for Tavus digital twins.
+  (see https://www.tavus.io/)
+
+- Added `DailyTransport.update_subscriptions()`. This allows you to have fine
+  grained control of what media subscriptions you want for each participant in a
+  room.
+
+- Added audio filter `KrispFilter`.
+
+### Changed
+
+- The following `DailyTransport` functions are now `async` which means they need
+  to be awaited: `start_dialout`, `stop_dialout`, `start_recording`,
+  `stop_recording`, `capture_participant_transcription` and
+  `capture_participant_video`.
+
+- Changed default output sample rate to 24000. This changes all TTS service to
+  output to 24000 and also the default output transport sample rate. This
+  improves audio quality at the cost of some extra bandwidth.
+
+- `AzureTTSService` now uses Azure websockets instead of HTTP requests.
+
+- The previous `AzureTTSService` HTTP implementation is now
+  `AzureHttpTTSService`.
+
+### Fixed
+
+- Websocket transports (FastAPI and Websocket) now synchronize with time before
+  sending data. This allows for interruptions to just work out of the box.
+
+- Improved bot speaking detection for all TTS services by using actual bot
+  audio.
+
+- Fixed an issue that was generating constant bot started/stopped speaking
+  frames for HTTP TTS services.
+
+- Fixed an issue that was causing stuttering with AWS TTS service.
+
+- Fixed an issue with PlayHTTTSService, where the TTFB metrics were reporting
+  very small time values.
+
+- Fixed an issue where AzureTTSService wasn't initializing the specified
+  language.
+
+### Other
+
+- Add `23-bot-background-sound.py` foundational example.
+
+- Added a new foundational example `22-natural-conversation.py`. This example
+  shows how to achieve a more natural conversation detecting when the user ends
+  statement.
+
+## [0.0.47] - 2024-10-22
 
 ### Added
 
@@ -15,7 +128,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a foundational example for Gladia transcription:
   `13c-gladia-transcription.py`
 
+### Changed
+
+- Updated `GladiaSTTService` to use the V2 API.
+
+- Changed `DailyTransport` transcription model to `nova-2-general`.
+
 ### Fixed
+
+- Fixed an issue that would cause an import error when importing
+  `SileroVADAnalyzer` from the old package `pipecat.vad.silero`.
 
 - Fixed `enable_usage_metrics` to control LLM/TTS usage metrics separately
   from `enable_metrics`.
@@ -31,6 +153,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PlayHTHttpTTSService`.
 
 ### Changed
+
+- Changed `DeepgramSTTService` model to `nova-2-general`.
 
 - Moved `SileroVAD` audio processor to `processors.audio.vad`.
 

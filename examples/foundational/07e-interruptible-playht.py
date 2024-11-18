@@ -40,7 +40,6 @@ async def main():
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
-                audio_out_sample_rate=16000,
                 transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
@@ -50,7 +49,7 @@ async def main():
         tts = PlayHTTTSService(
             user_id=os.getenv("PLAYHT_USER_ID"),
             api_key=os.getenv("PLAYHT_API_KEY"),
-            voice_url="s3://voice-cloning-zero-shot/801a663f-efd0-4254-98d0-5c175514c3e8/jennifer/manifest.json",
+            voice_url="s3://voice-cloning-zero-shot/d9ff78ba-d016-47f6-b0ef-dd630f59414e/female-cs/manifest.json",
             params=PlayHTTTSService.InputParams(language=Language.EN),
         )
 
@@ -89,7 +88,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])

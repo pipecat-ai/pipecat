@@ -1,14 +1,20 @@
-<div align="center">
+<h1><div align="center">
  <img alt="pipecat" width="300px" height="auto" src="https://raw.githubusercontent.com/pipecat-ai/pipecat/main/pipecat.png">
-</div>
-
-# Pipecat
+</div></h1>
 
 [![PyPI](https://img.shields.io/pypi/v/pipecat-ai)](https://pypi.org/project/pipecat-ai) [![Discord](https://img.shields.io/discord/1239284677165056021)](https://discord.gg/pipecat) <a href="https://app.commanddash.io/agent/github_pipecat-ai_pipecat"><img src="https://img.shields.io/badge/AI-Code%20Agent-EB9FDA"></a>
 
-`pipecat` is a framework for building voice (and multimodal) conversational agents. Things like personal coaches, meeting assistants, [story-telling toys for kids](https://storytelling-chatbot.fly.dev/), customer support bots, [intake flows](https://www.youtube.com/watch?v=lDevgsp9vn0), and snarky social companions.
+Pipecat is an open source Python framework for building voice and multimodal conversational agents. It handles the complex orchestration of AI services, network transport, audio processing, and multimodal interactions, letting you focus on creating engaging experiences.
 
-Take a look at some example apps:
+## What you can build
+
+- **Voice Assistants**: [Natural, real-time conversations with AI](https://demo.dailybots.ai/)
+- **Interactive Agents**: Personal coaches and meeting assistants
+- **Multimodal Apps**: Combine voice, video, images, and text
+- **Creative Tools**: [Story-telling experiences](https://storytelling-chatbot.fly.dev/) and social companions
+- **Business Solutions**: [Customer intake flows](https://www.youtube.com/watch?v=lDevgsp9vn0) and support bots
+
+## See it in action
 
 <p float="left">
     <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/simple-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat/main/examples/simple-chatbot/image.png" width="280" /></a>&nbsp;
@@ -18,33 +24,52 @@ Take a look at some example apps:
     <a href="https://github.com/pipecat-ai/pipecat/tree/main/examples/moondream-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat/main/examples/moondream-chatbot/image.png" width="280" /></a>
 </p>
 
-## Getting started with voice agents
+## Key features
+
+- **Voice-first Design**: Built-in speech recognition, TTS, and conversation handling
+- **Flexible Integration**: Works with popular AI services (OpenAI, ElevenLabs, etc.)
+- **Pipeline Architecture**: Build complex apps from simple, reusable components
+- **Real-time Processing**: Frame-based pipeline architecture for fluid interactions
+- **Production Ready**: Enterprise-grade WebRTC and Websocket support
+
+## Getting started
 
 You can get started with Pipecat running on your local machine, then move your agent processes to the cloud when you’re ready. You can also add a 📞 telephone number, 🖼️ image output, 📺 video input, use different LLMs, and more.
 
 ```shell
-# install the module
+# Install the module
 pip install pipecat-ai
 
-# set up an .env file with API keys
+# Set up your environment
 cp dot-env.template .env
 ```
 
-By default, in order to minimize dependencies, only the basic framework functionality is available. Some third-party AI services require additional dependencies that you can install with:
+To keep things lightweight, only the core framework is included by default. If you need support for third-party AI services, you can add the necessary dependencies with:
 
 ```shell
 pip install "pipecat-ai[option,...]"
 ```
 
-Your project may or may not need these, so they're made available as optional requirements. Here is a list:
+Available options include:
 
-- **AI services**: `anthropic`, `assemblyai`, `aws`, `azure`, `deepgram`, `gladia`, `google`, `fal`, `lmnt`, `moondream`, `openai`, `openpipe`, `playht`, `silero`, `whisper`, `xtts`
-- **Transports**: `local`, `websocket`, `daily`
+| Category            | Services                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Install Command Example               |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Speech-to-Text      | [AssemblyAI](https://docs.pipecat.ai/api-reference/services/stt/assemblyai), [Azure](https://docs.pipecat.ai/api-reference/services/stt/azure), [Deepgram](https://docs.pipecat.ai/api-reference/services/stt/deepgram), [Gladia](https://docs.pipecat.ai/api-reference/services/stt/gladia), [Whisper](https://docs.pipecat.ai/api-reference/services/stt/whisper)                                                                                                                                                                                                                                                                                                                                                                                                               | `pip install "pipecat-ai[deepgram]"`  |
+| LLMs                | [Anthropic](https://docs.pipecat.ai/api-reference/services/llm/anthropic), [Azure](https://docs.pipecat.ai/api-reference/services/llm/azure), [Fireworks AI](https://docs.pipecat.ai/api-reference/services/llm/fireworks), [Gemini](https://docs.pipecat.ai/api-reference/services/llm/gemini), [Ollama](https://docs.pipecat.ai/api-reference/services/llm/ollama), [OpenAI](https://docs.pipecat.ai/api-reference/services/llm/openai), [Together AI](https://docs.pipecat.ai/api-reference/services/llm/together)                                                                                                                                                                                                                                                             | `pip install "pipecat-ai[openai]"`    |
+| Text-to-Speech      | [AWS](https://docs.pipecat.ai/api-reference/services/tts/aws), [Azure](https://docs.pipecat.ai/api-reference/services/tts/azure), [Cartesia](https://docs.pipecat.ai/api-reference/services/tts/cartesia), [Deepgram](https://docs.pipecat.ai/api-reference/services/tts/deepgram), [ElevenLabs](https://docs.pipecat.ai/api-reference/services/tts/elevenlabs), [Google](https://docs.pipecat.ai/api-reference/services/tts/google), [LMNT](https://docs.pipecat.ai/api-reference/services/tts/lmnt), [OpenAI](https://docs.pipecat.ai/api-reference/services/tts/openai), [PlayHT](https://docs.pipecat.ai/api-reference/services/tts/playht), [Rime](https://docs.pipecat.ai/api-reference/services/tts/rime), [XTTS](https://docs.pipecat.ai/api-reference/services/tts/xtts) | `pip install "pipecat-ai[cartesia]"`  |
+| Speech-to-Speech    | [OpenAI Realtime](https://docs.pipecat.ai/api-reference/services/s2s/openai)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `pip install "pipecat-ai[openai]"`    |
+| Transport           | [Daily (WebRTC)](https://docs.pipecat.ai/api-reference/services/transport/daily), WebSocket, Local                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `pip install "pipecat-ai[daily]"`     |
+| Video               | [Tavus](https://docs.pipecat.ai/api-reference/services/video/tavus)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `pip install "pipecat-ai[tavus]"`     |
+| Vision & Image      | [Moondream](https://docs.pipecat.ai/api-reference/services/vision/moondream), [fal](https://docs.pipecat.ai/api-reference/services/image-generation/fal)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | `pip install "pipecat-ai[moondream]"` |
+| Audio Processing    | [Silero VAD](https://docs.pipecat.ai/api-reference/utilities/audio/silero-vad-analyzer), [Krisp](https://docs.pipecat.ai/api-reference/utilities/audio/krisp-filter), [Noisereduce](https://docs.pipecat.ai/api-reference/utilities/audio/noisereduce-filter)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `pip install "pipecat-ai[silero]"`    |
+| Analytics & Metrics | [Canonical AI](https://docs.pipecat.ai/api-reference/services/analytics/canonical), [Sentry](https://docs.pipecat.ai/api-reference/services/analytics/sentry)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `pip install "pipecat-ai[canonical]"` |
+
+📚 [View full services documentation →](https://docs.pipecat.ai/api-reference/services/supported-services)
 
 ## Code examples
 
-- [foundational](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational) — small snippets that build on each other, introducing one or two concepts at a time
-- [example apps](https://github.com/pipecat-ai/pipecat/tree/main/examples/) — complete applications that you can use as starting points for development
+- [Foundational](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational) — small snippets that build on each other, introducing one or two concepts at a time
+- [Example apps](https://github.com/pipecat-ai/pipecat/tree/main/examples/) — complete applications that you can use as starting points for development
 
 ## A simple voice agent running locally
 
@@ -64,7 +89,7 @@ async def main():
   # Use Daily as a real-time media transport (WebRTC)
   transport = DailyTransport(
     room_url=...,
-    token=...,
+    token="", # leave empty. Note: token is _not_ your api key
     bot_name="Bot Name",
     params=DailyParams(audio_out_enabled=True))
 
@@ -109,7 +134,7 @@ Run it with:
 python app.py
 ```
 
-Daily provides a prebuilt WebRTC user interface. Whilst the app is running, you can visit at `https://<yourdomain>.daily.co/<room_url>` and listen to the bot say hello!
+Daily provides a prebuilt WebRTC user interface. While the app is running, you can visit at `https://<yourdomain>.daily.co/<room_url>` and listen to the bot say hello!
 
 ## WebRTC for production use
 
@@ -118,16 +143,6 @@ WebSockets are fine for server-to-server communication or for initial developmen
 One way to get up and running quickly with WebRTC is to sign up for a Daily developer account. Daily gives you SDKs and global infrastructure for audio (and video) routing. Every account gets 10,000 audio/video/transcription minutes free each month.
 
 Sign up [here](https://dashboard.daily.co/u/signup) and [create a room](https://docs.daily.co/reference/rest-api/rooms) in the developer Dashboard.
-
-## What is VAD?
-
-Voice Activity Detection &mdash; very important for knowing when a user has finished speaking to your bot. If you are not using press-to-talk, and want Pipecat to detect when the user has finished talking, VAD is an essential component for a natural feeling conversation.
-
-Pipecat makes use of WebRTC VAD by default when using a WebRTC transport layer. Optionally, you can use Silero VAD for improved accuracy at the cost of higher CPU usage.
-
-```shell
-pip install pipecat-ai[silero]
-```
 
 ## Hacking on the framework itself
 
@@ -178,7 +193,7 @@ You can use [use-package](https://github.com/jwiegley/use-package) to install [e
   :ensure t
   :hook ((python-mode . lazy-ruff-mode))
   :config
-  (setq lazy-ruff-format-command "ruff format --config line-length=100")
+  (setq lazy-ruff-format-command "ruff format")
   (setq lazy-ruff-only-format-block t)
   (setq lazy-ruff-only-format-region t)
   (setq lazy-ruff-only-format-buffer t))
@@ -197,18 +212,32 @@ You can use [use-package](https://github.com/jwiegley/use-package) to install [e
 ### Visual Studio Code
 
 Install the
-[Ruff](https://marketplace.visualstudio.com/items?itemName=charliermarsh.ruff) extension. Then edit the user settings (_Ctrl-Shift-P_ `Open User Settings (JSON)`) and set it as the default Python formatter, enable formatting on save and configure `ruff` arguments:
+[Ruff](https://marketplace.visualstudio.com/items?itemName=charliermarsh.ruff) extension. Then edit the user settings (_Ctrl-Shift-P_ `Open User Settings (JSON)`) and set it as the default Python formatter, and enable formatting on save:
 
 ```json
 "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true
-},
-"ruff.format.args": ["--config", "line-length=100"]
+}
 ```
+
+## Contributing
+
+We welcome contributions from the community! Whether you're fixing bugs, improving documentation, or adding new features, here's how you can help:
+
+- **Found a bug?** Open an [issue](https://github.com/pipecat-ai/pipecat/issues)
+- **Have a feature idea?** Start a [discussion](https://discord.gg/pipecat)
+- **Want to contribute code?** Check our [CONTRIBUTING.md](CONTRIBUTING.md) guide
+- **Documentation improvements?** [Docs](https://github.com/pipecat-ai/docs) PRs are always welcome
+
+Before submitting a pull request, please check existing issues and PRs to avoid duplicates.
+
+We aim to review all contributions promptly and provide constructive feedback to help get your changes merged.
 
 ## Getting help
 
 ➡️ [Join our Discord](https://discord.gg/pipecat)
+
+➡️ [Read the docs](https://docs.pipecat.ai)
 
 ➡️ [Reach us on X](https://x.com/pipecat_ai)

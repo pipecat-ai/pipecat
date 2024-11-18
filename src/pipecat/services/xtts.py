@@ -31,6 +31,34 @@ from loguru import logger
 # https://github.com/coqui-ai/xtts-streaming-server
 
 
+def language_to_xtts_language(language: Language) -> str | None:
+    language_map = {
+        Language.CS: "cs",
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.EN_US: "en",
+        Language.EN_AU: "en",
+        Language.EN_GB: "en",
+        Language.EN_NZ: "en",
+        Language.EN_IN: "en",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.HI: "hi",
+        Language.HU: "hu",
+        Language.IT: "it",
+        Language.JA: "ja",
+        Language.KO: "ko",
+        Language.NL: "nl",
+        Language.PL: "pl",
+        Language.PT: "pt",
+        Language.PT_BR: "pt",
+        Language.RU: "ru",
+        Language.TR: "tr",
+        Language.ZH: "zh-cn",
+    }
+    return language_map.get(language)
+
+
 class XTTSService(TTSService):
     def __init__(
         self,
@@ -39,9 +67,10 @@ class XTTSService(TTSService):
         language: Language,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
+        sample_rate: int = 24000,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = {
             "language": self.language_to_service_language(language),
@@ -55,47 +84,7 @@ class XTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.CS:
-                return "cs"
-            case Language.DE:
-                return "de"
-            case (
-                Language.EN
-                | Language.EN_US
-                | Language.EN_AU
-                | Language.EN_GB
-                | Language.EN_NZ
-                | Language.EN_IN
-            ):
-                return "en"
-            case Language.ES:
-                return "es"
-            case Language.FR:
-                return "fr"
-            case Language.HI:
-                return "hi"
-            case Language.HU:
-                return "hu"
-            case Language.IT:
-                return "it"
-            case Language.JA:
-                return "ja"
-            case Language.KO:
-                return "ko"
-            case Language.NL:
-                return "nl"
-            case Language.PL:
-                return "pl"
-            case Language.PT | Language.PT_BR:
-                return "pt"
-            case Language.RU:
-                return "ru"
-            case Language.TR:
-                return "tr"
-            case Language.ZH:
-                return "zh-cn"
-        return None
+        return language_to_xtts_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -150,28 +139,30 @@ class XTTSService(TTSService):
             async for chunk in r.content.iter_chunked(1024):
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
-                    # Append new chunk to the buffer
+                    # Append new chunk to the buffer.
                     buffer.extend(chunk)
 
-                    # Check if buffer has enough data for processing
+                    # Check if buffer has enough data for processing.
                     while (
                         len(buffer) >= 48000
                     ):  # Assuming at least 0.5 seconds of audio data at 24000 Hz
-                        # Process the buffer up to a safe size for resampling
+                        # Process the buffer up to a safe size for resampling.
                         process_data = buffer[:48000]
-                        # Remove processed data from buffer
+                        # Remove processed data from buffer.
                         buffer = buffer[48000:]
 
-                        # Resample the audio from 24000 Hz to 16000 Hz
-                        resampled_audio = resample_audio(bytes(process_data), 24000, 16000)
+                        # XTTS uses 24000 so we need to resample to our desired rate.
+                        resampled_audio = resample_audio(
+                            bytes(process_data), 24000, self._sample_rate
+                        )
                         # Create the frame with the resampled audio
-                        frame = TTSAudioRawFrame(resampled_audio, 16000, 1)
+                        frame = TTSAudioRawFrame(resampled_audio, self._sample_rate, 1)
                         yield frame
 
-            # Process any remaining data in the buffer
+            # Process any remaining data in the buffer.
             if len(buffer) > 0:
-                resampled_audio = resample_audio(bytes(buffer), 24000, 16000)
-                frame = TTSAudioRawFrame(resampled_audio, 16000, 1)
+                resampled_audio = resample_audio(bytes(buffer), 24000, self._sample_rate)
+                frame = TTSAudioRawFrame(resampled_audio, self._sample_rate, 1)
                 yield frame
 
             yield TTSStoppedFrame()

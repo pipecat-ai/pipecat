@@ -13,12 +13,15 @@ from loguru import logger
 from pydantic import BaseModel, model_validator
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -35,6 +38,50 @@ except ModuleNotFoundError as e:
         "In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`. Also, set `ELEVENLABS_API_KEY` environment variable."
     )
     raise Exception(f"Missing module: {e}")
+
+ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
+
+
+def language_to_elevenlabs_language(language: Language) -> str | None:
+    language_map = {
+        Language.BG: "bg",
+        Language.ZH: "zh",
+        Language.CS: "cs",
+        Language.DA: "da",
+        Language.NL: "nl",
+        Language.EN: "en",
+        Language.EN_US: "en",
+        Language.EN_AU: "en",
+        Language.EN_GB: "en",
+        Language.EN_NZ: "en",
+        Language.EN_IN: "en",
+        Language.FI: "fi",
+        Language.FR: "fr",
+        Language.FR_CA: "fr",
+        Language.DE: "de",
+        Language.DE_CH: "de",
+        Language.EL: "el",
+        Language.HI: "hi",
+        Language.HU: "hu",
+        Language.ID: "id",
+        Language.IT: "it",
+        Language.JA: "ja",
+        Language.KO: "ko",
+        Language.MS: "ms",
+        Language.NO: "no",
+        Language.PL: "pl",
+        Language.PT: "pt-PT",
+        Language.PT_BR: "pt-BR",
+        Language.RO: "ro",
+        Language.RU: "ru",
+        Language.SK: "sk",
+        Language.ES: "es",
+        Language.SV: "sv",
+        Language.TR: "tr",
+        Language.UK: "uk",
+        Language.VI: "vi",
+    }
+    return language_map.get(language)
 
 
 def sample_rate_from_output_format(output_format: str) -> int:
@@ -74,7 +121,6 @@ def calculate_word_times(
 class ElevenLabsTTSService(WordTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
-        output_format: Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"] = "pcm_16000"
         optimize_streaming_latency: Optional[str] = None
         stability: Optional[float] = None
         similarity_boost: Optional[float] = None
@@ -98,6 +144,7 @@ class ElevenLabsTTSService(WordTTSService):
         voice_id: str,
         model: str = "eleven_turbo_v2_5",
         url: str = "wss://api.elevenlabs.io",
+        output_format: ElevenLabsOutputFormat = "pcm_24000",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -120,18 +167,18 @@ class ElevenLabsTTSService(WordTTSService):
             push_text_frames=False,
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
-            sample_rate=sample_rate_from_output_format(params.output_format),
+            sample_rate=sample_rate_from_output_format(output_format),
             **kwargs,
         )
 
         self._api_key = api_key
         self._url = url
         self._settings = {
-            "sample_rate": sample_rate_from_output_format(params.output_format),
+            "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
-            "output_format": params.output_format,
+            else "en",
+            "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
             "similarity_boost": params.similarity_boost,
@@ -153,73 +200,7 @@ class ElevenLabsTTSService(WordTTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.BG:
-                return "bg"
-            case Language.ZH:
-                return "zh"
-            case Language.CS:
-                return "cs"
-            case Language.DA:
-                return "da"
-            case Language.NL:
-                return "nl"
-            case (
-                Language.EN
-                | Language.EN_US
-                | Language.EN_AU
-                | Language.EN_GB
-                | Language.EN_NZ
-                | Language.EN_IN
-            ):
-                return "en"
-            case Language.FI:
-                return "fi"
-            case Language.FR | Language.FR_CA:
-                return "fr"
-            case Language.DE | Language.DE_CH:
-                return "de"
-            case Language.EL:
-                return "el"
-            case Language.HI:
-                return "hi"
-            case Language.HU:
-                return "hu"
-            case Language.ID:
-                return "id"
-            case Language.IT:
-                return "it"
-            case Language.JA:
-                return "ja"
-            case Language.KO:
-                return "ko"
-            case Language.MS:
-                return "ms"
-            case Language.NO:
-                return "no"
-            case Language.PL:
-                return "pl"
-            case Language.PT:
-                return "pt-PT"
-            case Language.PT_BR:
-                return "pt-BR"
-            case Language.RO:
-                return "ro"
-            case Language.RU:
-                return "ru"
-            case Language.SK:
-                return "sk"
-            case Language.ES:
-                return "es"
-            case Language.SV:
-                return "sv"
-            case Language.TR:
-                return "tr"
-            case Language.UK:
-                return "uk"
-            case Language.VI:
-                return "vi"
-        return None
+        return language_to_elevenlabs_language(language)
 
     def _set_voice_settings(self):
         voice_settings = {}
@@ -281,7 +262,20 @@ class ElevenLabsTTSService(WordTTSService):
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
             self._started = False
             if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("LLMFullResponseEndFrame", 0)])
+                await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # If we received a TTSSpeakFrame and the LLM response included text (it
+        # might be that it's only a function calling response) we pause
+        # processing more frames until we receive a BotStoppedSpeakingFrame.
+        if isinstance(frame, TTSSpeakFrame):
+            await self.pause_processing_frames()
+        elif isinstance(frame, LLMFullResponseEndFrame) and self._started:
+            await self.pause_processing_frames()
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self.resume_processing_frames()
 
     async def _connect(self):
         try:

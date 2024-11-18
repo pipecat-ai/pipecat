@@ -38,4 +38,4 @@ jobs:
         id: ruff
         run: |
           source .venv/bin/activate
-          ruff format --config line-length=100 --diff --exclude "*_pb2.py"
+          ruff format --diff

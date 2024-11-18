@@ -14,13 +14,16 @@ from loguru import logger
 from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -41,36 +44,28 @@ except ModuleNotFoundError as e:
 
 
 def language_to_cartesia_language(language: Language) -> str | None:
-    match language:
-        case Language.DE:
-            return "de"
-        case (
-            Language.EN
-            | Language.EN_US
-            | Language.EN_GB
-            | Language.EN_AU
-            | Language.EN_NZ
-            | Language.EN_IN
-        ):
-            return "en"
-        case Language.ES:
-            return "es"
-        case Language.FR | Language.FR_CA:
-            return "fr"
-        case Language.JA:
-            return "ja"
-        case Language.PT | Language.PT_BR:
-            return "pt"
-        case Language.ZH | Language.ZH_TW:
-            return "zh"
-    return None
+    language_map = {
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.EN_US: "en",
+        Language.EN_GB: "en",
+        Language.EN_AU: "en",
+        Language.EN_NZ: "en",
+        Language.EN_IN: "en",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.FR_CA: "fr",
+        Language.JA: "ja",
+        Language.PT: "pt",
+        Language.PT_BR: "pt",
+        Language.ZH: "zh",
+        Language.ZH_TW: "zh",
+    }
+    return language_map.get(language)
 
 
 class CartesiaTTSService(WordTTSService):
     class InputParams(BaseModel):
-        encoding: Optional[str] = "pcm_s16le"
-        sample_rate: Optional[int] = 16000
-        container: Optional[str] = "raw"
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
@@ -83,6 +78,9 @@ class CartesiaTTSService(WordTTSService):
         cartesia_version: str = "2024-06-10",
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str = "sonic-english",
+        sample_rate: int = 24000,
+        encoding: str = "pcm_s16le",
+        container: str = "raw",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -99,7 +97,7 @@ class CartesiaTTSService(WordTTSService):
         super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,
-            sample_rate=params.sample_rate,
+            sample_rate=sample_rate,
             **kwargs,
         )
 
@@ -108,13 +106,13 @@ class CartesiaTTSService(WordTTSService):
         self._url = url
         self._settings = {
             "output_format": {
-                "container": params.container,
-                "encoding": params.encoding,
-                "sample_rate": params.sample_rate,
+                "container": container,
+                "encoding": encoding,
+                "sample_rate": sample_rate,
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en",
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -225,14 +223,13 @@ class CartesiaTTSService(WordTTSService):
                 if not msg or msg["context_id"] != self._context_id:
                     continue
                 if msg["type"] == "done":
+                    await self.push_frame(TTSStoppedFrame())
                     await self.stop_ttfb_metrics()
                     # Unset _context_id but not the _context_id_start_timestamp
                     # because we are likely still playing out audio and need the
                     # timestamp to set send context frames.
                     self._context_id = None
-                    await self.add_word_timestamps(
-                        [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0)]
-                    )
+                    await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
                 elif msg["type"] == "timestamps":
                     await self.add_word_timestamps(
                         list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
@@ -257,6 +254,19 @@ class CartesiaTTSService(WordTTSService):
             pass
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # If we received a TTSSpeakFrame and the LLM response included text (it
+        # might be that it's only a function calling response) we pause
+        # processing more frames until we receive a BotStoppedSpeakingFrame.
+        if isinstance(frame, TTSSpeakFrame):
+            await self.pause_processing_frames()
+        elif isinstance(frame, LLMFullResponseEndFrame) and self._context_id:
+            await self.pause_processing_frames()
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self.resume_processing_frames()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -288,9 +298,6 @@ class CartesiaTTSService(WordTTSService):
 
 class CartesiaHttpTTSService(TTSService):
     class InputParams(BaseModel):
-        encoding: Optional[str] = "pcm_s16le"
-        sample_rate: Optional[int] = 16000
-        container: Optional[str] = "raw"
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
@@ -302,21 +309,24 @@ class CartesiaHttpTTSService(TTSService):
         voice_id: str,
         model: str = "sonic-english",
         base_url: str = "https://api.cartesia.ai",
+        sample_rate: int = 24000,
+        encoding: str = "pcm_s16le",
+        container: str = "raw",
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._settings = {
             "output_format": {
-                "container": params.container,
-                "encoding": params.encoding,
-                "sample_rate": params.sample_rate,
+                "container": container,
+                "encoding": encoding,
+                "sample_rate": sample_rate,
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en",
             "speed": params.speed,
             "emotion": params.emotion,
         }
