@@ -44,24 +44,27 @@ except ModuleNotFoundError as e:
 
 
 def language_to_cartesia_language(language: Language) -> str | None:
-    language_map = {
+    BASE_LANGUAGES = {
         Language.DE: "de",
         Language.EN: "en",
-        Language.EN_US: "en",
-        Language.EN_GB: "en",
-        Language.EN_AU: "en",
-        Language.EN_NZ: "en",
-        Language.EN_IN: "en",
         Language.ES: "es",
         Language.FR: "fr",
-        Language.FR_CA: "fr",
         Language.JA: "ja",
         Language.PT: "pt",
-        Language.PT_BR: "pt",
         Language.ZH: "zh",
-        Language.ZH_TW: "zh",
     }
-    return language_map.get(language)
+
+    result = BASE_LANGUAGES.get(language)
+
+    # If not found in base languages, try to find the base language from a variant
+    if not result:
+        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
+        lang_str = str(language.value)
+        base_code = lang_str.split("-")[0].lower()
+        # Look up the base code in our supported languages
+        result = base_code if base_code in BASE_LANGUAGES.values() else None
+
+    return result
 
 
 class CartesiaTTSService(WordTTSService):
