@@ -7,6 +7,7 @@
 from typing import Any, AsyncGenerator, Dict
 
 import aiohttp
+from loguru import logger
 
 from pipecat.audio.utils import resample_audio
 from pipecat.frames.frames import (
@@ -20,9 +21,6 @@ from pipecat.frames.frames import (
 from pipecat.services.ai_services import TTSService
 from pipecat.transcriptions.language import Language
 
-from loguru import logger
-
-
 # The server below can connect to XTTS through a local running docker
 #
 # Docker command: $ docker run --gpus=all -e COQUI_TOS_AGREED=1 --rm -p 8000:80 ghcr.io/coqui-ai/xtts-streaming-server:latest-cuda121
@@ -32,15 +30,10 @@ from loguru import logger
 
 
 def language_to_xtts_language(language: Language) -> str | None:
-    language_map = {
+    BASE_LANGUAGES = {
         Language.CS: "cs",
         Language.DE: "de",
         Language.EN: "en",
-        Language.EN_US: "en",
-        Language.EN_AU: "en",
-        Language.EN_GB: "en",
-        Language.EN_NZ: "en",
-        Language.EN_IN: "en",
         Language.ES: "es",
         Language.FR: "fr",
         Language.HI: "hi",
@@ -51,12 +44,28 @@ def language_to_xtts_language(language: Language) -> str | None:
         Language.NL: "nl",
         Language.PL: "pl",
         Language.PT: "pt",
-        Language.PT_BR: "pt",
         Language.RU: "ru",
         Language.TR: "tr",
+        # Special case for Chinese base language
         Language.ZH: "zh-cn",
     }
-    return language_map.get(language)
+
+    result = BASE_LANGUAGES.get(language)
+
+    # If not found in base languages, try to find the base language from a variant
+    if not result:
+        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
+        lang_str = str(language.value)
+        base_code = lang_str.split("-")[0].lower()
+
+        # Special handling for Chinese variants
+        if base_code == "zh":
+            result = "zh-cn"
+        else:
+            # Look up the base code in our supported languages
+            result = base_code if base_code in BASE_LANGUAGES.values() else None
+
+    return result
 
 
 class XTTSService(TTSService):
