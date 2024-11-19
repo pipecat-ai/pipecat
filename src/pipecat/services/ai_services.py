@@ -289,7 +289,7 @@ class TTSService(AIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        print(f"_---_ai_services.py process_frame * frame: {frame}")
+        # print(f"_---_ai_services.py process_frame * frame: {frame}")
 
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)

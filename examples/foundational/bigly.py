@@ -22,16 +22,25 @@ from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer, VADParams
-from pipecat.frames.frames import EndFrame, LLMMessagesFrame, TextFrame
+from pipecat.frames.frames import (
+    BotSpeakingFrame,
+    EndFrame,
+    Frame,
+    InputAudioRawFrame,
+    LLMMessagesFrame,
+    TTSAudioRawFrame,
+    TextFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper
 from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper
 
 load_dotenv(override=True)
@@ -41,12 +50,13 @@ logger.add(sys.stderr, level="DEBUG")
 PARTICIPANT_ID = [""]  # this will get filled in later
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
-DAILY_API_KEY = os.getenv("DAILY_API_KEY")
+print(f"_____bigly.py * DEEPGRAM_API_KEY: {DEEPGRAM_API_KEY}")
+DAILY_API_KEY = os.getenv("DAILY_BOTS_API_KEY")
 CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY")
 
 DAILY_ROOM_NAME = "bigs"  #### ENSURE THIS ROOM HAS enable_dialout SET (and exp)
 
-TO = "+16104204483"
+TO = "+12097135125"  # Daily bot that pretends to be a customer asking about solar panels
 # FROM_DAILY_CALLER_ID = "+13373378501"
 
 QUESTION_AFFIRMATION = [
@@ -75,6 +85,24 @@ VOICEMAIL_EXAMPLES = [
 ]
 
 
+class DebugProcessor(FrameProcessor):
+    def __init__(self, name, **kwargs):
+        self._name = name
+        super().__init__(**kwargs)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if not (
+            isinstance(frame, InputAudioRawFrame)
+            or isinstance(frame, BotSpeakingFrame)
+            or isinstance(frame, UserStoppedSpeakingFrame)
+            or isinstance(frame, TTSAudioRawFrame)
+            or isinstance(frame, TextFrame)
+        ):
+            logger.debug(f"--- DebugProcessor {self._name}: {frame} {direction}")
+        await self.push_frame(frame, direction)
+
+
 async def configure(aiohttp_session: aiohttp.ClientSession):
     (url, token, _) = await configure_with_args(aiohttp_session)
     return (url, token)
@@ -99,7 +127,7 @@ async def configure_with_args(
     args, unknown = parser.parse_known_args()
 
     #####
-    url = f"https://pc-34b1bdc94a7741719b57b2efb82d658e.daily.co/{DAILY_ROOM_NAME}"
+    url = f"https://pc-5b722fad4e9b47df8faa50cf3626267d.daily.co/{DAILY_ROOM_NAME}"
     # url = f"https://biglysales-team.daily.co/{DAILY_ROOM_NAME}"
     key = DAILY_API_KEY
     print(f"_____bigly.py * key: {key}")
@@ -229,6 +257,7 @@ async def transfer_call(
     context: OpenAILLMContext,
     result_callback,
 ) -> None:
+    print(f"_____bigly.py * transfer_call * _args: {_args}")
     await result_callback("CALL TRANSFERED")
 
 
@@ -426,12 +455,15 @@ async def main():
         messages = [
             {
                 "role": "system",
-                "content": """Main Prompt""",
+                "content": """You are a friendly sales person for a solar panel company. Your responses will be converted to audio. Please do not include any special characters in your response other than '!' or '?'. """,
             },
         ]
 
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
+
+        dp_post_llm = DebugProcessor('post_llm')
+        dp_post_tts = DebugProcessor('post_tts')
 
         pipeline = Pipeline(
             [
@@ -439,7 +471,9 @@ async def main():
                 stt,
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
+                dp_post_llm,  # Debug Processor
                 tts,  # TTS
+                # dp_post_tts,  # Debug Processor
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
             ]
@@ -484,9 +518,9 @@ async def main():
             def _handle_dialout_completion(task: asyncio.Task) -> None:
                 asyncio.create_task(_dialout_task_exception(task))
 
-            if state == "joined":
-                task = transport.input().get_event_loop().create_task(_dialout_retry_handler())
-                task.add_done_callback(_handle_dialout_completion)
+            # if state == "joined":
+            #     task = transport.input().get_event_loop().create_task(_dialout_retry_handler())
+            #     task.add_done_callback(_handle_dialout_completion)
 
         # Event handler for on_first_participant_joined
         @transport.event_handler("on_first_participant_joined")
