@@ -11,10 +11,10 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+from pipecat_flows import FlowManager
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.flows.manager import FlowManager
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -64,7 +64,7 @@ flow_config = {
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are an order-taking assistant. You must ALWAYS use one of the available functions to progress the conversation. For this step, ask the user if they want pizza or sushi, and wait for them to use a function to choose.",
+                    "content": "You are an order-taking assistant. You must ALWAYS use one of the available functions to progress the conversation. For this step, ask the user if they want pizza or sushi, and wait for them to use a function to choose. Start off by greeting them. Be friendly and casual; you're taking an order for food over the phone.",
                 }
             ],
             "functions": [
@@ -95,7 +95,10 @@ flow_config = {
                 - Use the end function ONLY when the user confirms they are done with their order
                 
                 After each size selection, confirm the selection and ask if they want to change it or complete their order.
-                Only use the end function after the user confirms they are satisfied with their order.""",
+                Only use the end function after the user confirms they are satisfied with their order.
+                
+                Start off by acknowledging the user's choice. Once they've chosen a size, ask if they'd like anything else.
+                Remember to be friendly and casual.""",
                 }
             ],
             "functions": [
@@ -139,7 +142,10 @@ flow_config = {
                 - Use the end function ONLY when the user confirms they are done with their order
                 
                 After each roll count selection, confirm the count and ask if they want to change it or complete their order.
-                Only use the end function after the user confirms they are satisfied with their order.""",
+                Only use the end function after the user confirms they are satisfied with their order.
+                
+                Start off by acknowledging the user's choice. Once they've chosen a size, ask if they'd like anything else.
+                Remember to be friendly and casual.""",
                 }
             ],
             "functions": [
