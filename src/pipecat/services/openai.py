@@ -166,6 +166,7 @@ class BaseOpenAILLMService(LLMService):
         params.update(self._settings["extra"])
 
         chunks = await self._client.chat.completions.create(**params)
+        print(f"_____openai.py get_chat_completions * chunks: {chunks}")
         return chunks
 
     async def _stream_chat_completions(
@@ -202,6 +203,8 @@ class BaseOpenAILLMService(LLMService):
         function_name = ""
         arguments = ""
         tool_call_id = ""
+        
+        print(f"_____openai.py * _process_context: tool_call_id {tool_call_id}")
 
         await self.start_ttfb_metrics()
 
@@ -239,6 +242,7 @@ class BaseOpenAILLMService(LLMService):
                 # yield a frame containing the function name and the arguments.
 
                 tool_call = chunk.choices[0].delta.tool_calls[0]
+                print(f"___________________________openai.py * tool_call_id: {tool_call_id}")
                 if tool_call.index != func_idx:
                     functions_list.append(function_name)
                     arguments_list.append(arguments)
@@ -503,6 +507,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
+        print(f"___<1>__openai.py * OpenAIAssistantContextAggregator process_frame frame : {frame}")
         # See note above about not calling push_frame() here.
         if isinstance(frame, StartInterruptionFrame):
             self._function_calls_in_progress.clear()
@@ -525,6 +530,8 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         elif isinstance(frame, OpenAIImageMessageFrame):
             self._pending_image_frame_message = frame
             await self._push_aggregation()
+        else:
+           print(f"___<2>__openai.py * OpenAIAssistantContextAggregator process_frame frame : {frame}")
 
     async def _push_aggregation(self):
         if not (

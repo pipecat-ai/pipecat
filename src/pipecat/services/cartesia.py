@@ -140,6 +140,8 @@ class CartesiaTTSService(WordTTSService):
     def _build_msg(
         self, text: str = "", continue_transcript: bool = True, add_timestamps: bool = True
     ):
+        print(f"_____cartesia.py * _build_msg str: {str}")
+
         voice_config = {}
         voice_config["mode"] = "id"
         voice_config["id"] = self._voice_id

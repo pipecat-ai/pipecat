@@ -289,6 +289,7 @@ class TTSService(AIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+        print(f"_---_ai_services.py process_frame * frame: {frame}")
 
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)
@@ -343,6 +344,7 @@ class TTSService(AIService):
             await self._push_tts_frames(text)
 
     async def _push_tts_frames(self, text: str):
+        print(f"_____ai_services.py * push_tts_frames str: {str}")
         # Don't send only whitespace. This causes problems for some TTS models. But also don't
         # strip all whitespace, as whitespace can influence prosody.
         if not text.strip():
