@@ -1,7 +1,7 @@
 #### run from in pipecat/examples/foundational
 
 
-#
+# 
 # Copyright (c) 2024, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
@@ -22,35 +22,31 @@ from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer, VADParams
-from pipecat.frames.frames import (BotSpeakingFrame, EndFrame, Frame,
-                                   InputAudioRawFrame, LLMMessagesFrame,
-                                   TextFrame, TTSAudioRawFrame,
-                                   UserStoppedSpeakingFrame)
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper
 from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper
 
 load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
-PARTICIPANT_ID = [""]  # this will get filled in later
+PARTICIPANT_ID = [""] # this will get filled in later
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
-print(f"_____bigly.py * DEEPGRAM_API_KEY: {DEEPGRAM_API_KEY}")
-DAILY_API_KEY = os.getenv("DAILY_BOTS_API_KEY")
+DAILY_API_KEY = os.getenv("DAILY_API_KEY")
 CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY")
 
-DAILY_ROOM_NAME = "bigs"  #### ENSURE THIS ROOM HAS enable_dialout SET (and exp)
+DAILY_ROOM_NAME = "bigs" #### ENSURE THIS ROOM HAS enable_dialout SET (and exp)
 
-TO = "+12097135125"  # Daily bot that pretends to be a customer asking about solar panels
+TO = "+12097135125"
 # FROM_DAILY_CALLER_ID = "+13373378501"
 
 QUESTION_AFFIRMATION = [
@@ -78,25 +74,6 @@ VOICEMAIL_EXAMPLES = [
     "We are sorry, there is noneone available to take your call...",
 ]
 
-
-class DebugProcessor(FrameProcessor):
-    def __init__(self, name, **kwargs):
-        self._name = name
-        super().__init__(**kwargs)
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-        if not (
-            isinstance(frame, InputAudioRawFrame)
-            or isinstance(frame, BotSpeakingFrame)
-            or isinstance(frame, UserStoppedSpeakingFrame)
-            or isinstance(frame, TTSAudioRawFrame)
-            or isinstance(frame, TextFrame)
-        ):
-            logger.debug(f"--- DebugProcessor {self._name}: {frame} {direction}")
-        await self.push_frame(frame, direction)
-
-
 async def configure(aiohttp_session: aiohttp.ClientSession):
     (url, token, _) = await configure_with_args(aiohttp_session)
     return (url, token)
@@ -120,8 +97,8 @@ async def configure_with_args(
 
     args, unknown = parser.parse_known_args()
 
-    #####
-    url = f"https://pc-5b722fad4e9b47df8faa50cf3626267d.daily.co/{DAILY_ROOM_NAME}"
+#####
+    url = f"https://hush.daily.co/{DAILY_ROOM_NAME}"
     # url = f"https://biglysales-team.daily.co/{DAILY_ROOM_NAME}"
     key = DAILY_API_KEY
     print(f"_____bigly.py * key: {key}")
@@ -156,7 +133,6 @@ async def cancel_transport_input_task(transport_input) -> None:
     transport_input._audio_task.cancel()
     await transport_input._audio_task
 
-
 def get_cartesia_static_response(text: str, voice_id: str, model_id: str, **kwargs) -> bytes:
     """
     Makes an API call to Cartesia to generate TTS audio bytes.
@@ -177,11 +153,7 @@ def get_cartesia_static_response(text: str, voice_id: str, model_id: str, **kwar
         output_format = kwargs.get("output_format")
         response = requests.post(
             "https://api.cartesia.ai/tts/bytes",
-            headers={
-                "X-API-Key": CARTESIA_API_KEY,
-                "Cartesia-Version": "2024-06-10",
-                "Content-Type": "application/json",
-            },
+            headers={"X-API-Key": CARTESIA_API_KEY, "Cartesia-Version": "2024-06-10", "Content-Type": "application/json"},
             json={
                 "model_id": model_id,
                 "transcript": text,
@@ -227,8 +199,7 @@ async def say_agent_response(
     except Exception as error:
         logger.opt(exception=True).error("Error Occurred while Uttering Agent Response.")
         raise error
-
-
+    
 async def get_meeting_dates(
     function_name: str,
     tool_call_id: str,
@@ -251,12 +222,17 @@ async def transfer_call(
     context: OpenAILLMContext,
     result_callback,
 ) -> None:
-    print(f"_____bigly.py * transfer_call * _args: {_args}")
     await result_callback("CALL TRANSFERED")
 
 
 async def voicemail(
-    function_name: str, tool_call_id: str, _args, llm, context, result_callback, transport
+    function_name: str,
+    tool_call_id: str,
+    _args,
+    llm,
+    context,
+    result_callback,
+    transport
 ) -> None:
     logger.info("Invoking `voicemail` tool with argument {_args}", _args=_args)
     await transport.stop_dialout(PARTICIPANT_ID[0])
@@ -272,11 +248,8 @@ async def get_knowledge_base(
     if kb_call_reason == "GENERAL_QUESTION":
         # await llm.push_frame("aldkjfls oaogi8ovs(*YVSDY*( &*Tqr))")
         await llm.push_frame(TextFrame(random.choice(QUESTION_AFFIRMATION)))
-    await result_callback(
-        """Sure! Here are some random facts that could be associated with a solar panel company: 1. **History**: The company was founded in 2008 by a group of renewable energy enthusiasts who wanted to make solar power more accessible to homeowners and businesses. 2. **Headquarters**: Their headquarters is a net-zero energy building powered entirely by their own solar panels, showcasing their commitment to sustainability. 3. **Products**: They produce three main types of solar panels: monocrystalline, polycrystalline, and thin-film, catering to different customer needs and budgets. 4. **Innovation**: The company holds patents for advanced solar cell technology that increases efficiency by 20% compared to industry standards. 5. **Global Reach**: They have installed solar systems in over 40 countries and have manufacturing plants on three continents.6. **Community Impact**: For every 100 solar panels sold, they donate a panel to a school or community center in underprivileged areas. 7. **Workforce**: The company employs over 5,000 people, 40% of whom are in research and development roles. 8. **Recognition**: They won the “Green Energy Innovator of the Year” award in 2022 for their work on solar panels made from recycled materials. 9. **Sustainability**: Their panels are designed to last 25+ years and are 95% recyclable at the end of their life cycle. 10. **Customer Perks**: They offer a 25-year warranty and real-time monitoring systems that allow users to track energy production via an app. 11. **Mission Statement**: "Empowering the world with clean energy, one panel at a time." 12. **Energy Production**: The combined output of all their installations generates enough electricity to power over 2 million homes annually. 13. **R&D Efforts**: They are actively working on integrating solar panels into everyday items like backpacks and electric vehicles. 14. **Solar Farms**: The company has partnered with governments to develop large-scale solar farms, including one that spans over 10,000 acres. 15. **Future Goals**: By 2030, they aim to make solar power the most affordable energy source worldwide.  Would you like these customized for a specific scenario?"""
-    )
+    await result_callback("""Sure! Here are some random facts that could be associated with a solar panel company: 1. **History**: The company was founded in 2008 by a group of renewable energy enthusiasts who wanted to make solar power more accessible to homeowners and businesses. 2. **Headquarters**: Their headquarters is a net-zero energy building powered entirely by their own solar panels, showcasing their commitment to sustainability. 3. **Products**: They produce three main types of solar panels: monocrystalline, polycrystalline, and thin-film, catering to different customer needs and budgets. 4. **Innovation**: The company holds patents for advanced solar cell technology that increases efficiency by 20% compared to industry standards. 5. **Global Reach**: They have installed solar systems in over 40 countries and have manufacturing plants on three continents.6. **Community Impact**: For every 100 solar panels sold, they donate a panel to a school or community center in underprivileged areas. 7. **Workforce**: The company employs over 5,000 people, 40% of whom are in research and development roles. 8. **Recognition**: They won the “Green Energy Innovator of the Year” award in 2022 for their work on solar panels made from recycled materials. 9. **Sustainability**: Their panels are designed to last 25+ years and are 95% recyclable at the end of their life cycle. 10. **Customer Perks**: They offer a 25-year warranty and real-time monitoring systems that allow users to track energy production via an app. 11. **Mission Statement**: "Empowering the world with clean energy, one panel at a time." 12. **Energy Production**: The combined output of all their installations generates enough electricity to power over 2 million homes annually. 13. **R&D Efforts**: They are actively working on integrating solar panels into everyday items like backpacks and electric vehicles. 14. **Solar Farms**: The company has partnered with governments to develop large-scale solar farms, including one that spans over 10,000 acres. 15. **Future Goals**: By 2030, they aim to make solar power the most affordable energy source worldwide.  Would you like these customized for a specific scenario?""")
     # raise RuntimeError("<><><><><>get_knowledge_base")
-
 
 async def end_call(
     function_name: str,
@@ -293,12 +266,23 @@ async def end_call(
     end_call_sentence = _args.get("end_call_sentence", "Thank you for your time have a great day")
     estimated_time_end_call_sentence = 15
     logger.info(
-        "Estimated End Call Sentence Time is {estimated_time_end_call_sentence}",
-        estimated_time_end_call_sentence=estimated_time_end_call_sentence,
+        "Estimated End Call Sentence Time is {estimated_time_end_call_sentence}", estimated_time_end_call_sentence=estimated_time_end_call_sentence
     )
-    await llm.push_frame(TextFrame(end_call_sentence))
+    if voice_provider == "cartesia":
+        await say_agent_response(
+            get_cartesia_static_response(
+                end_call_sentence,
+                voice_id,
+                "sonic-english",
+                output_format={"container": "raw", "encoding": "pcm_s16le", "sample_rate": 16000},
+            ),
+            transport,
+            estimated_time_end_call_sentence,
+            True,
+        )
     await transport.stop_dialout(PARTICIPANT_ID[0])
     await result_callback("CALL ENDED BY ASSISTANT")
+
 
 
 async def main():
@@ -330,123 +314,111 @@ async def main():
         )
 
         llm = OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o")
-        llm.register_function("get_knowledge_base", get_knowledge_base)
-        llm.register_function(
-            "end_call",
-            partial(
-                end_call,
-                transport=transport,
-                voice_provider="cartesia",
-                voice_id="7360f116-6306-4e9a-b487-1235f35a0f21",
-            ),
-        )
-        llm.register_function("transfer_call", transfer_call)
-        llm.register_function("voicemail", partial(voicemail, transport=transport))
-        llm.register_function("get_meeting_dates", get_meeting_dates)
+        llm.register_function('get_knowledge_base', get_knowledge_base)
+        llm.register_function('end_call', partial(end_call,transport=transport, voice_provider='cartesia', voice_id = '7360f116-6306-4e9a-b487-1235f35a0f21'))
+        llm.register_function('transfer_call', transfer_call)
+        llm.register_function('voicemail', partial(voicemail, transport = transport))
+        llm.register_function('get_meeting_dates', get_meeting_dates)
 
         tools = [
             ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "get_knowledge_base",
-                    "description": """""
-                Used to find information from the knowledge base. Use this tool in the following scenarios:
-                    - When the user asks questions about the company.
-                    - If user is not showing interest and you need to convince them by using information about the company
+        type="function",
+        function={
+            "name": "get_knowledge_base",
+            "description": """""Always Use this tool:
+                - When User have Questions about Company
+                - If user is not showing interest and you need to convince them by using information about Company
+                - When User have any General Query and Questions
             """,
-                    "strict": True,  # type: ignore[typeddict-unknown-key]
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "question": {
-                                "type": "string",
-                                "description": "User questions or concerns about the Company",
-                            },
-                            "reason": {
-                                "type": "string",
-                                "enum": ["CONVINCE", "GENERAL_QUESTION"],
-                                "description": "Reason why you are using this tool. This can only be one of the category: `CONVINCE`, `GENERAL_QUESTION`.\
+            "strict": True,  # type: ignore[typeddict-unknown-key]
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "User Question/Concern about Company",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "enum": ["CONVINCE", "GENERAL_QUESTION"],
+                        "description": "Reason why you are using this tool. This can only be one of the category: `CONVINCE`, `GENERAL_QUESTION`.\
                             `CONVINCE` would be in case you are convincing the user otherwise it is `GENERAL_QUESTION`",
-                            },
-                        },
-                        "additionalProperties": False,
-                        "required": ["question", "reason"],
                     },
                 },
-            ),
-            ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "end_call",
-                    "description": "Use this tool to end the call",
-                    "strict": True,  # type: ignore[typeddict-unknown-key]
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "end_call_sentence": {
-                                "type": "string",
-                                "description": "The End Call Sentence that needs to be utter by the AI",
-                            }
-                        },
-                        "additionalProperties": False,
-                        "required": ["end_call_sentence"],
+                "additionalProperties": False,
+                "required": ["question", "reason"],
+            },
+        },
+    ),
+    ChatCompletionToolParam(
+        type="function",
+        function={
+            "name": "end_call",
+            "description": "Use this tool to end the call",
+            "strict": True,  # type: ignore[typeddict-unknown-key]
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "end_call_sentence": {
+                        "type": "string",
+                        "description": "The End Call Sentence that needs to be utter by the AI",
+                    }
+                },
+                "additionalProperties": False,
+                "required": ["end_call_sentence"],
+            },
+        },
+    ),
+    ChatCompletionToolParam(
+        type="function",
+        function={
+            "name": "transfer_call",
+            "description": "Use this tool to transfer the call",
+            "strict": True,  # type: ignore[typeddict-unknown-key]
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "transfer_number_sentence": {
+                        "type": "string",
+                        "description": "The sentence that AI needs to speak before transfering the call",
+                    },
+                    "transfer_number": {
+                        "type": "string",
+                        "description": "The number to use to which we need transfer the call",
                     },
                 },
-            ),
-            ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "transfer_call",
-                    "description": "Use this tool to transfer the call",
-                    "strict": True,  # type: ignore[typeddict-unknown-key]
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "transfer_number_sentence": {
-                                "type": "string",
-                                "description": "The sentence that AI needs to speak before transfering the call",
-                            },
-                            "transfer_number": {
-                                "type": "string",
-                                "description": "The number to use to which we need transfer the call",
-                            },
-                        },
-                        "additionalProperties": False,
-                        "required": ["transfer_number", "transfer_number_sentence"],
-                    },
-                },
-            ),
-            ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "voicemail",
-                    "description": f"Use this tool if you reach voicemail. Here is some examples: {'\n'.join(VOICEMAIL_EXAMPLES)}",
-                    "parameters": {},
-                },
-            ),
-            ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "get_meeting_dates",
-                    "description": "Use this tool to get the meeting dates in order to schedule a meeting date with the user. The output of this\
+                "additionalProperties": False,
+                "required": ["transfer_number", "transfer_number_sentence"],
+            },
+        },
+    ),
+    ChatCompletionToolParam(
+        type="function",
+        function={
+            "name": "voicemail",
+            "description": f"Use this tool if you reach voicemail. Here is some examples: {'\n'.join(VOICEMAIL_EXAMPLES)}",
+            "parameters": {},
+        },
+    ),
+    ChatCompletionToolParam(
+        type="function",
+        function={
+            "name": "get_meeting_dates",
+            "description": "Use this tool to get the meeting dates in order to schedule a meeting date with the user. The output of this\
                         tool are slots which you need to recommend to the user. The slots are given in numerical list in ascending order\
                             (earlier slots to later slots)",
-                    "parameters": {},
-                },
-            ),
-        ]
+            "parameters": {},
+        },
+    )]
         messages = [
             {
                 "role": "system",
-                "content": """You are a friendly sales person for a solar panel company. Your responses will be converted to audio. Please do not include any special characters in your response other than '!' or '?'. """,
+                "content": """Main Prompt""",
             },
         ]
 
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
-
-        dp_post_llm = DebugProcessor('post_llm')
-        dp_post_tts = DebugProcessor('post_tts')
 
         pipeline = Pipeline(
             [
@@ -454,9 +426,7 @@ async def main():
                 stt,
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
-                dp_post_llm,  # Debug Processor
                 tts,  # TTS
-                dp_post_tts,  # Debug Processor
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
             ]
@@ -466,8 +436,8 @@ async def main():
             pipeline,
             PipelineParams(
                 allow_interruptions=True,
-                enable_metrics=False,  ####
-                enable_usage_metrics=False,  #####
+                enable_metrics=False,####
+                enable_usage_metrics=False,#####
                 report_only_initial_ttfb=True,
             ),
         )
@@ -508,17 +478,15 @@ async def main():
         # Event handler for on_first_participant_joined
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant) -> None:
-            logger.info(
-                "First Participant Joined with ID {participant_id}",
-                participant_id=participant["id"],
-            )
+            logger.info("First Participant Joined with ID {participant_id}", participant_id=participant["id"])
             PARTICIPANT_ID[0] = participant["id"]
             await transport.capture_participant_transcription(participant["id"])
 
+     
         @transport.event_handler("on_dialout_error")
         async def on_dialout_error(transport, cdata) -> None:
             logger.info("Dial-Out error: {data}", data=cdata)
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([LLMMessagesFrame(messages)])  
 
         # Event handler for on_dialout_answered
         @transport.event_handler("on_dialout_answered")
