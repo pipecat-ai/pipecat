@@ -246,6 +246,8 @@ class FrameProcessor:
                 await self._prev.queue_frame(frame, direction)
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
+            await self.push_error(ErrorFrame(str(e)))
+            raise
 
     def __create_input_task(self):
         self.__input_queue = asyncio.Queue()
