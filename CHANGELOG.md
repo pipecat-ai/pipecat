@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a new RTVI message called `disconnect-bot`, which when handled pushes
   an `EndFrame` to trigger the pipeline to stop.
 
+- Added support for the new Pipecat Flows package (pipecat-ai-flows). Learn
+  more at: https://github.com/pipecat-ai/pipecat-flows.
+
+- Added foundational example `25-conversation-flow.py` showing how to use
+  Pipecat Flows.
+
 ## [0.0.49] - 2024-11-17
 
 ### Added
