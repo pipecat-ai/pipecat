@@ -58,48 +58,161 @@ except ModuleNotFoundError as e:
 
 def language_to_google_language(language: Language) -> str | None:
     language_map = {
+        # Afrikaans
+        Language.AF: "af-ZA",
+        Language.AF_ZA: "af-ZA",
+        # Arabic
+        Language.AR: "ar-XA",
+        # Bengali
+        Language.BN: "bn-IN",
+        Language.BN_IN: "bn-IN",
+        # Bulgarian
         Language.BG: "bg-BG",
+        Language.BG_BG: "bg-BG",
+        # Catalan
         Language.CA: "ca-ES",
+        Language.CA_ES: "ca-ES",
+        # Chinese (Mandarin and Cantonese)
         Language.ZH: "cmn-CN",
+        Language.ZH_CN: "cmn-CN",
         Language.ZH_TW: "cmn-TW",
+        Language.ZH_HK: "yue-HK",
+        # Czech
         Language.CS: "cs-CZ",
+        Language.CS_CZ: "cs-CZ",
+        # Danish
         Language.DA: "da-DK",
+        Language.DA_DK: "da-DK",
+        # Dutch
         Language.NL: "nl-NL",
+        Language.NL_BE: "nl-BE",
+        Language.NL_NL: "nl-NL",
+        # English
         Language.EN: "en-US",
         Language.EN_US: "en-US",
         Language.EN_AU: "en-AU",
         Language.EN_GB: "en-GB",
         Language.EN_IN: "en-IN",
+        # Estonian
         Language.ET: "et-EE",
+        Language.ET_EE: "et-EE",
+        # Filipino
+        Language.FIL: "fil-PH",
+        Language.FIL_PH: "fil-PH",
+        # Finnish
         Language.FI: "fi-FI",
-        Language.NL_BE: "nl-BE",
+        Language.FI_FI: "fi-FI",
+        # French
         Language.FR: "fr-FR",
         Language.FR_CA: "fr-CA",
+        Language.FR_FR: "fr-FR",
+        # Galician
+        Language.GL: "gl-ES",
+        Language.GL_ES: "gl-ES",
+        # German
         Language.DE: "de-DE",
+        Language.DE_DE: "de-DE",
+        # Greek
         Language.EL: "el-GR",
+        Language.EL_GR: "el-GR",
+        # Gujarati
+        Language.GU: "gu-IN",
+        Language.GU_IN: "gu-IN",
+        # Hebrew
+        Language.HE: "he-IL",
+        Language.HE_IL: "he-IL",
+        # Hindi
         Language.HI: "hi-IN",
+        Language.HI_IN: "hi-IN",
+        # Hungarian
         Language.HU: "hu-HU",
+        Language.HU_HU: "hu-HU",
+        # Icelandic
+        Language.IS: "is-IS",
+        Language.IS_IS: "is-IS",
+        # Indonesian
         Language.ID: "id-ID",
+        Language.ID_ID: "id-ID",
+        # Italian
         Language.IT: "it-IT",
+        Language.IT_IT: "it-IT",
+        # Japanese
         Language.JA: "ja-JP",
+        Language.JA_JP: "ja-JP",
+        # Kannada
+        Language.KN: "kn-IN",
+        Language.KN_IN: "kn-IN",
+        # Korean
         Language.KO: "ko-KR",
+        Language.KO_KR: "ko-KR",
+        # Latvian
         Language.LV: "lv-LV",
+        Language.LV_LV: "lv-LV",
+        # Lithuanian
         Language.LT: "lt-LT",
+        Language.LT_LT: "lt-LT",
+        # Malay
         Language.MS: "ms-MY",
+        Language.MS_MY: "ms-MY",
+        # Malayalam
+        Language.ML: "ml-IN",
+        Language.ML_IN: "ml-IN",
+        # Marathi
+        Language.MR: "mr-IN",
+        Language.MR_IN: "mr-IN",
+        # Norwegian
         Language.NO: "nb-NO",
+        Language.NB: "nb-NO",
+        Language.NB_NO: "nb-NO",
+        # Polish
         Language.PL: "pl-PL",
+        Language.PL_PL: "pl-PL",
+        # Portuguese
         Language.PT: "pt-PT",
         Language.PT_BR: "pt-BR",
+        Language.PT_PT: "pt-PT",
+        # Punjabi
+        Language.PA: "pa-IN",
+        Language.PA_IN: "pa-IN",
+        # Romanian
         Language.RO: "ro-RO",
+        Language.RO_RO: "ro-RO",
+        # Russian
         Language.RU: "ru-RU",
+        Language.RU_RU: "ru-RU",
+        # Serbian
+        Language.SR: "sr-RS",
+        Language.SR_RS: "sr-RS",
+        # Slovak
         Language.SK: "sk-SK",
+        Language.SK_SK: "sk-SK",
+        # Spanish
         Language.ES: "es-ES",
+        Language.ES_ES: "es-ES",
+        Language.ES_US: "es-US",
+        # Swedish
         Language.SV: "sv-SE",
+        Language.SV_SE: "sv-SE",
+        # Tamil
+        Language.TA: "ta-IN",
+        Language.TA_IN: "ta-IN",
+        # Telugu
+        Language.TE: "te-IN",
+        Language.TE_IN: "te-IN",
+        # Thai
         Language.TH: "th-TH",
+        Language.TH_TH: "th-TH",
+        # Turkish
         Language.TR: "tr-TR",
+        Language.TR_TR: "tr-TR",
+        # Ukrainian
         Language.UK: "uk-UA",
+        Language.UK_UA: "uk-UA",
+        # Vietnamese
         Language.VI: "vi-VN",
+        Language.VI_VN: "vi-VN",
     }
+
     return language_map.get(language)
 
 
