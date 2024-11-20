@@ -34,35 +34,77 @@ except ModuleNotFoundError as e:
 
 def language_to_aws_language(language: Language) -> str | None:
     language_map = {
+        # Arabic
+        Language.AR: "arb",
+        Language.AR_AE: "ar-AE",
+        # Catalan
         Language.CA: "ca-ES",
-        Language.ZH: "cmn-CN",
+        # Chinese
+        Language.ZH: "cmn-CN",  # Mandarin
+        Language.YUE: "yue-CN",  # Cantonese
+        Language.YUE_CN: "yue-CN",
+        # Czech
+        Language.CS: "cs-CZ",
+        # Danish
         Language.DA: "da-DK",
+        # Dutch
         Language.NL: "nl-NL",
         Language.NL_BE: "nl-BE",
-        Language.EN: "en-US",
-        Language.EN_US: "en-US",
+        # English
+        Language.EN: "en-US",  # Default to US English
         Language.EN_AU: "en-AU",
         Language.EN_GB: "en-GB",
-        Language.EN_NZ: "en-NZ",
         Language.EN_IN: "en-IN",
+        Language.EN_NZ: "en-NZ",
+        Language.EN_US: "en-US",
+        Language.EN_ZA: "en-ZA",
+        # Finnish
         Language.FI: "fi-FI",
+        # French
         Language.FR: "fr-FR",
+        Language.FR_BE: "fr-BE",
         Language.FR_CA: "fr-CA",
+        # German
         Language.DE: "de-DE",
+        Language.DE_AT: "de-AT",
+        Language.DE_CH: "de-CH",
+        # Hindi
         Language.HI: "hi-IN",
+        # Icelandic
+        Language.IS: "is-IS",
+        # Italian
         Language.IT: "it-IT",
+        # Japanese
         Language.JA: "ja-JP",
+        # Korean
         Language.KO: "ko-KR",
+        # Norwegian
         Language.NO: "nb-NO",
+        Language.NB: "nb-NO",
+        Language.NB_NO: "nb-NO",
+        # Polish
         Language.PL: "pl-PL",
+        # Portuguese
         Language.PT: "pt-PT",
         Language.PT_BR: "pt-BR",
+        Language.PT_PT: "pt-PT",
+        # Romanian
         Language.RO: "ro-RO",
+        # Russian
         Language.RU: "ru-RU",
+        # Spanish
         Language.ES: "es-ES",
+        Language.ES_MX: "es-MX",
+        Language.ES_US: "es-US",
+        # Swedish
         Language.SV: "sv-SE",
+        # Turkish
         Language.TR: "tr-TR",
+        # Welsh
+        Language.CY: "cy-GB",
+        Language.CY_GB: "cy-GB",
     }
+
     return language_map.get(language)
 
 
