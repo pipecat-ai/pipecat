@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added foundational example `25-conversation-flow.py` showing how to use
   Pipecat Flows.
 
+### Changed
+
+- Expanded the transcriptions.language module to support a superset of
+  languages.
+
+- Updated STT and TTS services with language options that match the supported
+  languages for each service.
+
 ## [0.0.49] - 2024-11-17
 
 ### Added
