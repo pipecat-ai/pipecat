@@ -236,7 +236,7 @@ class WebsocketServerTransport(BaseTransport):
 
     async def _monitor_websocket(self, websocket: websockets.WebSocketServerProtocol):
         """
-        Wait for 60 seconds, if the websocket is still open, trigger timeout event.
+        Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event.
         """
         try:
             await asyncio.sleep(self._params.session_timeout)
