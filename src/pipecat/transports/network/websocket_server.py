@@ -47,6 +47,7 @@ class WebsocketServerParams(TransportParams):
 class WebsocketServerCallbacks(BaseModel):
     on_client_connected: Callable[[websockets.WebSocketServerProtocol], Awaitable[None]]
     on_client_disconnected: Callable[[websockets.WebSocketServerProtocol], Awaitable[None]]
+    on_session_timeout: Callable[[websockets.WebSocketServerProtocol], Awaitable[None]]
 
 
 class WebsocketServerInputTransport(BaseInputTransport):
@@ -99,6 +100,10 @@ class WebsocketServerInputTransport(BaseInputTransport):
         # Notify
         await self._callbacks.on_client_connected(websocket)
 
+        # Create a task to monitor the websocket connection
+        if self._params.session_timeout:
+            self.get_event_loop().create_task(self._monitor_websocket(websocket))
+
         # Handle incoming messages
         async for message in websocket:
             frame = self._params.serializer.deserialize(message)
@@ -124,6 +129,17 @@ class WebsocketServerInputTransport(BaseInputTransport):
         self._websocket = None
 
         logger.info(f"Client {websocket.remote_address} disconnected")
+
+    async def _monitor_websocket(self, websocket: websockets.WebSocketServerProtocol):
+        """
+        Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event.
+        """
+        try:
+            await asyncio.sleep(self._params.session_timeout)
+            if not websocket.closed:
+                await self._callbacks.on_session_timeout(websocket)
+        except asyncio.CancelledError:
+            logger.info(f"Monitoring task cancelled for: {websocket.remote_address}")
 
 
 class WebsocketServerOutputTransport(BaseOutputTransport):
@@ -209,6 +225,7 @@ class WebsocketServerTransport(BaseTransport):
         self._callbacks = WebsocketServerCallbacks(
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
+            on_session_timeout=self._on_session_timeout
         )
         self._input: WebsocketServerInputTransport | None = None
         self._output: WebsocketServerOutputTransport | None = None
@@ -218,9 +235,7 @@ class WebsocketServerTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
-
-        if self._params.session_timeout:
-            self._register_event_handler("on_session_timeout")
+        self._register_event_handler("on_session_timeout")
 
     def input(self) -> WebsocketServerInputTransport:
         if not self._input:
@@ -234,22 +249,9 @@ class WebsocketServerTransport(BaseTransport):
             self._output = WebsocketServerOutputTransport(self._params, name=self._output_name)
         return self._output
 
-    async def _monitor_websocket(self, websocket: websockets.WebSocketServerProtocol):
-        """
-        Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event.
-        """
-        try:
-            await asyncio.sleep(self._params.session_timeout)
-            if not websocket.closed:
-                await self._call_event_handler("on_session_timeout", websocket)
-        except asyncio.CancelledError:
-            logger.info(f"Monitoring task cancelled for: {websocket.remote_address}")
-
     async def _on_client_connected(self, websocket):
         if self._output:
             await self._output.set_client_connection(websocket)
-            if self._params.session_timeout:
-                self._loop.create_task(self._monitor_websocket(websocket))
             await self._call_event_handler("on_client_connected", websocket)
         else:
             logger.error("A WebsocketServerTransport output is missing in the pipeline")
@@ -260,4 +262,7 @@ class WebsocketServerTransport(BaseTransport):
             await self._call_event_handler("on_client_disconnected", websocket)
         else:
             logger.error("A WebsocketServerTransport output is missing in the pipeline")
+
+    async def _on_session_timeout(self, websocket):
+        await self._call_event_handler("on_session_timeout", websocket)
 
