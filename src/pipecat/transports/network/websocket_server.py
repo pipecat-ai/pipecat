@@ -234,9 +234,22 @@ class WebsocketServerTransport(BaseTransport):
             self._output = WebsocketServerOutputTransport(self._params, name=self._output_name)
         return self._output
 
+    async def _monitor_websocket(self, websocket: websockets.WebSocketServerProtocol):
+        """
+        Wait for 60 seconds, if the websocket is still open, trigger timeout event.
+        """
+        try:
+            await asyncio.sleep(self._params.session_timeout)
+            if not websocket.closed:
+                await self._call_event_handler("on_session_timeout", websocket)
+        except asyncio.CancelledError:
+            logger.info(f"Monitoring task cancelled for: {websocket.remote_address}")
+
     async def _on_client_connected(self, websocket):
         if self._output:
             await self._output.set_client_connection(websocket)
+            if self._params.session_timeout:
+                self._loop.create_task(self._monitor_websocket(websocket))
             await self._call_event_handler("on_client_connected", websocket)
         else:
             logger.error("A WebsocketServerTransport output is missing in the pipeline")
@@ -247,3 +260,4 @@ class WebsocketServerTransport(BaseTransport):
             await self._call_event_handler("on_client_disconnected", websocket)
         else:
             logger.error("A WebsocketServerTransport output is missing in the pipeline")
+
