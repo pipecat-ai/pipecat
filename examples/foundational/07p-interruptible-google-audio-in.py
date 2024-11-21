@@ -217,7 +217,11 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = GoogleLLMService(model="gemini-1.5-flash-latest", api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = GoogleLLMService(
+            model="gemini-1.5-flash-latest",
+            # model="gemini-exp-1114",
+            api_key=os.getenv("GOOGLE_API_KEY"),
+        )
 
         messages = [
             {
