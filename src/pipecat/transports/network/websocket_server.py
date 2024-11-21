@@ -41,6 +41,7 @@ except ModuleNotFoundError as e:
 class WebsocketServerParams(TransportParams):
     add_wav_header: bool = False
     serializer: FrameSerializer = ProtobufFrameSerializer()
+    session_timeout: int | None = None
 
 
 class WebsocketServerCallbacks(BaseModel):
@@ -217,6 +218,9 @@ class WebsocketServerTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
+
+        if self._params.session_timeout:
+            self._register_event_handler("on_session_timeout")
 
     def input(self) -> WebsocketServerInputTransport:
         if not self._input:
