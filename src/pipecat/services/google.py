@@ -281,9 +281,10 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
                     )
                     run_llm = not bool(self._function_calls_in_progress)
             else:
-                self._context.add_message(
-                    glm.Content(role="model", parts=[glm.Part(text=aggregation)])
-                )
+                if aggregation.strip():
+                    self._context.add_message(
+                        glm.Content(role="model", parts=[glm.Part(text=aggregation)])
+                    )
 
             if self._pending_image_frame_message:
                 frame = self._pending_image_frame_message
