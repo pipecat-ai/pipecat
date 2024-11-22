@@ -5,11 +5,12 @@
 #
 
 import asyncio
-
 from typing import Awaitable, Callable
 
 from pipecat.frames.frames import (
     BotSpeakingFrame,
+    CancelFrame,
+    EndFrame,
     Frame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -32,20 +33,25 @@ class UserIdleProcessor(FrameProcessor):
         **kwargs,
     ):
         super().__init__(**kwargs)
-
         self._callback = callback
         self._timeout = timeout
-
         self._interrupted = False
-
         self._create_idle_task()
+
+    async def _stop(self):
+        self._idle_task.cancel()
+        await self._idle_task
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
+        # Check for end frames before processing
+        if isinstance(frame, (EndFrame, CancelFrame)):
+            await self._stop()
+
         await self.push_frame(frame, direction)
 
-        # We shouldn't call the idle callback if the user or the bot are speaking.
+        # We shouldn't call the idle callback if the user or the bot are speaking
         if isinstance(frame, UserStartedSpeakingFrame):
             self._interrupted = True
             self._idle_event.set()
@@ -56,8 +62,7 @@ class UserIdleProcessor(FrameProcessor):
             self._idle_event.set()
 
     async def cleanup(self):
-        self._idle_task.cancel()
-        await self._idle_task
+        await self._stop()
 
     def _create_idle_task(self):
         self._idle_event = asyncio.Event()
