@@ -12,7 +12,6 @@ import asyncio
 import os
 import random
 import sys
-from functools import partial
 
 import aiohttp
 import requests
@@ -22,10 +21,14 @@ from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer, VADParams
-from pipecat.frames.frames import (BotSpeakingFrame, EndFrame, Frame,
-                                   InputAudioRawFrame, LLMMessagesFrame,
-                                   TextFrame, TTSAudioRawFrame,
-                                   UserStoppedSpeakingFrame)
+from pipecat.frames.frames import (
+    EndFrame,
+    Frame,
+    LLMMessagesFrame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
+    TextFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -86,14 +89,18 @@ class DebugProcessor(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if not (
-            isinstance(frame, InputAudioRawFrame)
-            or isinstance(frame, BotSpeakingFrame)
-            or isinstance(frame, UserStoppedSpeakingFrame)
-            or isinstance(frame, TTSAudioRawFrame)
-            or isinstance(frame, TextFrame)
-        ):
+        # if not (
+        #     isinstance(frame, InputAudioRawFrame)
+        #     or isinstance(frame, BotSpeakingFrame)
+        #     or isinstance(frame, UserStoppedSpeakingFrame)
+        #     or isinstance(frame, TTSAudioRawFrame)
+        #     or isinstance(frame, TextFrame)
+        # ):
+        #     logger.debug(f"--- DebugProcessor {self._name}: {frame} {direction}")
+        # StopInterruptionFrame
+        if isinstance(frame, StopInterruptionFrame) or isinstance(frame, StartInterruptionFrame):
             logger.debug(f"--- DebugProcessor {self._name}: {frame} {direction}")
+
         await self.push_frame(frame, direction)
 
 
@@ -331,17 +338,17 @@ async def main():
 
         llm = OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o")
         llm.register_function("get_knowledge_base", get_knowledge_base)
-        llm.register_function(
-            "end_call",
-            partial(
-                end_call,
-                transport=transport,
-                voice_provider="cartesia",
-                voice_id="7360f116-6306-4e9a-b487-1235f35a0f21",
-            ),
-        )
-        llm.register_function("transfer_call", transfer_call)
-        llm.register_function("voicemail", partial(voicemail, transport=transport))
+        # llm.register_function(
+        #     "end_call",
+        #     partial(
+        #         end_call,
+        #         transport=transport,
+        #         voice_provider="cartesia",
+        #         voice_id="7360f116-6306-4e9a-b487-1235f35a0f21",
+        #     ),
+        # )
+        # llm.register_function("transfer_call", transfer_call)
+        # llm.register_function("voicemail", partial(voicemail, transport=transport))
         llm.register_function("get_meeting_dates", get_meeting_dates)
 
         tools = [
@@ -374,56 +381,56 @@ async def main():
                     },
                 },
             ),
-            ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "end_call",
-                    "description": "Use this tool to end the call",
-                    "strict": True,  # type: ignore[typeddict-unknown-key]
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "end_call_sentence": {
-                                "type": "string",
-                                "description": "The End Call Sentence that needs to be utter by the AI",
-                            }
-                        },
-                        "additionalProperties": False,
-                        "required": ["end_call_sentence"],
-                    },
-                },
-            ),
-            ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "transfer_call",
-                    "description": "Use this tool to transfer the call",
-                    "strict": True,  # type: ignore[typeddict-unknown-key]
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "transfer_number_sentence": {
-                                "type": "string",
-                                "description": "The sentence that AI needs to speak before transfering the call",
-                            },
-                            "transfer_number": {
-                                "type": "string",
-                                "description": "The number to use to which we need transfer the call",
-                            },
-                        },
-                        "additionalProperties": False,
-                        "required": ["transfer_number", "transfer_number_sentence"],
-                    },
-                },
-            ),
-            ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "voicemail",
-                    "description": f"Use this tool if you reach voicemail. Here is some examples: {'\n'.join(VOICEMAIL_EXAMPLES)}",
-                    "parameters": {},
-                },
-            ),
+            # ChatCompletionToolParam(
+            #     type="function",
+            #     function={
+            #         "name": "end_call",
+            #         "description": "Use this tool to end the call",
+            #         "strict": True,  # type: ignore[typeddict-unknown-key]
+            #         "parameters": {
+            #             "type": "object",
+            #             "properties": {
+            #                 "end_call_sentence": {
+            #                     "type": "string",
+            #                     "description": "The End Call Sentence that needs to be utter by the AI",
+            #                 }
+            #             },
+            #             "additionalProperties": False,
+            #             "required": ["end_call_sentence"],
+            #         },
+            #     },
+            # ),
+            # ChatCompletionToolParam(
+            #     type="function",
+            #     function={
+            #         "name": "transfer_call",
+            #         "description": "Use this tool to transfer the call",
+            #         "strict": True,  # type: ignore[typeddict-unknown-key]
+            #         "parameters": {
+            #             "type": "object",
+            #             "properties": {
+            #                 "transfer_number_sentence": {
+            #                     "type": "string",
+            #                     "description": "The sentence that AI needs to speak before transfering the call",
+            #                 },
+            #                 "transfer_number": {
+            #                     "type": "string",
+            #                     "description": "The number to use to which we need transfer the call",
+            #                 },
+            #             },
+            #             "additionalProperties": False,
+            #             "required": ["transfer_number", "transfer_number_sentence"],
+            #         },
+            #     },
+            # ),
+            # ChatCompletionToolParam(
+            #     type="function",
+            #     function={
+            #         "name": "voicemail",
+            #         "description": f"Use this tool if you reach voicemail. Here is some examples: {'\n'.join(VOICEMAIL_EXAMPLES)}",
+            #         "parameters": {},
+            #     },
+            # ),
             ChatCompletionToolParam(
                 type="function",
                 function={
@@ -445,8 +452,8 @@ async def main():
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
-        dp_post_llm = DebugProcessor('post_llm')
-        dp_post_tts = DebugProcessor('post_tts')
+        dp_post_llm = DebugProcessor("post_llm")
+        dp_post_tts = DebugProcessor("post_tts")
 
         pipeline = Pipeline(
             [

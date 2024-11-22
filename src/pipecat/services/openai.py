@@ -165,7 +165,13 @@ class BaseOpenAILLMService(LLMService):
 
         params.update(self._settings["extra"])
 
-        chunks = await self._client.chat.completions.create(**params)
+        try:
+            chunks = await self._client.chat.completions.create(**params)
+        except aiohttp.ClientError as e:
+            logger.error(f"HTTP error occurred: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error occurred: {e}")
+            raise e
         print(f"_____openai.py get_chat_completions * chunks: {chunks}")
         return chunks
 
@@ -451,6 +457,9 @@ class OpenAITTSService(TTSService):
                 yield TTSStoppedFrame()
         except BadRequestError as e:
             logger.exception(f"{self} error generating TTS: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error occurred in run_tts: {e}")
+            raise e
 
 
 # internal use only -- todo: refactor
