@@ -27,15 +27,18 @@ class ResponseAggregator(FrameProcessor):
         UserStoppedSpeakingFrame() -> TextFrame("Hello world.")
 
     Doctest: FIXME to work with asyncio
+    >>> import asyncio
+
     >>> async def print_frames(aggregator, frame):
-    ...     async for frame in aggregator.process_frame(frame):
+    ...     async for frame in aggregator.process_frame(frame, FrameDirection.DOWNSTREAM):
     ...         if isinstance(frame, TextFrame):
     ...             print(frame.text)
 
+    >>> loop = asyncio.new_event_loop()
     >>> aggregator = ResponseAggregator(start_frame = UserStartedSpeakingFrame,
     ...                                 end_frame=UserStoppedSpeakingFrame,
     ...                                 accumulator_frame=TranscriptionFrame,
-    ...                                 pass_through=False)
+    ...                                 loop=loop)
     >>> asyncio.run(print_frames(aggregator, UserStartedSpeakingFrame()))
     >>> asyncio.run(print_frames(aggregator, TranscriptionFrame("Hello,", 1, 1)))
     >>> asyncio.run(print_frames(aggregator, TranscriptionFrame("world.",  1, 2)))
@@ -51,8 +54,9 @@ class ResponseAggregator(FrameProcessor):
         end_frame,
         accumulator_frame: TextFrame,
         interim_accumulator_frame: TextFrame | None = None,
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
 
         self._start_frame = start_frame
         self._end_frame = end_frame
