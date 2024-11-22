@@ -245,6 +245,8 @@ async def get_meeting_dates(
     result_callback,
 ) -> None:
     logger.info("Invoking `get_meeting_dates` tool with argument {_args}", _args=_args)
+    
+    await asyncio.sleep(30)
     await result_callback("""
     "1- 8AM Eastern on November 16 2024\n\n2- 9AM Eastern on November 16 2024\n\n3- 10AM Eastern on November 16 2024\n\n4- 11AM Eastern on November 16 2024\n\n5- 12PM Eastern on November 16 2024\n\n6- 1PM Eastern on November 16 2024\n\n7- 2PM Eastern on November 16 2024\n\n8- 3PM Eastern on November 16 2024\n\n9- 4PM Eastern on November 16 2024\n\n10- 5PM Eastern on November 16 2024\n\n11- 6PM Eastern on November 16 2024\n\n12- 7PM Eastern on November 16 2024\n\n"
     """)
