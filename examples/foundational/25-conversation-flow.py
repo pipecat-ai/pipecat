@@ -91,7 +91,8 @@ flow_config = {
                 {
                     "role": "system",
                     "content": """You are handling a pizza order. Use the available functions:
-                - Use select_pizza_size when the user specifies a size (can be used multiple times if they change their mind)
+                - Use select_pizza_size when the user specifies a size (can be used multiple times if they change their
+                mind or want to order multiple pizzas)
                 - Use the end function ONLY when the user confirms they are done with their order
                 
                 After each size selection, confirm the selection and ask if they want to change it or complete their order.
@@ -138,7 +139,8 @@ flow_config = {
                 {
                     "role": "system",
                     "content": """You are handling a sushi order. Use the available functions:
-                - Use select_roll_count when the user specifies how many rolls (can be used multiple times if they change their mind)
+                - Use select_roll_count when the user specifies how many rolls (can be used multiple times if they change their mind
+                or if they want to order multiple sushi rolls)
                 - Use the end function ONLY when the user confirms they are done with their order
                 
                 After each roll count selection, confirm the count and ask if they want to change it or complete their order.
