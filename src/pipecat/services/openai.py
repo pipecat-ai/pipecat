@@ -48,13 +48,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
 
 try:
-    from openai import (
-        NOT_GIVEN,
-        AsyncOpenAI,
-        AsyncStream,
-        BadRequestError,
-        DefaultAsyncHttpxClient,
-    )
+    from openai import NOT_GIVEN, AsyncOpenAI, AsyncStream, BadRequestError, DefaultAsyncHttpxClient
     from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -165,6 +159,118 @@ class BaseOpenAILLMService(LLMService):
 
         params.update(self._settings["extra"])
 
+        # test_params {'model': 'gpt-4o', 'stream': True, 'messages': [{...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, {...}, ...], 'tools': [{...}, {...}], 'tool_choice': NOT_GIVEN, 'stream_options': {'include_usage': True}, 'frequency_penalty': NOT_GIVEN, 'presence_penalty': NOT_GIVEN, 'seed': NOT_GIVEN, 'temperature': NOT_GIVEN, 'top_p': NOT_GIVEN, 'max_tokens': NOT_GIVEN, 'max_completion_tokens': NOT_GIVEN}
+
+        default_messages = [
+            {
+                "role": "system",
+                "content": "You are a friendly sales person for a solar panel company. Your responses will be converted to audio. Please do not include any special characters in your response other than '!' or '?'. ",
+            },
+            {"role": "user", "content": "Hey there."},
+            {"role": "assistant", "content": "Hi! How can I assist you today?"},
+            {"role": "user", "content": "I want to learn more about your company."},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_BPxFAYW2i8Ke4iAjS2ODZjwS",
+                        "function": {
+                            "name": "get_knowledge_base",
+                            "arguments": '{"question": "Tell me about your company", "reason": "GENERAL_QUESTION"}',
+                        },
+                        "type": "function",
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "content": '"Sure! Here are some random facts that could be associated with a solar panel company: 1. **History**: The company was founded in 2008 by a group of renewable energy enthusiasts who wanted to make solar power more accessible to homeowners and businesses. 2. **Headquarters**: Their headquarters is a net-zero energy building powered entirely by their own solar panels, showcasing their commitment to sustainability. 3. **Products**: They produce three main types of solar panels: monocrystalline, polycrystalline, and thin-film, catering to different customer needs and budgets. 4. **Innovation**: The company holds patents for advanced solar cell technology that increases efficiency by 20% compared to industry standards. 5. **Global Reach**: They have installed solar systems in over 40 countries and have manufacturing plants on three continents.6. **Community Impact**: For every 100 solar panels sold, they donate a panel to a school or community center in underprivileged areas. 7. **Workforce**: The company employs over 5,000 people, 40% of whom are in research and development roles. 8. **Recognition**: They won the \\u201cGreen Energy Innovator of the Year\\u201d award in 2022 for their work on solar panels made from recycled materials. 9. **Sustainability**: Their panels are designed to last 25+ years and are 95% recyclable at the end of their life cycle. 10. **Customer Perks**: They offer a 25-year warranty and real-time monitoring systems that allow users to track energy production via an app. 11. **Mission Statement**: \\"Empowering the world with clean energy, one panel at a time.\\" 12. **Energy Production**: The combined output of all their installations generates enough electricity to power over 2 million homes annually. 13. **R&D Efforts**: They are actively working on integrating solar panels into everyday items like backpacks and electric vehicles. 14. **Solar Farms**: The company has partnered with governments to develop large-scale solar farms, including one that spans over 10,000 acres. 15. **Future Goals**: By 2030, they aim to make solar power the most affordable energy source worldwide.  Would you like these customized for a specific scenario?"',
+                "tool_call_id": "call_BPxFAYW2i8Ke4iAjS2ODZjwS",
+            },
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+            {"role": "assistant", "content": "Sure! Our company was founded in"},
+            {"role": "user", "content": "Hi. Can you tell me more about the company?"},
+        ]
+        
+        params['messages'] = default_messages + params['messages']
+        
+        # print(f"_____openai.py get_chat_completions * params: {params['messages']}")
         try:
             chunks = await self._client.chat.completions.create(**params)
         except aiohttp.ClientError as e:
@@ -209,7 +315,7 @@ class BaseOpenAILLMService(LLMService):
         function_name = ""
         arguments = ""
         tool_call_id = ""
-        
+
         print(f"_____openai.py * _process_context: tool_call_id {tool_call_id}")
 
         await self.start_ttfb_metrics()
@@ -248,7 +354,9 @@ class BaseOpenAILLMService(LLMService):
                 # yield a frame containing the function name and the arguments.
 
                 tool_call = chunk.choices[0].delta.tool_calls[0]
-                print(f"___________________________openai.py * tool_call_id: {tool_call_id} {tool_call.function.arguments}")
+                print(
+                    f"___________________________openai.py * tool_call_id: {tool_call_id} {tool_call.function.arguments}"
+                )
                 if tool_call.index != func_idx:
                     functions_list.append(function_name)
                     arguments_list.append(arguments)
@@ -540,7 +648,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             self._pending_image_frame_message = frame
             await self._push_aggregation()
         # else:
-           # print(f"___<2>__openai.py * OpenAIAssistantContextAggregator process_frame frame : {frame}")
+        # print(f"___<2>__openai.py * OpenAIAssistantContextAggregator process_frame frame : {frame}")
 
     async def _push_aggregation(self):
         if not (

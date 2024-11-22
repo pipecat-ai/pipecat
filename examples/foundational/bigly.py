@@ -359,7 +359,9 @@ async def main():
                     "description": """""
                 Used to find information from the knowledge base. Use this tool in the following scenarios:
                     - When the user asks questions about the company.
-                    - If user is not showing interest and you need to convince them by using information about the company
+                    - If you need to convince the user to purchase solar panels.
+                    
+                IMPORTANT: ALWAYS call this tool after EVERY question the user asks.
             """,
                     "strict": True,  # type: ignore[typeddict-unknown-key]
                     "parameters": {
@@ -367,7 +369,7 @@ async def main():
                         "properties": {
                             "question": {
                                 "type": "string",
-                                "description": "User questions or concerns about the Company",
+                                "description": "The question the user asked.",
                             },
                             "reason": {
                                 "type": "string",
@@ -479,38 +481,38 @@ async def main():
             ),
         )
 
-        @transport.event_handler("on_call_state_updated")
-        async def on_call_state_updated(transport, state: str) -> None:
-            logger.info("Call State Updated, state: {state}", state=state)
+        # @transport.event_handler("on_call_state_updated")
+        # async def on_call_state_updated(transport, state: str) -> None:
+        #     logger.info("Call State Updated, state: {state}", state=state)
 
-            async def _dialout_retry_handler() -> None:
-                try:
-                    for i in range(3):
-                        logger.info("Attempting a Dial-Out, Attempt: {attempt}", attempt=i + 1)
-                        await transport.start_dialout(
-                            {"phoneNumber": TO, "video": False}
-                            # {"phoneNumber": TO, "callerId": FROM_DAILY_CALLER_ID, "video": False}
-                        )
-                        await asyncio.sleep(15)
-                        current_participant_count = transport.participant_counts()
-                        if current_participant_count["present"] >= 2:
-                            return
-                    raise Exception("Unable to perform a dial-out for Daily-Co ROOM")
-                except Exception as e:
-                    raise e
+        #     async def _dialout_retry_handler() -> None:
+        #         try:
+        #             for i in range(3):
+        #                 logger.info("Attempting a Dial-Out, Attempt: {attempt}", attempt=i + 1)
+        #                 await transport.start_dialout(
+        #                     {"phoneNumber": TO, "video": False}
+        #                     # {"phoneNumber": TO, "callerId": FROM_DAILY_CALLER_ID, "video": False}
+        #                 )
+        #                 await asyncio.sleep(15)
+        #                 current_participant_count = transport.participant_counts()
+        #                 if current_participant_count["present"] >= 2:
+        #                     return
+        #             raise Exception("Unable to perform a dial-out for Daily-Co ROOM")
+        #         except Exception as e:
+        #             raise e
 
-            async def _dialout_task_exception(task: asyncio.Task) -> None:
-                if task.exception():
-                    await task.queue_frames([EndFrame()])
-                else:
-                    logger.info("Dial-out completed successfully.")
+        #     async def _dialout_task_exception(task: asyncio.Task) -> None:
+        #         if task.exception():
+        #             await task.queue_frames([EndFrame()])
+        #         else:
+        #             logger.info("Dial-out completed successfully.")
 
-            def _handle_dialout_completion(task: asyncio.Task) -> None:
-                asyncio.create_task(_dialout_task_exception(task))
+        #     def _handle_dialout_completion(task: asyncio.Task) -> None:
+        #         asyncio.create_task(_dialout_task_exception(task))
 
-            if state == "joined":
-                task = transport.input().get_event_loop().create_task(_dialout_retry_handler())
-                task.add_done_callback(_handle_dialout_completion)
+        #     if state == "joined":
+        #         task = transport.input().get_event_loop().create_task(_dialout_retry_handler())
+        #         task.add_done_callback(_handle_dialout_completion)
 
         # Event handler for on_first_participant_joined
         @transport.event_handler("on_first_participant_joined")
@@ -519,8 +521,8 @@ async def main():
                 "First Participant Joined with ID {participant_id}",
                 participant_id=participant["id"],
             )
-            PARTICIPANT_ID[0] = participant["id"]
-            await transport.capture_participant_transcription(participant["id"])
+            # PARTICIPANT_ID[0] = participant["id"]
+            # await transport.capture_participant_transcription(participant["id"])
 
         @transport.event_handler("on_dialout_error")
         async def on_dialout_error(transport, cdata) -> None:
@@ -528,10 +530,10 @@ async def main():
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         # Event handler for on_dialout_answered
-        @transport.event_handler("on_dialout_answered")
-        async def on_dialout_answered(transport, cdata) -> None:
-            logger.info("Dial-Out Answered with data as follow: {data}", data=cdata)
-            await task.queue_frames([LLMMessagesFrame(messages)])
+        # @transport.event_handler("on_dialout_answered")
+        # async def on_dialout_answered(transport, cdata) -> None:
+        #     logger.info("Dial-Out Answered with data as follow: {data}", data=cdata)
+        #     await task.queue_frames([LLMMessagesFrame(messages)])
 
         # Event handler for on_participant_left
         @transport.event_handler("on_participant_left")
