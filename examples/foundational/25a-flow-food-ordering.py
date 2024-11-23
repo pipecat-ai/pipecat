@@ -28,7 +28,7 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-# Flow Configuration
+# Flow Configuration - Food ordering
 #
 # This configuration defines a simple food ordering system with the following states:
 #
@@ -64,7 +64,7 @@ flow_config = {
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are an order-taking assistant. You must ALWAYS use one of the available functions to progress the conversation. For this step, ask the user if they want pizza or sushi, and wait for them to use a function to choose. Start off by greeting them. Be friendly and casual; you're taking an order for food over the phone.",
+                    "content": "For this step, ask the user if they want pizza or sushi, and wait for them to use a function to choose. Start off by greeting them. Be friendly and casual; you're taking an order for food over the phone.",
                 }
             ],
             "functions": [
@@ -90,16 +90,7 @@ flow_config = {
             "messages": [
                 {
                     "role": "system",
-                    "content": """You are handling a pizza order. Use the available functions:
-                - Use select_pizza_size when the user specifies a size (can be used multiple times if they change their
-                mind or want to order multiple pizzas)
-                - Use the end function ONLY when the user confirms they are done with their order
-                
-                After each size selection, confirm the selection and ask if they want to change it or complete their order.
-                Only use the end function after the user confirms they are satisfied with their order.
-                
-                Start off by acknowledging the user's choice. Once they've chosen a size, ask if they'd like anything else.
-                Remember to be friendly and casual.""",
+                    "content": "You are handling a pizza order. Use the available functions:\n - Use select_pizza_size when the user specifies a size (can be used multiple times if they change their mind or want to order multiple pizzas)\n - Use the end function ONLY when the user confirms they are done with their order\n\nAfter each size selection, confirm the selection and ask if they want to change it or complete their order. Only use the end function after the user confirms they are satisfied with their order.\n\nStart off by acknowledging the user's choice. Once they've chosen a size, ask if they'd like anything else. Remember to be friendly and casual.",
                 }
             ],
             "functions": [
@@ -138,16 +129,7 @@ flow_config = {
             "messages": [
                 {
                     "role": "system",
-                    "content": """You are handling a sushi order. Use the available functions:
-                - Use select_roll_count when the user specifies how many rolls (can be used multiple times if they change their mind
-                or if they want to order multiple sushi rolls)
-                - Use the end function ONLY when the user confirms they are done with their order
-                
-                After each roll count selection, confirm the count and ask if they want to change it or complete their order.
-                Only use the end function after the user confirms they are satisfied with their order.
-                
-                Start off by acknowledging the user's choice. Once they've chosen a size, ask if they'd like anything else.
-                Remember to be friendly and casual.""",
+                    "content": "You are handling a sushi order. Use the available functions:\n - Use select_roll_count when the user specifies how many rolls (can be used multiple times if they change their mind or if they want to order multiple sushi rolls)\n - Use the end function ONLY when the user confirms they are done with their order\n\nAfter each roll count selection, confirm the count and ask if they want to change it or complete their order. Only use the end function after the user confirms they are satisfied with their order.\n\nStart off by acknowledging the user's choice. Once they've chosen a size, ask if they'd like anything else. Remember to be friendly and casual.",
                 }
             ],
             "functions": [
@@ -216,7 +198,7 @@ async def main():
 
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
         tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         # Get initial tools from the first node
         initial_tools = flow_config["nodes"]["start"]["functions"]
@@ -225,7 +207,7 @@ async def main():
         messages = [
             {
                 "role": "system",
-                "content": "You are an order-taking assistant. You must ALWAYS use the available functions to progress the conversation. Never assume an order is complete without the proper function calls. Your responses will be converted to audio so avoid special characters.",
+                "content": "You are an order-taking assistant. You must ALWAYS use the available functions to progress the conversation. This is a phone conversations and your responses will be converted to audio. Avoid outputting special characters and emojis.",
             }
         ]
 

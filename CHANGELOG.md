@@ -12,15 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a new RTVI message called `disconnect-bot`, which when handled pushes
   an `EndFrame` to trigger the pipeline to stop.
 
-- Added support for the new Pipecat Flows package (pipecat-ai-flows). Learn
+- Added support for the new Pipecat Flows package (`pipecat-ai-flows`). Learn
   more at: https://github.com/pipecat-ai/pipecat-flows.
 
-- Added foundational example `25-conversation-flow.py` showing how to use
-  Pipecat Flows.
+- Added three Pipecat Flows foundational examples: `25a-flow-food-ordering.py`,
+  `25b-flow-movie-booking.py`, and `25c-flow-travel-planner.py`.
 
 ### Changed
 
-- Expanded the transcriptions.language module to support a superset of
+- Expanded the `transcriptions.language` module to support a superset of
   languages.
 
 - Updated STT and TTS services with language options that match the supported
