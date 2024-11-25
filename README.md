@@ -13,6 +13,7 @@ Pipecat is an open source Python framework for building voice and multimodal con
 - **Multimodal Apps**: Combine voice, video, images, and text
 - **Creative Tools**: [Story-telling experiences](https://storytelling-chatbot.fly.dev/) and social companions
 - **Business Solutions**: [Customer intake flows](https://www.youtube.com/watch?v=lDevgsp9vn0) and support bots
+- **Complex conversational flows**: [Refer to Pipecat Flows](https://github.com/pipecat-ai/pipecat-flows) to learn more
 
 ## See it in action
 
@@ -31,6 +32,8 @@ Pipecat is an open source Python framework for building voice and multimodal con
 - **Pipeline Architecture**: Build complex apps from simple, reusable components
 - **Real-time Processing**: Frame-based pipeline architecture for fluid interactions
 - **Production Ready**: Enterprise-grade WebRTC and Websocket support
+
+💡 Looking to build structured conversations? Check out [Pipecat Flows](https://github.com/pipecat-ai/pipecat-flows) for managing complex conversational states and transitions.
 
 ## Getting started
 
