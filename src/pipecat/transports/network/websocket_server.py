@@ -106,6 +106,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
                 continue
 
             if isinstance(frame, AudioRawFrame):
+                logger.info("websocket_server")
                 await self.push_audio_frame(
                     InputAudioRawFrame(
                         audio=frame.audio,

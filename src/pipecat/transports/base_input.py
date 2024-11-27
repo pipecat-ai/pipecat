@@ -71,6 +71,7 @@ class BaseInputTransport(FrameProcessor):
         return self._params.vad_analyzer
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
+        logger.info(f"Pushing audio qsize: {self._audio_in_queue.qsize()}")
         if self._params.audio_in_enabled or self._params.vad_enabled:
             await self._audio_in_queue.put(frame)
 
@@ -167,6 +168,7 @@ class BaseInputTransport(FrameProcessor):
         return vad_state
 
     async def _audio_task_handler(self):
+        logger.info("_audio_task_handler started")
         vad_state: VADState = VADState.QUIET
         while True:
             try:

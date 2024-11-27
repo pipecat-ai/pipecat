@@ -7,6 +7,7 @@
 import asyncio
 import base64
 import json
+import random
 import uuid
 from typing import AsyncGenerator, List, Optional, Union
 
@@ -222,6 +223,10 @@ class CartesiaTTSService(WordTTSService):
     async def _receive_task_handler(self):
         try:
             async for message in self._get_websocket():
+                # Randomly cancel the asyncio task 1% of the time
+                if random.random() < 0.01:
+                    logger.info(f"Cancelling task for {self} due to random chance")
+                    asyncio.current_task().cancel()
                 msg = json.loads(message)
                 if not msg or msg["context_id"] != self._context_id:
                     continue
@@ -256,6 +261,7 @@ class CartesiaTTSService(WordTTSService):
                     logger.error(f"Cartesia error, unknown message type: {msg}")
         except asyncio.CancelledError:
             pass
+            # await self.push_error(ErrorFrame(f"{self} cancelled", True))
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
