@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated STT and TTS services with language options that match the supported
   languages for each service.
 
+### Fixed
+
+- Fixed Google Gemini message handling to properly convert appended messages to Gemini's required format
+
 ## [0.0.49] - 2024-11-17
 
 ### Added
