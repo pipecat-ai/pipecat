@@ -13,19 +13,16 @@ import aiohttp
 from loguru import logger
 from runner import configure
 
-from pipecat.frames.frames import (
-    BotSpeakingFrame,
-    EndFrame,
-    Frame,
-    StartInterruptionFrame,
-    StopInterruptionFrame,
-    TranscriptionFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
-)
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import (BotSpeakingFrame, EndFrame, Frame,
+                                   InputAudioRawFrame, StartInterruptionFrame,
+                                   StopInterruptionFrame, TextFrame,
+                                   TranscriptionFrame, TTSAudioRawFrame,
+                                   UserStartedSpeakingFrame,
+                                   UserStoppedSpeakingFrame)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaTTSService
@@ -44,7 +41,11 @@ class DebugProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if not (
-            isinstance(frame, BotSpeakingFrame)
+            isinstance(frame, InputAudioRawFrame)
+            or isinstance(frame, BotSpeakingFrame)
+            or isinstance(frame, UserStoppedSpeakingFrame)
+            or isinstance(frame, TTSAudioRawFrame)
+            or isinstance(frame, TextFrame)
         ):
             logger.debug(f"--- {self._name}: {frame} {direction}")
         await self.push_frame(frame, direction)
@@ -55,9 +56,12 @@ async def main():
         (room_url, _) = await configure(session)
 
         transport = DailyTransport(
-            room_url, None, "Say One Thing", DailyParams(audio_out_enabled=True)
+            room_url, None, "AI Bot", DailyParams(
+                audio_out_enabled=True,                 
+                transcription_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),)
         )
-
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
@@ -82,14 +86,18 @@ async def main():
         task = PipelineTask(
             Pipeline(
                 [
-                    dp,
+                    # transport.input(),
                     context_aggregator.user(),
+                    dp,
                     llm,
                     tts,
                     transport.output(),
                     context_aggregator.assistant(),
                 ]
-            )
+            ),
+            PipelineParams(
+                allow_interruptions=True,
+            ),
         )
 
         # Register an event handler so we can play the audio when the
@@ -98,37 +106,76 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             participant_id = participant.get("info", {}).get("participantId", "")
 
-            await task.queue_frames(
-                [
-                    UserStartedSpeakingFrame(),
-                    TranscriptionFrame("Tell a joke about dogs.", participant_id, time.time()),
-                    UserStoppedSpeakingFrame(),
-                ]
-            )
-            # await asyncio.sleep(5)  # Small delay between frame sets
-
             # Create frames for 60 seconds
             start_time = time.time()
-            while time.time() - start_time < 30:
+            while time.time() - start_time < 300:
                 elapsed_time = round(time.time() - start_time)
                 logger.info(f"Running for {elapsed_time} seconds")
-                await asyncio.sleep(5)  # Small delay between frame sets
-                await task.queue_frames(
-                    [
-                        StartInterruptionFrame(),
-                        TranscriptionFrame("Tell a joke about cats.", participant_id, time.time()),
-                        StopInterruptionFrame(),
-                    ]
+                await task.queue_frame(
+                    StartInterruptionFrame(),
                 )
-                await asyncio.sleep(5)  # Small delay between frame sets
-                await task.queue_frames(
-                    [
-                        StartInterruptionFrame(),
-                        TranscriptionFrame("Tell a joke about dogs.", participant_id, time.time()),
-                        StopInterruptionFrame(),
-                    ]
+                await asyncio.sleep(1) 
+                
+                await task.queue_frame(
+                    UserStartedSpeakingFrame(),
                 )
+                
+                await asyncio.sleep(1) 
+                
+                await task.queue_frame(
+                    TranscriptionFrame("Tell a joke about dogs.", participant_id, time.time()),
+                )
+
+                await asyncio.sleep(1) 
+                
+                await task.queue_frame(
+                    StopInterruptionFrame(),
+                )
+
+                await asyncio.sleep(1) 
+
+                
+                await task.queue_frame(
+                    UserStoppedSpeakingFrame(),
+                )
+                
+                await asyncio.sleep(5) 
+                
+                await task.queue_frame(
+                        StartInterruptionFrame()
+                )
+                await asyncio.sleep(1) 
+                
+                await task.queue_frame(
+                    UserStartedSpeakingFrame(),
+                )
+                
+                await asyncio.sleep(1) 
+                
+                await task.queue_frame(
+                    TranscriptionFrame("Tell a joke about cats.", participant_id, time.time()),
+                )
+
+                await asyncio.sleep(1) 
+                
+                await task.queue_frames(
+                    StopInterruptionFrame(),
+                )
+
+                await asyncio.sleep(1) 
+                await task.queue_frame(
+                    UserStoppedSpeakingFrame(),
+                )
+                await asyncio.sleep(5)
             await task.queue_frame(EndFrame())
+        
+        
+        # @transport.event_handler("on_first_participant_joined")
+        # async def on_first_participant_joined(transport, participant):
+        #     await transport.capture_participant_transcription(participant["id"])
+        #     # Kick off the conversation.
+        #     messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        #     await task.queue_frames([LLMMessagesFrame(messages)])
 
         await runner.run(task)
 
