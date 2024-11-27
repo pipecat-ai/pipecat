@@ -332,6 +332,22 @@ class GoogleLLMContext(OpenAILLMContext):
         self._messages[:] = messages
         self._restructure_from_openai_messages()
 
+    def add_messages(self, messages: List):
+        # Convert each message individually
+        converted_messages = []
+        for msg in messages:
+            if isinstance(msg, glm.Content):
+                # Already in Gemini format
+                converted_messages.append(msg)
+            else:
+                # Convert from standard format to Gemini format
+                converted = self.from_standard_message(msg)
+                if converted is not None:
+                    converted_messages.append(converted)
+
+        # Add the converted messages to our existing messages
+        self._messages.extend(converted_messages)
+
     def get_messages_for_logging(self):
         msgs = []
         for message in self.messages:
