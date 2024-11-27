@@ -14,12 +14,19 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import (BotSpeakingFrame, EndFrame, Frame,
-                                   InputAudioRawFrame, StartInterruptionFrame,
-                                   StopInterruptionFrame, TextFrame,
-                                   TranscriptionFrame, TTSAudioRawFrame,
-                                   UserStartedSpeakingFrame,
-                                   UserStoppedSpeakingFrame)
+from pipecat.frames.frames import (
+    BotSpeakingFrame,
+    EndFrame,
+    Frame,
+    InputAudioRawFrame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
+    TextFrame,
+    TranscriptionFrame,
+    TTSAudioRawFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -56,11 +63,15 @@ async def main():
         (room_url, _) = await configure(session)
 
         transport = DailyTransport(
-            room_url, None, "AI Bot", DailyParams(
-                audio_out_enabled=True,                 
+            room_url,
+            None,
+            "AI Bot",
+            DailyParams(
+                audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),)
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
         )
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
@@ -88,8 +99,8 @@ async def main():
                 [
                     # transport.input(),
                     context_aggregator.user(),
-                    dp,
                     llm,
+                    dp,
                     tts,
                     transport.output(),
                     context_aggregator.assistant(),
@@ -106,7 +117,7 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             participant_id = participant.get("info", {}).get("participantId", "")
 
-            # Create frames for 60 seconds
+            # Create frames for 600 seconds
             start_time = time.time()
             while time.time() - start_time < 300:
                 elapsed_time = round(time.time() - start_time)
@@ -114,62 +125,58 @@ async def main():
                 await task.queue_frame(
                     StartInterruptionFrame(),
                 )
-                await asyncio.sleep(1) 
-                
+                await asyncio.sleep(1)
+
                 await task.queue_frame(
                     UserStartedSpeakingFrame(),
                 )
-                
-                await asyncio.sleep(1) 
-                
+
+                await asyncio.sleep(1)
+
                 await task.queue_frame(
-                    TranscriptionFrame("Tell a joke about dogs.", participant_id, time.time()),
+                    TranscriptionFrame("Tell me more about your company.", participant_id, time.time()),
                 )
 
-                await asyncio.sleep(1) 
-                
+                await asyncio.sleep(1)
+
                 await task.queue_frame(
                     StopInterruptionFrame(),
                 )
 
-                await asyncio.sleep(1) 
+                await asyncio.sleep(1)
 
-                
                 await task.queue_frame(
                     UserStoppedSpeakingFrame(),
                 )
-                
-                await asyncio.sleep(5) 
-                
-                await task.queue_frame(
-                        StartInterruptionFrame()
-                )
-                await asyncio.sleep(1) 
-                
+
+                await asyncio.sleep(5)
+
+                await task.queue_frame(StartInterruptionFrame())
+                await asyncio.sleep(1)
+
                 await task.queue_frame(
                     UserStartedSpeakingFrame(),
                 )
-                
-                await asyncio.sleep(1) 
-                
+
+                await asyncio.sleep(1)
+
                 await task.queue_frame(
-                    TranscriptionFrame("Tell a joke about cats.", participant_id, time.time()),
+                    TranscriptionFrame("Give me a list of appointment dates.", participant_id, time.time()),
                 )
 
-                await asyncio.sleep(1) 
-                
+                await asyncio.sleep(1)
+
                 await task.queue_frames(
                     StopInterruptionFrame(),
                 )
 
-                await asyncio.sleep(1) 
+                await asyncio.sleep(1)
                 await task.queue_frame(
                     UserStoppedSpeakingFrame(),
                 )
                 await asyncio.sleep(5)
             await task.queue_frame(EndFrame())
-        
-        
+
         # @transport.event_handler("on_first_participant_joined")
         # async def on_first_participant_joined(transport, participant):
         #     await transport.capture_participant_transcription(participant["id"])
