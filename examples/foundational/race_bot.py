@@ -14,6 +14,8 @@ from loguru import logger
 from runner import configure
 
 from pipecat.frames.frames import (
+    StartInterruptionFrame,
+    StopInterruptionFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -72,13 +74,23 @@ async def main():
         # participant joins.
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            frames = [
-                UserStartedSpeakingFrame(),
-                TranscriptionFrame("Tell a joke about dogs.", "user_id", time.time()),
-                UserStoppedSpeakingFrame(),
-            ]
-
-            await task.queue_frames(frames)
+            # Create frames for 3 seconds
+            start_time = time.time()
+            while time.time() - start_time < 300:
+                timestamp = time.time()
+                frames = [
+                    UserStartedSpeakingFrame(),
+                    TranscriptionFrame("Tell a joke about dogs.", "user_id", timestamp),
+                    UserStoppedSpeakingFrame(),
+                ]
+                await task.queue_frames(frames)
+                await asyncio.sleep(5)  # Small delay between frame sets
+                next_frames = [
+                    StartInterruptionFrame(),
+                    TranscriptionFrame("Tell a joke about cats.", "user_id", timestamp),
+                    StopInterruptionFrame(),
+                ]
+                await task.queue_frames(next_frames)
 
         await runner.run(task)
 
