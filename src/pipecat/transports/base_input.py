@@ -6,7 +6,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-
+import time
 from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
@@ -41,6 +41,25 @@ class BaseInputTransport(FrameProcessor):
         # if passthrough is enabled.
         self._audio_task = None
 
+        self._last_queue_check = time.time()
+
+        self._last_queue_size = 0
+
+
+    async def _monitor_queue_processing(self):
+        current_time = time.time()
+        current_size = self._audio_in_queue.qsize()
+
+        if current_time - self._last_queue_check >= 5.0:  # Check every 5 seconds
+            processing_rate = (current_size - self._last_queue_size) / 5.0
+            logger.info(f"Audio queue processing rate: {processing_rate:.2f} frames/sec")
+
+            if processing_rate > 0:  # Queue is growing
+                logger.warning("Audio queue is growing - possible processing bottleneck")
+
+            self._last_queue_check = current_time
+            self._last_queue_size = current_size
+
     async def start(self, frame: StartFrame):
         # Start audio filter.
         if self._params.audio_in_filter:
@@ -71,6 +90,8 @@ class BaseInputTransport(FrameProcessor):
         return self._params.vad_analyzer
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
+        queue_size = self._audio_in_queue.qsize()
+        # TODO: Let's see after having a certain size we should drain the queue
         if self._params.audio_in_enabled or self._params.vad_enabled:
             await self._audio_in_queue.put(frame)
 
@@ -122,6 +143,7 @@ class BaseInputTransport(FrameProcessor):
             # Make sure we notify about interruptions quickly out-of-band.
             if isinstance(frame, UserStartedSpeakingFrame):
                 logger.debug("User started speaking")
+                await self._drain_audio_queue()
                 await self._start_interruption()
                 # Push an out-of-band frame (i.e. not using the ordered push
                 # frame task) to stop everything, specially at the output
@@ -134,6 +156,16 @@ class BaseInputTransport(FrameProcessor):
 
         await self.push_frame(frame)
 
+    async def _drain_audio_queue(self):
+        """Clear accumulated audio frames from the queue"""
+        logger.info(f"Draining audio queue (size: {self._audio_in_queue.qsize()})")
+        try:
+            while not self._audio_in_queue.empty():
+                self._audio_in_queue.get_nowait()
+                self._audio_in_queue.task_done()
+        except asyncio.QueueEmpty:
+            pass
+        logger.info("Audio queue drained")
     #
     # Audio input
     #
@@ -156,14 +188,17 @@ class BaseInputTransport(FrameProcessor):
         ):
             frame = None
             if new_vad_state == VADState.SPEAKING:
+                logger.info(f"User started speaking {time.time()}")
                 frame = UserStartedSpeakingFrame()
             elif new_vad_state == VADState.QUIET:
+                logger.info(f"User stopped speaking {time.time()}")
                 frame = UserStoppedSpeakingFrame()
 
             if frame:
                 await self._handle_interruptions(frame)
 
             vad_state = new_vad_state
+        
         return vad_state
 
     async def _audio_task_handler(self):
@@ -172,23 +207,27 @@ class BaseInputTransport(FrameProcessor):
             try:
                 frame: InputAudioRawFrame = await self._audio_in_queue.get()
 
+                await self._monitor_queue_processing()
+
                 audio_passthrough = True
 
-                # If an audio filter is available, run it before VAD.
-                if self._params.audio_in_filter:
-                    frame.audio = await self._params.audio_in_filter.filter(frame.audio)
+                try:
+                    # If an audio filter is available, run it before VAD.
+                    if self._params.audio_in_filter:
+                        frame.audio = await self._params.audio_in_filter.filter(frame.audio)
 
-                # Check VAD and push event if necessary. We just care about
-                # changes from QUIET to SPEAKING and vice versa.
-                if self._params.vad_enabled:
-                    vad_state = await self._handle_vad(frame.audio, vad_state)
-                    audio_passthrough = self._params.vad_audio_passthrough
+                    # Check VAD and push event if necessary. We just care about
+                    # changes from QUIET to SPEAKING and vice versa.
+                    if self._params.vad_enabled:
+                        vad_state = await self._handle_vad(frame.audio, vad_state)
+                        audio_passthrough = self._params.vad_audio_passthrough
 
-                # Push audio downstream if passthrough.
-                if audio_passthrough:
-                    await self.push_frame(frame)
-
-                self._audio_in_queue.task_done()
+                    # Push audio downstream if passthrough.
+                    if audio_passthrough:
+                        await self.push_frame(frame)
+                finally:
+                    # Always mark task as done, even if processing fails
+                    self._audio_in_queue.task_done()
             except asyncio.CancelledError:
                 break
             except Exception as e:

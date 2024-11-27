@@ -8,7 +8,7 @@ import dataclasses
 
 import pipecat.frames.protobufs.frames_pb2 as frame_protos
 
-from pipecat.frames.frames import AudioRawFrame, Frame, TextFrame, TranscriptionFrame
+from pipecat.frames.frames import AudioRawFrame, Frame, TextFrame, TranscriptionFrame, TransportMessageFrame
 from pipecat.serializers.base_serializer import FrameSerializer
 
 from loguru import logger
@@ -19,6 +19,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         TextFrame: "text",
         AudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
+        TransportMessageFrame: "transport_message",
     }
 
     SERIALIZABLE_FIELDS = {v: k for k, v in SERIALIZABLE_TYPES.items()}

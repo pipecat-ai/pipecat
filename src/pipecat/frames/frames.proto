@@ -27,6 +27,7 @@ message AudioRawFrame {
   optional uint64 pts = 6;
 }
 
+
 message TranscriptionFrame {
   uint64 id = 1;
   string name = 2;
@@ -35,10 +36,18 @@ message TranscriptionFrame {
   string timestamp = 5;
 }
 
+message TransportMessageFrame {
+  uint64 id = 1;
+  string name = 2;
+  string message = 3;
+  optional uint64 pts = 6;
+}
+
 message Frame {
   oneof frame {
     TextFrame text = 1;
     AudioRawFrame audio = 2;
     TranscriptionFrame transcription = 3;
+    TransportMessageFrame transport_message = 4;
   }
 }
