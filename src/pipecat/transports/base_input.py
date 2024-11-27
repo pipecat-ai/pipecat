@@ -6,7 +6,6 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-
 from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState

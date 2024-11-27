@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     TextFrame,
     TranscriptionFrame,
+    TransportMessageFrame
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
@@ -25,6 +26,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         TextFrame: "text",
         OutputAudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
+        TransportMessageFrame: "transport_message",
     }
     SERIALIZABLE_FIELDS = {v: k for k, v in SERIALIZABLE_TYPES.items()}
 

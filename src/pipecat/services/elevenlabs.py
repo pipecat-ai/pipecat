@@ -147,7 +147,7 @@ class ElevenLabsTTSService(WordTTSService):
         voice_id: str,
         model: str = "eleven_turbo_v2_5",
         url: str = "wss://api.elevenlabs.io",
-        output_format: ElevenLabsOutputFormat = "pcm_24000",
+        output_format: ElevenLabsOutputFormat = "pcm_16000",
         params: InputParams = InputParams(),
         **kwargs,
     ):
