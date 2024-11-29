@@ -29,6 +29,7 @@ dependencies = [
     "pydantic~=2.8.2",
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
+    "dtmf @ git+https://github.com/jamsea/dtmf.git@hush/updateDeps",
 ]
 
 [project.urls]
