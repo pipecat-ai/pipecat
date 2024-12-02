@@ -22,7 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed Google Gemini message handling to properly convert appended messages to Gemini's required format
+- `DailyTransport.capture_participant_video` now allows capturing user's screen
+  share by simply passing `video_source="screenVideo"`.
+
+- Fixed Google Gemini message handling to properly convert appended messages to
+  Gemini's required format.
 
 ## [0.0.49] - 2024-11-17
 
