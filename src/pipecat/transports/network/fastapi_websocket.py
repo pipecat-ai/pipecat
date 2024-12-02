@@ -15,8 +15,6 @@ from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
     AudioRawFrame,
-    CancelFrame,
-    EndFrame,
     Frame,
     InputAudioRawFrame,
     StartFrame,
