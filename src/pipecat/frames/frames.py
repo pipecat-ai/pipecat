@@ -68,20 +68,40 @@ class ControlFrame(Frame):
 
 
 #
+# Mixins
+#
+
+
+@dataclass
+class AudioRawFrame:
+    """A chunk of audio."""
+
+    audio: bytes
+    sample_rate: int
+    num_channels: int
+    num_frames: int = field(init=False)
+
+
+@dataclass
+class ImageRawFrame:
+    """A raw image."""
+
+    image: bytes
+    size: Tuple[int, int]
+    format: str | None
+
+
+#
 # Data frames.
 #
 
 
 @dataclass
-class OutputAudioRawFrame(DataFrame):
+class OutputAudioRawFrame(DataFrame, AudioRawFrame):
     """A chunk of audio. Will be played by the output transport if the
     transport's microphone has been enabled.
 
     """
-
-    audio: bytes
-    sample_rate: int
-    num_channels: int
 
     def __post_init__(self):
         super().__post_init__()
@@ -93,15 +113,11 @@ class OutputAudioRawFrame(DataFrame):
 
 
 @dataclass
-class OutputImageRawFrame(DataFrame):
+class OutputImageRawFrame(DataFrame, ImageRawFrame):
     """An image that will be shown by the transport if the transport's camera is
     enabled.
 
     """
-
-    image: bytes
-    size: Tuple[int, int]
-    format: str | None
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -474,12 +490,8 @@ class UserImageRequestFrame(SystemFrame):
 
 
 @dataclass
-class InputAudioRawFrame(SystemFrame):
+class InputAudioRawFrame(SystemFrame, AudioRawFrame):
     """A chunk of audio usually coming from an input transport."""
-
-    audio: bytes
-    sample_rate: int
-    num_channels: int
 
     def __post_init__(self):
         super().__post_init__()
@@ -491,12 +503,8 @@ class InputAudioRawFrame(SystemFrame):
 
 
 @dataclass
-class InputImageRawFrame(SystemFrame):
+class InputImageRawFrame(SystemFrame, ImageRawFrame):
     """An image usually coming from an input transport."""
-
-    image: bytes
-    size: Tuple[int, int]
-    format: str | None
 
     def __str__(self):
         pts = format_pts(self.pts)
