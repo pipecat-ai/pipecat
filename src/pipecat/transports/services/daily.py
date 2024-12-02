@@ -328,7 +328,7 @@ class DailyTransportClient(EventHandler):
 
                 logger.info(f"Joined {self._room_url}")
 
-                if self._token and self._params.transcription_enabled:
+                if self._params.transcription_enabled:
                     await self._start_transcription()
 
                 await self._callbacks.on_joined(data)
@@ -342,6 +342,10 @@ class DailyTransportClient(EventHandler):
             await self._callbacks.on_error(error_msg)
 
     async def _start_transcription(self):
+        if not self._token:
+            logger.warning(f"Transcription can't be started without a room token")
+            return
+
         logger.info(f"Enabling transcription with settings {self._params.transcription_settings}")
 
         future = self._loop.create_future()
@@ -436,6 +440,8 @@ class DailyTransportClient(EventHandler):
             await self._callbacks.on_error(error_msg)
 
     async def _stop_transcription(self):
+        if not self._token:
+            return
         future = self._loop.create_future()
         self._client.stop_transcription(completion=completion_callback(future))
         error = await future
