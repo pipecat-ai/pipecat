@@ -255,6 +255,7 @@ class CartesiaTTSService(WordTTSService):
                 else:
                     logger.error(f"Cartesia error, unknown message type: {msg}")
         except asyncio.CancelledError:
+            # TODO(jamsea): Should we really pass here?
             pass
         except Exception as e:
             logger.error(f"{self} exception: {e}")
@@ -377,17 +378,31 @@ class CartesiaHttpTTSService(TTSService):
                 stream=False,
                 _experimental_voice_controls=voice_controls,
             )
-
-            await self.stop_ttfb_metrics()
-
             frame = TTSAudioRawFrame(
                 audio=output["audio"],
                 sample_rate=self._settings["output_format"]["sample_rate"],
                 num_channels=1,
             )
             yield frame
+        except asyncio.TimeoutError as e:
+            logger.error(f"{self} timeout error: {e}")
+            await self.push_frame(ErrorFrame("Request timed out"))
+        except asyncio.CancelledError:
+            logger.info(f"{self} operation cancelled")
+            await self.push_frame(ErrorFrame("Operation cancelled"))
+            raise  # Re-raise CancelledError to properly handle task cancellation
+        except ConnectionError as e:
+            logger.error(f"{self} connection error: {e}")
+            await self.push_frame(ErrorFrame(f"Connection error: {e}"))
+        except KeyError as e:
+            logger.error(f"{self} invalid settings: Missing {e}")
+            await self.push_frame(ErrorFrame(f"Invalid settings: Missing {e}"))
         except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            logger.error(f"{self} unexpected error: {e}")
+            await self.push_frame(ErrorFrame(f"Unexpected error: {e}"))
+
+        finally:
+            await self.stop_ttfb_metrics()
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()
