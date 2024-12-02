@@ -12,7 +12,7 @@ import sys
 from dataclasses import dataclass
 
 from pipecat.frames.frames import (
-    AppFrame,
+    DataFrame,
     Frame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -42,7 +42,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 @dataclass
-class MonthFrame(AppFrame):
+class MonthFrame(DataFrame):
     month: str
 
     def __str__(self):

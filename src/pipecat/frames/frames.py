@@ -244,16 +244,6 @@ class TransportMessageFrame(DataFrame):
 
 
 #
-# App frames. Application user-defined frames.
-#
-
-
-@dataclass
-class AppFrame(Frame):
-    pass
-
-
-#
 # System frames
 #
 

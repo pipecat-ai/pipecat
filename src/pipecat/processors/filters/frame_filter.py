@@ -6,7 +6,7 @@
 
 from typing import Tuple, Type
 
-from pipecat.frames.frames import AppFrame, ControlFrame, Frame, SystemFrame
+from pipecat.frames.frames import ControlFrame, Frame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -23,11 +23,7 @@ class FrameFilter(FrameProcessor):
         if isinstance(frame, self._types):
             return True
 
-        return (
-            isinstance(frame, AppFrame)
-            or isinstance(frame, ControlFrame)
-            or isinstance(frame, SystemFrame)
-        )
+        return isinstance(frame, ControlFrame) or isinstance(frame, SystemFrame)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
