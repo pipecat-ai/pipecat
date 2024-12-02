@@ -42,6 +42,7 @@ Next, follow the steps in the README for each demo.
 | [Dialin Chatbot](dialin-chatbot)             | A chatbot that connects to an incoming phone call from Daily or Twilio.                                                                    | Deepgram, ElevenLabs, OpenAI, Daily, Twilio                       |
 | [Twilio Chatbot](twilio-chatbot)             | A chatbot that connects to an incoming phone call from Twilio.                                                                             | Deepgram, ElevenLabs, OpenAI, Daily, Twilio                       |
 | [studypal](studypal)                         | A chatbot to have a conversation about any article on the web                                                                              |                                                                   |
+| [WebSocket Chatbot Server](websocket-server) | A real-time websocket server that handles audio streaming and bot interactions with speech-to-text and text-to-speech capabilities | `python-websockets`, `openai`, `deepgram`, `silero-tts`, `numpy` |
 
 > [!IMPORTANT]
 > These example projects use Daily as a WebRTC transport and can be joined using their hosted Prebuilt UI.
