@@ -66,7 +66,7 @@ soundfile = [ "soundfile~=0.12.1" ]
 together = [ "openai~=1.50.2" ]
 websocket = [ "websockets~=13.1", "fastapi~=0.115.0" ]
 whisper = [ "faster-whisper~=1.0.3" ]
-
+simli = [ "simli-ai>=0.1.7"]
 [tool.setuptools.packages.find]
 # All the following settings are optional:
 where = ["src"]
