@@ -676,6 +676,7 @@ class RTVIProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def cleanup(self):
+        await super().cleanup()
         if self._pipeline:
             await self._pipeline.cleanup()
 

@@ -5,13 +5,16 @@
 #
 
 import aiohttp
+import io
 import os
 import uuid
+import wave
 
 from datetime import datetime
 from typing import Dict, List, Tuple
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame
+from pipecat.processors.audio import audio_buffer_processor
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AIService
@@ -81,9 +84,11 @@ class CanonicalMetricsService(AIService):
         self._output_dir = output_dir
 
     async def stop(self, frame: EndFrame):
+        await super().stop(frame)
         await self._process_audio()
 
     async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
         await self._process_audio()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -91,23 +96,32 @@ class CanonicalMetricsService(AIService):
         await self.push_frame(frame, direction)
 
     async def _process_audio(self):
-        pipeline = self._audio_buffer_processor
-        if pipeline.has_audio():
-            os.makedirs(self._output_dir, exist_ok=True)
-            filename = self._get_output_filename()
-            wave_data = pipeline.merge_audio_buffers()
+        audio_buffer_processor = self._audio_buffer_processor
 
+        if not audio_buffer_processor.has_audio():
+            return
+
+        os.makedirs(self._output_dir, exist_ok=True)
+        filename = self._get_output_filename()
+        audio = audio_buffer_processor.merge_audio_buffers()
+
+        with io.BytesIO() as buffer:
+            with wave.open(buffer, "wb") as wf:
+                wf.setsampwidth(2)
+                wf.setnchannels(audio_buffer_processor.num_channels)
+                wf.setframerate(audio_buffer_processor.sample_rate)
+                wf.writeframes(audio)
             async with aiofiles.open(filename, "wb") as file:
-                await file.write(wave_data)
+                await file.write(buffer.getvalue())
 
-            try:
-                await self._multipart_upload(filename)
-                pipeline.reset_audio_buffer()
-                await aiofiles.os.remove(filename)
-            except FileNotFoundError:
-                pass
-            except Exception as e:
-                logger.error(f"Failed to upload recording: {e}")
+        try:
+            await self._multipart_upload(filename)
+            await aiofiles.os.remove(filename)
+            audio_buffer_processor.reset_audio_buffers()
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.error(f"Failed to upload recording: {e}")
 
     def _get_output_filename(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
