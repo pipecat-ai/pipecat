@@ -102,7 +102,6 @@ async def main():
             audio_buffer_processor=audio_buffer_processor,
             aiohttp_session=session,
             api_key=os.getenv("CANONICAL_API_KEY"),
-            api_url=os.getenv("CANONICAL_API_URL"),
             call_id=str(uuid.uuid4()),
             assistant="pipecat-chatbot",
             assistant_speaks_first=True,

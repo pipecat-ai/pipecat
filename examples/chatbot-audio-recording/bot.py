@@ -4,7 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import aiofiles
 import asyncio
+import io
 import os
 import sys
 
@@ -32,15 +34,17 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def save_audio(audiobuffer):
-    if audiobuffer.has_audio():
-        merged_audio = audiobuffer.merge_audio_buffers()
+async def save_audio(audio: bytes, sample_rate: int, num_channels: int):
+    if len(audio) > 0:
         filename = f"conversation_recording{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
-        with wave.open(filename, "wb") as wf:
-            wf.setnchannels(2)
-            wf.setsampwidth(2)
-            wf.setframerate(audiobuffer._sample_rate)
-            wf.writeframes(merged_audio)
+        with io.BytesIO() as buffer:
+            with wave.open(buffer, "wb") as wf:
+                wf.setsampwidth(2)
+                wf.setnchannels(num_channels)
+                wf.setframerate(sample_rate)
+                wf.writeframes(audio)
+            async with aiofiles.open(filename, "wb") as file:
+                await file.write(buffer.getvalue())
         print(f"Merged audio saved to {filename}")
     else:
         print("No audio data to save")
@@ -106,7 +110,9 @@ async def main():
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
-        audiobuffer = AudioBufferProcessor()
+        # Save audio every 10 seconds.
+        audiobuffer = AudioBufferProcessor(buffer_size=480000)
+
         pipeline = Pipeline(
             [
                 transport.input(),  # microphone
@@ -121,6 +127,10 @@ async def main():
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
+        @audiobuffer.event_handler("on_audio_data")
+        async def on_audio_data(buffer, audio, sample_rate, num_channels):
+            await save_audio(audio, sample_rate, num_channels)
+
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
@@ -130,7 +140,6 @@ async def main():
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
             await task.queue_frame(EndFrame())
-            await save_audio(audiobuffer)
 
         runner = PipelineRunner()
 
