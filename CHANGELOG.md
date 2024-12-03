@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `WebsocketServerTransport` issue that would prevent interruptions with
+  `TwilioSerializer` from working.
+
 - `DailyTransport.capture_participant_video` now allows capturing user's screen
   share by simply passing `video_source="screenVideo"`.
 
