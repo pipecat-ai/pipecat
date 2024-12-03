@@ -342,7 +342,7 @@ class LiveKitInputTransport(BaseInputTransport):
         return self._vad_analyzer
 
     async def push_app_message(self, message: Any, sender: str):
-        frame = LiveKitTransportMessageFrame(message=message, participant_id=sender)
+        frame = LiveKitTransportMessageUrgentFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     async def _audio_in_task_handler(self):

@@ -723,7 +723,7 @@ class DailyInputTransport(BaseInputTransport):
         await self.push_frame(frame)
 
     async def push_app_message(self, message: Any, sender: str):
-        frame = DailyTransportMessageFrame(message=message, participant_id=sender)
+        frame = DailyTransportMessageUrgentFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     #
