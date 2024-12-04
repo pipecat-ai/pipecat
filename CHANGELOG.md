@@ -10,12 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `GroqLLMService` and `GrokLLMService` for Groq and Grok API integration, with
-  OpenAI-compatible interface
-- New examples demonstrating function calling with Groq, Grok, and Azure OpenAI
+  OpenAI-compatible interface.
 
-  - `14f-function-calling-groq.py`
-  - `14g-function-calling-grok.py`
-  - `14h-function-calling-azure.py`
+- New examples demonstrating function calling with Groq, Grok, Azure OpenAI,
+  and Fireworks: `14f-function-calling-groq.py`, `14g-function-calling-grok.py`,
+  `14h-function-calling-azure.py`, and `14i-function-calling-fireworks.py`.
 
 - In order to obtain the audio stored by the `AudioBufferProcessor` you can now
   also register an `on_audio_data` event handler. The `on_audio_data` handler
@@ -47,6 +46,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 - Updated the `AzureLLMService` to use the `OpenAILLMService`. Updated the
   `api_version` to `2024-09-01-preview`.
 
+- Updated the `FireworksLLMService` to use the `OpenAILLMService`. Updated the
+  default model to `accounts/fireworks/models/firefunction-v2`.
+
 ### Removed
 
 - Removed `AppFrame`. This was used as a special user custom frame, but there's
@@ -70,6 +72,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 - Fixed Google Gemini message handling to properly convert appended messages to
   Gemini's required format.
+
+- Fixed an issue with `FireworksLLMService` where chat completions were failing
+  by removing the `stream_options` from the chat completion options.
 
 ## [0.0.49] - 2024-11-17
 
