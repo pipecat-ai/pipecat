@@ -5,7 +5,11 @@
 #
 
 import asyncio
+<<<<<<< HEAD
 from typing import AsyncGenerator, Optional
+=======
+from typing import AsyncGenerator, List, Optional, Union, Iterator
+>>>>>>> 07e3942e (add nvidia riva - fastpitch)
 
 from loguru import logger
 from pydantic.main import BaseModel
@@ -13,6 +17,10 @@ from pydantic.main import BaseModel
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+<<<<<<< HEAD
+=======
+    ErrorFrame,
+>>>>>>> 07e3942e (add nvidia riva - fastpitch)
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -38,7 +46,11 @@ except ModuleNotFoundError as e:
 
 class FastpitchTTSService(TTSService):
     class InputParams(BaseModel):
+<<<<<<< HEAD
         language: Optional[Language] = Language.EN_US
+=======
+        language: Optional[str] = "en-US"
+>>>>>>> 07e3942e (add nvidia riva - fastpitch)
 
     def __init__(
         self,
