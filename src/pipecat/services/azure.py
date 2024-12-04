@@ -25,13 +25,9 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     URLImageRawFrame,
 )
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.ai_services import ImageGenService, STTService, TTSService
 from pipecat.services.openai import (
-    BaseOpenAILLMService,
-    OpenAIAssistantContextAggregator,
-    OpenAIContextAggregatorPair,
-    OpenAIUserContextAggregator,
+    OpenAILLMService,
 )
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -398,32 +394,43 @@ def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputForma
     return sample_rate_map.get(sample_rate, SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm)
 
 
-class AzureLLMService(BaseOpenAILLMService):
+class AzureLLMService(OpenAILLMService):
+    """A service for interacting with Azure OpenAI using the OpenAI-compatible interface.
+
+    This service extends OpenAILLMService to connect to Azure's OpenAI endpoint while
+    maintaining full compatibility with OpenAI's interface and functionality.
+
+    Args:
+        api_key (str): The API key for accessing Azure OpenAI
+        endpoint (str): The Azure endpoint URL
+        model (str): The model identifier to use
+        api_version (str, optional): Azure API version. Defaults to "2024-09-01-preview"
+        **kwargs: Additional keyword arguments passed to OpenAILLMService
+    """
+
     def __init__(
-        self, *, api_key: str, endpoint: str, model: str, api_version: str = "2023-12-01-preview"
+        self,
+        *,
+        api_key: str,
+        endpoint: str,
+        model: str,
+        api_version: str = "2024-09-01-preview",
+        **kwargs,
     ):
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
         self._endpoint = endpoint
         self._api_version = api_version
-        super().__init__(api_key=api_key, model=model)
+        super().__init__(api_key=api_key, model=model, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
+        """Create OpenAI-compatible client for Azure OpenAI endpoint."""
+        logger.debug(f"Creating Azure OpenAI client with endpoint {self._endpoint}")
         return AsyncAzureOpenAI(
             api_key=api_key,
             azure_endpoint=self._endpoint,
             api_version=self._api_version,
         )
-
-    @staticmethod
-    def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
-    ) -> OpenAIContextAggregatorPair:
-        user = OpenAIUserContextAggregator(context)
-        assistant = OpenAIAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
-        )
-        return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
 
 class AzureBaseTTSService(TTSService):
