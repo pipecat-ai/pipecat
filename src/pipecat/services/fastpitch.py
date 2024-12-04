@@ -35,9 +35,7 @@ from pipecat.audio import audio_io
 
 try:
     import websockets
-
     import riva.client
-    from riva.client.argparse_utils import add_connection_argparse_parameters
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -92,7 +90,7 @@ class FastpitchTTSService(WordTTSService):
         super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,
-            sample_rate=sample_rate,
+            sample_rate=sample_rate_hz,
             **kwargs,
         )
 
@@ -144,6 +142,7 @@ class FastpitchTTSService(WordTTSService):
 
     async def _connect(self):
         try:
+            # borked
             self._websocket = await websockets.connect(
                 f"{self._url}?api_key={self._api_key}&fastpitch_version={self._fastpitch_version}"
             )
