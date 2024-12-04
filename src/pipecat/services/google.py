@@ -568,10 +568,12 @@ class GoogleLLMService(LLMService):
     async def _process_context(self, context: OpenAILLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
         try:
-            logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
+            logger.debug(
+                f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
+            )
 
             messages = context.messages
-            if self._system_instruction != context.system_message:
+            if context.system_message and self._system_instruction != context.system_message:
                 logger.debug(f"System instruction changed: {context.system_message}")
                 self._system_instruction = context.system_message
                 self._create_client()
