@@ -61,6 +61,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 ### Fixed
 
+- Fixed an issue in `WebsocketServerTransport` and `FastAPIWebsocketTransport`
+  that would cause a busy loop when using audio mixer.
+
 - Fixed a `DailyTransport` and `LiveKitTransport` issue where connections were
   being closed in the input transport prematurely. This was causing frames
   queued inside the pipeline being discarded.
