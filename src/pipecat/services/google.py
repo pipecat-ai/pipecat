@@ -16,13 +16,19 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
+<<<<<<< Updated upstream
     AudioRawFrame,
+=======
+    CancelFrame,
+    EndFrame,
+>>>>>>> Stashed changes
     ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMUpdateSettingsFrame,
+    StartFrame,
     TextFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -45,8 +51,12 @@ from pipecat.transcriptions.language import Language
 try:
     import google.ai.generativelanguage as glm
     import google.generativeai as gai
+<<<<<<< Updated upstream
     from google.cloud import texttospeech_v1
     from google.generativeai.types import GenerationConfig
+=======
+    from google.cloud import speech, texttospeech_v1
+>>>>>>> Stashed changes
     from google.oauth2 import service_account
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -827,3 +837,107 @@ class GoogleTTSService(TTSService):
             yield ErrorFrame(error=error_message)
         finally:
             yield TTSStoppedFrame()
+<<<<<<< Updated upstream
+=======
+
+
+class GoogleSTTService(STTService):
+    def __init__(
+        self,
+        *,
+        credentials_path: str,
+        language: Language = Language.EN,
+        sample_rate: int = 16000,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._credentials_path = credentials_path
+        self._language = language
+        self._sample_rate = sample_rate
+        self._client = None
+        self._streaming_config = None
+        self._requests_queue = asyncio.Queue()
+        self._responses = None
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        credentials = service_account.Credentials.from_service_account_file(self._credentials_path)
+        self._client = speech.SpeechClient(credentials=credentials)
+
+        config = speech.RecognitionConfig(
+            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+            sample_rate_hertz=self._sample_rate,
+            language_code=self._language.value,
+            enable_automatic_punctuation=True,
+        )
+        self._streaming_config = speech.StreamingRecognitionConfig(
+            config=config, interim_results=True
+        )
+
+        # Start the recognition stream
+        self._responses = self._client.streaming_recognize(
+            self._streaming_config, self._request_generator()
+        )
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self._requests_queue.put(None)  # Signal to stop the request generator
+        self._client = None
+        self._streaming_config = None
+        self._responses = None
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self.stop(EndFrame())
+
+    async def set_language(self, language: Language):
+        self._language = language
+        # Recreate the streaming config with the new language
+        if self._client:
+            config = speech.RecognitionConfig(
+                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                sample_rate_hertz=self._sample_rate,
+                language_code=self._language.value,
+                enable_automatic_punctuation=True,
+            )
+            self._streaming_config = speech.StreamingRecognitionConfig(
+                config=config, interim_results=True
+            )
+            # Restart the recognition stream
+            await self._requests_queue.put(None)  # Signal to stop the current request generator
+            self._responses = self._client.streaming_recognize(
+                self._streaming_config, self._request_generator()
+            )
+
+    async def _request_generator(self):
+        while True:
+            request = await self._requests_queue.get()
+            if request is None:
+                break
+            yield request
+
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        if not self._client or not self._streaming_config or not self._responses:
+            raise RuntimeError("GoogleSTTService not started")
+
+        # Queue the audio content
+        await self._requests_queue.put(speech.StreamingRecognizeRequest(audio_content=audio))
+
+        # Process the responses
+        for response in self._responses:
+            for result in response.results:
+                if result.alternatives:
+                    transcript = result.alternatives[0].transcript
+                    if result.is_final:
+                        await self.push_frame(
+                            TranscriptionFrame(transcript, "", time_now_iso8601(), self._language)
+                        )
+                    else:
+                        await self.push_frame(
+                            InterimTranscriptionFrame(
+                                transcript, "", time_now_iso8601(), self._language
+                            )
+                        )
+
+        yield None
+>>>>>>> Stashed changes
