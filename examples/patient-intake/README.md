@@ -64,7 +64,7 @@ docker run --env-file .env -p 7860:7860 chatbot
 ```
 ## Cartesia best practices
 
-Since this example is using cartesia checkout best practices given in cartesia page.LLM prompts should be modified accordingly.
+Since this example is using Cartesia, checkout the best practices given in Cartesia's docs. LLM prompts should be modified accordingly.
 <https://docs.cartesia.ai/build-with-sonic/formatting-text-for-sonic/best-practices>
 
 <https://docs.cartesia.ai/build-with-sonic/formatting-text-for-sonic/inserting-breaks-pauses>
