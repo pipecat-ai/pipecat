@@ -63,7 +63,8 @@ except ModuleNotFoundError as e:
 #             "English-US.Female-Sad"
 #         ]
 #     }
-# }    
+# }
+
 
 class FastpitchTTSService(WordTTSService):
     class InputParams(BaseModel):
@@ -265,9 +266,10 @@ class FastpitchTTSService(WordTTSService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
+
 class FastpitchHttpTTSService(TTSService):
     class InputParams(BaseModel):
-        language: Optional[str] = "en-US"    
+        language: Optional[str] = "en-US"
 
     def __init__(
         self,
@@ -286,22 +288,19 @@ class FastpitchHttpTTSService(TTSService):
 
         self.voice_id = voice_id
         self.sample_rate_hz = sample_rate_hz
-        self.language_code=params.language
+        self.language_code = params.language
         self.nchannels = 1
         self.sampwidth = 2
         self.sound_stream = None
-        self.quality=None 
+        self.quality = None
 
         # "function-id" is hard-coded in the example curl request
         # if this should be a configurable thing, we can update that later
-        metadata=[["function-id", "0149dedb-2be8-4195-b9a0-e57e0e14f972"], 
-            ["authorization", f"Bearer {api_key}"]]
-        auth = riva.client.Auth(
-            None, 
-            True,
-            "grpc.nvcf.nvidia.com:443", 
-            metadata
-        )
+        metadata = [
+            ["function-id", "0149dedb-2be8-4195-b9a0-e57e0e14f972"],
+            ["authorization", f"Bearer {api_key}"],
+        ]
+        auth = riva.client.Auth(None, True, "grpc.nvcf.nvidia.com:443", metadata)
 
         self.service = riva.client.SpeechSynthesisService(auth)
 
@@ -323,20 +322,21 @@ class FastpitchHttpTTSService(TTSService):
 
         try:
             self.sound_stream = audio_io.SoundCallBack(
-                None, nchannels=self.nchannels, 
-                sampwidth=self.sampwidth, 
-                framerate=self.sample_rate_hz
+                None,
+                nchannels=self.nchannels,
+                sampwidth=self.sampwidth,
+                framerate=self.sample_rate_hz,
             )
-            
+
             custom_dictionary_input = {}
             responses = self.service.synthesize_online(
-                text, 
-                self.voice_id, 
-                self.language_code, 
+                text,
+                self.voice_id,
+                self.language_code,
                 sample_rate_hz=self.sample_rate_hz,
-                audio_prompt_file=None, 
+                audio_prompt_file=None,
                 quality=20 if self.quality is None else self.quality,
-                custom_dictionary=custom_dictionary_input
+                custom_dictionary=custom_dictionary_input,
             )
 
             for resp in responses:

@@ -69,7 +69,7 @@ class MicrophoneStream:
             except queue.Empty:
                 break
 
-        return b''.join(data)
+        return b"".join(data)
 
     def __iter__(self):
         return self
@@ -97,7 +97,7 @@ def list_output_devices() -> None:
     print("Output audio devices:")
     for i in range(p.get_device_count()):
         info = p.get_device_info_by_index(i)
-        if info['maxOutputChannels'] < 1:
+        if info["maxOutputChannels"] < 1:
             continue
         print(f"{info['index']}: {info['name']}")
     p.terminate()
@@ -108,7 +108,7 @@ def list_input_devices() -> None:
     print("Input audio devices:")
     for i in range(p.get_device_count()):
         info = p.get_device_info_by_index(i)
-        if info['maxInputChannels'] < 1:
+        if info["maxInputChannels"] < 1:
             continue
         print(f"{info['index']}: {info['name']}")
     p.terminate()
@@ -116,7 +116,11 @@ def list_input_devices() -> None:
 
 class SoundCallBack:
     def __init__(
-        self, output_device_index: Optional[int], sampwidth: int, nchannels: int, framerate: int,
+        self,
+        output_device_index: Optional[int],
+        sampwidth: int,
+        nchannels: int,
+        framerate: int,
     ) -> None:
         self.pa = pyaudio.PyAudio()
         self.stream = self.pa.open(
