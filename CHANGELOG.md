@@ -43,6 +43,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 ### Fixed
 
+- Fixed an issue where other frames were being processed while a `CancelFrame`
+  was being pushed down the pipeline.
+
 - `AudioBufferProcessor` now handles interruptions properly.
 
 - Fixed a `WebsocketServerTransport` issue that would prevent interruptions with
