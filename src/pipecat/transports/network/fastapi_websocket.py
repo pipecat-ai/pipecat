@@ -15,8 +15,6 @@ from pydantic.main import BaseModel
 
 from pipecat.frames.frames import (
     AudioRawFrame,
-    CancelFrame,
-    EndFrame,
     Frame,
     InputAudioRawFrame,
     StartFrame,
@@ -69,16 +67,6 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         await super().start(frame)
         await self._callbacks.on_client_connected(self._websocket)
         self._receive_task = self.get_event_loop().create_task(self._receive_messages())
-
-    async def stop(self, frame: EndFrame):
-        await super().stop(frame)
-        if self._websocket.client_state != WebSocketState.DISCONNECTED:
-            await self._websocket.close()
-
-    async def cancel(self, frame: CancelFrame):
-        await super().cancel(frame)
-        if self._websocket.client_state != WebSocketState.DISCONNECTED:
-            await self._websocket.close()
 
     async def _receive_messages(self):
         async for message in self._websocket.iter_text():

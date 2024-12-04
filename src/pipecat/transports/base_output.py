@@ -443,11 +443,6 @@ class BaseOutputTransport(FrameProcessor):
             return without_mixer(vad_stop_secs)
 
     async def _audio_out_task_handler(self):
-        wait_time = (
-            self._params.vad_analyzer.params.stop_secs
-            if self._params.vad_analyzer
-            else VAD_STOP_SECS
-        )
         try:
             async for frame in self._next_audio_frame():
                 # Notify the bot started speaking upstream if necessary and that

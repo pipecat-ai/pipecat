@@ -64,7 +64,11 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = GoogleLLMService(model="gemini-1.5-flash-latest", api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = GoogleLLMService(
+            model="gemini-1.5-flash-latest",
+            # model="gemini-exp-1114",
+            api_key=os.getenv("GOOGLE_API_KEY"),
+        )
         llm.register_function("get_weather", get_weather)
         llm.register_function("get_image", get_image)
 
@@ -151,7 +155,6 @@ indicate you should use the get_image tool are:
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
             ),
         )
 

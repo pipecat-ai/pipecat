@@ -14,14 +14,16 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import (
+    LLMMessagesFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFilter, STTMuteStrategy
+from pipecat.services.deepgram import DeepgramSTTService, DeepgramTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.playht import PlayHTTTSService
-from pipecat.transcriptions.language import Language
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -32,26 +34,27 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
+        (room_url, _) = await configure(session)
 
         transport = DailyTransport(
             room_url,
-            token,
+            None,
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
-                transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
         )
 
-        tts = PlayHTTTSService(
-            user_id=os.getenv("PLAYHT_USER_ID"),
-            api_key=os.getenv("PLAYHT_API_KEY"),
-            voice_url="s3://voice-cloning-zero-shot/d9ff78ba-d016-47f6-b0ef-dd630f59414e/female-cs/manifest.json",
-            params=PlayHTTTSService.InputParams(language=Language.EN),
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        # Configure the mute processor to mute only during first speech
+        stt_mute_processor = STTMuteFilter(
+            stt_service=stt, config=STTMuteConfig(strategy=STTMuteStrategy.FIRST_SPEECH)
         )
+
+        tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
@@ -68,6 +71,8 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                stt_mute_processor,  # Add the mute processor before STT
+                stt,  # STT
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
@@ -76,19 +81,10 @@ async def main():
             ]
         )
 
-        task = PipelineTask(
-            pipeline,
-            PipelineParams(
-                allow_interruptions=True,
-                enable_metrics=True,
-                enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
-            ),
-        )
+        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])
