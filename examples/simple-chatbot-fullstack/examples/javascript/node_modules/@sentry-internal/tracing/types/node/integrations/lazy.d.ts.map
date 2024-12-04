@@ -1,0 +1,1 @@
+{"version":3,"file":"lazy.d.ts","sourceRoot":"","sources":["../../../../src/node/integrations/lazy.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,WAAW,EAAoB,MAAM,eAAe,CAAC;AAGnE,MAAM,WAAW,qBAAqB,CAAC,CAAC,GAAG,MAAM,CAAE,SAAQ,WAAW;IACpE;;;;OAIG;IACH,cAAc,IAAI,CAAC,GAAG,SAAS,CAAC;CACjC;AAED,eAAO,MAAM,+CAA+C,EAAE,CAAC,MAAM,qBAAqB,CAAC,EA2C1F,CAAC"}

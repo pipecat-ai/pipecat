@@ -1,0 +1,1 @@
+{"version":3,"file":"integration.d.ts","sourceRoot":"","sources":["../../../src/metrics/integration.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,MAAM,EAAiB,WAAW,EAAE,gBAAgB,EAAiB,MAAM,eAAe,CAAC;AAkBzG,eAAO,MAAM,4BAA4B,mDAAmD,CAAC;AAE7F;;;;;GAKG;AAEH,eAAO,MAAM,iBAAiB;oBAGwB,MAAM,KAAK,IAAI;EAAG,CAAC"}

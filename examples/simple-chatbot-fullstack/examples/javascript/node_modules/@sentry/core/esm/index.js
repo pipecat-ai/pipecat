@@ -1,0 +1,52 @@
+export { addTracingExtensions, startIdleTransaction } from './tracing/hubextensions.js';
+export { IdleTransaction, TRACING_DEFAULTS } from './tracing/idletransaction.js';
+export { Span } from './tracing/span.js';
+export { Transaction } from './tracing/transaction.js';
+export { extractTraceparentData, getActiveTransaction } from './tracing/utils.js';
+export { SpanStatus, getSpanStatusFromHttpCode, setHttpStatus, spanStatusfromHttpCode } from './tracing/spanstatus.js';
+export { continueTrace, getActiveSpan, startActiveSpan, startInactiveSpan, startSpan, startSpanManual, trace } from './tracing/trace.js';
+export { getDynamicSamplingContextFromClient, getDynamicSamplingContextFromSpan } from './tracing/dynamicSamplingContext.js';
+export { setMeasurement } from './tracing/measurement.js';
+export { isValidSampleRate } from './tracing/sampling.js';
+export { SEMANTIC_ATTRIBUTE_PROFILE_ID, SEMANTIC_ATTRIBUTE_SENTRY_OP, SEMANTIC_ATTRIBUTE_SENTRY_ORIGIN, SEMANTIC_ATTRIBUTE_SENTRY_SAMPLE_RATE, SEMANTIC_ATTRIBUTE_SENTRY_SOURCE } from './semanticAttributes.js';
+export { createEventEnvelope, createSessionEnvelope } from './envelope.js';
+export { addBreadcrumb, captureCheckIn, captureEvent, captureException, captureMessage, captureSession, close, configureScope, endSession, flush, getClient, getCurrentScope, isInitialized, lastEventId, setContext, setExtra, setExtras, setTag, setTags, setUser, startSession, startTransaction, withActiveSpan, withIsolationScope, withMonitor, withScope } from './exports.js';
+export { Hub, ensureHubOnCarrier, getCurrentHub, getHubFromCarrier, getIsolationScope, getMainCarrier, makeMain, runWithAsyncContext, setAsyncContextStrategy, setHubOnCarrier } from './hub.js';
+export { closeSession, makeSession, updateSession } from './session.js';
+export { SessionFlusher } from './sessionflusher.js';
+export { Scope, getGlobalScope, setGlobalScope } from './scope.js';
+export { addGlobalEventProcessor, notifyEventProcessors } from './eventProcessors.js';
+export { getEnvelopeEndpointWithUrlEncodedAuth, getReportDialogEndpoint } from './api.js';
+export { BaseClient, addEventProcessor } from './baseclient.js';
+export { ServerRuntimeClient } from './server-runtime-client.js';
+export { initAndBind, setCurrentClient } from './sdk.js';
+export { createTransport } from './transports/base.js';
+export { makeOfflineTransport } from './transports/offline.js';
+export { makeMultiplexedTransport } from './transports/multiplexed.js';
+export { SDK_VERSION } from './version.js';
+export { addIntegration, convertIntegrationFnToClass, defineIntegration, getIntegrationsToSetup } from './integration.js';
+export { applyScopeDataToEvent, mergeScopeData } from './utils/applyScopeDataToEvent.js';
+export { prepareEvent } from './utils/prepareEvent.js';
+export { createCheckInEnvelope } from './checkin.js';
+export { createSpanEnvelope } from './span.js';
+export { hasTracingEnabled } from './utils/hasTracingEnabled.js';
+export { isSentryRequestUrl } from './utils/isSentryRequestUrl.js';
+export { handleCallbackErrors } from './utils/handleCallbackErrors.js';
+export { parameterize } from './utils/parameterize.js';
+export { spanIsSampled, spanToJSON, spanToTraceContext, spanToTraceHeader } from './utils/spanUtils.js';
+export { getRootSpan } from './utils/getRootSpan.js';
+export { applySdkMetadata } from './utils/sdkMetadata.js';
+export { DEFAULT_ENVIRONMENT } from './constants.js';
+export { ModuleMetadata, moduleMetadataIntegration } from './integrations/metadata.js';
+export { RequestData, requestDataIntegration } from './integrations/requestdata.js';
+export { InboundFilters, inboundFiltersIntegration } from './integrations/inboundfilters.js';
+export { FunctionToString, functionToStringIntegration } from './integrations/functiontostring.js';
+export { LinkedErrors, linkedErrorsIntegration } from './integrations/linkederrors.js';
+import * as index from './integrations/index.js';
+export { metrics } from './metrics/exports.js';
+
+/** @deprecated Import the integration function directly, e.g. `inboundFiltersIntegration()` instead of `new Integrations.InboundFilter(). */
+const Integrations = index;
+
+export { Integrations };
+//# sourceMappingURL=index.js.map
