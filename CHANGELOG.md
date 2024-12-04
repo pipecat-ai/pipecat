@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `GroqLLMService` and `GrokLLMService` for Groq and Grok API integration, with
-  OpenAI-compatible interface.
+- Added `GroqLLMService`, `GrokLLMService`, and `NimLLMService` for Groq, Grok,
+  and NVIDIA NIM API integration, with an OpenAI-compatible interface.
 
 - New examples demonstrating function calling with Groq, Grok, Azure OpenAI,
-  and Fireworks: `14f-function-calling-groq.py`, `14g-function-calling-grok.py`,
-  `14h-function-calling-azure.py`, and `14i-function-calling-fireworks.py`.
+  Fireworks, and NVIDIA NIM: `14f-function-calling-groq.py`,
+  `14g-function-calling-grok.py`, `14h-function-calling-azure.py`,
+  `14i-function-calling-fireworks.py`, and `14j-function-calling-nvidia.py`.
 
 - In order to obtain the audio stored by the `AudioBufferProcessor` you can now
   also register an `on_audio_data` event handler. The `on_audio_data` handler
