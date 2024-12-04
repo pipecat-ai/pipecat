@@ -35,6 +35,30 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+def language_to_lmnt_language(language: Language) -> str | None:
+    BASE_LANGUAGES = {
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.KO: "ko",
+        Language.PT: "pt",
+        Language.ZH: "zh",
+    }
+
+    result = BASE_LANGUAGES.get(language)
+
+    # If not found in base languages, try to find the base language from a variant
+    if not result:
+        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
+        lang_str = str(language.value)
+        base_code = lang_str.split("-")[0].lower()
+        # Look up the base code in our supported languages
+        result = base_code if base_code in BASE_LANGUAGES.values() else None
+
+    return result
+
+
 class LmntTTSService(TTSService):
     def __init__(
         self,
@@ -72,29 +96,7 @@ class LmntTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.DE:
-                return "de"
-            case (
-                Language.EN
-                | Language.EN_US
-                | Language.EN_AU
-                | Language.EN_GB
-                | Language.EN_NZ
-                | Language.EN_IN
-            ):
-                return "en"
-            case Language.ES:
-                return "es"
-            case Language.FR | Language.FR_CA:
-                return "fr"
-            case Language.PT | Language.PT_BR:
-                return "pt"
-            case Language.ZH | Language.ZH_TW:
-                return "zh"
-            case Language.KO:
-                return "ko"
-        return None
+        return language_to_lmnt_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)

@@ -148,6 +148,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartInterruptionFrame):
+            await self._write_frame(frame)
             self._next_send_time = 0
 
     async def write_raw_audio_frames(self, frames: bytes):
@@ -188,6 +189,11 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             self._next_send_time += self._send_interval
 
         self._websocket_audio_buffer = bytes()
+
+    async def _write_frame(self, frame: Frame):
+        payload = self._params.serializer.serialize(frame)
+        if payload and self._websocket:
+            await self._websocket.send(payload)
 
 
 class WebsocketServerTransport(BaseTransport):

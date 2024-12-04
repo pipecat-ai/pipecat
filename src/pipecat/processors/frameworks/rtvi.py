@@ -591,6 +591,7 @@ class RTVIProcessor(FrameProcessor):
         self._message_queue = asyncio.Queue()
         self._message_task = self.get_event_loop().create_task(self._message_task_handler())
 
+        self._register_event_handler("on_bot_started")
         self._register_event_handler("on_client_ready")
 
     def register_action(self, action: RTVIAction):
@@ -675,11 +676,12 @@ class RTVIProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def cleanup(self):
+        await super().cleanup()
         if self._pipeline:
             await self._pipeline.cleanup()
 
     async def _start(self, frame: StartFrame):
-        pass
+        await self._call_event_handler("on_bot_started")
 
     async def _stop(self, frame: EndFrame):
         await self._cancel_tasks()
@@ -742,6 +744,8 @@ class RTVIProcessor(FrameProcessor):
                 case "update-config":
                     update_config = RTVIUpdateConfig.model_validate(message.data)
                     await self._handle_update_config(message.id, update_config)
+                case "disconnect-bot":
+                    await self.push_frame(EndFrame())
                 case "action":
                     action = RTVIActionRun.model_validate(message.data)
                     action_frame = RTVIActionFrame(message_id=message.id, rtvi_action_run=action)

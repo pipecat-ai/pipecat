@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
+    STTMuteFrame,
     STTUpdateSettingsFrame,
     TextFrame,
     TTSAudioRawFrame,
@@ -456,6 +457,12 @@ class STTService(AIService):
         super().__init__(**kwargs)
         self._audio_passthrough = audio_passthrough
         self._settings: Dict[str, Any] = {}
+        self._muted: bool = False
+
+    @property
+    def is_muted(self) -> bool:
+        """Returns whether the STT service is currently muted."""
+        return self._muted
 
     @abstractmethod
     async def set_model(self, model: str):
@@ -484,7 +491,8 @@ class STTService(AIService):
                 logger.warning(f"Unknown setting for STT service: {key}")
 
     async def process_audio_frame(self, frame: AudioRawFrame):
-        await self.process_generator(self.run_stt(frame.audio))
+        if not self._muted:
+            await self.process_generator(self.run_stt(frame.audio))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes a frame of audio data, either buffering or transcribing it."""
@@ -499,6 +507,9 @@ class STTService(AIService):
                 await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
             await self._update_settings(frame.settings)
+        elif isinstance(frame, STTMuteFrame):
+            self._muted = frame.mute
+            logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
         else:
             await self.push_frame(frame, direction)
 

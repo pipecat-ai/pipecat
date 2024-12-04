@@ -5,7 +5,6 @@
 #
 
 import asyncio
-
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -31,6 +30,82 @@ except ModuleNotFoundError as e:
         "In order to use Deepgram, you need to `pip install pipecat-ai[aws]`. Also, set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable."
     )
     raise Exception(f"Missing module: {e}")
+
+
+def language_to_aws_language(language: Language) -> str | None:
+    language_map = {
+        # Arabic
+        Language.AR: "arb",
+        Language.AR_AE: "ar-AE",
+        # Catalan
+        Language.CA: "ca-ES",
+        # Chinese
+        Language.ZH: "cmn-CN",  # Mandarin
+        Language.YUE: "yue-CN",  # Cantonese
+        Language.YUE_CN: "yue-CN",
+        # Czech
+        Language.CS: "cs-CZ",
+        # Danish
+        Language.DA: "da-DK",
+        # Dutch
+        Language.NL: "nl-NL",
+        Language.NL_BE: "nl-BE",
+        # English
+        Language.EN: "en-US",  # Default to US English
+        Language.EN_AU: "en-AU",
+        Language.EN_GB: "en-GB",
+        Language.EN_IN: "en-IN",
+        Language.EN_NZ: "en-NZ",
+        Language.EN_US: "en-US",
+        Language.EN_ZA: "en-ZA",
+        # Finnish
+        Language.FI: "fi-FI",
+        # French
+        Language.FR: "fr-FR",
+        Language.FR_BE: "fr-BE",
+        Language.FR_CA: "fr-CA",
+        # German
+        Language.DE: "de-DE",
+        Language.DE_AT: "de-AT",
+        Language.DE_CH: "de-CH",
+        # Hindi
+        Language.HI: "hi-IN",
+        # Icelandic
+        Language.IS: "is-IS",
+        # Italian
+        Language.IT: "it-IT",
+        # Japanese
+        Language.JA: "ja-JP",
+        # Korean
+        Language.KO: "ko-KR",
+        # Norwegian
+        Language.NO: "nb-NO",
+        Language.NB: "nb-NO",
+        Language.NB_NO: "nb-NO",
+        # Polish
+        Language.PL: "pl-PL",
+        # Portuguese
+        Language.PT: "pt-PT",
+        Language.PT_BR: "pt-BR",
+        Language.PT_PT: "pt-PT",
+        # Romanian
+        Language.RO: "ro-RO",
+        # Russian
+        Language.RU: "ru-RU",
+        # Spanish
+        Language.ES: "es-ES",
+        Language.ES_MX: "es-MX",
+        Language.ES_US: "es-US",
+        # Swedish
+        Language.SV: "sv-SE",
+        # Turkish
+        Language.TR: "tr-TR",
+        # Welsh
+        Language.CY: "cy-GB",
+        Language.CY_GB: "cy-GB",
+    }
+
+    return language_map.get(language)
 
 
 class AWSTTSService(TTSService):
@@ -65,7 +140,7 @@ class AWSTTSService(TTSService):
             "engine": params.engine,
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en-US",
             "pitch": params.pitch,
             "rate": params.rate,
             "volume": params.volume,
@@ -77,62 +152,7 @@ class AWSTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.CA:
-                return "ca-ES"
-            case Language.ZH:
-                return "cmn-CN"
-            case Language.DA:
-                return "da-DK"
-            case Language.NL:
-                return "nl-NL"
-            case Language.NL_BE:
-                return "nl-BE"
-            case Language.EN | Language.EN_US:
-                return "en-US"
-            case Language.EN_AU:
-                return "en-AU"
-            case Language.EN_GB:
-                return "en-GB"
-            case Language.EN_NZ:
-                return "en-NZ"
-            case Language.EN_IN:
-                return "en-IN"
-            case Language.FI:
-                return "fi-FI"
-            case Language.FR:
-                return "fr-FR"
-            case Language.FR_CA:
-                return "fr-CA"
-            case Language.DE:
-                return "de-DE"
-            case Language.HI:
-                return "hi-IN"
-            case Language.IT:
-                return "it-IT"
-            case Language.JA:
-                return "ja-JP"
-            case Language.KO:
-                return "ko-KR"
-            case Language.NO:
-                return "nb-NO"
-            case Language.PL:
-                return "pl-PL"
-            case Language.PT:
-                return "pt-PT"
-            case Language.PT_BR:
-                return "pt-BR"
-            case Language.RO:
-                return "ro-RO"
-            case Language.RU:
-                return "ru-RU"
-            case Language.ES:
-                return "es-ES"
-            case Language.SV:
-                return "sv-SE"
-            case Language.TR:
-                return "tr-TR"
-        return None
+        return language_to_aws_language(language)
 
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"

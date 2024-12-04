@@ -44,29 +44,27 @@ except ModuleNotFoundError as e:
 
 
 def language_to_cartesia_language(language: Language) -> str | None:
-    match language:
-        case Language.DE:
-            return "de"
-        case (
-            Language.EN
-            | Language.EN_US
-            | Language.EN_GB
-            | Language.EN_AU
-            | Language.EN_NZ
-            | Language.EN_IN
-        ):
-            return "en"
-        case Language.ES:
-            return "es"
-        case Language.FR | Language.FR_CA:
-            return "fr"
-        case Language.JA:
-            return "ja"
-        case Language.PT | Language.PT_BR:
-            return "pt"
-        case Language.ZH | Language.ZH_TW:
-            return "zh"
-    return None
+    BASE_LANGUAGES = {
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.JA: "ja",
+        Language.PT: "pt",
+        Language.ZH: "zh",
+    }
+
+    result = BASE_LANGUAGES.get(language)
+
+    # If not found in base languages, try to find the base language from a variant
+    if not result:
+        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
+        lang_str = str(language.value)
+        base_code = lang_str.split("-")[0].lower()
+        # Look up the base code in our supported languages
+        result = base_code if base_code in BASE_LANGUAGES.values() else None
+
+    return result
 
 
 class CartesiaTTSService(WordTTSService):
@@ -117,7 +115,7 @@ class CartesiaTTSService(WordTTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en",
             "speed": params.speed,
             "emotion": params.emotion,
         }
@@ -228,13 +226,14 @@ class CartesiaTTSService(WordTTSService):
                 if not msg or msg["context_id"] != self._context_id:
                     continue
                 if msg["type"] == "done":
-                    await self.push_frame(TTSStoppedFrame())
                     await self.stop_ttfb_metrics()
                     # Unset _context_id but not the _context_id_start_timestamp
                     # because we are likely still playing out audio and need the
                     # timestamp to set send context frames.
                     self._context_id = None
-                    await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
+                    await self.add_word_timestamps(
+                        [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0), ("Reset", 0)]
+                    )
                 elif msg["type"] == "timestamps":
                     await self.add_word_timestamps(
                         list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
@@ -331,7 +330,7 @@ class CartesiaHttpTTSService(TTSService):
             },
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en",
             "speed": params.speed,
             "emotion": params.emotion,
         }

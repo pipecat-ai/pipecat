@@ -5,12 +5,83 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [Unreleased]
 
 ### Added
 
+- In order to obtain the audio stored by the `AudioBufferProcessor` you can now
+  also register an `on_audio_data` event handler. The `on_audio_data` handler
+  will be called every time `buffer_size` (a new constructor argument) is
+  reached. If `buffer_size` is 0 (default) you need to manually get the audio as
+  before using `AudioBufferProcessor.merge_audio_buffers()`.
+
+```
+@audiobuffer.event_handler("on_audio_data")
+async def on_audio_data(processor, audio, sample_rate, num_channels):
+    await save_audio(audio, sample_rate, num_channels)
+```
+
+- Added a new RTVI message called `disconnect-bot`, which when handled pushes
+  an `EndFrame` to trigger the pipeline to stop.
+
+### Changed
+
+- All input frames (text, audio, image, etc.) are now system frames. This means
+  they are processed immediately by all processors instead of being queued
+  internally.
+
+- Expanded the transcriptions.language module to support a superset of
+  languages.
+
+- Updated STT and TTS services with language options that match the supported
+  languages for each service.
+
+### Removed
+
+- Removed `AppFrame`. This was used as a special user custom frame, but there's
+  actually no use case for that.
+
+### Fixed
+
+- Fixed an issue in `DailyTransport` that would cause some internal callbacks to
+  not be executed.
+
+- Fixed an issue where other frames were being processed while a `CancelFrame`
+  was being pushed down the pipeline.
+
+- `AudioBufferProcessor` now handles interruptions properly.
+
+- Fixed a `WebsocketServerTransport` issue that would prevent interruptions with
+  `TwilioSerializer` from working.
+
+- `DailyTransport.capture_participant_video` now allows capturing user's screen
+  share by simply passing `video_source="screenVideo"`.
+
+- Fixed Google Gemini message handling to properly convert appended messages to
+  Gemini's required format.
+
+## [0.0.49] - 2024-11-17
+
+### Added
+
+- Added RTVI `on_bot_started` event which is useful in a single turn
+  interaction.
+
+- Added `DailyTransport` events `dialin-connected`, `dialin-stopped`,
+  `dialin-error` and `dialin-warning`. Needs daily-python >= 0.13.0.
+
 - Added `RimeHttpTTSService` and the `07q-interruptible-rime.py` foundational
   example.
+
+- Added `STTMuteFilter`, a general-purpose processor that combines STT
+  muting and interruption control. When active, it prevents both transcription
+  and interruptions during bot speech. The processor supports multiple
+  strategies: `FIRST_SPEECH` (mute only during bot's first
+  speech), `ALWAYS` (mute during all bot speech), or `CUSTOM` (using provided
+  callback).
+
+- Added `STTMuteFrame`, a control frame that enables/disables speech
+  transcription in STT services.
 
 ## [0.0.48] - 2024-11-10 "Antonio release"
 

@@ -7,6 +7,7 @@
 from typing import Any, AsyncGenerator, Dict
 
 import aiohttp
+from loguru import logger
 
 from pipecat.audio.utils import resample_audio
 from pipecat.frames.frames import (
@@ -20,15 +21,51 @@ from pipecat.frames.frames import (
 from pipecat.services.ai_services import TTSService
 from pipecat.transcriptions.language import Language
 
-from loguru import logger
-
-
 # The server below can connect to XTTS through a local running docker
 #
 # Docker command: $ docker run --gpus=all -e COQUI_TOS_AGREED=1 --rm -p 8000:80 ghcr.io/coqui-ai/xtts-streaming-server:latest-cuda121
 #
 # You can find more information on the official repo:
 # https://github.com/coqui-ai/xtts-streaming-server
+
+
+def language_to_xtts_language(language: Language) -> str | None:
+    BASE_LANGUAGES = {
+        Language.CS: "cs",
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.HI: "hi",
+        Language.HU: "hu",
+        Language.IT: "it",
+        Language.JA: "ja",
+        Language.KO: "ko",
+        Language.NL: "nl",
+        Language.PL: "pl",
+        Language.PT: "pt",
+        Language.RU: "ru",
+        Language.TR: "tr",
+        # Special case for Chinese base language
+        Language.ZH: "zh-cn",
+    }
+
+    result = BASE_LANGUAGES.get(language)
+
+    # If not found in base languages, try to find the base language from a variant
+    if not result:
+        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
+        lang_str = str(language.value)
+        base_code = lang_str.split("-")[0].lower()
+
+        # Special handling for Chinese variants
+        if base_code == "zh":
+            result = "zh-cn"
+        else:
+            # Look up the base code in our supported languages
+            result = base_code if base_code in BASE_LANGUAGES.values() else None
+
+    return result
 
 
 class XTTSService(TTSService):
@@ -56,47 +93,7 @@ class XTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.CS:
-                return "cs"
-            case Language.DE:
-                return "de"
-            case (
-                Language.EN
-                | Language.EN_US
-                | Language.EN_AU
-                | Language.EN_GB
-                | Language.EN_NZ
-                | Language.EN_IN
-            ):
-                return "en"
-            case Language.ES:
-                return "es"
-            case Language.FR:
-                return "fr"
-            case Language.HI:
-                return "hi"
-            case Language.HU:
-                return "hu"
-            case Language.IT:
-                return "it"
-            case Language.JA:
-                return "ja"
-            case Language.KO:
-                return "ko"
-            case Language.NL:
-                return "nl"
-            case Language.PL:
-                return "pl"
-            case Language.PT | Language.PT_BR:
-                return "pt"
-            case Language.RU:
-                return "ru"
-            case Language.TR:
-                return "tr"
-            case Language.ZH:
-                return "zh-cn"
-        return None
+        return language_to_xtts_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)

@@ -16,6 +16,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
+    AudioRawFrame,
     ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
@@ -53,6 +54,166 @@ except ModuleNotFoundError as e:
         "In order to use Google AI, you need to `pip install pipecat-ai[google]`. Also, set the environment variable GOOGLE_API_KEY for the GoogleLLMService and GOOGLE_APPLICATION_CREDENTIALS for the GoogleTTSService`."
     )
     raise Exception(f"Missing module: {e}")
+
+
+def language_to_google_language(language: Language) -> str | None:
+    language_map = {
+        # Afrikaans
+        Language.AF: "af-ZA",
+        Language.AF_ZA: "af-ZA",
+        # Arabic
+        Language.AR: "ar-XA",
+        # Bengali
+        Language.BN: "bn-IN",
+        Language.BN_IN: "bn-IN",
+        # Bulgarian
+        Language.BG: "bg-BG",
+        Language.BG_BG: "bg-BG",
+        # Catalan
+        Language.CA: "ca-ES",
+        Language.CA_ES: "ca-ES",
+        # Chinese (Mandarin and Cantonese)
+        Language.ZH: "cmn-CN",
+        Language.ZH_CN: "cmn-CN",
+        Language.ZH_TW: "cmn-TW",
+        Language.ZH_HK: "yue-HK",
+        # Czech
+        Language.CS: "cs-CZ",
+        Language.CS_CZ: "cs-CZ",
+        # Danish
+        Language.DA: "da-DK",
+        Language.DA_DK: "da-DK",
+        # Dutch
+        Language.NL: "nl-NL",
+        Language.NL_BE: "nl-BE",
+        Language.NL_NL: "nl-NL",
+        # English
+        Language.EN: "en-US",
+        Language.EN_US: "en-US",
+        Language.EN_AU: "en-AU",
+        Language.EN_GB: "en-GB",
+        Language.EN_IN: "en-IN",
+        # Estonian
+        Language.ET: "et-EE",
+        Language.ET_EE: "et-EE",
+        # Filipino
+        Language.FIL: "fil-PH",
+        Language.FIL_PH: "fil-PH",
+        # Finnish
+        Language.FI: "fi-FI",
+        Language.FI_FI: "fi-FI",
+        # French
+        Language.FR: "fr-FR",
+        Language.FR_CA: "fr-CA",
+        Language.FR_FR: "fr-FR",
+        # Galician
+        Language.GL: "gl-ES",
+        Language.GL_ES: "gl-ES",
+        # German
+        Language.DE: "de-DE",
+        Language.DE_DE: "de-DE",
+        # Greek
+        Language.EL: "el-GR",
+        Language.EL_GR: "el-GR",
+        # Gujarati
+        Language.GU: "gu-IN",
+        Language.GU_IN: "gu-IN",
+        # Hebrew
+        Language.HE: "he-IL",
+        Language.HE_IL: "he-IL",
+        # Hindi
+        Language.HI: "hi-IN",
+        Language.HI_IN: "hi-IN",
+        # Hungarian
+        Language.HU: "hu-HU",
+        Language.HU_HU: "hu-HU",
+        # Icelandic
+        Language.IS: "is-IS",
+        Language.IS_IS: "is-IS",
+        # Indonesian
+        Language.ID: "id-ID",
+        Language.ID_ID: "id-ID",
+        # Italian
+        Language.IT: "it-IT",
+        Language.IT_IT: "it-IT",
+        # Japanese
+        Language.JA: "ja-JP",
+        Language.JA_JP: "ja-JP",
+        # Kannada
+        Language.KN: "kn-IN",
+        Language.KN_IN: "kn-IN",
+        # Korean
+        Language.KO: "ko-KR",
+        Language.KO_KR: "ko-KR",
+        # Latvian
+        Language.LV: "lv-LV",
+        Language.LV_LV: "lv-LV",
+        # Lithuanian
+        Language.LT: "lt-LT",
+        Language.LT_LT: "lt-LT",
+        # Malay
+        Language.MS: "ms-MY",
+        Language.MS_MY: "ms-MY",
+        # Malayalam
+        Language.ML: "ml-IN",
+        Language.ML_IN: "ml-IN",
+        # Marathi
+        Language.MR: "mr-IN",
+        Language.MR_IN: "mr-IN",
+        # Norwegian
+        Language.NO: "nb-NO",
+        Language.NB: "nb-NO",
+        Language.NB_NO: "nb-NO",
+        # Polish
+        Language.PL: "pl-PL",
+        Language.PL_PL: "pl-PL",
+        # Portuguese
+        Language.PT: "pt-PT",
+        Language.PT_BR: "pt-BR",
+        Language.PT_PT: "pt-PT",
+        # Punjabi
+        Language.PA: "pa-IN",
+        Language.PA_IN: "pa-IN",
+        # Romanian
+        Language.RO: "ro-RO",
+        Language.RO_RO: "ro-RO",
+        # Russian
+        Language.RU: "ru-RU",
+        Language.RU_RU: "ru-RU",
+        # Serbian
+        Language.SR: "sr-RS",
+        Language.SR_RS: "sr-RS",
+        # Slovak
+        Language.SK: "sk-SK",
+        Language.SK_SK: "sk-SK",
+        # Spanish
+        Language.ES: "es-ES",
+        Language.ES_ES: "es-ES",
+        Language.ES_US: "es-US",
+        # Swedish
+        Language.SV: "sv-SE",
+        Language.SV_SE: "sv-SE",
+        # Tamil
+        Language.TA: "ta-IN",
+        Language.TA_IN: "ta-IN",
+        # Telugu
+        Language.TE: "te-IN",
+        Language.TE_IN: "te-IN",
+        # Thai
+        Language.TH: "th-TH",
+        Language.TH_TH: "th-TH",
+        # Turkish
+        Language.TR: "tr-TR",
+        Language.TR_TR: "tr-TR",
+        # Ukrainian
+        Language.UK: "uk-UA",
+        Language.UK_UA: "uk-UA",
+        # Vietnamese
+        Language.VI: "vi-VN",
+        Language.VI_VN: "vi-VN",
+    }
+
+    return language_map.get(language)
 
 
 class GoogleUserContextAggregator(OpenAIUserContextAggregator):
@@ -120,9 +281,10 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
                     )
                     run_llm = not bool(self._function_calls_in_progress)
             else:
-                self._context.add_message(
-                    glm.Content(role="model", parts=[glm.Part(text=aggregation)])
-                )
+                if aggregation.strip():
+                    self._context.add_message(
+                        glm.Content(role="model", parts=[glm.Part(text=aggregation)])
+                    )
 
             if self._pending_image_frame_message:
                 frame = self._pending_image_frame_message
@@ -170,6 +332,22 @@ class GoogleLLMContext(OpenAILLMContext):
         self._messages[:] = messages
         self._restructure_from_openai_messages()
 
+    def add_messages(self, messages: List):
+        # Convert each message individually
+        converted_messages = []
+        for msg in messages:
+            if isinstance(msg, glm.Content):
+                # Already in Gemini format
+                converted_messages.append(msg)
+            else:
+                # Convert from standard format to Gemini format
+                converted = self.from_standard_message(msg)
+                if converted is not None:
+                    converted_messages.append(converted)
+
+        # Add the converted messages to our existing messages
+        self._messages.extend(converted_messages)
+
     def get_messages_for_logging(self):
         msgs = []
         for message in self.messages:
@@ -184,11 +362,53 @@ class GoogleLLMContext(OpenAILLMContext):
             msgs.append(obj)
         return msgs
 
+    def add_image_frame_message(
+        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
+    ):
+        buffer = io.BytesIO()
+        Image.frombytes(format, size, image).save(buffer, format="JPEG")
+
+        parts = []
+        if text:
+            parts.append(glm.Part(text=text))
+        parts.append(
+            glm.Part(inline_data=glm.Blob(mime_type="image/jpeg", data=buffer.getvalue())),
+        )
+        self.add_message(glm.Content(role="user", parts=parts))
+
+    def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: str = None):
+        if not audio_frames:
+            return
+
+        sample_rate = audio_frames[0].sample_rate
+        num_channels = audio_frames[0].num_channels
+
+        parts = []
+        data = b"".join(frame.audio for frame in audio_frames)
+        if text:
+            parts.append(glm.Part(text=text))
+        parts.append(
+            glm.Part(
+                inline_data=glm.Blob(
+                    mime_type="audio/wav",
+                    data=(
+                        bytes(
+                            self.create_wav_header(sample_rate, num_channels, 16, len(data)) + data
+                        )
+                    ),
+                )
+            ),
+        )
+        self.add_message(glm.Content(role="user", parts=parts))
+        # message = {"mime_type": "audio/mp3", "data": bytes(data + create_wav_header(sample_rate, num_channels, 16, len(data)))}
+        # self.add_message(message)
+
     def from_standard_message(self, message):
         role = message["role"]
         content = message.get("content", [])
         if role == "system":
-            role = "user"
+            self.system_message = content
+            return None
         elif role == "assistant":
             role = "model"
 
@@ -231,20 +451,6 @@ class GoogleLLMContext(OpenAILLMContext):
 
         message = glm.Content(role=role, parts=parts)
         return message
-
-    def add_image_frame_message(
-        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
-    ):
-        buffer = io.BytesIO()
-        Image.frombytes(format, size, image).save(buffer, format="JPEG")
-
-        parts = []
-        if text:
-            parts.append(glm.Part(text=text))
-        parts.append(
-            glm.Part(inline_data=glm.Blob(mime_type="image/jpeg", data=buffer.getvalue())),
-        )
-        self.add_message(glm.Content(role="user", parts=parts))
 
     def to_standard_messages(self, obj) -> list:
         msg = {"role": obj.role, "content": []}
@@ -289,9 +495,20 @@ class GoogleLLMContext(OpenAILLMContext):
         return [msg]
 
     def _restructure_from_openai_messages(self):
+        self.system_message = None
         # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
         try:
-            self._messages[:] = [self.from_standard_message(m) for m in self._messages]
+            self._messages[:] = [
+                msg
+                for msg in (self.from_standard_message(m) for m in self._messages)
+                if msg is not None
+            ]
+            # We might have been given a messages list with only a system message. If so, let's put that back in
+            # the messages list as a user message.
+            if self.system_message and not self._messages:
+                self.add_message(
+                    glm.Content(role="user", parts=[glm.Part(text=self.system_message)])
+                )
         except Exception as e:
             logger.error(f"Error mapping messages: {e}")
         # iterate over messages and remove any messages that have an empty content list
@@ -319,11 +536,14 @@ class GoogleLLMService(LLMService):
         api_key: str,
         model: str = "gemini-1.5-flash-latest",
         params: InputParams = InputParams(),
+        system_instruction: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         gai.configure(api_key=api_key)
-        self._create_client(model)
+        self.set_model_name(model)
+        self._system_instruction = system_instruction
+        self._create_client()
         self._settings = {
             "max_tokens": params.max_tokens,
             "temperature": params.temperature,
@@ -335,34 +555,10 @@ class GoogleLLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def _create_client(self, model: str):
-        self.set_model_name(model)
-        self._client = gai.GenerativeModel(model)
-
-    def _get_messages_from_openai_context(self, context: OpenAILLMContext) -> List[glm.Content]:
-        openai_messages = context.get_messages()
-        google_messages = []
-
-        for message in openai_messages:
-            role = message["role"]
-            content = message["content"]
-            if role == "system":
-                role = "user"
-            elif role == "assistant":
-                role = "model"
-
-            parts = [glm.Part(text=content)]
-            if "mime_type" in message:
-                parts.append(
-                    glm.Part(
-                        inline_data=glm.Blob(
-                            mime_type=message["mime_type"], data=message["data"].getvalue()
-                        )
-                    )
-                )
-            google_messages.append({"role": role, "parts": parts})
-
-        return google_messages
+    def _create_client(self):
+        self._client = gai.GenerativeModel(
+            self._model_name, system_instruction=self._system_instruction
+        )
 
     async def _async_generator_wrapper(self, sync_generator):
         for item in sync_generator:
@@ -374,10 +570,11 @@ class GoogleLLMService(LLMService):
         try:
             logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
 
-            # todo: move this into the new context code structure, convert from openai context one time
-            # todo: add system instructions
-            # messages = self._get_messages_from_openai_context(context)
             messages = context.messages
+            if self._system_instruction != context.system_message:
+                logger.debug(f"System instruction changed: {context.system_message}")
+                self._system_instruction = context.system_message
+                self._create_client()
 
             # Filter out None values and create GenerationConfig
             generation_params = {
@@ -394,24 +591,21 @@ class GoogleLLMService(LLMService):
             generation_config = GenerationConfig(**generation_params) if generation_params else None
 
             await self.start_ttfb_metrics()
-
             tools = context.tools if context.tools else []
             response = self._client.generate_content(
                 contents=messages, tools=tools, stream=True, generation_config=generation_config
             )
-
-            tokens = LLMTokenUsage(
-                prompt_tokens=response.usage_metadata.prompt_token_count,
-                completion_tokens=response.usage_metadata.candidates_token_count,
-                total_tokens=response.usage_metadata.total_token_count,
-            )
-
-            await self.start_llm_usage_metrics(tokens)
-
             await self.stop_ttfb_metrics()
 
+            prompt_tokens = response.usage_metadata.prompt_token_count
+            completion_tokens = response.usage_metadata.candidates_token_count
+            total_tokens = response.usage_metadata.total_token_count
+
             async for chunk in self._async_generator_wrapper(response):
-                # todo: usage
+                if chunk.usage_metadata:
+                    prompt_tokens += response.usage_metadata.prompt_token_count
+                    completion_tokens += response.usage_metadata.candidates_token_count
+                    total_tokens += response.usage_metadata.total_token_count
                 try:
                     for c in chunk.parts:
                         if c.text:
@@ -436,6 +630,13 @@ class GoogleLLMService(LLMService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
+            await self.start_llm_usage_metrics(
+                LLMTokenUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                )
+            )
             await self.push_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -499,7 +700,7 @@ class GoogleTTSService(TTSService):
             "emphasis": params.emphasis,
             "language": self.language_to_service_language(params.language)
             if params.language
-            else Language.EN,
+            else "en-US",
             "gender": params.gender,
             "google_style": params.google_style,
         }
@@ -530,88 +731,7 @@ class GoogleTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        match language:
-            case Language.BG:
-                return "bg-BG"
-            case Language.CA:
-                return "ca-ES"
-            case Language.ZH:
-                return "cmn-CN"
-            case Language.ZH_TW:
-                return "cmn-TW"
-            case Language.CS:
-                return "cs-CZ"
-            case Language.DA:
-                return "da-DK"
-            case Language.NL:
-                return "nl-NL"
-            case Language.EN | Language.EN_US:
-                return "en-US"
-            case Language.EN_AU:
-                return "en-AU"
-            case Language.EN_GB:
-                return "en-GB"
-            case Language.EN_IN:
-                return "en-IN"
-            case Language.ET:
-                return "et-EE"
-            case Language.FI:
-                return "fi-FI"
-            case Language.NL_BE:
-                return "nl-BE"
-            case Language.FR:
-                return "fr-FR"
-            case Language.FR_CA:
-                return "fr-CA"
-            case Language.DE:
-                return "de-DE"
-            case Language.EL:
-                return "el-GR"
-            case Language.HI:
-                return "hi-IN"
-            case Language.HU:
-                return "hu-HU"
-            case Language.ID:
-                return "id-ID"
-            case Language.IT:
-                return "it-IT"
-            case Language.JA:
-                return "ja-JP"
-            case Language.KO:
-                return "ko-KR"
-            case Language.LV:
-                return "lv-LV"
-            case Language.LT:
-                return "lt-LT"
-            case Language.MS:
-                return "ms-MY"
-            case Language.NO:
-                return "nb-NO"
-            case Language.PL:
-                return "pl-PL"
-            case Language.PT:
-                return "pt-PT"
-            case Language.PT_BR:
-                return "pt-BR"
-            case Language.RO:
-                return "ro-RO"
-            case Language.RU:
-                return "ru-RU"
-            case Language.SK:
-                return "sk-SK"
-            case Language.ES:
-                return "es-ES"
-            case Language.SV:
-                return "sv-SE"
-            case Language.TH:
-                return "th-TH"
-            case Language.TR:
-                return "tr-TR"
-            case Language.UK:
-                return "uk-UA"
-            case Language.VI:
-                return "vi-VN"
-        return None
+        return language_to_google_language(language)
 
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"

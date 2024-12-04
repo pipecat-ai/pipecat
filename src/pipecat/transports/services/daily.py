@@ -130,7 +130,11 @@ class DailyCallbacks(BaseModel):
     on_error: Callable[[str], Awaitable[None]]
     on_app_message: Callable[[Any, str], Awaitable[None]]
     on_call_state_updated: Callable[[str], Awaitable[None]]
+    on_dialin_connected: Callable[[Any], Awaitable[None]]
     on_dialin_ready: Callable[[str], Awaitable[None]]
+    on_dialin_stopped: Callable[[Any], Awaitable[None]]
+    on_dialin_error: Callable[[Any], Awaitable[None]]
+    on_dialin_warning: Callable[[Any], Awaitable[None]]
     on_dialout_answered: Callable[[Any], Awaitable[None]]
     on_dialout_connected: Callable[[Any], Awaitable[None]]
     on_dialout_stopped: Callable[[Any], Awaitable[None]]
@@ -204,6 +208,17 @@ class DailyTransportClient(EventHandler):
         self._executor = ThreadPoolExecutor(max_workers=5)
 
         self._client: CallClient = CallClient(event_handler=self)
+
+        # We use a separate task to execute the callbacks, otherwise if we call
+        # a `CallClient` function and wait for its completion this will
+        # currently result in a deadlock. This is because `_call_async_callback`
+        # can be used inside `CallClient` event handlers which are holding the
+        # GIL in `daily-python`. So if the `callback` passed here makes a
+        # `CallClient` call and waits for it to finish using completions (and a
+        # future) we will deadlock because completions use event handlers (which
+        # are holding the GIL).
+        self._callback_queue = asyncio.Queue()
+        self._callback_task = self._loop.create_task(self._callback_task_handler())
 
         self._camera: VirtualCameraDevice | None = None
         if self._params.camera_out_enabled:
@@ -332,7 +347,7 @@ class DailyTransportClient(EventHandler):
 
                 logger.info(f"Joined {self._room_url}")
 
-                if self._token and self._params.transcription_enabled:
+                if self._params.transcription_enabled:
                     await self._start_transcription()
 
                 await self._callbacks.on_joined(data)
@@ -346,6 +361,10 @@ class DailyTransportClient(EventHandler):
             await self._callbacks.on_error(error_msg)
 
     async def _start_transcription(self):
+        if not self._token:
+            logger.warning(f"Transcription can't be started without a room token")
+            return
+
         logger.info(f"Enabling transcription with settings {self._params.transcription_settings}")
 
         future = self._loop.create_future()
@@ -440,6 +459,8 @@ class DailyTransportClient(EventHandler):
             await self._callbacks.on_error(error_msg)
 
     async def _stop_transcription(self):
+        if not self._token:
+            return
         future = self._loop.create_future()
         self._client.stop_transcription(completion=completion_callback(future))
         error = await future
@@ -453,6 +474,8 @@ class DailyTransportClient(EventHandler):
 
     async def cleanup(self):
         await self._loop.run_in_executor(self._executor, self._cleanup)
+        self._callback_task.cancel()
+        await self._callback_task
 
     def _cleanup(self):
         if self._client:
@@ -506,9 +529,9 @@ class DailyTransportClient(EventHandler):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
-        # Only enable camera subscription on this participant
+        # Only enable the desired video source subscription on this participant.
         await self.update_subscriptions(
-            participant_settings={participant_id: {"media": {"camera": "subscribed"}}}
+            participant_settings={participant_id: {"media": {video_source: "subscribed"}}}
         )
 
         self._video_renderers[participant_id] = callback
@@ -547,8 +570,20 @@ class DailyTransportClient(EventHandler):
     def on_call_state_updated(self, state: str):
         self._call_async_callback(self._callbacks.on_call_state_updated, state)
 
+    def on_dialin_connected(self, data: Any):
+        self._call_async_callback(self._callbacks.on_dialin_connected, data)
+
     def on_dialin_ready(self, sip_endpoint: str):
         self._call_async_callback(self._callbacks.on_dialin_ready, sip_endpoint)
+
+    def on_dialin_stopped(self, data: Any):
+        self._call_async_callback(self._callbacks.on_dialin_stopped, data)
+
+    def on_dialin_error(self, data: Any):
+        self._call_async_callback(self._callbacks.on_dialin_error, data)
+
+    def on_dialin_warning(self, data: Any):
+        self._call_async_callback(self._callbacks.on_dialin_warning, data)
 
     def on_dialout_answered(self, data: Any):
         self._call_async_callback(self._callbacks.on_dialout_answered, data)
@@ -625,15 +660,18 @@ class DailyTransportClient(EventHandler):
         )
 
     def _call_async_callback(self, callback, *args):
-        # Don't wait on the coroutine, otherwise if we call a `CallClient`
-        # function and wait for its completion this will currently result in a
-        # deadlock. This is because `_call_async_callback` is used inside
-        # `CallClient` event handlers which are holding the GIL in
-        # `daily-python`. So if the `callback` passed here makes a `CallClient`
-        # call and waits for it to finish using completions (and a future) we
-        # will deadlock because completions use event handlers (which are
-        # holding the GIL).
-        asyncio.run_coroutine_threadsafe(callback(*args), self._loop)
+        future = asyncio.run_coroutine_threadsafe(
+            self._callback_queue.put((callback, *args)), self._loop
+        )
+        future.result()
+
+    async def _callback_task_handler(self):
+        while True:
+            try:
+                (callback, *args) = await self._callback_queue.get()
+                await callback(*args)
+            except asyncio.CancelledError:
+                break
 
 
 class DailyInputTransport(BaseInputTransport):
@@ -712,7 +750,7 @@ class DailyInputTransport(BaseInputTransport):
         await self.push_frame(frame)
 
     async def push_app_message(self, message: Any, sender: str):
-        frame = DailyTransportMessageFrame(message=message, participant_id=sender)
+        frame = DailyTransportMessageUrgentFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     #
@@ -833,7 +871,11 @@ class DailyTransport(BaseTransport):
             on_error=self._on_error,
             on_app_message=self._on_app_message,
             on_call_state_updated=self._on_call_state_updated,
+            on_dialin_connected=self._on_dialin_connected,
             on_dialin_ready=self._on_dialin_ready,
+            on_dialin_stopped=self._on_dialin_stopped,
+            on_dialin_error=self._on_dialin_error,
+            on_dialin_warning=self._on_dialin_warning,
             on_dialout_answered=self._on_dialout_answered,
             on_dialout_connected=self._on_dialout_connected,
             on_dialout_stopped=self._on_dialout_stopped,
@@ -862,7 +904,11 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_left")
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_call_state_updated")
+        self._register_event_handler("on_dialin_connected")
         self._register_event_handler("on_dialin_ready")
+        self._register_event_handler("on_dialin_stopped")
+        self._register_event_handler("on_dialin_error")
+        self._register_event_handler("on_dialin_warning")
         self._register_event_handler("on_dialout_answered")
         self._register_event_handler("on_dialout_connected")
         self._register_event_handler("on_dialout_stopped")
@@ -1000,10 +1046,22 @@ class DailyTransport(BaseTransport):
             except Exception as e:
                 logger.exception(f"Error handling dialin-ready event ({url}): {e}")
 
+    async def _on_dialin_connected(self, data):
+        await self._call_event_handler("on_dialin_connected", data)
+
     async def _on_dialin_ready(self, sip_endpoint):
         if self._params.dialin_settings:
             await self._handle_dialin_ready(sip_endpoint)
         await self._call_event_handler("on_dialin_ready", sip_endpoint)
+
+    async def _on_dialin_stopped(self, data):
+        await self._call_event_handler("on_dialin_stopped", data)
+
+    async def _on_dialin_error(self, data):
+        await self._call_event_handler("on_dialin_error", data)
+
+    async def _on_dialin_warning(self, data):
+        await self._call_event_handler("on_dialin_warning", data)
 
     async def _on_dialout_answered(self, data):
         await self._call_event_handler("on_dialout_answered", data)
