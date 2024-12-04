@@ -53,7 +53,7 @@ async def main():
             out_params=GStreamerPipelineSource.OutputParams(
                 video_width=1280,
                 video_height=720,
-                audio_sample_rate=16000,
+                audio_sample_rate=24000,
                 audio_channels=1,
             ),
         )
