@@ -560,11 +560,6 @@ class GoogleLLMService(LLMService):
             self._model_name, system_instruction=self._system_instruction
         )
 
-    async def _async_generator_wrapper(self, sync_generator):
-        for item in sync_generator:
-            yield item
-            await asyncio.sleep(0)
-
     async def _process_context(self, context: OpenAILLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
         try:
@@ -594,7 +589,8 @@ class GoogleLLMService(LLMService):
 
             await self.start_ttfb_metrics()
             tools = context.tools if context.tools else []
-            response = self._client.generate_content(
+
+            response = await self._client.generate_content_async(
                 contents=messages, tools=tools, stream=True, generation_config=generation_config
             )
             await self.stop_ttfb_metrics()
@@ -603,7 +599,7 @@ class GoogleLLMService(LLMService):
             completion_tokens = response.usage_metadata.candidates_token_count
             total_tokens = response.usage_metadata.total_token_count
 
-            async for chunk in self._async_generator_wrapper(response):
+            async for chunk in response:
                 if chunk.usage_metadata:
                     prompt_tokens += response.usage_metadata.prompt_token_count
                     completion_tokens += response.usage_metadata.candidates_token_count
