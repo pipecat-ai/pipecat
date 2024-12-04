@@ -11,10 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `GroqLLMService` and `GrokLLMService` for Groq and Grok API integration, with
   OpenAI-compatible interface
-- New examples demonstrating function calling with Groq and Grok
+- New examples demonstrating function calling with Groq, Grok, and Azure OpenAI
 
   - `14f-function-calling-groq.py`
   - `14g-function-calling-grok.py`
+  - `14h-function-calling-azure.py`
 
 - In order to obtain the audio stored by the `AudioBufferProcessor` you can now
   also register an `on_audio_data` event handler. The `on_audio_data` handler
@@ -42,6 +43,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 - Updated STT and TTS services with language options that match the supported
   languages for each service.
+
+- Updated the `AzureLLMService` to use the `OpenAILLMService`. Updated the
+  `api_version` to `2024-09-01-preview`.
 
 ### Removed
 
