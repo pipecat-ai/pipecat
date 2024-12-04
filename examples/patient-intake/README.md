@@ -66,5 +66,7 @@ docker run --env-file .env -p 7860:7860 chatbot
 
 Since this example is using cartesia checkout best practices given in cartesia page.LLM prompts should be modified accordingly.
 <https://docs.cartesia.ai/build-with-sonic/formatting-text-for-sonic/best-practices>
+
 <https://docs.cartesia.ai/build-with-sonic/formatting-text-for-sonic/inserting-breaks-pauses>
+
 <https://docs.cartesia.ai/build-with-sonic/formatting-text-for-sonic/spelling-out-input-text>
