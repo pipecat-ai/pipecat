@@ -17,10 +17,10 @@ from runner import configure
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.grok import GrokLLMService
 from pipecat.services.openai import OpenAILLMContext
-from pipecat.services.together import TogetherLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -63,10 +63,7 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = TogetherLLMService(
-            api_key=os.getenv("TOGETHER_API_KEY"),
-            model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
-        )
+        llm = GrokLLMService(api_key=os.getenv("GROK_API_KEY"))
         # Register a function_name of None to get all functions
         # sent to the same callback with an additional function_name parameter.
         llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
@@ -116,7 +113,14 @@ async def main():
             ]
         )
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(
+            pipeline,
+            PipelineParams(
+                allow_interruptions=True,
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
