@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `GroqLLMService` and `GrokLLMService` for Groq and Grok API integration, with
+  OpenAI-compatible interface
+- New examples demonstrating function calling with Groq and Grok
+
+  - `14f-function-calling-groq.py`
+  - `14g-function-calling-grok.py`
+
 - In order to obtain the audio stored by the `AudioBufferProcessor` you can now
   also register an `on_audio_data` event handler. The `on_audio_data` handler
   will be called every time `buffer_size` (a new constructor argument) is
