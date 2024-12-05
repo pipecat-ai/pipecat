@@ -1,5 +1,11 @@
 import { useRef, useCallback } from 'react';
-import { Participant, RTVIEvent, TransportState } from 'realtime-ai';
+import {
+  Participant,
+  RTVIEvent,
+  TransportState,
+  TranscriptData,
+  BotLLMTextData,
+} from 'realtime-ai';
 import { useRTVIClient, useRTVIClientEvent } from 'realtime-ai-react';
 import './DebugDisplay.css';
 
@@ -12,6 +18,14 @@ export function DebugDisplay() {
 
     const entry = document.createElement('div');
     entry.textContent = `${new Date().toISOString()} - ${message}`;
+
+    // Add styling based on message type
+    if (message.startsWith('User: ')) {
+      entry.style.color = '#2196F3'; // blue for user
+    } else if (message.startsWith('Bot: ')) {
+      entry.style.color = '#4CAF50'; // green for bot
+    }
+
     debugLogRef.current.appendChild(entry);
     debugLogRef.current.scrollTop = debugLogRef.current.scrollHeight;
   }, []);
@@ -95,6 +109,30 @@ export function DebugDisplay() {
         })}`
       );
     }, [client, log])
+  );
+
+  // Log transcripts
+  useRTVIClientEvent(
+    RTVIEvent.UserTranscript,
+    useCallback(
+      (data: TranscriptData) => {
+        // Only log final transcripts
+        if (data.final) {
+          log(`User: ${data.text}`);
+        }
+      },
+      [log]
+    )
+  );
+
+  useRTVIClientEvent(
+    RTVIEvent.BotTranscript,
+    useCallback(
+      (data: BotLLMTextData) => {
+        log(`Bot: ${data.text}`);
+      },
+      [log]
+    )
   );
 
   return (
