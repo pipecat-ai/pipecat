@@ -1,0 +1,26 @@
+.debug-panel {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.debug-panel h3 {
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.debug-log {
+  height: 200px;
+  overflow-y: auto;
+  background-color: #f8f8f8;
+  padding: 10px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.debug-log div {
+  margin-bottom: 4px;
+}

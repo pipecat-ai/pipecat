@@ -1,0 +1,166 @@
+Object.defineProperty(exports, '__esModule', { value: true });
+
+const core = require('@sentry/core');
+const helpers = require('./helpers.js');
+const client = require('./client.js');
+const fetch = require('./transports/fetch.js');
+const xhr = require('./transports/xhr.js');
+const stackParsers = require('./stack-parsers.js');
+const eventbuilder = require('./eventbuilder.js');
+const userfeedback = require('./userfeedback.js');
+const sdk = require('./sdk.js');
+const breadcrumbs = require('./integrations/breadcrumbs.js');
+const dedupe = require('./integrations/dedupe.js');
+const globalhandlers = require('./integrations/globalhandlers.js');
+const httpcontext = require('./integrations/httpcontext.js');
+const linkederrors = require('./integrations/linkederrors.js');
+const trycatch = require('./integrations/trycatch.js');
+const index = require('./integrations/index.js');
+const replay = require('@sentry/replay');
+const replayCanvas = require('@sentry-internal/replay-canvas');
+const feedback = require('@sentry-internal/feedback');
+const integrations = require('@sentry/integrations');
+const tracing = require('@sentry-internal/tracing');
+const offline = require('./transports/offline.js');
+const hubextensions = require('./profiling/hubextensions.js');
+const integration = require('./profiling/integration.js');
+
+let windowIntegrations = {};
+
+// This block is needed to add compatibility with the integrations packages when used with a CDN
+if (helpers.WINDOW.Sentry && helpers.WINDOW.Sentry.Integrations) {
+  windowIntegrations = helpers.WINDOW.Sentry.Integrations;
+}
+
+/** @deprecated Import the integration function directly, e.g. `inboundFiltersIntegration()` instead of `new Integrations.InboundFilter(). */
+const INTEGRATIONS = {
+  ...windowIntegrations,
+  // eslint-disable-next-line deprecation/deprecation
+  ...core.Integrations,
+  ...index,
+};
+
+exports.FunctionToString = core.FunctionToString;
+exports.Hub = core.Hub;
+exports.InboundFilters = core.InboundFilters;
+exports.ModuleMetadata = core.ModuleMetadata;
+exports.SDK_VERSION = core.SDK_VERSION;
+exports.SEMANTIC_ATTRIBUTE_SENTRY_OP = core.SEMANTIC_ATTRIBUTE_SENTRY_OP;
+exports.SEMANTIC_ATTRIBUTE_SENTRY_ORIGIN = core.SEMANTIC_ATTRIBUTE_SENTRY_ORIGIN;
+exports.SEMANTIC_ATTRIBUTE_SENTRY_SAMPLE_RATE = core.SEMANTIC_ATTRIBUTE_SENTRY_SAMPLE_RATE;
+exports.SEMANTIC_ATTRIBUTE_SENTRY_SOURCE = core.SEMANTIC_ATTRIBUTE_SENTRY_SOURCE;
+exports.Scope = core.Scope;
+exports.addBreadcrumb = core.addBreadcrumb;
+exports.addEventProcessor = core.addEventProcessor;
+exports.addGlobalEventProcessor = core.addGlobalEventProcessor;
+exports.addIntegration = core.addIntegration;
+exports.addTracingExtensions = core.addTracingExtensions;
+exports.captureEvent = core.captureEvent;
+exports.captureException = core.captureException;
+exports.captureMessage = core.captureMessage;
+exports.captureSession = core.captureSession;
+exports.close = core.close;
+exports.configureScope = core.configureScope;
+exports.continueTrace = core.continueTrace;
+exports.createTransport = core.createTransport;
+exports.endSession = core.endSession;
+exports.extractTraceparentData = core.extractTraceparentData;
+exports.flush = core.flush;
+exports.functionToStringIntegration = core.functionToStringIntegration;
+exports.getActiveSpan = core.getActiveSpan;
+exports.getActiveTransaction = core.getActiveTransaction;
+exports.getClient = core.getClient;
+exports.getCurrentHub = core.getCurrentHub;
+exports.getCurrentScope = core.getCurrentScope;
+exports.getHubFromCarrier = core.getHubFromCarrier;
+exports.getSpanStatusFromHttpCode = core.getSpanStatusFromHttpCode;
+exports.inboundFiltersIntegration = core.inboundFiltersIntegration;
+exports.isInitialized = core.isInitialized;
+exports.lastEventId = core.lastEventId;
+exports.makeMain = core.makeMain;
+exports.makeMultiplexedTransport = core.makeMultiplexedTransport;
+exports.metrics = core.metrics;
+exports.moduleMetadataIntegration = core.moduleMetadataIntegration;
+exports.parameterize = core.parameterize;
+exports.setContext = core.setContext;
+exports.setCurrentClient = core.setCurrentClient;
+exports.setExtra = core.setExtra;
+exports.setExtras = core.setExtras;
+exports.setHttpStatus = core.setHttpStatus;
+exports.setMeasurement = core.setMeasurement;
+exports.setTag = core.setTag;
+exports.setTags = core.setTags;
+exports.setUser = core.setUser;
+exports.spanStatusfromHttpCode = core.spanStatusfromHttpCode;
+exports.startInactiveSpan = core.startInactiveSpan;
+exports.startSession = core.startSession;
+exports.startSpan = core.startSpan;
+exports.startSpanManual = core.startSpanManual;
+exports.startTransaction = core.startTransaction;
+exports.trace = core.trace;
+exports.withActiveSpan = core.withActiveSpan;
+exports.withIsolationScope = core.withIsolationScope;
+exports.withScope = core.withScope;
+exports.WINDOW = helpers.WINDOW;
+exports.BrowserClient = client.BrowserClient;
+exports.makeFetchTransport = fetch.makeFetchTransport;
+exports.makeXHRTransport = xhr.makeXHRTransport;
+exports.chromeStackLineParser = stackParsers.chromeStackLineParser;
+exports.defaultStackLineParsers = stackParsers.defaultStackLineParsers;
+exports.defaultStackParser = stackParsers.defaultStackParser;
+exports.geckoStackLineParser = stackParsers.geckoStackLineParser;
+exports.opera10StackLineParser = stackParsers.opera10StackLineParser;
+exports.opera11StackLineParser = stackParsers.opera11StackLineParser;
+exports.winjsStackLineParser = stackParsers.winjsStackLineParser;
+exports.eventFromException = eventbuilder.eventFromException;
+exports.eventFromMessage = eventbuilder.eventFromMessage;
+exports.exceptionFromError = eventbuilder.exceptionFromError;
+exports.createUserFeedbackEnvelope = userfeedback.createUserFeedbackEnvelope;
+exports.captureUserFeedback = sdk.captureUserFeedback;
+exports.defaultIntegrations = sdk.defaultIntegrations;
+exports.forceLoad = sdk.forceLoad;
+exports.getDefaultIntegrations = sdk.getDefaultIntegrations;
+exports.init = sdk.init;
+exports.onLoad = sdk.onLoad;
+exports.showReportDialog = sdk.showReportDialog;
+exports.wrap = sdk.wrap;
+exports.Breadcrumbs = breadcrumbs.Breadcrumbs;
+exports.breadcrumbsIntegration = breadcrumbs.breadcrumbsIntegration;
+exports.Dedupe = dedupe.Dedupe;
+exports.GlobalHandlers = globalhandlers.GlobalHandlers;
+exports.globalHandlersIntegration = globalhandlers.globalHandlersIntegration;
+exports.HttpContext = httpcontext.HttpContext;
+exports.httpContextIntegration = httpcontext.httpContextIntegration;
+exports.LinkedErrors = linkederrors.LinkedErrors;
+exports.linkedErrorsIntegration = linkederrors.linkedErrorsIntegration;
+exports.TryCatch = trycatch.TryCatch;
+exports.browserApiErrorsIntegration = trycatch.browserApiErrorsIntegration;
+exports.Replay = replay.InternalReplay;
+exports.getReplay = replay.internalGetReplay;
+exports.replayIntegration = replay.internalReplayIntegration;
+exports.ReplayCanvas = replayCanvas.ReplayCanvas;
+exports.replayCanvasIntegration = replayCanvas.replayCanvasIntegration;
+exports.Feedback = feedback.Feedback;
+exports.feedbackIntegration = feedback.feedbackIntegration;
+exports.sendFeedback = feedback.sendFeedback;
+exports.captureConsoleIntegration = integrations.captureConsoleIntegration;
+exports.contextLinesIntegration = integrations.contextLinesIntegration;
+exports.debugIntegration = integrations.debugIntegration;
+exports.dedupeIntegration = integrations.dedupeIntegration;
+exports.extraErrorDataIntegration = integrations.extraErrorDataIntegration;
+exports.httpClientIntegration = integrations.httpClientIntegration;
+exports.reportingObserverIntegration = integrations.reportingObserverIntegration;
+exports.rewriteFramesIntegration = integrations.rewriteFramesIntegration;
+exports.sessionTimingIntegration = integrations.sessionTimingIntegration;
+exports.BrowserTracing = tracing.BrowserTracing;
+exports.browserTracingIntegration = tracing.browserTracingIntegration;
+exports.defaultRequestInstrumentationOptions = tracing.defaultRequestInstrumentationOptions;
+exports.instrumentOutgoingRequests = tracing.instrumentOutgoingRequests;
+exports.startBrowserTracingNavigationSpan = tracing.startBrowserTracingNavigationSpan;
+exports.startBrowserTracingPageLoadSpan = tracing.startBrowserTracingPageLoadSpan;
+exports.makeBrowserOfflineTransport = offline.makeBrowserOfflineTransport;
+exports.onProfilingStartRouteTransaction = hubextensions.onProfilingStartRouteTransaction;
+exports.BrowserProfilingIntegration = integration.BrowserProfilingIntegration;
+exports.browserProfilingIntegration = integration.browserProfilingIntegration;
+exports.Integrations = INTEGRATIONS;
+//# sourceMappingURL=index.js.map
