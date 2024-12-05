@@ -1,1 +1,0 @@
-{"version":3,"file":"metadata.d.ts","sourceRoot":"","sources":["../../../src/integrations/metadata.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,MAAM,EAAE,KAAK,EAAE,SAAS,EAAa,WAAW,EAAE,gBAAgB,EAAiB,MAAM,eAAe,CAAC;AAyCvH,eAAO,MAAM,yBAAyB,mDAAgD,CAAC;AAEvF;;;;;;;;;;GAUG;AAEH,eAAO,MAAM,cAAc;oBAKP,MAAM,KAAK,IAAI;0BACT,KAAK,QAAQ,SAAS,UAAU,MAAM,KAAK,KAAK;EAEzE,CAAC"}
