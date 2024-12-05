@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `DeepgramSTTService` now exposes two event handlers `on_speech_started` and
+  `on_utterance_end` that could be used to implement interruptions. See new
+  example `examples/foundational/07c-interruptible-deepgram-vad.py`
+
 - Added `GroqLLMService`, `GrokLLMService`, and `NimLLMService` for Groq, Grok,
   and NVIDIA NIM API integration, with an OpenAI-compatible interface.
 
