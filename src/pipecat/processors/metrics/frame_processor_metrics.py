@@ -1,5 +1,6 @@
 import time
 
+from loguru import logger
 from pipecat.frames.frames import MetricsFrame
 from pipecat.metrics.metrics import (
     LLMTokenUsage,
@@ -9,8 +10,6 @@ from pipecat.metrics.metrics import (
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
-
-from loguru import logger
 
 
 class FrameProcessorMetrics:
