@@ -80,6 +80,12 @@ button:disabled {
   padding: 20px;
 }
 
+.debug-panel h3 {
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  font-weight: bold;
+}
+
 #debug-log {
   height: 200px;
   overflow-y: auto;
@@ -87,4 +93,6 @@ button:disabled {
   padding: 10px;
   border-radius: 4px;
   font-family: monospace;
+  font-size: 12px;
+  line-height: 1.4;
 }
