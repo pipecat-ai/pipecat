@@ -29,3 +29,6 @@ MANIFEST
 .DS_Store
 .env
 fly.toml
+
+# Example files
+pipecat/examples/twilio-chatbot/templates/streams.xml
