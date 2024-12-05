@@ -265,7 +265,7 @@ class TranscriptionContextFixup(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, LLMDemoTranscriptionFrame):
-            logger.debug(f"TRANSCRIPTION FROM LLM: {frame.text}")
+            logger.info(f"Transcription from Gemini: {frame.text}")
             self._transcript = frame.text
             self.swap_user_audio()
             self._transcript = ""

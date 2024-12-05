@@ -562,6 +562,11 @@ class GoogleLLMService(LLMService):
 
     async def _process_context(self, context: OpenAILLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+
         try:
             logger.debug(
                 f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
@@ -595,9 +600,10 @@ class GoogleLLMService(LLMService):
             )
             await self.stop_ttfb_metrics()
 
-            prompt_tokens = response.usage_metadata.prompt_token_count
-            completion_tokens = response.usage_metadata.candidates_token_count
-            total_tokens = response.usage_metadata.total_token_count
+            if response.usage_metadata:
+                prompt_tokens = response.usage_metadata.prompt_token_count
+                completion_tokens = response.usage_metadata.candidates_token_count
+                total_tokens = response.usage_metadata.total_token_count
 
             async for chunk in response:
                 if chunk.usage_metadata:
