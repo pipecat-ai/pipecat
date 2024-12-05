@@ -49,6 +49,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 - Updated the `FireworksLLMService` to use the `OpenAILLMService`. Updated the
   default model to `accounts/fireworks/models/firefunction-v2`.
 
+- Updated the `simple-chatbot` example to include a Javascript and React client
+  example, using RTVI JS and React.
+
 ### Removed
 
 - Removed `AppFrame`. This was used as a special user custom frame, but there's

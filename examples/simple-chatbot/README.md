@@ -1,4 +1,4 @@
-# Simple Chatbot Implementation
+# Simple Chatbot
 
 This repository demonstrates a simple AI chatbot with real-time audio/video interaction, implemented in three different ways. The bot server remains the same, but you can connect to it using three different client approaches.
 
