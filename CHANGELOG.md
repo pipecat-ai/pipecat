@@ -34,6 +34,10 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 ### Changed
 
+- `SoundfileMixer` doesn't resample input files anymore to avoid startup
+  delays. The sample rate of the provided sound files now need to match the
+  sample rate of the output transport.
+
 - All input frames (text, audio, image, etc.) are now system frames. This means
   they are processed immediately by all processors instead of being queued
   internally.
@@ -56,6 +60,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
   actually no use case for that.
 
 ### Fixed
+
+- Fixed an issue in `WebsocketServerTransport` and `FastAPIWebsocketTransport`
+  that would cause a busy loop when using audio mixer.
 
 - Fixed a `DailyTransport` and `LiveKitTransport` issue where connections were
   being closed in the input transport prematurely. This was causing frames
