@@ -83,6 +83,7 @@ class LiveKitTransportClient:
         self._room = rtc.Room(loop=loop)
         self._participant_id: str = ""
         self._connected = False
+        self._disconnect_counter = 0
         self._audio_source: rtc.AudioSource | None = None
         self._audio_track: rtc.LocalAudioTrack | None = None
         self._audio_tracks = {}
@@ -105,6 +106,8 @@ class LiveKitTransportClient:
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def connect(self):
         if self._connected:
+            # Increment disconnect counter if already connected.
+            self._disconnect_counter += 1
             return
 
         logger.info(f"Connecting to {self._room_name}")
@@ -116,6 +119,9 @@ class LiveKitTransportClient:
                 options=rtc.RoomOptions(auto_subscribe=True),
             )
             self._connected = True
+            # Increment disconnect counter if we successfully connected.
+            self._disconnect_counter += 1
+
             self._participant_id = self._room.local_participant.sid
             logger.info(f"Connected to {self._room_name}")
 
@@ -142,7 +148,10 @@ class LiveKitTransportClient:
             raise
 
     async def disconnect(self):
-        if not self._connected:
+        # Decrement leave counter when leaving.
+        self._disconnect_counter -= 1
+
+        if not self._connected or self._disconnect_counter > 0:
             return
 
         logger.info(f"Disconnecting from {self._room_name}")
