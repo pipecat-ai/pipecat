@@ -29,6 +29,10 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frameworks.rtvi import (
+    RTVIBotTranscriptionProcessor,
+    RTVIUserTranscriptionProcessor,
+)
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -143,11 +147,21 @@ async def main():
 
         ta = TalkingAnimation()
 
+        # RTVI
+
+        # This will emit UserTranscript events.
+        rtvi_user_transcription = RTVIUserTranscriptionProcessor()
+
+        # This will emit BotTranscript events.
+        rtvi_bot_transcription = RTVIBotTranscriptionProcessor()
+
         pipeline = Pipeline(
             [
                 transport.input(),
+                rtvi_user_transcription,
                 context_aggregator.user(),
                 llm,
+                rtvi_bot_transcription,
                 tts,
                 ta,
                 transport.output(),

@@ -63,6 +63,14 @@ class ChatbotClient {
   log(message) {
     const entry = document.createElement('div');
     entry.textContent = `${new Date().toISOString()} - ${message}`;
+
+    // Add styling based on message type
+    if (message.startsWith('User: ')) {
+      entry.style.color = '#2196F3'; // blue for user
+    } else if (message.startsWith('Bot: ')) {
+      entry.style.color = '#4CAF50'; // green for bot
+    }
+
     this.debugLog.appendChild(entry);
     this.debugLog.scrollTop = this.debugLog.scrollHeight;
     console.log(message);
@@ -220,6 +228,23 @@ class ChatbotClient {
           onBotReady: (data) => {
             this.log(`Bot ready: ${JSON.stringify(data)}`);
             this.setupMediaTracks();
+          },
+          // Transcript events
+          onUserTranscript: (data) => {
+            // Only log final transcripts
+            if (data.final) {
+              this.log(`User: ${data.text}`);
+            }
+          },
+          onBotTranscript: (data) => {
+            this.log(`Bot: ${data.text}`);
+          },
+          // Error handling
+          onMessageError: (error) => {
+            console.log('Message error:', error);
+          },
+          onError: (error) => {
+            console.log('Error:', error);
           },
         },
       });
