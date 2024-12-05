@@ -1,0 +1,1 @@
+{"version":3,"file":"textencoder.d.ts","sourceRoot":"","sources":["../../src/textencoder.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AACH,MAAM,WAAW,iBAAiB;IAChC;;OAEG;IACH,QAAQ,CAAC,QAAQ,EAAE,MAAM,CAAC;CAC3B;AAGD,MAAM,WAAW,mBAAoB,SAAQ,iBAAiB;IAC5D,MAAM,CAAC,KAAK,CAAC,EAAE,MAAM,GAAG,UAAU,CAAC;CACpC"}

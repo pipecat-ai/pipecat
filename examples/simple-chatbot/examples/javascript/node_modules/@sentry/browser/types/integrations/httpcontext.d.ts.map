@@ -1,0 +1,1 @@
+{"version":3,"file":"httpcontext.d.ts","sourceRoot":"","sources":["../../../../src/integrations/httpcontext.ts"],"names":[],"mappings":"AACA,OAAO,KAAK,EAAE,KAAK,EAAE,WAAW,EAAE,gBAAgB,EAAiB,MAAM,eAAe,CAAC;AAkCzF,eAAO,MAAM,sBAAsB,mDAA6C,CAAC;AAEjF;;;GAGG;AAEH,eAAO,MAAM,WAAW;6BACmB,KAAK,KAAK,IAAI;EACxD,CAAC"}
