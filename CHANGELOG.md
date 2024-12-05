@@ -68,6 +68,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 ### Fixed
 
+- Fixed a `BaseOutputTransport` issue that was causing audio to be discarded
+  after an `EndFrame` was received.
+
 - Fixed an issue in `WebsocketServerTransport` and `FastAPIWebsocketTransport`
   that would cause a busy loop when using audio mixer.
 
