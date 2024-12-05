@@ -51,11 +51,10 @@ class BaseOutputTransport(FrameProcessor):
         # Task to process incoming frames using a clock.
         self._sink_clock_task = None
 
-        # Task to write/send audio frames.
+        # Task to write/send audio and image frames.
         self._audio_out_task = None
-
-        # Task to write/send image frames.
         self._camera_out_task = None
+        self._running_out_tasks = True
 
         # These are the images that we should send to the camera at our desired
         # framerate.
@@ -82,7 +81,9 @@ class BaseOutputTransport(FrameProcessor):
         self._create_sink_tasks()
 
     async def stop(self, frame: EndFrame):
-        await self._cancel_output_tasks()
+        # We can't cancel output tasks because there might still be audio
+        # buffered to be played.
+        await self._stop_output_tasks()
         # Stop audio mixer.
         if self._params.audio_out_mixer:
             await self._params.audio_out_mixer.stop()
@@ -308,6 +309,15 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_out_queue = asyncio.Queue()
             self._audio_out_task = loop.create_task(self._audio_out_task_handler())
 
+    async def _stop_output_tasks(self):
+        self._running_out_tasks = False
+        # Stop camera output task.
+        if self._camera_out_task and self._params.camera_out_enabled:
+            await self._camera_out_task
+        # Stop audio output task.
+        if self._audio_out_task and self._params.audio_out_enabled:
+            await self._audio_out_task
+
     async def _cancel_output_tasks(self):
         # Stop camera output task.
         if self._camera_out_task and self._params.camera_out_enabled:
@@ -351,7 +361,7 @@ class BaseOutputTransport(FrameProcessor):
         self._camera_out_frame_index = 0
         self._camera_out_frame_duration = 1 / self._params.camera_out_framerate
         self._camera_out_frame_reset = self._camera_out_frame_duration * 5
-        while True:
+        while self._running_out_tasks:
             try:
                 if self._params.camera_out_is_live:
                     await self._camera_out_is_live_handler()
@@ -400,7 +410,7 @@ class BaseOutputTransport(FrameProcessor):
 
     def _next_audio_frame(self) -> AsyncGenerator[AudioRawFrame, None]:
         async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[AudioRawFrame, None]:
-            while True:
+            while self._running_out_tasks or self._bot_speaking:
                 try:
                     frame = await asyncio.wait_for(
                         self._audio_out_queue.get(), timeout=vad_stop_secs
@@ -413,7 +423,7 @@ class BaseOutputTransport(FrameProcessor):
         async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[AudioRawFrame, None]:
             last_frame_time = 0
             silence = b"\x00" * self._audio_chunk_size
-            while True:
+            while self._running_out_tasks or self._bot_speaking:
                 try:
                     frame = self._audio_out_queue.get_nowait()
                     frame.audio = await self._params.audio_out_mixer.mix(frame.audio)

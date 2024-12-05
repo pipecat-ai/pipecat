@@ -105,6 +105,11 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             self._next_send_time = 0
 
     async def write_raw_audio_frames(self, frames: bytes):
+        if self._websocket.client_state != WebSocketState.CONNECTED:
+            # Simulate audio playback with a sleep.
+            await self._write_audio_sleep()
+            return
+
         frame = AudioRawFrame(
             audio=frames,
             sample_rate=self._params.audio_out_sample_rate,
@@ -126,9 +131,20 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             frame = wav_frame
 
         payload = self._params.serializer.serialize(frame)
+        if payload:
+            await self._websocket.send_text(payload)
+
+        self._websocket_audio_buffer = bytes()
+
+        # Simulate audio playback with a sleep.
+        await self._write_audio_sleep()
+
+    async def _write_frame(self, frame: Frame):
+        payload = self._params.serializer.serialize(frame)
         if payload and self._websocket.client_state == WebSocketState.CONNECTED:
             await self._websocket.send_text(payload)
 
+    async def _write_audio_sleep(self):
         # Simulate a clock.
         current_time = time.monotonic()
         sleep_duration = max(0, self._next_send_time - current_time)
@@ -137,13 +153,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             self._next_send_time = time.monotonic() + self._send_interval
         else:
             self._next_send_time += self._send_interval
-
-        self._websocket_audio_buffer = bytes()
-
-    async def _write_frame(self, frame: Frame):
-        payload = self._params.serializer.serialize(frame)
-        if payload and self._websocket.client_state == WebSocketState.CONNECTED:
-            await self._websocket.send_text(payload)
 
 
 class FastAPIWebsocketTransport(BaseTransport):

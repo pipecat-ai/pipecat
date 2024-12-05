@@ -18,6 +18,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    EndFrame,
     Frame,
     LLMMessagesFrame,
     OutputImageRawFrame,
@@ -28,6 +29,10 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frameworks.rtvi import (
+    RTVIBotTranscriptionProcessor,
+    RTVIUserTranscriptionProcessor,
+)
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -142,11 +147,21 @@ async def main():
 
         ta = TalkingAnimation()
 
+        # RTVI
+
+        # This will emit UserTranscript events.
+        rtvi_user_transcription = RTVIUserTranscriptionProcessor()
+
+        # This will emit BotTranscript events.
+        rtvi_bot_transcription = RTVIBotTranscriptionProcessor()
+
         pipeline = Pipeline(
             [
                 transport.input(),
+                rtvi_user_transcription,
                 context_aggregator.user(),
                 llm,
+                rtvi_bot_transcription,
                 tts,
                 ta,
                 transport.output(),
@@ -161,6 +176,11 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
             await task.queue_frames([LLMMessagesFrame(messages)])
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            print(f"Participant left: {participant}")
+            await task.queue_frame(EndFrame())
 
         runner = PipelineRunner()
 

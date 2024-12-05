@@ -153,6 +153,8 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
     async def write_raw_audio_frames(self, frames: bytes):
         if not self._websocket:
+            # Simulate audio playback with a sleep.
+            await self._write_audio_sleep()
             return
 
         frame = AudioRawFrame(
@@ -179,6 +181,17 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         if proto:
             await self._websocket.send(proto)
 
+        self._websocket_audio_buffer = bytes()
+
+        # Simulate audio playback with a sleep.
+        await self._write_audio_sleep()
+
+    async def _write_frame(self, frame: Frame):
+        payload = self._params.serializer.serialize(frame)
+        if payload and self._websocket:
+            await self._websocket.send(payload)
+
+    async def _write_audio_sleep(self):
         # Simulate a clock.
         current_time = time.monotonic()
         sleep_duration = max(0, self._next_send_time - current_time)
@@ -187,13 +200,6 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             self._next_send_time = time.monotonic() + self._send_interval
         else:
             self._next_send_time += self._send_interval
-
-        self._websocket_audio_buffer = bytes()
-
-    async def _write_frame(self, frame: Frame):
-        payload = self._params.serializer.serialize(frame)
-        if payload and self._websocket:
-            await self._websocket.send(payload)
 
 
 class WebsocketServerTransport(BaseTransport):
