@@ -202,8 +202,7 @@ class DailyTransportClient(EventHandler):
         self._other_participant_has_joined = False
 
         self._joined = False
-        self._joining = False
-        self._leaving = False
+        self._leave_counter = 0
 
         self._executor = ThreadPoolExecutor(max_workers=5)
 
@@ -265,7 +264,7 @@ class DailyTransportClient(EventHandler):
         self._callbacks = callbacks
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
-        if not self._joined or self._leaving:
+        if not self._joined:
             return
 
         participant_id = None
@@ -317,12 +316,12 @@ class DailyTransportClient(EventHandler):
 
     async def join(self):
         # Transport already joined, ignore.
-        if self._joined or self._joining:
+        if self._joined:
+            # Increment leave counter if we already joined.
+            self._leave_counter += 1
             return
 
         logger.info(f"Joining {self._room_url}")
-
-        self._joining = True
 
         # For performance reasons, never subscribe to video streams (unless a
         # video renderer is registered).
@@ -343,7 +342,8 @@ class DailyTransportClient(EventHandler):
 
             if not error:
                 self._joined = True
-                self._joining = False
+                # Increment leave counter if we successfully joined.
+                self._leave_counter += 1
 
                 logger.info(f"Joined {self._room_url}")
 
@@ -431,12 +431,14 @@ class DailyTransportClient(EventHandler):
         return await asyncio.wait_for(future, timeout=10)
 
     async def leave(self):
+        # Decrement leave counter when leaving.
+        self._leave_counter -= 1
+
         # Transport not joined, ignore.
-        if not self._joined or self._leaving:
+        if not self._joined or self._leave_counter > 0:
             return
 
         self._joined = False
-        self._leaving = True
 
         logger.info(f"Leaving {self._room_url}")
 
@@ -446,7 +448,6 @@ class DailyTransportClient(EventHandler):
         try:
             error = await self._leave()
             if not error:
-                self._leaving = False
                 logger.info(f"Left {self._room_url}")
                 await self._callbacks.on_left()
             else:

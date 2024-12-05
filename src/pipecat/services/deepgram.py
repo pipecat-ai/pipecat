@@ -152,7 +152,10 @@ class DeepgramSTTService(STTService):
         self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
         self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
         if self.vad_enabled:
+            self._register_event_handler("on_speech_started")
+            self._register_event_handler("on_utterance_end")
             self._connection.on(LiveTranscriptionEvents.SpeechStarted, self._on_speech_started)
+            self._connection.on(LiveTranscriptionEvents.UtteranceEnd, self._on_utterance_end)
 
     @property
     def vad_enabled(self):
@@ -206,6 +209,10 @@ class DeepgramSTTService(STTService):
             await self.push_frame(UserStartedSpeakingFrame())
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
+        await self._call_event_handler("on_speech_started", *args, **kwargs)
+
+    async def _on_utterance_end(self, *args, **kwargs):
+        await self._call_event_handler("on_utterance_end", *args, **kwargs)
 
     async def _on_message(self, *args, **kwargs):
         result: LiveResultResponse = kwargs["result"]

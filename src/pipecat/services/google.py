@@ -560,18 +560,20 @@ class GoogleLLMService(LLMService):
             self._model_name, system_instruction=self._system_instruction
         )
 
-    async def _async_generator_wrapper(self, sync_generator):
-        for item in sync_generator:
-            yield item
-            await asyncio.sleep(0)
-
     async def _process_context(self, context: OpenAILLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+
         try:
-            logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
+            logger.debug(
+                f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
+            )
 
             messages = context.messages
-            if self._system_instruction != context.system_message:
+            if context.system_message and self._system_instruction != context.system_message:
                 logger.debug(f"System instruction changed: {context.system_message}")
                 self._system_instruction = context.system_message
                 self._create_client()
@@ -592,16 +594,18 @@ class GoogleLLMService(LLMService):
 
             await self.start_ttfb_metrics()
             tools = context.tools if context.tools else []
-            response = self._client.generate_content(
+
+            response = await self._client.generate_content_async(
                 contents=messages, tools=tools, stream=True, generation_config=generation_config
             )
             await self.stop_ttfb_metrics()
 
-            prompt_tokens = response.usage_metadata.prompt_token_count
-            completion_tokens = response.usage_metadata.candidates_token_count
-            total_tokens = response.usage_metadata.total_token_count
+            if response.usage_metadata:
+                prompt_tokens = response.usage_metadata.prompt_token_count
+                completion_tokens = response.usage_metadata.candidates_token_count
+                total_tokens = response.usage_metadata.total_token_count
 
-            async for chunk in self._async_generator_wrapper(response):
+            async for chunk in response:
                 if chunk.usage_metadata:
                     prompt_tokens += response.usage_metadata.prompt_token_count
                     completion_tokens += response.usage_metadata.candidates_token_count

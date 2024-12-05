@@ -1,0 +1,27 @@
+# React Implementation
+
+Basic implementation using the RTVI React SDK.
+
+## Setup
+
+1. Run the bot server; see [README](../../README).
+
+2. Navigate to the `examples/react` directory:
+
+```bash
+cd examples/react
+```
+
+3. Install dependencies:
+
+```bash
+npm install
+```
+
+4. Run the client app:
+
+```
+npm run dev
+```
+
+5. Visit http://localhost:5173 in your browser.

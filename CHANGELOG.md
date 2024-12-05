@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `DeepgramSTTService` now exposes two event handlers `on_speech_started` and
+  `on_utterance_end` that could be used to implement interruptions. See new
+  example `examples/foundational/07c-interruptible-deepgram-vad.py`
+
+- Added `GroqLLMService`, `GrokLLMService`, and `NimLLMService` for Groq, Grok,
+  and NVIDIA NIM API integration, with an OpenAI-compatible interface.
+
+- New examples demonstrating function calling with Groq, Grok, Azure OpenAI,
+  Fireworks, and NVIDIA NIM: `14f-function-calling-groq.py`,
+  `14g-function-calling-grok.py`, `14h-function-calling-azure.py`,
+  `14i-function-calling-fireworks.py`, and `14j-function-calling-nvidia.py`.
+
 - In order to obtain the audio stored by the `AudioBufferProcessor` you can now
   also register an `on_audio_data` event handler. The `on_audio_data` handler
   will be called every time `buffer_size` (a new constructor argument) is
@@ -26,6 +38,10 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 ### Changed
 
+- `SoundfileMixer` doesn't resample input files anymore to avoid startup
+  delays. The sample rate of the provided sound files now need to match the
+  sample rate of the output transport.
+
 - All input frames (text, audio, image, etc.) are now system frames. This means
   they are processed immediately by all processors instead of being queued
   internally.
@@ -36,12 +52,31 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 - Updated STT and TTS services with language options that match the supported
   languages for each service.
 
+- Updated the `AzureLLMService` to use the `OpenAILLMService`. Updated the
+  `api_version` to `2024-09-01-preview`.
+
+- Updated the `FireworksLLMService` to use the `OpenAILLMService`. Updated the
+  default model to `accounts/fireworks/models/firefunction-v2`.
+
+- Updated the `simple-chatbot` example to include a Javascript and React client
+  example, using RTVI JS and React.
+
 ### Removed
 
 - Removed `AppFrame`. This was used as a special user custom frame, but there's
   actually no use case for that.
 
 ### Fixed
+
+- Fixed a `BaseOutputTransport` issue that was causing audio to be discarded
+  after an `EndFrame` was received.
+
+- Fixed an issue in `WebsocketServerTransport` and `FastAPIWebsocketTransport`
+  that would cause a busy loop when using audio mixer.
+
+- Fixed a `DailyTransport` and `LiveKitTransport` issue where connections were
+  being closed in the input transport prematurely. This was causing frames
+  queued inside the pipeline being discarded.
 
 - Fixed an issue in `DailyTransport` that would cause some internal callbacks to
   not be executed.
@@ -59,6 +94,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 - Fixed Google Gemini message handling to properly convert appended messages to
   Gemini's required format.
+
+- Fixed an issue with `FireworksLLMService` where chat completions were failing
+  by removing the `stream_options` from the chat completion options.
 
 ## [0.0.49] - 2024-11-17
 

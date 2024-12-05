@@ -79,7 +79,10 @@ class AudioRawFrame:
     audio: bytes
     sample_rate: int
     num_channels: int
-    num_frames: int = field(init=False)
+    num_frames: int = field(default=0, init=False)
+
+    def __post_init__(self):
+        self.num_frames = int(len(self.audio) / (self.num_channels * 2))
 
 
 @dataclass
