@@ -229,6 +229,17 @@ class LLMEnablePromptCachingFrame(DataFrame):
 
 
 @dataclass
+class FunctionCallResultFrame(DataFrame):
+    """A frame containing the result of an LLM function (tool) call."""
+
+    function_name: str
+    tool_call_id: str
+    arguments: str
+    result: Any
+    run_llm: bool = True
+
+
+@dataclass
 class TTSSpeakFrame(DataFrame):
     """A frame that contains a text that should be spoken by the TTS in the
     pipeline (if any).
@@ -420,17 +431,6 @@ class FunctionCallInProgressFrame(SystemFrame):
     function_name: str
     tool_call_id: str
     arguments: str
-
-
-@dataclass
-class FunctionCallResultFrame(SystemFrame):
-    """A frame containing the result of an LLM function (tool) call."""
-
-    function_name: str
-    tool_call_id: str
-    arguments: str
-    result: Any
-    run_llm: bool = True
 
 
 @dataclass
