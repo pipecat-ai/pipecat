@@ -145,7 +145,22 @@ class PlayHTTTSService(TTSService):
         await self._disconnect()
 
     async def _connect(self):
+        await self._connect_websocket()
+
+        self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+
+    async def _disconnect(self):
+        await self._disconnect_websocket()
+
+        if self._receive_task:
+            self._receive_task.cancel()
+            await self._receive_task
+            self._receive_task = None
+
+    async def _connect_websocket(self):
         try:
+            logger.debug("Connecting to PlayHT")
+
             if not self._websocket_url:
                 await self._get_websocket_url()
 
@@ -153,8 +168,6 @@ class PlayHTTTSService(TTSService):
                 raise ValueError("WebSocket URL is not a string")
 
             self._websocket = await websockets.connect(self._websocket_url)
-            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
-            logger.debug("Connected to TTS WebSocket")
         except ValueError as ve:
             logger.error(f"{self} initialization error: {ve}")
             self._websocket = None
@@ -162,18 +175,14 @@ class PlayHTTTSService(TTSService):
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
 
-    async def _disconnect(self):
+    async def _disconnect_websocket(self):
         try:
             await self.stop_all_metrics()
 
             if self._websocket:
+                logger.debug("Disconnecting from PlayHT")
                 await self._websocket.close()
                 self._websocket = None
-
-            if self._receive_task:
-                self._receive_task.cancel()
-                await self._receive_task
-                self._receive_task = None
 
             self._request_id = None
         except Exception as e:
@@ -209,31 +218,34 @@ class PlayHTTTSService(TTSService):
         self._request_id = None
 
     async def _receive_task_handler(self):
-        try:
-            async for message in self._get_websocket():
-                if isinstance(message, bytes):
-                    # Skip the WAV header message
-                    if message.startswith(b"RIFF"):
-                        continue
-                    await self.stop_ttfb_metrics()
-                    frame = TTSAudioRawFrame(message, self._settings["sample_rate"], 1)
-                    await self.push_frame(frame)
-                else:
-                    logger.debug(f"Received text message: {message}")
-                    try:
-                        msg = json.loads(message)
-                        if "request_id" in msg and msg["request_id"] == self._request_id:
-                            await self.push_frame(TTSStoppedFrame())
-                            self._request_id = None
-                        elif "error" in msg:
-                            logger.error(f"{self} error: {msg}")
-                            await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
-                    except json.JSONDecodeError:
-                        logger.error(f"Invalid JSON message: {message}")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"{self} exception in receive task: {e}")
+        while True:
+            try:
+                async for message in self._get_websocket():
+                    if isinstance(message, bytes):
+                        # Skip the WAV header message
+                        if message.startswith(b"RIFF"):
+                            continue
+                        await self.stop_ttfb_metrics()
+                        frame = TTSAudioRawFrame(message, self._settings["sample_rate"], 1)
+                        await self.push_frame(frame)
+                    else:
+                        logger.debug(f"Received text message: {message}")
+                        try:
+                            msg = json.loads(message)
+                            if "request_id" in msg and msg["request_id"] == self._request_id:
+                                await self.push_frame(TTSStoppedFrame())
+                                self._request_id = None
+                            elif "error" in msg:
+                                logger.error(f"{self} error: {msg}")
+                                await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                        except json.JSONDecodeError:
+                            logger.error(f"Invalid JSON message: {message}")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"{self} exception in receive task: {e}")
+                await self._disconnect_websocket()
+                await self._connect_websocket()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -381,4 +393,4 @@ class PlayHTHttpTTSService(TTSService):
                         yield frame
             yield TTSStoppedFrame()
         except Exception as e:
-            logger.exception(f"{self} error generating TTS: {e}")
+            logger.error(f"{self} error generating TTS: {e}")
