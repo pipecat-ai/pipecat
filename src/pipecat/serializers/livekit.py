@@ -8,7 +8,7 @@ import ctypes
 import pickle
 
 from pipecat.frames.frames import Frame, InputAudioRawFrame, OutputAudioRawFrame
-from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
 from loguru import logger
 
@@ -21,6 +21,10 @@ except ModuleNotFoundError as e:
 
 
 class LivekitFrameSerializer(FrameSerializer):
+    @property
+    def type(self) -> FrameSerializerType:
+        return FrameSerializerType.BINARY
+
     def serialize(self, frame: Frame) -> str | bytes | None:
         if not isinstance(frame, OutputAudioRawFrame):
             return None
