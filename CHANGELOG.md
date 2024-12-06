@@ -68,6 +68,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 ### Fixed
 
+- Fixed an issue in `CartesiaTTSService` that could cause previous audio to be
+  received after an interruption.
+
 - Fixed Cartesia, ElevenLabs, LMNT and PlayHT TTS websocket
   reconnection. Before, if an error occurred no reconnection was happening.
 
