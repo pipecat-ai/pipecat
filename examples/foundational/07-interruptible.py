@@ -10,11 +10,12 @@ import os
 import sys
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import BotSpeakingFrame, Frame, InputAudioRawFrame, LLMMessagesFrame, TTSAudioRawFrame, TextFrame, UserStoppedSpeakingFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -29,6 +30,22 @@ load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+class DebugProcessor(FrameProcessor):
+    def __init__(self, name, **kwargs):
+        self._name = name
+        super().__init__(**kwargs)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if not (
+            isinstance(frame, InputAudioRawFrame)
+            or isinstance(frame, BotSpeakingFrame)
+            or isinstance(frame, TTSAudioRawFrame)
+            or isinstance(frame, TextFrame)
+        ):
+            logger.debug(f"--- {self._name}: {frame} {direction}")
+        await self.push_frame(frame, direction)
 
 
 async def main():
@@ -63,11 +80,14 @@ async def main():
 
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
+        
+        dp = DebugProcessor("dp")
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
                 context_aggregator.user(),  # User responses
+                dp,
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
