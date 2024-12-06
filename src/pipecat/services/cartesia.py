@@ -49,8 +49,16 @@ def language_to_cartesia_language(language: Language) -> str | None:
         Language.EN: "en",
         Language.ES: "es",
         Language.FR: "fr",
+        Language.HI: "hi",
+        Language.IT: "it",
         Language.JA: "ja",
+        Language.KO: "ko",
+        Language.NL: "nl",
+        Language.PL: "pl",
         Language.PT: "pt",
+        Language.RU: "ru",
+        Language.SV: "sv",
+        Language.TR: "tr",
         Language.ZH: "zh",
     }
 
