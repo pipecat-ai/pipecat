@@ -227,7 +227,7 @@ class CartesiaTTSService(WordTTSService):
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        if not self._context_id:
+        if self._context_id:
             cancel_msg = json.dumps({"context_id": self._context_id, "cancel": True})
             await self._get_websocket().send(cancel_msg)
             self._context_id = None
