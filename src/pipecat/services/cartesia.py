@@ -184,27 +184,36 @@ class CartesiaTTSService(WordTTSService):
         await self._disconnect()
 
     async def _connect(self):
+        await self._connect_websocket()
+
+        self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+
+    async def _disconnect(self):
+        await self._disconnect_websocket()
+
+        if self._receive_task:
+            self._receive_task.cancel()
+            await self._receive_task
+            self._receive_task = None
+
+    async def _connect_websocket(self):
         try:
+            logger.debug("Connecting to Cartesia")
             self._websocket = await websockets.connect(
                 f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
             )
-            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
 
-    async def _disconnect(self):
+    async def _disconnect_websocket(self):
         try:
             await self.stop_all_metrics()
 
             if self._websocket:
+                logger.debug("Disconnecting from Cartesia")
                 await self._websocket.close()
                 self._websocket = None
-
-            if self._receive_task:
-                self._receive_task.cancel()
-                await self._receive_task
-                self._receive_task = None
 
             self._context_id = None
         except Exception as e:
@@ -228,44 +237,51 @@ class CartesiaTTSService(WordTTSService):
         await self._websocket.send(msg)
 
     async def _receive_task_handler(self):
-        try:
-            async for message in self._get_websocket():
-                msg = json.loads(message)
-                if not msg or msg["context_id"] != self._context_id:
-                    continue
-                if msg["type"] == "done":
-                    await self.stop_ttfb_metrics()
-                    # Unset _context_id but not the _context_id_start_timestamp
-                    # because we are likely still playing out audio and need the
-                    # timestamp to set send context frames.
-                    self._context_id = None
-                    await self.add_word_timestamps(
-                        [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0), ("Reset", 0)]
-                    )
-                elif msg["type"] == "timestamps":
-                    await self.add_word_timestamps(
-                        list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
-                    )
-                elif msg["type"] == "chunk":
-                    await self.stop_ttfb_metrics()
-                    self.start_word_timestamps()
-                    frame = TTSAudioRawFrame(
-                        audio=base64.b64decode(msg["data"]),
-                        sample_rate=self._settings["output_format"]["sample_rate"],
-                        num_channels=1,
-                    )
-                    await self.push_frame(frame)
-                elif msg["type"] == "error":
-                    logger.error(f"{self} error: {msg}")
-                    await self.push_frame(TTSStoppedFrame())
-                    await self.stop_all_metrics()
-                    await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
-                else:
-                    logger.error(f"Cartesia error, unknown message type: {msg}")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
+        while True:
+            try:
+                async for message in self._get_websocket():
+                    msg = json.loads(message)
+                    if not msg or msg["context_id"] != self._context_id:
+                        continue
+                    if msg["type"] == "done":
+                        await self.stop_ttfb_metrics()
+                        # Unset _context_id but not the _context_id_start_timestamp
+                        # because we are likely still playing out audio and need the
+                        # timestamp to set send context frames.
+                        self._context_id = None
+                        await self.add_word_timestamps(
+                            [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0), ("Reset", 0)]
+                        )
+                    elif msg["type"] == "timestamps":
+                        await self.add_word_timestamps(
+                            list(
+                                zip(
+                                    msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
+                                )
+                            )
+                        )
+                    elif msg["type"] == "chunk":
+                        await self.stop_ttfb_metrics()
+                        self.start_word_timestamps()
+                        frame = TTSAudioRawFrame(
+                            audio=base64.b64decode(msg["data"]),
+                            sample_rate=self._settings["output_format"]["sample_rate"],
+                            num_channels=1,
+                        )
+                        await self.push_frame(frame)
+                    elif msg["type"] == "error":
+                        logger.error(f"{self} error: {msg}")
+                        await self.push_frame(TTSStoppedFrame())
+                        await self.stop_all_metrics()
+                        await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                    else:
+                        logger.error(f"{self} error, unknown message type: {msg}")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"{self} exception: {e}")
+                await self._disconnect_websocket()
+                await self._connect_websocket()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -386,8 +402,6 @@ class CartesiaHttpTTSService(TTSService):
                 _experimental_voice_controls=voice_controls,
             )
 
-            await self.stop_ttfb_metrics()
-
             frame = TTSAudioRawFrame(
                 audio=output["audio"],
                 sample_rate=self._settings["output_format"]["sample_rate"],
@@ -398,4 +412,6 @@ class CartesiaHttpTTSService(TTSService):
             logger.error(f"{self} exception: {e}")
 
         await self.start_tts_usage_metrics(text)
+
+        await self.stop_ttfb_metrics()
         yield TTSStoppedFrame()

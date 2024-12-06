@@ -192,15 +192,14 @@ class DeepgramSTTService(STTService):
         yield None
 
     async def _connect(self):
-        if await self._connection.start(self._settings):
-            logger.info(f"{self}: Connected to Deepgram")
-        else:
-            logger.error(f"{self}: Unable to connect to Deepgram")
+        logger.debug("Connecting to Deepgram")
+        if not await self._connection.start(self._settings):
+            logger.error(f"{self}: unable to connect to Deepgram")
 
     async def _disconnect(self):
         if self._connection.is_connected:
+            logger.debug("Disconnecting from Deepgram")
             await self._connection.finish()
-            logger.info(f"{self}: Disconnected from Deepgram")
 
     async def _on_speech_started(self, *args, **kwargs):
         await self.start_ttfb_metrics()
