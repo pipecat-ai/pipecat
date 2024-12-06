@@ -8,8 +8,14 @@ import dataclasses
 
 import pipecat.frames.protobufs.frames_pb2 as frame_protos
 
-from pipecat.frames.frames import AudioRawFrame, Frame, TextFrame, TranscriptionFrame
-from pipecat.serializers.base_serializer import FrameSerializer
+from pipecat.frames.frames import (
+    Frame,
+    InputAudioRawFrame,
+    OutputAudioRawFrame,
+    TextFrame,
+    TranscriptionFrame,
+)
+from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
 from loguru import logger
 
@@ -17,14 +23,24 @@ from loguru import logger
 class ProtobufFrameSerializer(FrameSerializer):
     SERIALIZABLE_TYPES = {
         TextFrame: "text",
-        AudioRawFrame: "audio",
+        OutputAudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
     }
-
     SERIALIZABLE_FIELDS = {v: k for k, v in SERIALIZABLE_TYPES.items()}
+
+    DESERIALIZABLE_TYPES = {
+        TextFrame: "text",
+        InputAudioRawFrame: "audio",
+        TranscriptionFrame: "transcription",
+    }
+    DESERIALIZABLE_FIELDS = {v: k for k, v in DESERIALIZABLE_TYPES.items()}
 
     def __init__(self):
         pass
+
+    @property
+    def type(self) -> FrameSerializerType:
+        return FrameSerializerType.BINARY
 
     def serialize(self, frame: Frame) -> str | bytes | None:
         proto_frame = frame_protos.Frame()
@@ -40,8 +56,7 @@ class ProtobufFrameSerializer(FrameSerializer):
             if value and hasattr(proto_attr, field.name):
                 setattr(proto_attr, field.name, value)
 
-        result = proto_frame.SerializeToString()
-        return result
+        return proto_frame.SerializeToString()
 
     def deserialize(self, data: str | bytes) -> Frame | None:
         """Returns a Frame object from a Frame protobuf. Used to convert frames
@@ -64,11 +79,11 @@ class ProtobufFrameSerializer(FrameSerializer):
 
         proto = frame_protos.Frame.FromString(data)
         which = proto.WhichOneof("frame")
-        if which not in self.SERIALIZABLE_FIELDS:
+        if which not in self.DESERIALIZABLE_FIELDS:
             logger.error("Unable to deserialize a valid frame")
             return None
 
-        class_name = self.SERIALIZABLE_FIELDS[which]
+        class_name = self.DESERIALIZABLE_FIELDS[which]
         args = getattr(proto, which)
         args_dict = {}
         for field in proto.DESCRIPTOR.fields_by_name[which].message_type.fields:
