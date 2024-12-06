@@ -49,13 +49,13 @@
       let startBtn = document.getElementById('startAudioBtn');
       let stopBtn = document.getElementById('stopAudioBtn');
 
-      const proto = protobuf.load("frames.proto", (err, root) => {
+      const proto = protobuf.load('frames.proto', (err, root) => {
           if (err) {
               throw err;
           }
-          Frame = root.lookupType("pipecat.Frame");
-          const progressText = document.getElementById("progressText");
-          progressText.textContent = "We are ready! Make sure to run the server and then click `Start Audio`.";
+          Frame = root.lookupType('pipecat.Frame');
+          const progressText = document.getElementById('progressText');
+          progressText.textContent = 'We are ready! Make sure to run the server and then click `Start Audio`.';
 
           startBtn.disabled = false;
           stopBtn.disabled = true;
@@ -63,18 +63,60 @@
 
       function initWebSocket() {
           ws = new WebSocket('ws://localhost:8765');
+          // This is so `event.data` is already an ArrayBuffer.
+          ws.binaryType = 'arraybuffer';
 
-          ws.addEventListener('open', () => console.log('WebSocket connection established.'));
+          ws.addEventListener('open', handleWebSocketOpen);
           ws.addEventListener('message', handleWebSocketMessage);
           ws.addEventListener('close', (event) => {
-              console.log("WebSocket connection closed.", event.code, event.reason);
+              console.log('WebSocket connection closed.', event.code, event.reason);
               stopAudio(false);
           });
           ws.addEventListener('error', (event) => console.error('WebSocket error:', event));
       }
 
-      async function handleWebSocketMessage(event) {
-          const arrayBuffer = await event.data.arrayBuffer();
+      function handleWebSocketOpen(event) {
+        console.log('WebSocket connection established.', event)
+
+        navigator.mediaDevices.getUserMedia({
+              audio: {
+                  sampleRate: SAMPLE_RATE,
+                  channelCount: NUM_CHANNELS,
+                  autoGainControl: true,
+                  echoCancellation: true,
+                  noiseSuppression: true,
+              }
+          }).then((stream) => {
+              microphoneStream = stream;
+              // 512 is closest thing to 200ms.
+              scriptProcessor = audioContext.createScriptProcessor(512, 1, 1);
+              source = audioContext.createMediaStreamSource(stream);
+              source.connect(scriptProcessor);
+              scriptProcessor.connect(audioContext.destination);
+
+              scriptProcessor.onaudioprocess = (event) => {
+                  if (!ws) {
+                      return;
+                  }
+
+                  const audioData = event.inputBuffer.getChannelData(0);
+                  const pcmS16Array = convertFloat32ToS16PCM(audioData);
+                  const pcmByteArray = new Uint8Array(pcmS16Array.buffer);
+                  const frame = Frame.create({
+                      audio: {
+                          audio: Array.from(pcmByteArray),
+                          sampleRate: SAMPLE_RATE,
+                          numChannels: NUM_CHANNELS
+                      }
+                  });
+                  const encodedFrame = new Uint8Array(Frame.encode(frame).finish());
+                  ws.send(encodedFrame);
+              };
+          }).catch((error) => console.error('Error accessing microphone:', error));
+      }
+
+      function handleWebSocketMessage(event) {
+          const arrayBuffer = event.data;
           if (isPlaying) {
               enqueueAudioFromProto(arrayBuffer);
           }
@@ -127,49 +169,13 @@
           stopBtn.disabled = false;
 
           audioContext = new (window.AudioContext || window.webkitAudioContext)({
-              latencyHint: "interactive",
+              latencyHint: 'interactive',
               sampleRate: SAMPLE_RATE
           });
 
           isPlaying = true;
 
           initWebSocket();
-
-          navigator.mediaDevices.getUserMedia({
-              audio: {
-                  sampleRate: SAMPLE_RATE,
-                  channelCount: NUM_CHANNELS,
-                  autoGainControl: true,
-                  echoCancellation: true,
-                  noiseSuppression: true,
-              }
-          }).then((stream) => {
-              microphoneStream = stream;
-              // 512 is closest thing to 200ms.
-              scriptProcessor = audioContext.createScriptProcessor(512, 1, 1);
-              source = audioContext.createMediaStreamSource(stream);
-              source.connect(scriptProcessor);
-              scriptProcessor.connect(audioContext.destination);
-
-              scriptProcessor.onaudioprocess = (event) => {
-                  if (!ws) {
-                      return;
-                  }
-
-                  const audioData = event.inputBuffer.getChannelData(0);
-                  const pcmS16Array = convertFloat32ToS16PCM(audioData);
-                  const pcmByteArray = new Uint8Array(pcmS16Array.buffer);
-                  const frame = Frame.create({
-                      audio: {
-                          audio: Array.from(pcmByteArray),
-                          sampleRate: SAMPLE_RATE,
-                          numChannels: NUM_CHANNELS
-                      }
-                  });
-                  const encodedFrame = new Uint8Array(Frame.encode(frame).finish());
-                  ws.send(encodedFrame);
-              };
-          }).catch((error) => console.error('Error accessing microphone:', error));
       }
 
       function stopAudio(closeWebsocket) {

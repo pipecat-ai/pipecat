@@ -68,6 +68,9 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 ### Fixed
 
+- Fixed `FastAPIWebsocketTransport` so it can work with binary data (e.g. using
+  the protobuf serializer).
+
 - Fixed an issue in `CartesiaTTSService` that could cause previous audio to be
   received after an interruption.
 
