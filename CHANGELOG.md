@@ -38,6 +38,8 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 ### Changed
 
+- `XTTSService` language now defaults to `Language.EN`.
+
 - `SoundfileMixer` doesn't resample input files anymore to avoid startup
   delays. The sample rate of the provided sound files now need to match the
   sample rate of the output transport.

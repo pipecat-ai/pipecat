@@ -73,9 +73,9 @@ class XTTSService(TTSService):
         self,
         *,
         voice_id: str,
-        language: Language,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
+        language: Language = Language.EN,
         sample_rate: int = 24000,
         **kwargs,
     ):

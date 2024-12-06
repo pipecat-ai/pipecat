@@ -50,7 +50,6 @@ async def main():
         tts = XTTSService(
             aiohttp_session=session,
             voice_id="Claribel Dervla",
-            language="en",
             base_url="http://localhost:8000",
         )
 
