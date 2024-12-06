@@ -281,7 +281,28 @@ class ElevenLabsTTSService(WordTTSService):
             await self.resume_processing_frames()
 
     async def _connect(self):
+        await self._connect_websocket()
+
+        self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+        self._keepalive_task = self.get_event_loop().create_task(self._keepalive_task_handler())
+
+    async def _disconnect(self):
+        if self._receive_task:
+            self._receive_task.cancel()
+            await self._receive_task
+            self._receive_task = None
+
+        if self._keepalive_task:
+            self._keepalive_task.cancel()
+            await self._keepalive_task
+            self._keepalive_task = None
+
+        await self._disconnect_websocket()
+
+    async def _connect_websocket(self):
         try:
+            logger.debug("Connecting to ElevenLabs")
+
             voice_id = self._voice_id
             model = self.model_name
             output_format = self._settings["output_format"]
@@ -300,8 +321,6 @@ class ElevenLabsTTSService(WordTTSService):
                 )
 
             self._websocket = await websockets.connect(url)
-            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
-            self._keepalive_task = self.get_event_loop().create_task(self._keepalive_task_handler())
 
             # According to ElevenLabs, we should always start with a single space.
             msg: Dict[str, Any] = {
@@ -315,49 +334,42 @@ class ElevenLabsTTSService(WordTTSService):
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
 
-    async def _disconnect(self):
+    async def _disconnect_websocket(self):
         try:
             await self.stop_all_metrics()
 
             if self._websocket:
+                logger.debug("Disconnecting from ElevenLabs")
                 await self._websocket.send(json.dumps({"text": ""}))
                 await self._websocket.close()
                 self._websocket = None
-
-            if self._receive_task:
-                self._receive_task.cancel()
-                await self._receive_task
-                self._receive_task = None
-
-            if self._keepalive_task:
-                self._keepalive_task.cancel()
-                await self._keepalive_task
-                self._keepalive_task = None
 
             self._started = False
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
     async def _receive_task_handler(self):
-        try:
-            async for message in self._websocket:
-                msg = json.loads(message)
-                if msg.get("audio"):
-                    await self.stop_ttfb_metrics()
-                    self.start_word_timestamps()
+        while True:
+            try:
+                async for message in self._websocket:
+                    msg = json.loads(message)
+                    if msg.get("audio"):
+                        await self.stop_ttfb_metrics()
+                        self.start_word_timestamps()
 
-                    audio = base64.b64decode(msg["audio"])
-                    frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
-                    await self.push_frame(frame)
-
-                if msg.get("alignment"):
-                    word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
-                    await self.add_word_timestamps(word_times)
-                    self._cumulative_time = word_times[-1][1]
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
+                        audio = base64.b64decode(msg["audio"])
+                        frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
+                        await self.push_frame(frame)
+                    if msg.get("alignment"):
+                        word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
+                        await self.add_word_timestamps(word_times)
+                        self._cumulative_time = word_times[-1][1]
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"{self} exception: {e}")
+                await self._disconnect_websocket()
+                await self._connect_websocket()
 
     async def _keepalive_task_handler(self):
         while True:
