@@ -1,0 +1,47 @@
+name: Generate API Documentation
+
+on:
+  release:
+    types: [published] # Run on new release
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r docs/requirements.txt
+          pip install .
+
+      - name: Generate API documentation
+        run: |
+          cd docs
+          python generate_docs.py
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: 'docs: Update API documentation'
+          title: 'docs: Update API documentation'
+          body: |
+            Automated PR to update API documentation.
+
+            - Generated using `generate_docs.py`
+            - Triggered by: ${{ github.event_name }}
+          branch: update-api-docs
+          delete-branch: true
+          labels: |
+            documentation
