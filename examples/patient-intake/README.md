@@ -4,6 +4,7 @@
 
 This project implements an AI-powered chatbot designed to streamline the medical intake process for Tri-County Health Services. The chatbot, named Jessica, interacts with patients to collect essential information before their doctor's visit, enhancing efficiency and improving the patient experience.
 
+💡 Looking to build structured conversations? Check out [Pipecat Flows](https://github.com/pipecat-ai/pipecat-flows) for managing complex conversational states and transitions.
 ## Features
 
 Identity Verification: Confirms patient identity by verifying their date of birth.
