@@ -1,9 +1,3 @@
-#
-# Copyright (c) 2024, Daily
-#
-# SPDX-License-Identifier: BSD 2-Clause License
-#
-
 import os
 import subprocess
 from contextlib import asynccontextmanager
@@ -13,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomParams
+from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper
 
 MAX_BOTS_PER_ROOM = 1
 
@@ -33,8 +27,10 @@ def cleanup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Verify required environment variables
-    if not os.getenv("DAILY_API_KEY"):
-        raise Exception("DAILY_API_KEY environment variable is required")
+    required_vars = ["DAILY_API_KEY", "DAILY_ROOM_URL"]
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    if missing_vars:
+        raise Exception(f"Missing required environment variables: {', '.join(missing_vars)}")
 
     aiohttp_session = aiohttp.ClientSession()
     daily_helpers["rest"] = DailyRESTHelper(
@@ -60,34 +56,27 @@ app.add_middleware(
 
 @app.get("/")
 async def start_agent(request: Request):
-    print("!!! Creating room")
-    room = await daily_helpers["rest"].create_room(DailyRoomParams())
-    print(f"!!! Room URL: {room.url}")
-
-    if not room.url:
-        raise HTTPException(
-            status_code=500,
-            detail="Missing 'room' property in request data. Cannot start agent without a target room!",
-        )
+    room_url = os.getenv("DAILY_ROOM_URL")
+    print(f"!!! Using room URL: {room_url}")
 
     # Check if there is already an existing process running in this room
     num_bots_in_room = sum(
-        1 for proc in bot_procs.values() if proc[1] == room.url and proc[0].poll() is None
+        1 for proc in bot_procs.values() if proc[1] == room_url and proc[0].poll() is None
     )
     if num_bots_in_room >= MAX_BOTS_PER_ROOM:
-        raise HTTPException(status_code=500, detail=f"Max bot limited reach for room: {room.url}")
+        raise HTTPException(status_code=500, detail=f"Max bot limited reach for room: {room_url}")
 
     # Get the token for the room
-    token = await daily_helpers["rest"].get_token(room.url)
+    token = await daily_helpers["rest"].get_token(room_url)
 
     if not token:
-        raise HTTPException(status_code=500, detail=f"Failed to get token for room: {room.url}")
+        raise HTTPException(status_code=500, detail=f"Failed to get token for room: {room_url}")
 
     # Spawn a new agent and join the user session
     try:
         # Modified to use environment variables instead of command line arguments
         env = os.environ.copy()
-        env["DAILY_ROOM_URL"] = room.url
+        env["DAILY_ROOM_URL"] = room_url
         env["DAILY_ROOM_TOKEN"] = token
 
         proc = subprocess.Popen(
@@ -95,11 +84,11 @@ async def start_agent(request: Request):
             env=env,
             cwd=os.path.dirname(os.path.abspath(__file__)),
         )
-        bot_procs[proc.pid] = (proc, room.url)
+        bot_procs[proc.pid] = (proc, room_url)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
 
-    return RedirectResponse(room.url)
+    return RedirectResponse(room_url)
 
 
 @app.get("/status/{pid}")
