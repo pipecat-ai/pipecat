@@ -50,12 +50,19 @@ python-3.9.x
    - Add these environment variables:
      ```
      DAILY_API_KEY=your_daily_api_key
+     DAILY_ROOM_URL=your_daily_room_url
      CARTESIA_API_KEY=your_cartesia_api_key
      OPENAI_API_KEY=your_openai_api_key
      ```
 
 2. In the Resources tab:
    - Ensure the web dyno is enabled
+
+### Daily.co Setup
+
+1. Create a room in your [Daily Dashboard](https://dashboard.daily.co)
+2. Copy the room URL and set it as DAILY_ROOM_URL in Heroku config vars
+3. Get your Daily.co API key and set it as DAILY_API_KEY in Heroku config vars
 
 ### Monitoring
 
