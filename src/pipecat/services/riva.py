@@ -188,6 +188,13 @@ class ParakeetSTTService(STTService):
         )
         riva.client.add_custom_configuration_to_config(config, custom_configuration)
 
+        # this doesn't work, but something like this perhaps? part 1
+        self.audio = []
+        self.responses = self.asr_service.streaming_response_generator(
+            audio_chunks=[self.audio],
+            streaming_config=self.config,
+        )
+
     def can_generate_metrics(self) -> bool:
         return False
 
@@ -201,12 +208,14 @@ class ParakeetSTTService(STTService):
         await super().cancel(frame)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        responses = self.asr_service.streaming_response_generator(
-            audio_chunks=[audio],
-            streaming_config=self.config,
-        )
+        # this doesn't work, but something like this perhaps? part 2
+        self.audio.append(audio)
 
-        for response in responses:
+        # need to start to run this generator only once somewhere...
+        # 'start' function doesn't work...
+        # something about the event loop...
+        # maybe an audio buffer... though my attempt at that didn't work either
+        for response in self.responses:
             if not response.results:
                 continue
             partial_transcript = ""
