@@ -200,6 +200,7 @@ class DailyTransportClient(EventHandler):
         self._other_participant_has_joined = False
 
         self._joined = False
+        self._joining = False
         self._leave_counter = 0
 
         self._executor = ThreadPoolExecutor(max_workers=5)
@@ -314,11 +315,12 @@ class DailyTransportClient(EventHandler):
 
     async def join(self):
         # Transport already joined, ignore.
-        if self._joined:
+        if self._joined or self._joining:
             # Increment leave counter if we already joined.
             self._leave_counter += 1
             return
 
+        self._joining = True
         logger.info(f"Joining {self._room_url}")
 
         # For performance reasons, never subscribe to video streams (unless a
@@ -351,10 +353,11 @@ class DailyTransportClient(EventHandler):
             error_msg = f"Time out joining {self._room_url}"
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
+        self._joining = False
 
     async def _start_transcription(self):
         if not self._token:
-            logger.warning(f"Transcription can't be started without a room token")
+            logger.warning("Transcription can't be started without a room token")
             return
 
         logger.info(f"Enabling transcription with settings {self._params.transcription_settings}")
