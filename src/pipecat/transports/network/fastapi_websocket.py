@@ -12,7 +12,7 @@ import typing
 import wave
 
 from typing import Awaitable, Callable
-from pydantic.main import BaseModel
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     Frame,

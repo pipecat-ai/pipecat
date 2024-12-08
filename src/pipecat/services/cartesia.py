@@ -11,7 +11,7 @@ import uuid
 from typing import AsyncGenerator, List, Optional, Union
 
 from loguru import logger
-from pydantic.main import BaseModel
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,

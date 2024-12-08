@@ -22,14 +22,6 @@ class NimLLMService(OpenAILLMService):
         base_url (str, optional): The base URL for NIM API. Defaults to "https://integrate.api.nvidia.com/v1"
         model (str, optional): The model identifier to use. Defaults to "nvidia/llama-3.1-nemotron-70b-instruct"
         **kwargs: Additional keyword arguments passed to OpenAILLMService
-
-    Example:
-        ```python
-        service = NimLLMService(
-            api_key="your-api-key",
-            model="nvidia/llama-3.1-nemotron-70b-instruct"
-        )
-        ```
     """
 
     def __init__(

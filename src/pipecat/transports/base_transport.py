@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from pydantic import ConfigDict
-from pydantic.main import BaseModel
+from pydantic import BaseModel
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
