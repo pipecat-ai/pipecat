@@ -11,12 +11,11 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import (
-    LLMMessagesFrame,
-)
+from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -30,6 +29,18 @@ load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+
+async def start_fetch_weather(function_name, llm, context):
+    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
+
+
+async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
+    # Add a delay to test interruption during function calls
+    logger.info("Weather API call starting...")
+    await asyncio.sleep(5)  # 5-second delay
+    logger.info("Weather API call completed")
+    await result_callback({"conditions": "nice", "temperature": "75"})
 
 
 async def main():
@@ -49,23 +60,52 @@ async def main():
         )
 
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-        # Configure the mute processor to mute only during first speech
+        # Configure the mute processor with both strategies
         stt_mute_processor = STTMuteFilter(
-            stt_service=stt, config=STTMuteConfig(strategy=STTMuteStrategy.FIRST_SPEECH)
+            stt_service=stt,
+            config=STTMuteConfig(
+                strategies={STTMuteStrategy.FIRST_SPEECH, STTMuteStrategy.FUNCTION_CALL}
+            ),
         )
 
         tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
+
+        tools = [
+            ChatCompletionToolParam(
+                type="function",
+                function={
+                    "name": "get_current_weather",
+                    "description": "Get the current weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {
+                                "type": "string",
+                                "description": "The city and state, e.g. San Francisco, CA",
+                            },
+                            "format": {
+                                "type": "string",
+                                "enum": ["celsius", "fahrenheit"],
+                                "description": "The temperature unit to use. Infer this from the users location.",
+                            },
+                        },
+                        "required": ["location", "format"],
+                    },
+                },
+            )
+        ]
 
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful assistant who can check the weather. Always check the weather when a location is mentioned. Respond concisely and naturally. Your output will be converted to audio so use only simple words and punctuation.",
             },
         ]
 
-        context = OpenAILLMContext(messages)
+        context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
@@ -85,8 +125,13 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+            # Kick off the conversation with a weather-related prompt
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "Ask the user what city they'd like to know the weather for.",
+                }
+            )
             await task.queue_frames([LLMMessagesFrame(messages)])
 
         runner = PipelineRunner()
