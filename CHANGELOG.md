@@ -75,6 +75,8 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 ### Fixed
 
+- Fixed a `ParallelPipeline` issue that would cause system frames to be queued.
+
 - Fixed `FastAPIWebsocketTransport` so it can work with binary data (e.g. using
   the protobuf serializer).
 
