@@ -12,7 +12,7 @@ from typing import List
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame, SystemFrame
 
 from loguru import logger
 
@@ -27,7 +27,12 @@ class Source(FrameProcessor):
 
         match direction:
             case FrameDirection.UPSTREAM:
-                await self._up_queue.put(frame)
+                # We don't want to queue system frames as they would be
+                # processed by a separate task.
+                if isinstance(frame, SystemFrame):
+                    await self.push_frame(frame, direction)
+                else:
+                    await self._up_queue.put(frame)
             case FrameDirection.DOWNSTREAM:
                 await self.push_frame(frame, direction)
 
@@ -44,7 +49,12 @@ class Sink(FrameProcessor):
             case FrameDirection.UPSTREAM:
                 await self.push_frame(frame, direction)
             case FrameDirection.DOWNSTREAM:
-                await self._down_queue.put(frame)
+                # We don't want to queue system frames as they would be
+                # processed by a separate task.
+                if isinstance(frame, SystemFrame):
+                    await self.push_frame(frame, direction)
+                else:
+                    await self._down_queue.put(frame)
 
 
 class ParallelPipeline(BasePipeline):
