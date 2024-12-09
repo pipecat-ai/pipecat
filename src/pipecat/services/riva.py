@@ -5,11 +5,7 @@
 #
 
 import asyncio
-<<<<<<< HEAD
 from typing import AsyncGenerator, Optional
-=======
-from typing import AsyncGenerator, List, Optional, Union, Iterator
->>>>>>> 07e3942e (add nvidia riva - fastpitch)
 
 from loguru import logger
 from pydantic.main import BaseModel
@@ -17,10 +13,6 @@ from pydantic.main import BaseModel
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-<<<<<<< HEAD
-=======
-    ErrorFrame,
->>>>>>> 07e3942e (add nvidia riva - fastpitch)
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -46,11 +38,8 @@ except ModuleNotFoundError as e:
 
 class FastpitchTTSService(TTSService):
     class InputParams(BaseModel):
-<<<<<<< HEAD
         language: Optional[Language] = Language.EN_US
-=======
-        language: Optional[str] = "en-US"
->>>>>>> 07e3942e (add nvidia riva - fastpitch)
+        quality: Optional[int] = 20
 
     def __init__(
         self,
@@ -58,19 +47,18 @@ class FastpitchTTSService(TTSService):
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
         voice_id: str = "English-US.Female-1",
-        sample_rate_hz: int = 24000,
+        sample_rate: int = 24000,
         # nvidia riva calls this 'function-id'
         model: str = "0149dedb-2be8-4195-b9a0-e57e0e14f972",
         params: InputParams = InputParams(),
-        quality: int = 20,
         **kwargs,
     ):
-        super().__init__(sample_rate=sample_rate_hz, **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key
         self._voice_id = voice_id
-        self._sample_rate_hz = sample_rate_hz
+        self._sample_rate = sample_rate
         self._language_code = params.language
-        self.quality = quality
+        self.quality = params.quality
 
         self.set_model_name("fastpitch-hifigan-tts")
         self.set_voice(voice_id)
@@ -81,16 +69,16 @@ class FastpitchTTSService(TTSService):
         ]
         auth = riva.client.Auth(None, True, server, metadata)
 
-        self.service = riva.client.SpeechSynthesisService(auth)
+        self._service = riva.client.SpeechSynthesisService(auth)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         def read_audio_responses():
             try:
-                responses = self.service.synthesize_online(
+                responses = self._service.synthesize_online(
                     text,
                     self._voice_id,
                     self._language_code,
-                    sample_rate_hz=self._sample_rate_hz,
+                    sample_rate_hz=self._sample_rate,
                     audio_prompt_file=None,
                     quality=self.quality,
                     custom_dictionary={},
@@ -112,7 +100,7 @@ class FastpitchTTSService(TTSService):
 
             frame = TTSAudioRawFrame(
                 audio=resp.audio,
-                sample_rate=self._sample_rate_hz,
+                sample_rate=self._sample_rate,
                 num_channels=1,
             )
             yield frame
@@ -150,7 +138,7 @@ class ParakeetSTTService(STTService):
         self._stop_history_eou = -1
         self._stop_threshold_eou = -1.0
         self._custom_configuration = ""
-        self._sample_rate_hz: int = 16000
+        self._sample_rate: int = 16000
 
         self.set_model_name("parakeet-ctc-1.1b-asr")
 
@@ -171,7 +159,7 @@ class ParakeetSTTService(STTService):
                 profanity_filter=self._profanity_filter,
                 enable_automatic_punctuation=self._automatic_punctuation,
                 verbatim_transcripts=not self._no_verbatim_transcripts,
-                sample_rate_hertz=self._sample_rate_hz,
+                sample_rate_hertz=self._sample_rate,
                 audio_channel_count=1,
             ),
             interim_results=True,
