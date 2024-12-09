@@ -99,8 +99,8 @@ async def main():
             "Translator",
             DailyParams(
                 audio_out_enabled=True,
-                transcription_enabled=True,
-                transcription_settings=DailyTranscriptionSettings(extra={"interim_results": False}),
+                # transcription_enabled=True,
+                # transcription_settings=DailyTranscriptionSettings(extra={"interim_results": False}),
             ),
         )
 
