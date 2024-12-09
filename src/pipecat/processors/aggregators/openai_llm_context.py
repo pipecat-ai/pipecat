@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     VisionImageRawFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
     from openai._types import NOT_GIVEN, NotGiven
@@ -196,25 +196,42 @@ class OpenAILLMContext:
         # Push a SystemFrame downstream. This frame will let our assistant context aggregator
         # know that we are in the middle of a function call. Some contexts/aggregators may
         # not need this. But some definitely do (Anthropic, for example).
-        await llm.push_frame(
-            FunctionCallInProgressFrame(
+        # Also push a SystemFrame upstream for use by other processors, like STTMuteFilter.
+        progress_frame_downstream = FunctionCallInProgressFrame(
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+        )
+        progress_frame_upstream = FunctionCallInProgressFrame(
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+        )
+
+        # Push frame both downstream and upstream
+        await llm.push_frame(progress_frame_downstream, FrameDirection.DOWNSTREAM)
+        await llm.push_frame(progress_frame_upstream, FrameDirection.UPSTREAM)
+
+        # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
+        async def function_call_result_callback(result):
+            result_frame_downstream = FunctionCallResultFrame(
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
+                result=result,
+                run_llm=run_llm,
             )
-        )
+            result_frame_upstream = FunctionCallResultFrame(
+                function_name=function_name,
+                tool_call_id=tool_call_id,
+                arguments=arguments,
+                result=result,
+                run_llm=run_llm,
+            )
 
-        # Define a callback function that pushes a FunctionCallResultFrame downstream.
-        async def function_call_result_callback(result):
-            await llm.push_frame(
-                FunctionCallResultFrame(
-                    function_name=function_name,
-                    tool_call_id=tool_call_id,
-                    arguments=arguments,
-                    result=result,
-                    run_llm=run_llm,
-                )
-            )
+            # Push frame both downstream and upstream
+            await llm.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
+            await llm.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
 
         await f(function_name, tool_call_id, arguments, llm, self, function_call_result_callback)
 
