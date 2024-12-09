@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New `STTMuteStrategy` called `FUNCTION_CALL` which mutes the STT service
+  during LLM function calls.
+
 - `DeepgramSTTService` now exposes two event handlers `on_speech_started` and
   `on_utterance_end` that could be used to implement interruptions. See new
-  example `examples/foundational/07c-interruptible-deepgram-vad.py`
+  example `examples/foundational/07c-interruptible-deepgram-vad.py`.
 
 - Added `GroqLLMService`, `GrokLLMService`, and `NimLLMService` for Groq, Grok,
   and NVIDIA NIM API integration, with an OpenAI-compatible interface.
@@ -37,6 +40,8 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
   an `EndFrame` to trigger the pipeline to stop.
 
 ### Changed
+
+- `STTMuteFilter` now supports multiple simultaneous muting strategies
 
 - `XTTSService` language now defaults to `Language.EN`.
 
