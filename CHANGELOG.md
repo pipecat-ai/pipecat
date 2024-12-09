@@ -41,7 +41,7 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 
 ### Changed
 
-- `STTMuteFilter` now supports multiple simultaneous muting strategies
+- `STTMuteFilter` now supports multiple simultaneous muting strategies.
 
 - `XTTSService` language now defaults to `Language.EN`.
 

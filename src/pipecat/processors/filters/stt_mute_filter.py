@@ -129,9 +129,8 @@ class STTMuteFilter(FrameProcessor):
         elif isinstance(frame, FunctionCallResultFrame):
             self._function_call_in_progress = False
             await self._handle_mute_state(await self._should_mute())
-
         # Handle bot speaking state changes
-        if isinstance(frame, BotStartedSpeakingFrame):
+        elif isinstance(frame, BotStartedSpeakingFrame):
             self._bot_is_speaking = True
             await self._handle_mute_state(await self._should_mute())
         elif isinstance(frame, BotStoppedSpeakingFrame):
