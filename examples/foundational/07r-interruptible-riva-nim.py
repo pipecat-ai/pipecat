@@ -19,11 +19,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-
-from pipecat.services.deepgram import DeepgramSTTService
+from pipecat.services.nim import NimLLMService
 from pipecat.services.riva import FastpitchTTSService, ParakeetSTTService
-
-from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -48,12 +45,13 @@ async def main():
             ),
         )
 
-        # stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
         stt = ParakeetSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
 
         tts = FastpitchTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = NimLLMService(
+            api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.1-405b-instruct"
+        )
 
         messages = [
             {
