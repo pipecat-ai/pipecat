@@ -60,8 +60,6 @@ class FastpitchTTSService(TTSService):
         self.voice_id = voice_id
         self.sample_rate_hz = sample_rate_hz
         self.language_code = params.language
-        self.nchannels = 1
-        self.sampwidth = 2
         self.quality = None
 
         metadata = [
@@ -73,35 +71,39 @@ class FastpitchTTSService(TTSService):
         self.service = riva.client.SpeechSynthesisService(auth)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        def read_audio_responses():
+            try:
+                custom_dictionary_input = {}
+                responses = self.service.synthesize_online(
+                    text,
+                    self.voice_id,
+                    self.language_code,
+                    sample_rate_hz=self.sample_rate_hz,
+                    audio_prompt_file=None,
+                    quality=20 if self.quality is None else self.quality,
+                    custom_dictionary=custom_dictionary_input,
+                )
+                return responses
+            except Exception as e:
+                logger.error(f"{self} exception: {e}")
+                return []
+
         logger.debug(f"Generating TTS: [{text}]")
 
         await self.start_ttfb_metrics()
         yield TTSStartedFrame()
 
-        try:
-            custom_dictionary_input = {}
-            responses = self.service.synthesize_online(
-                text,
-                self.voice_id,
-                self.language_code,
-                sample_rate_hz=self.sample_rate_hz,
-                audio_prompt_file=None,
-                quality=20 if self.quality is None else self.quality,
-                custom_dictionary=custom_dictionary_input,
+        responses = await asyncio.to_thread(read_audio_responses)
+
+        for resp in responses:
+            await self.stop_ttfb_metrics()
+
+            frame = TTSAudioRawFrame(
+                audio=resp.audio,
+                sample_rate=self.sample_rate_hz,
+                num_channels=1,
             )
-
-            for resp in responses:
-                await self.stop_ttfb_metrics()
-
-                frame = TTSAudioRawFrame(
-                    audio=resp.audio,
-                    sample_rate=self.sample_rate_hz,
-                    num_channels=self.nchannels,
-                )
-                yield frame
-
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
+            yield frame
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()
