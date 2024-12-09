@@ -16,7 +16,7 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.azure import AzureTTSService
+from pipecat.services.azure import AzureTTSService, AzureSTTService, language_to_azure_language
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import (
     DailyParams,
@@ -46,9 +46,10 @@ It also isn't saving what the user or bot says into the context object for use i
 # We need to use a custom service here to yield LLM frames without saving
 # any context
 class TranslationProcessor(FrameProcessor):
-    def __init__(self, language):
+    def __init__(self, source_language, language):
         super().__init__()
         self._language = language
+        self._source_language = source_language
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -57,7 +58,8 @@ class TranslationProcessor(FrameProcessor):
             context = [
                 {
                     "role": "system",
-                    "content": f"You will be provided with a sentence in English, and your task is to translate it into {self._language}.",
+                    "content": f"You will be provided with a sentence in {self._source_language}, and your task is to only ßtranslate it into {self._language}.",
+                    #"content": f"Translate the sentence from {self._source_language} into {self._language}.",
                 },
                 {"role": "user", "content": frame.text},
             ]
@@ -102,20 +104,34 @@ async def main():
             ),
         )
 
+        stt = AzureSTTService(
+                    api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+                    region=os.getenv("AZURE_SPEECH_REGION"),
+                    #language="ko-KR" #azure language code
+                    language="nl-NL" #azure language code
+                    #language="en-US" #azure language code
+
+        )
+        print("Debug: STT=", stt)
+
         tts = AzureTTSService(
             api_key=os.getenv("AZURE_SPEECH_API_KEY"),
             region=os.getenv("AZURE_SPEECH_REGION"),
-            voice="es-ES-AlvaroNeural",
+            #voice="es-ES-AlvaroNeural",
+            voice="en-US-AndrewMultilingualNeural"
+            #voice="nl-NL-MaartenNeural"
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
         sa = SentenceAggregator()
-        tp = TranslationProcessor("Spanish")
+        #tp = TranslationProcessor("Spanish")
+        tp = TranslationProcessor(source_language="Dutch", language="English") # LLM Prompt
         lfra = LLMFullResponseAggregator()
-        ts = TranslationSubtitles("spanish")
+        ts = TranslationSubtitles("dutch")
 
-        pipeline = Pipeline([transport.input(), sa, tp, llm, lfra, ts, tts, transport.output()])
+        # pipeline = Pipeline([transport.input(), sa, tp, llm, lfra, ts, tts, transport.output()])
+        pipeline = Pipeline([transport.input(), stt, tp, llm, ts, tts, transport.output()])
 
         task = PipelineTask(pipeline)
 
