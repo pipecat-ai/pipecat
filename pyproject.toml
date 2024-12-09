@@ -25,7 +25,7 @@ dependencies = [
     "Markdown~=3.7",
     "numpy~=1.26.4",
     "Pillow~=10.4.0",
-    "protobuf~=4.25.4",
+    "protobuf~=5.26.1",
     "pydantic~=2.8.2",
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
@@ -63,7 +63,8 @@ nim = [ "openai~=1.50.2" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 openai = [ "openai~=1.50.2", "websockets~=13.1", "python-deepcompare~=1.0.1" ]
 openpipe = [ "openpipe~=4.38.0" ]
-playht = [ "pyht~=0.1.4", "websockets~=13.1" ]
+playht = [ "pyht~=0.1.8", "websockets~=13.1" ]
+riva = [ "nvidia-riva-client~=2.17.0" ]
 silero = [ "onnxruntime~=1.19.2" ]
 soundfile = [ "soundfile~=0.12.1" ]
 together = [ "openai~=1.50.2" ]
