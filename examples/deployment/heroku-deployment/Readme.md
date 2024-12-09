@@ -24,9 +24,9 @@ Make sure these files are in your repository:
 web: python server.py
 ```
 
-2. `runtime.txt` containing:
+2. `.python-version` containing:
 ```
-python-3.9.x
+3.13
 ```
 
 3. `requirements.txt` with all dependencies
