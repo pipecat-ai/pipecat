@@ -80,21 +80,20 @@ class DialoutBot:
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
         def get_phone_number(callId: int, run_number: int) -> str:
-            # Avoca 818-722-9086
-            # Dom:  "+1 562-286-9362"
-
             if run_number % 2 == 0:
                 phone_numbers = [
-                    "+12097135124",  # James
-                    "+12097135125",  # James
-                    "+19499870006",  # Varun
+                    "+12097743694",  # James (Daily Pipecat Local Computer)
+                    # "+12097135124",  # James
+                    # "+12097135125",  # James
+                    # "+19499870006",  # Varun
                 ]
                 return phone_numbers[callId % len(phone_numbers)]
             else:
                 phone_numbers = [
-                    "+14155204406",  # James
-                    "+18187229086",  # James (Avoca)
-                    "+16673870006",  # Varun
+                    "+12097743694",  # James (Daily Pipecat Local Computer)
+                    # "+14155204406",  # James
+                    # "+18187229086",  # James (Avoca)
+                    # "+16673870006",  # Varun
                 ]
                 return phone_numbers[callId % len(phone_numbers)]
 

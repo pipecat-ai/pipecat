@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import csv
 import os
@@ -16,7 +17,7 @@ from pipecat.transports.services.helpers.daily_rest import (
 BOT_RUN_TIME = 300
 
 
-async def run_bot(id: int, run_number: int, csv_writer):
+async def run_bot(id: int, run_number: int, bot_run_time: int, csv_writer):
     async with aiohttp.ClientSession() as aiohttp_session:
         print(f"Starting bot number: {id}")
         rest = DailyRESTHelper(
@@ -71,19 +72,30 @@ async def run_bot(id: int, run_number: int, csv_writer):
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="Pipecat Simple Dialout Bot")
+    parser.add_argument("-b", type=int, help="Number of bots per run")
+    parser.add_argument("-r", type=int, help="Number of runs")
+    parser.add_argument("-t", type=int, help="Time to run the bot in seconds")
+    config = parser.parse_args()
+
+    number_of_batches = int(config.r)
+    number_of_bots = int(config.b)
+    bot_run_time = int(config.t)
+
     # Open the CSV file in append mode
     with open("output.csv", mode="w", newline="") as file:
         csv_writer = csv.writer(file)
         # Write the header row
         csv_writer.writerow(["bot_id", "enable_dialout", "timestamp"])
 
-        for run_number in range(1):
-            print(f"-- Starting batch run number: {run_number}")
-            bots = [run_bot(i, run_number, csv_writer) for i in range(1)]
+        for run_number in range(number_of_batches):
+            print(f"-- Starting batch run number: {run_number} of {number_of_batches}")
+            bots = [run_bot(i, run_number, bot_run_time, csv_writer) for i in range(number_of_bots)]
+            print(f"-- Number of bots: {len(bots)}")
             await asyncio.gather(*bots)
-            print("-- Batch finished, waiting 60 seconds...")
-            await asyncio.sleep(BOT_RUN_TIME + 60)
-            print("-- Finished waiting 60 seconds...")
+            print(f"-- Waiting {bot_run_time} seconds...")
+            await asyncio.sleep(bot_run_time)
+            print(f"-- Finished waiting {bot_run_time} seconds...")
 
 
 if __name__ == "__main__":

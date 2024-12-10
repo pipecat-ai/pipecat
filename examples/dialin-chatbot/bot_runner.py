@@ -170,7 +170,8 @@ async def daily_start_bot(request: Request) -> JSONResponse:
     # forward the call to the SIP URi when dialin_ready fires.
 
     # Use specified room URL, or create a new one if not specified
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
+    # room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
+    room_url = None
     # Get the dial-in properties from the request
     try:
         data = await request.json()
