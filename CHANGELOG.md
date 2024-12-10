@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `IdentityFilter`. This is the simplest frame filter that lets through
+  all incoming frames.
+
 - New `STTMuteStrategy` called `FUNCTION_CALL` which mutes the STT service
   during LLM function calls.
 
