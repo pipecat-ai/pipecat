@@ -48,8 +48,7 @@ class FastpitchTTSService(TTSService):
         server: str = "grpc.nvcf.nvidia.com:443",
         voice_id: str = "English-US.Female-1",
         sample_rate: int = 24000,
-        # nvidia riva calls this 'function-id'
-        model: str = "0149dedb-2be8-4195-b9a0-e57e0e14f972",
+        function_id: str = "0149dedb-2be8-4195-b9a0-e57e0e14f972",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -64,7 +63,7 @@ class FastpitchTTSService(TTSService):
         self.set_voice(voice_id)
 
         metadata = [
-            ["function-id", model],
+            ["function-id", function_id],
             ["authorization", f"Bearer {api_key}"],
         ]
         auth = riva.client.Auth(None, True, server, metadata)
@@ -118,8 +117,7 @@ class ParakeetSTTService(STTService):
         *,
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
-        # nvidia calls this 'function-id'
-        model: str = "1598d209-5e27-4d3c-8079-4751568b1081",
+        function_id: str = "1598d209-5e27-4d3c-8079-4751568b1081",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -143,7 +141,7 @@ class ParakeetSTTService(STTService):
         self.set_model_name("parakeet-ctc-1.1b-asr")
 
         metadata = [
-            ["function-id", model],
+            ["function-id", function_id],
             ["authorization", f"Bearer {api_key}"],
         ]
         auth = riva.client.Auth(None, True, server, metadata)
