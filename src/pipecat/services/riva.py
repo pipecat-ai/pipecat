@@ -36,7 +36,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class FastpitchTTSService(TTSService):
+class FastPitchTTSService(TTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN_US
         quality: Optional[int] = 20
