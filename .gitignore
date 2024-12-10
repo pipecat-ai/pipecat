@@ -34,5 +34,5 @@ fly.toml
 pipecat/examples/twilio-chatbot/templates/streams.xml
 
 # Documentation
-docs/_build/
-docs/api/
+docs/api/_build/
+docs/api/api

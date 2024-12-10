@@ -17,14 +17,14 @@ def run_command(command: list[str]) -> None:
 
 def main():
     docs_dir = Path(__file__).parent
-    project_root = docs_dir.parent
+    project_root = docs_dir.parent.parent
 
     # Install documentation requirements
     requirements_file = docs_dir / "requirements.txt"
     run_command(["pip", "install", "-r", str(requirements_file)])
 
-    # Install core package
-    run_command(["pip", "install", "-e", "."])
+    # Install from project root, not docs directory
+    run_command(["pip", "install", "-e", str(project_root)])
 
     # Install all service dependencies
     services = [
@@ -60,7 +60,7 @@ def main():
 
     extras = ",".join(services)
     try:
-        run_command(["pip", "install", "-e", f".[{extras}]"])
+        run_command(["pip", "install", "-e", f"{str(project_root)}[{extras}]"])
     except Exception as e:
         print(f"Warning: Some dependencies failed to install: {e}")
 
@@ -83,12 +83,13 @@ def main():
             str(api_dir),  # Output directory
             str(project_root / "src/pipecat"),
             # Exclude problematic files and directories
-            "**/processors/gstreamer/*",  # Optional gstreamer
-            "**/transports/network/*",  # Pydantic issues
-            "**/transports/services/*",  # Pydantic issues
-            "**/transports/local/*",  # Optional dependencies
-            "**/services/to_be_updated/*",  # Exclude to_be_updated package
-            "**/*test*",  # Test files
+            str(project_root / "src/pipecat/processors/gstreamer"),  # Optional gstreamer
+            str(project_root / "src/pipecat/transports/network"),  # Pydantic issues
+            str(project_root / "src/pipecat/transports/services"),  # Pydantic issues
+            str(project_root / "src/pipecat/transports/local"),  # Optional dependencies
+            str(project_root / "src/pipecat/services/to_be_updated"),  # Exclude to_be_updated
+            "**/test_*.py",  # Test files
+            "**/tests/*.py",  # Test files
         ]
     )
 
