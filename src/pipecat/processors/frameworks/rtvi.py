@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
-    TransportMessageFrame,
     TransportMessageUrgentFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -59,7 +58,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.string import match_endofsentence
 
-RTVI_PROTOCOL_VERSION = "0.2"
+RTVI_PROTOCOL_VERSION = "0.3.0"
 
 ActionResult = Union[bool, int, float, str, list, dict]
 
