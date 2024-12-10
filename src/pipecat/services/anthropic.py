@@ -75,7 +75,12 @@ class AnthropicContextAggregatorPair:
 
 
 class AnthropicLLMService(LLMService):
-    """This class implements inference with Anthropic's AI models"""
+    """
+    This class implements inference with Anthropic's AI models.
+
+    Can provide a custom client via the `client` kwarg, allowing you to
+    use `AsyncAnthropicBedrock` and `AsyncAnthropicVertex` clients
+    """
 
     class InputParams(BaseModel):
         enable_prompt_caching_beta: Optional[bool] = False
@@ -89,12 +94,15 @@ class AnthropicLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "claude-3-5-sonnet-20240620",
+        model: str = "claude-3-5-sonnet-20241022",
         params: InputParams = InputParams(),
+        client=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._client = AsyncAnthropic(api_key=api_key)
+        self._client = client or AsyncAnthropic(
+            api_key=api_key
+        )  # if the client is provided, use it and remove it, otherwise create a new one
         self.set_model_name(model)
         self._settings = {
             "max_tokens": params.max_tokens,
