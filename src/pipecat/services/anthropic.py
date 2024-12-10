@@ -94,7 +94,7 @@ class AnthropicLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "claude-3-5-sonnet-20240620",
+        model: str = "claude-3-5-sonnet-20241022",
         params: InputParams = InputParams(),
         client = None,
         **kwargs,
