@@ -3,3 +3,4 @@ sphinx-rtd-theme
 sphinx-markdown-builder
 sphinx-autodoc-typehints
 toml
+pipecat-ai[anthropic,assemblyai,aws,azure,canonical,cartesia,deepgram,elevenlabs,fal,fireworks,gladia,google,grok,groq,krisp,langchain,lmnt,moondream,nim,noisereduce,openai,openpipe,playht,silero,soundfile,websocket,whisper]
