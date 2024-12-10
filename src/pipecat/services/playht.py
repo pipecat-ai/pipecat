@@ -14,7 +14,7 @@ from typing import AsyncGenerator, Optional
 import aiohttp
 import websockets
 from loguru import logger
-from pydantic.main import BaseModel
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,

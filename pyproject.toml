@@ -62,7 +62,7 @@ moondream = [ "einops~=0.8.0", "timm~=1.0.8", "transformers~=4.44.0" ]
 nim = [ "openai~=1.50.2" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 openai = [ "openai~=1.50.2", "websockets~=13.1", "python-deepcompare~=1.0.1" ]
-openpipe = [ "openpipe~=4.24.0" ]
+openpipe = [ "openpipe~=4.38.0" ]
 playht = [ "pyht~=0.1.4", "websockets~=13.1" ]
 silero = [ "onnxruntime~=1.19.2" ]
 soundfile = [ "soundfile~=0.12.1" ]
@@ -84,3 +84,10 @@ fallback_version = "0.0.0-dev"
 [tool.ruff]
 exclude = ["*_pb2.py"]
 line-length = 100
+
+select = [
+    "D", # Docstring rules
+]
+
+[tool.ruff.pydocstyle]
+convention = "google"
