@@ -96,7 +96,6 @@ class SimliVideoService(FrameProcessor):
                     logger.warning(
                         "Simli Connection is not Initialized properly, passing audio to next processor"
                     )
-                    await self.push_frame(frame, direction)
             except Exception as e:
                 logger.exception(f"{self} exception: {e}")
         elif isinstance(frame, (EndFrame, CancelFrame)):
