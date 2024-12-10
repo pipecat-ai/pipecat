@@ -70,6 +70,11 @@ class FastpitchTTSService(TTSService):
 
         self._service = riva.client.SpeechSynthesisService(auth)
 
+        # warm up the service
+        config_response = self._service.stub.GetRivaSynthesisConfig(
+            riva.client.proto.riva_tts_pb2.RivaSynthesisConfigRequest()
+        )
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         def read_audio_responses():
             try:
@@ -87,11 +92,10 @@ class FastpitchTTSService(TTSService):
                 logger.error(f"{self} exception: {e}")
                 return []
 
-        logger.debug(f"Generating TTS: [{text}]")
-
         await self.start_ttfb_metrics()
         yield TTSStartedFrame()
 
+        logger.debug(f"Generating TTS: [{text}]")
         responses = await asyncio.to_thread(read_audio_responses)
 
         for resp in responses:
