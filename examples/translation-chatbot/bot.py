@@ -112,7 +112,7 @@ async def main():
                     #language="en-US" #azure language code
 
         )
-        print("Debug: STT=", stt)
+        #print("Debug: STT=", stt)
 
         tts = AzureTTSService(
             api_key=os.getenv("AZURE_SPEECH_API_KEY"),
