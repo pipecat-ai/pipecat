@@ -14,10 +14,8 @@ from pipecat.transports.services.helpers.daily_rest import (
     DailyRoomProperties,
 )
 
-BOT_RUN_TIME = 300
 
-
-async def run_bot(id: int, run_number: int, bot_run_time: int, csv_writer):
+async def run_bot(id: int, run_number: int, bot_run_time: int, phone_number: str, csv_writer):
     async with aiohttp.ClientSession() as aiohttp_session:
         print(f"Starting bot number: {id}")
         rest = DailyRESTHelper(
@@ -27,7 +25,7 @@ async def run_bot(id: int, run_number: int, bot_run_time: int, csv_writer):
         )
 
         # Create daily.co room with dialin and dialout enabled
-        exp = time.time() + BOT_RUN_TIME
+        exp = time.time() + bot_run_time
         room_params = DailyRoomParams(
             properties=DailyRoomProperties(
                 exp=exp,
@@ -61,7 +59,7 @@ async def run_bot(id: int, run_number: int, bot_run_time: int, csv_writer):
                 [id, "Rate Limit Error", datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]]
             )
 
-        bot_proc = f"python3 -m batch_dialout_bot -u {room.url} -t {token} -i {id} -r {run_number}"
+        bot_proc = f"python3 -m batch_dialout_bot -u {room.url} -t {token} -i {id} -r {run_number} -p {phone_number}"
 
         try:
             subprocess.Popen(
@@ -76,11 +74,13 @@ async def main():
     parser.add_argument("-b", type=int, help="Number of bots per run")
     parser.add_argument("-r", type=int, help="Number of runs")
     parser.add_argument("-t", type=int, help="Time to run the bot in seconds")
+    parser.add_argument("-p", type=str, help="Phone Number")
     config = parser.parse_args()
 
     number_of_batches = int(config.r)
     number_of_bots = int(config.b)
     bot_run_time = int(config.t)
+    phone_number = config.p
 
     # Open the CSV file in append mode
     with open("output.csv", mode="w", newline="") as file:
@@ -90,11 +90,14 @@ async def main():
 
         for run_number in range(number_of_batches):
             print(f"-- Starting batch run number: {run_number} of {number_of_batches}")
-            bots = [run_bot(i, run_number, bot_run_time, csv_writer) for i in range(number_of_bots)]
+            bots = [
+                run_bot(i, run_number, bot_run_time, phone_number, csv_writer)
+                for i in range(number_of_bots)
+            ]
             print(f"-- Number of bots: {len(bots)}")
             await asyncio.gather(*bots)
-            print(f"-- Waiting {bot_run_time} seconds...")
-            await asyncio.sleep(bot_run_time)
+            print(f"-- Waiting {bot_run_time + 30} seconds...")
+            await asyncio.sleep(bot_run_time + 30)
             print(f"-- Finished waiting {bot_run_time} seconds...")
 
 

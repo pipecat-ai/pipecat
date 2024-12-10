@@ -25,12 +25,13 @@ daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
 class DialoutBot:
-    def __init__(self, room_url: str, token: str, callId: int, run_number: int):
+    def __init__(self, room_url: str, token: str, callId: int, run_number: int, phone_number: str):
         self.recording_id = None
         self.room_url = room_url
         self.token = token
         self.callId = callId
         self.run_number = run_number
+        self.phone_number = phone_number
 
     async def run(self):
         transport = DailyTransport(
@@ -80,20 +81,21 @@ class DialoutBot:
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
         def get_phone_number(callId: int, run_number: int) -> str:
+            if self.phone_number:
+                return self.phone_number
+
             if run_number % 2 == 0:
                 phone_numbers = [
-                    "+12097743694",  # James (Daily Pipecat Local Computer)
-                    # "+12097135124",  # James
-                    # "+12097135125",  # James
-                    # "+19499870006",  # Varun
+                    "+12097135124",  # James
+                    "+12097135125",  # James
+                    "+19499870006",  # Varun
                 ]
                 return phone_numbers[callId % len(phone_numbers)]
             else:
                 phone_numbers = [
-                    "+12097743694",  # James (Daily Pipecat Local Computer)
-                    # "+14155204406",  # James
-                    # "+18187229086",  # James (Avoca)
-                    # "+16673870006",  # Varun
+                    "+14155204406",  # James
+                    "+18187229086",  # James (Avoca)
+                    "+16673870006",  # Varun
                 ]
                 return phone_numbers[callId % len(phone_numbers)]
 
@@ -195,9 +197,10 @@ if __name__ == "__main__":
     parser.add_argument("-t", type=str, help="Token")
     parser.add_argument("-i", type=str, help="Call ID")
     parser.add_argument("-r", type=str, help="Run Number")
+    parser.add_argument("-p", type=str, help="Phone Number")
     config = parser.parse_args()
 
-    bot = DialoutBot(config.u, config.t, int(config.i), int(config.r))
+    bot = DialoutBot(config.u, config.t, int(config.i), int(config.r), config.p)
 
     try:
         asyncio.run(bot.run())
