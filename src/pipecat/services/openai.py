@@ -193,6 +193,34 @@ class BaseOpenAILLMService(LLMService):
         chunks = await self.get_chat_completions(context, messages)
 
         return chunks
+    
+    async def _handle_pre_execute_prompt(self, context: OpenAILLMContext, function_name: str):
+        """Handle pre-execute prompt for a function if one exists."""
+        pre_execute_prompt = self._pre_execute_prompts.get(function_name)
+        if not pre_execute_prompt:
+            return
+        
+        logger.debug(f"Handling pre_execute_prompt for function: {function_name}")
+
+        # Add the pre-execute prompt as a system message to the context
+        context.add_message({"role": "system", "content": pre_execute_prompt})
+        
+        # Temporarily disable function calling to prevent recursion
+        original_tools = context.tools
+        original_tool_choice = context.tool_choice
+        context.tools = NOT_GIVEN
+        context.tool_choice = NOT_GIVEN
+
+        # Process the context normally
+        await self.push_frame(LLMFullResponseStartFrame())
+        await self.start_processing_metrics()
+        await self._process_context(context)
+        await self.stop_processing_metrics()
+        await self.push_frame(LLMFullResponseEndFrame())
+
+        # Restore function calling capability
+        context.tools = original_tools
+        context.tool_choice = original_tool_choice
 
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []
@@ -250,6 +278,7 @@ class BaseOpenAILLMService(LLMService):
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
                     tool_call_id = tool_call.id
+                    await self._handle_pre_execute_prompt(context, function_name)
                     await self.call_start_function(context, function_name)
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments
