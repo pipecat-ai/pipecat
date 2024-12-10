@@ -32,8 +32,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
-        
+        _, token = await configure(session)
         print("Creating room")
         aiohttp_session = aiohttp.ClientSession()
         daily_helper = DailyRESTHelper(
@@ -41,15 +40,11 @@ async def main():
             daily_api_url=os.getenv("DAILY_API_URL", "https://api.daily.co/v1"),
             aiohttp_session=aiohttp_session,
         )
-        
         room = await daily_helper.create_room(DailyRoomParams())
         expiry_time: float = 60 * 60
 
         token = await daily_helper.get_token(room.url, expiry_time)
-
-        
         print("Room created ", room.url)
-        
         transport = DailyTransport(
             room.url,
             token,
@@ -84,7 +79,7 @@ async def main():
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
-        
+
         messages = [
             {
                 "role": "system",
@@ -98,13 +93,9 @@ async def main():
                 # "content": "Eres Chatbot, un amigable y útil robot. Tu objetivo es demostrar tus capacidades de una manera breve. Tus respuestas se convertiran a audio así que nunca no debes incluir caracteres especiales. Contesta a lo que el usuario pregunte de una manera creativa, útil y breve. Empieza por presentarte a ti mismo.",
             },
         ]
-        simliAi = SimliVideoService(
+        simli_ai = SimliVideoService(
             SimliConfig(os.getenv("SIMLI_API_KEY"), os.getenv("SIMLI_FACE_ID"))
         )
-        print("starting connection to simi")
-        await simliAi.startConnection()
-        print("connection started")
-
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
@@ -114,7 +105,7 @@ async def main():
                 context_aggregator.user(),
                 llm,
                 tts,
-                simliAi,
+                simli_ai,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
