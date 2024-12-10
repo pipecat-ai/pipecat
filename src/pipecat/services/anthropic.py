@@ -94,7 +94,7 @@ class AnthropicLLMService(LLMService):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._client = AsyncAnthropic(api_key=api_key)
+        self._client = kwargs.pop('client', None) or AsyncAnthropic(api_key=api_key) # if the client is provided, use it and remove it, otherwise create a new one
         self.set_model_name(model)
         self._settings = {
             "max_tokens": params.max_tokens,
