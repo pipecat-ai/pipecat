@@ -8,58 +8,57 @@ from pipecat.frames.frames import (
     EndFrame,
     CancelFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, StartFrame
 
 import numpy as np
 from av import AudioFrame
 from av.audio.resampler import AudioResampler
+
 from simli import SimliClient, SimliConfig
+from loguru import logger
 
 
 class SimliVideoService(FrameProcessor):
-    def __init__(
-        self, simliConfig: SimliConfig, useTurnServer=False, latencyInterval=60
-    ):
+    def __init__(self, simli_config: SimliConfig, use_turn_server=False, latency_interval=0):
         super().__init__()
-        self.simliClient = SimliClient(simliConfig, useTurnServer, latencyInterval)
+        self._simli_client = SimliClient(simli_config, use_turn_server, latency_interval)
 
-        self.pipecatResampler: AudioResampler = None
-        self.name = "SimliAi"
-        self.ready = False
-        self.simliResampler = AudioResampler("s16", 1, 16000)
-        self.AudioTask: asyncio.Task = None
-        self.VideoTask: asyncio.Task = None
+        self._ready = False
+        self._pipecat_resampler: AudioResampler = None
+        self._simli_resampler = AudioResampler("s16", 1, 16000)
 
-    async def startConnection(self):
-        await self.simliClient.Initialize()
-        self.ready = True
+        self._audio_task: asyncio.Task = None
+        self._video_task: asyncio.Task = None
+
+    async def _start_connection(self):
+        await self._simli_client.Initialize()
+        self._ready = True
         # Create task to consume and process audio and video
-        self.AudioTask = asyncio.create_task(self.consume_and_process_audio())
-        self.VideoTask = asyncio.create_task(self.consume_and_process_video())
+        self._audio_task = asyncio.create_task(self._consume_and_process_audio())
+        self._video_task = asyncio.create_task(self._consume_and_process_video())
 
-    async def consume_and_process_audio(self):
-        async for audio_frame in self.simliClient.getAudioStreamIterator():
+    async def _consume_and_process_audio(self):
+        while self._pipecat_resampler is None:
+            await asyncio.sleep(0.001)
+        async for audio_frame in self._simli_client.getAudioStreamIterator():
             # Process the audio frame
             try:
-                resampledFrames = self.pipecatResampler.resample(audio_frame)
-                for resampled_frame in resampledFrames:
+                resampled_frames = self._pipecat_resampler.resample(audio_frame)
+                for resampled_frame in resampled_frames:
                     await self.push_frame(
                         TTSAudioRawFrame(
                             audio=resampled_frame.to_ndarray().tobytes(),
-                            sample_rate=self.pipecatResampler.rate,
+                            sample_rate=self._pipecat_resampler.rate,
                             num_channels=1,
                         ),
                     )
             except Exception as e:
-                print(e)
-                import traceback
+                logger.exception(f"{self} exception: {e}")
 
-                traceback.print_exc()
-
-    async def consume_and_process_video(self):
-        async for video_frame in self.simliClient.getVideoStreamIterator(
-            targetFormat="rgb24"
-        ):
+    async def _consume_and_process_video(self):
+        while self._pipecat_resampler is None:
+            await asyncio.sleep(0.001)
+        async for video_frame in self._simli_client.getVideoStreamIterator(targetFormat="rgb24"):
             # Process the video frame
             convertedFrame: OutputImageRawFrame = OutputImageRawFrame(
                 image=video_frame.to_rgb().to_image().tobytes(),
@@ -73,44 +72,41 @@ class SimliVideoService(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-
-        if isinstance(frame, TTSAudioRawFrame):
+        if isinstance(frame, StartFrame):
+            await self._start_connection()
+        elif isinstance(frame, TTSAudioRawFrame):
             # Send audio frame to Simli
             try:
-                if self.ready:
-                    AudioFrame
+                if self._ready:
                     oldFrame = AudioFrame.from_ndarray(
                         np.frombuffer(frame.audio, dtype=np.int16)[None, :],
                         layout=frame.num_channels,
                     )
                     oldFrame.sample_rate = frame.sample_rate
-                    if self.pipecatResampler is None:
-                        self.pipecatResampler = AudioResampler(
+                    if self._pipecat_resampler is None:
+                        self._pipecat_resampler = AudioResampler(
                             "s16", oldFrame.layout, oldFrame.sample_rate
                         )
 
-                    resampledFrame = self.simliResampler.resample(oldFrame)
+                    resampledFrame = self._simli_resampler.resample(oldFrame)
                     for frame in resampledFrame:
-                        await self.simliClient.send(
-                            frame.to_ndarray().astype(np.int16).tobytes()
-                        )
+                        await self._simli_client.send(frame.to_ndarray().astype(np.int16).tobytes())
                     return
                 else:
-                    print(
+                    logger.warning(
                         "Simli Connection is not Initialized properly, passing audio to next processor"
                     )
                     await self.push_frame(frame, direction)
             except Exception as e:
-                print(e)
-                import traceback
-
-                traceback.print_exc()
+                logger.exception(f"{self} exception: {e}")
         elif isinstance(frame, (EndFrame, CancelFrame)):
-            await self.simliClient.stop()
-            self.AudioTask.cancel()
-            self.VideoTask.cancel()
+            await self._simli_client.stop()
+            self._audio_task.cancel()
+            await self._audio_task
+            self._video_task.cancel()
+            await self._video_task
 
         elif isinstance(frame, StartInterruptionFrame):
-            await self.simliClient.clearBuffer()
+            await self._simli_client.clearBuffer()
 
         await self.push_frame(frame, direction)
