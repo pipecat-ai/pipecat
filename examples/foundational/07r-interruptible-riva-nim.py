@@ -47,11 +47,11 @@ async def main():
 
         stt = ParakeetSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
 
-        tts = FastpitchTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
-
         llm = NimLLMService(
             api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.1-405b-instruct"
         )
+
+        tts = FastpitchTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
 
         messages = [
             {
