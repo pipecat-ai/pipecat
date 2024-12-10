@@ -45,7 +45,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 
 try:
-    from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven, AsyncAn
+    from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
