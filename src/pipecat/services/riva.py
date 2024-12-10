@@ -57,7 +57,7 @@ class FastpitchTTSService(TTSService):
         self._voice_id = voice_id
         self._sample_rate = sample_rate
         self._language_code = params.language
-        self.quality = params.quality
+        self._quality = params.quality
 
         self.set_model_name("fastpitch-hifigan-tts")
         self.set_voice(voice_id)
@@ -79,7 +79,7 @@ class FastpitchTTSService(TTSService):
                     self._language_code,
                     sample_rate_hz=self._sample_rate,
                     audio_prompt_file=None,
-                    quality=self.quality,
+                    quality=self._quality,
                     custom_dictionary={},
                 )
                 return responses
@@ -146,7 +146,7 @@ class ParakeetSTTService(STTService):
         ]
         auth = riva.client.Auth(None, True, server, metadata)
 
-        self.asr_service = riva.client.ASRService(auth)
+        self._asr_service = riva.client.ASRService(auth)
 
         config = riva.client.StreamingRecognitionConfig(
             config=riva.client.RecognitionConfig(
@@ -175,7 +175,7 @@ class ParakeetSTTService(STTService):
             self._stop_threshold_eou,
         )
         riva.client.add_custom_configuration_to_config(config, self._custom_configuration)
-        self.config = config
+        self._config = config
 
         self._queue = asyncio.Queue()
 
@@ -203,9 +203,9 @@ class ParakeetSTTService(STTService):
         await self._response_task
 
     def _response_handler(self):
-        responses = self.asr_service.streaming_response_generator(
+        responses = self._asr_service.streaming_response_generator(
             audio_chunks=self,
-            streaming_config=self.config,
+            streaming_config=self._config,
         )
         for response in responses:
             if not response.results:
