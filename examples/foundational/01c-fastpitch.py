@@ -13,7 +13,7 @@ from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.services.riva import FastpitchTTSService
+from pipecat.services.riva import FastPitchTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 from runner import configure
@@ -36,7 +36,7 @@ async def main():
             room_url, None, "Say One Thing", DailyParams(audio_out_enabled=True)
         )
 
-        tts = FastpitchTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
+        tts = FastPitchTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
 
         runner = PipelineRunner()
 
