@@ -45,7 +45,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 
 try:
-    from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
+    from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven, AsyncAn
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -75,7 +75,12 @@ class AnthropicContextAggregatorPair:
 
 
 class AnthropicLLMService(LLMService):
-    """This class implements inference with Anthropic's AI models"""
+    """
+    This class implements inference with Anthropic's AI models.
+
+    Can provide a custom client via the `client` kwarg, allowing you to
+    use `AsyncAnthropicBedrock` and `AsyncAnthropicVertex` clients
+    """
 
     class InputParams(BaseModel):
         enable_prompt_caching_beta: Optional[bool] = False
