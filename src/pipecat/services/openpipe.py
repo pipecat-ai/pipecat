@@ -7,7 +7,7 @@
 from typing import Dict, List
 
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai import BaseOpenAILLMService
+from pipecat.services.openai import OpenAILLMService
 
 from loguru import logger
 
@@ -22,7 +22,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class OpenPipeLLMService(BaseOpenAILLMService):
+class OpenPipeLLMService(OpenAILLMService):
     def __init__(
         self,
         *,
