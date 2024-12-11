@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `SimliVideoService`. This is an integration for Simli AI avatars.
+  (see https://www.simli.com)
+
 - Added NVIDIA Riva's `FastPitchTTSService` and `ParakeetSTTService`.
   (see https://www.nvidia.com/en-us/ai-data-science/products/riva/)
 
