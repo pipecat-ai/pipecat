@@ -4,18 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import os
 import sys
 from datetime import datetime
 
-
+import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
-
-from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -23,6 +20,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -108,7 +106,7 @@ async def main():
         llm.register_function("get_current_weather", fetch_weather_from_api)
 
         context = OpenAILLMContext(
-            # [{"role": "user", "content": "Say hello and tell me a joke about piranhas!"}],
+            [{"role": "user", "content": "Say hello."}],
         )
         context_aggregator = llm.create_context_aggregator(context)
 
