@@ -320,6 +320,15 @@ class GoogleContextAggregatorPair:
 
 
 class GoogleLLMContext(OpenAILLMContext):
+    def __init__(
+        self,
+        messages: list[dict] | None = None,
+        tools: list[dict] | None = None,
+        tool_choice: dict | None = None,
+    ):
+        super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
+        self.system_message = None
+
     @staticmethod
     def upgrade_to_google(obj: OpenAILLMContext) -> "GoogleLLMContext":
         if isinstance(obj, OpenAILLMContext) and not isinstance(obj, GoogleLLMContext):
@@ -371,9 +380,8 @@ class GoogleLLMContext(OpenAILLMContext):
         parts = []
         if text:
             parts.append(glm.Part(text=text))
-        parts.append(
-            glm.Part(inline_data=glm.Blob(mime_type="image/jpeg", data=buffer.getvalue())),
-        )
+        parts.append(glm.Part(inline_data=glm.Blob(mime_type="image/jpeg", data=buffer.getvalue())))
+
         self.add_message(glm.Content(role="user", parts=parts))
 
     def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: str = None):
@@ -649,12 +657,14 @@ class GoogleLLMService(LLMService):
         context = None
 
         if isinstance(frame, OpenAILLMContextFrame):
-            context: GoogleLLMContext = GoogleLLMContext.upgrade_to_google(frame.context)
+            context = GoogleLLMContext.upgrade_to_google(frame.context)
         elif isinstance(frame, LLMMessagesFrame):
             context = GoogleLLMContext(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
-            # todo: fix this
-            context = OpenAILLMContext.from_image_frame(frame)
+            context = GoogleLLMContext()
+            context.add_image_frame_message(
+                format=frame.format, size=frame.size, image=frame.image, text=frame.text
+            )
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
