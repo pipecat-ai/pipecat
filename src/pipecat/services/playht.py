@@ -47,23 +47,24 @@ except ModuleNotFoundError as e:
 
 
 def language_to_playht_language(language: Language) -> str | None:
-    language_map = {
+    BASE_LANGUAGES = {
+        Language.AF: "afrikans",
+        Language.AM: "amharic",
+        Language.AR: "arabic",
+        Language.BN: "bengali",
         Language.BG: "bulgarian",
         Language.CA: "catalan",
         Language.CS: "czech",
         Language.DA: "danish",
         Language.DE: "german",
+        Language.EL: "greek",
         Language.EN: "english",
-        Language.EN_US: "english",
-        Language.EN_GB: "english",
-        Language.EN_AU: "english",
-        Language.EN_NZ: "english",
-        Language.EN_IN: "english",
         Language.ES: "spanish",
         Language.FR: "french",
-        Language.FR_CA: "french",
-        Language.EL: "greek",
+        Language.GL: "galician",
+        Language.HE: "hebrew",
         Language.HI: "hindi",
+        Language.HR: "croatian",
         Language.HU: "hungarian",
         Language.ID: "indonesian",
         Language.IT: "italian",
@@ -73,14 +74,30 @@ def language_to_playht_language(language: Language) -> str | None:
         Language.NL: "dutch",
         Language.PL: "polish",
         Language.PT: "portuguese",
-        Language.PT_BR: "portuguese",
         Language.RU: "russian",
+        Language.SQ: "albanian",
+        Language.SR: "serbian",
         Language.SV: "swedish",
         Language.TH: "thai",
+        Language.TL: "tagalog",
         Language.TR: "turkish",
         Language.UK: "ukrainian",
+        Language.UR: "urdu",
+        Language.XH: "xhosa",
+        Language.ZH: "mandarin",
     }
-    return language_map.get(language)
+
+    result = BASE_LANGUAGES.get(language)
+
+    # If not found in base languages, try to find the base language from a variant
+    if not result:
+        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
+        lang_str = str(language.value)
+        base_code = lang_str.split("-")[0].lower()
+        # Look up the base code in our supported languages
+        result = base_code if base_code in BASE_LANGUAGES.values() else None
+
+    return result
 
 
 class PlayHTTTSService(TTSService):
