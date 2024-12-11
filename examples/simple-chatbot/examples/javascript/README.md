@@ -1,10 +1,10 @@
 # JavaScript Implementation
 
-Basic implementation using the RTVI JavaScript SDK.
+Basic implementation using the [Pipecat JavaScript SDK](https://docs.pipecat.ai/client/reference/js/introduction).
 
 ## Setup
 
-1. Run the bot server; see [README](../../README).
+1. Run the bot server. See the [server README](../../README).
 
 2. Navigate to the `examples/javascript` directory:
 
