@@ -4,6 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Gemini Bot Implementation.
+
+This module implements a chatbot using Google's Gemini Multimodal Live model.
+It includes:
+- Real-time audio/video interaction through Daily
+- Animated robot avatar
+- Speech-to-speech model
+
+The bot runs as part of a pipeline that processes audio/video frames and manages
+the conversation flow using Gemini's streaming capabilities.
+"""
+
 import asyncio
 import os
 import sys
@@ -21,7 +33,6 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     EndFrame,
     Frame,
-    LLMMessagesFrame,
     OutputImageRawFrame,
     SpriteFrame,
 )
@@ -47,7 +58,6 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 sprites = []
-
 script_dir = os.path.dirname(__file__)
 
 for i in range(1, 26):
@@ -58,18 +68,20 @@ for i in range(1, 26):
     with Image.open(full_path) as img:
         sprites.append(OutputImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
 
+# Create a smooth animation by adding reversed frames
 flipped = sprites[::-1]
 sprites.extend(flipped)
 
-# When the bot isn't talking, show a static image of the cat listening
-quiet_frame = sprites[0]
-talking_frame = SpriteFrame(images=sprites)
+# Define static and animated states
+quiet_frame = sprites[0]  # Static frame for when bot is listening
+talking_frame = SpriteFrame(images=sprites)  # Animation sequence for when bot is talking
 
 
 class TalkingAnimation(FrameProcessor):
-    """This class starts a talking animation when it receives an first AudioFrame.
+    """Manages the bot's visual animation states.
 
-    It then returns to a "quiet" sprite when it sees a TTSStoppedFrame.
+    Switches between static (listening) and animated (talking) states based on
+    the bot's current speaking status.
     """
 
     def __init__(self):
@@ -77,12 +89,20 @@ class TalkingAnimation(FrameProcessor):
         self._is_talking = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and update animation state.
+
+        Args:
+            frame: The incoming frame to process
+            direction: The direction of frame flow in the pipeline
+        """
         await super().process_frame(frame, direction)
 
+        # Switch to talking animation when bot starts speaking
         if isinstance(frame, BotStartedSpeakingFrame):
             if not self._is_talking:
                 await self.push_frame(talking_frame)
                 self._is_talking = True
+        # Return to static frame when bot stops speaking
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_frame(quiet_frame)
             self._is_talking = False
@@ -91,9 +111,19 @@ class TalkingAnimation(FrameProcessor):
 
 
 async def main():
+    """Main bot execution function.
+
+    Sets up and runs the bot pipeline including:
+    - Daily video transport with specific audio parameters
+    - Gemini Live multimodal model integration
+    - Voice activity detection
+    - Animation processing
+    - RTVI event handling
+    """
     async with aiohttp.ClientSession() as session:
         (room_url, token) = await configure(session)
 
+        # Set up Daily transport with specific audio/video parameters for Gemini
         transport = DailyTransport(
             room_url,
             token,
@@ -111,6 +141,7 @@ async def main():
             ),
         )
 
+        # Initialize the Gemini Multimodal Live model
         llm = GeminiMultimodalLiveLLMService(
             api_key=os.getenv("GEMINI_API_KEY"),
             voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
@@ -125,12 +156,16 @@ async def main():
             },
         ]
 
+        # Set up conversation context and management
+        # The context_aggregator will automatically collect conversation context
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
         ta = TalkingAnimation()
 
-        # RTVI
+        #
+        # RTVI events for Pipecat client UI
+        #
 
         # This will send `user-*-speaking` and `bot-*-speaking` messages.
         rtvi_speaking = RTVISpeakingProcessor()
