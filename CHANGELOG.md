@@ -5,6 +5,14 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Add support for more languages to ElevenLabs (Arabic, Croatian, Filipino,
+  Tamil) and PlayHT (Afrikans, Albanian, Amharic, Arabic, Bengali, Croatian,
+  Galician, Hebrew, Mandarin, Serbian, Tagalog, Urdu, Xhosa).
+
 ## [0.0.50] - 2024-12-11
 
 ### Added
