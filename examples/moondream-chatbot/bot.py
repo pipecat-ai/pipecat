@@ -13,13 +13,13 @@ from PIL import Image
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     ImageRawFrame,
     OutputImageRawFrame,
     SpriteFrame,
     Frame,
     LLMMessagesFrame,
-    TTSAudioRawFrame,
-    TTSStoppedFrame,
     TextFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
@@ -83,14 +83,15 @@ class TalkingAnimation(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TTSAudioRawFrame):
+        if isinstance(frame, BotStartedSpeakingFrame):
             if not self._is_talking:
                 await self.push_frame(talking_frame)
                 self._is_talking = True
-        elif isinstance(frame, TTSStoppedFrame):
+        elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_frame(quiet_frame)
             self._is_talking = False
-        await self.push_frame(frame)
+
+        await self.push_frame(frame, direction)
 
 
 class UserImageRequester(FrameProcessor):
@@ -126,7 +127,7 @@ class TextFilterProcessor(FrameProcessor):
             if frame.text != self.text:
                 await self.push_frame(frame)
         else:
-            await self.push_frame(frame)
+            await self.push_frame(frame, direction)
 
 
 class ImageFilterProcessor(FrameProcessor):
@@ -134,7 +135,7 @@ class ImageFilterProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if not isinstance(frame, ImageRawFrame):
-            await self.push_frame(frame)
+            await self.push_frame(frame, direction)
 
 
 async def main():
