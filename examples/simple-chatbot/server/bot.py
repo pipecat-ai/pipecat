@@ -33,7 +33,7 @@ from pipecat.processors.frameworks.rtvi import (
     RTVIBotTranscriptionProcessor,
     RTVIUserTranscriptionProcessor,
 )
-from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.fish import FishAudioTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -113,17 +113,15 @@ async def main():
             ),
         )
 
-        tts = ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            #
-            # English
-            #
-            voice_id="pNInz6obpgDQGcFmaJgB",
-            #
-            # Spanish
-            #
-            # model="eleven_multilingual_v2",
-            # voice_id="gD1IexrzCvsXPHUuT0s3",
+        tts = FishAudioTTSService(
+            api_key=os.getenv("FISH_API_KEY"),
+            model_id="e58b0d7efca34eb38d5c4985e378abcb",  # Trump voice
+            params=FishAudioTTSService.InputParams(
+                # language=Language.EN_US,   # Use the Language enum
+                latency="normal",          # Optional, defaults to "normal"
+                prosody_speed=4.0,         # Use prosody_speed instead of speed
+                prosody_volume=2.0           # Use prosody_volume instead of pitch
+            )
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
