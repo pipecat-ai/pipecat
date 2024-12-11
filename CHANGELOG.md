@@ -5,11 +5,12 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.50] - 2024-12-11
 
 ### Added
 
-- Added `GeminiMultimodalLiveLLMService`. This is an integration for Google's Gemini Multimodal Live API, supporting:
+- Added `GeminiMultimodalLiveLLMService`. This is an integration for Google's
+  Gemini Multimodal Live API, supporting:
 
   - Real-time audio and video input processing
   - Streaming text responses with TTS
@@ -18,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - System instructions and context management
   - Dynamic parameter updates (temperature, top_p, etc.)
 
-- Added `AudioTranscriber` utility class for handling audio transcription with Gemini models.
+- Added `AudioTranscriber` utility class for handling audio transcription with
+  Gemini models.
 
 - Added new context classes for Gemini:
 
