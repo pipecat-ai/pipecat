@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `GeminiMultimodalLiveLLMService`. This is an integration for Google's Gemini Multimodal Live API, supporting:
+
+  - Real-time audio and video input processing
+  - Streaming text responses with TTS
+  - Audio transcription for both user and bot speech
+  - Function calling
+  - System instructions and context management
+  - Dynamic parameter updates (temperature, top_p, etc.)
+
+- Added `AudioTranscriber` utility class for handling audio transcription with Gemini models.
+
+- Added new context classes for Gemini:
+
+  - `GeminiMultimodalLiveContext`
+  - `GeminiMultimodalLiveUserContextAggregator`
+  - `GeminiMultimodalLiveAssistantContextAggregator`
+  - `GeminiMultimodalLiveContextAggregatorPair`
+
+- Added new foundational examples for `GeminiMultimodalLiveLLMService`:
+
+  - `26-gemini-multimodal-live.py`
+  - `26a-gemini-multimodal-live-transcription.py`
+  - `26b-gemini-multimodal-live-video.py`
+  - `26c-gemini-multimodal-live-video.py`
+
 - Added `SimliVideoService`. This is an integration for Simli AI avatars.
   (see https://www.simli.com)
 
