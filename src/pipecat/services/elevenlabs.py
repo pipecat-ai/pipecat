@@ -44,6 +44,7 @@ ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_441
 
 def language_to_elevenlabs_language(language: Language) -> str | None:
     BASE_LANGUAGES = {
+        Language.AR: "ar",
         Language.BG: "bg",
         Language.CS: "cs",
         Language.DA: "da",
@@ -52,8 +53,10 @@ def language_to_elevenlabs_language(language: Language) -> str | None:
         Language.EN: "en",
         Language.ES: "es",
         Language.FI: "fi",
+        Language.FIL: "fil",
         Language.FR: "fr",
         Language.HI: "hi",
+        Language.HR: "hr",
         Language.HU: "hu",
         Language.ID: "id",
         Language.IT: "it",
@@ -68,6 +71,7 @@ def language_to_elevenlabs_language(language: Language) -> str | None:
         Language.RU: "ru",
         Language.SK: "sk",
         Language.SV: "sv",
+        Language.TA: "ta",
         Language.TR: "tr",
         Language.UK: "uk",
         Language.VI: "vi",
