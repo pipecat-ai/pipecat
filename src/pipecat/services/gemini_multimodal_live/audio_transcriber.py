@@ -1,3 +1,10 @@
+#
+# Copyright (c) 2024, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+
 import google.ai.generativelanguage as glm
 import google.generativeai as gai
 from loguru import logger
