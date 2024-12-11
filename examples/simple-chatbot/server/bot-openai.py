@@ -31,6 +31,8 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import (
     RTVIBotTranscriptionProcessor,
+    RTVIMetricsProcessor,
+    RTVISpeakingProcessor,
     RTVIUserTranscriptionProcessor,
 )
 from pipecat.services.elevenlabs import ElevenLabsTTSService
@@ -63,9 +65,9 @@ talking_frame = SpriteFrame(images=sprites)
 
 
 class TalkingAnimation(FrameProcessor):
-    """
-    This class starts a talking animation when it receives an first AudioFrame,
-    and then returns to a "quiet" sprite when it sees a TTSStoppedFrame.
+    """This class starts a talking animation when it receives an first AudioFrame.
+
+    It then returns to a "quiet" sprite when it sees a TTSStoppedFrame.
     """
 
     def __init__(self):
@@ -149,27 +151,42 @@ async def main():
 
         # RTVI
 
+        # This will send `user-*-speaking` and `bot-*-speaking` messages.
+        rtvi_speaking = RTVISpeakingProcessor()
+
         # This will emit UserTranscript events.
         rtvi_user_transcription = RTVIUserTranscriptionProcessor()
 
         # This will emit BotTranscript events.
         rtvi_bot_transcription = RTVIBotTranscriptionProcessor()
 
+        # This will send `metrics` messages.
+        rtvi_metrics = RTVIMetricsProcessor()
+
         pipeline = Pipeline(
             [
                 transport.input(),
+                rtvi_speaking,
                 rtvi_user_transcription,
                 context_aggregator.user(),
                 llm,
                 rtvi_bot_transcription,
                 tts,
                 ta,
+                rtvi_metrics,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+        task = PipelineTask(
+            pipeline,
+            PipelineParams(
+                allow_interruptions=True,
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
+        )
         await task.queue_frame(quiet_frame)
 
         @transport.event_handler("on_first_participant_joined")
