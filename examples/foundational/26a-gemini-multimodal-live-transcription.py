@@ -4,25 +4,23 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import os
 import sys
 
-
+import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
-
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -63,7 +61,10 @@ async def main():
 
         context = OpenAILLMContext(
             [
-                {"role": "user", "content": "Say hello and tell me a joke!"},
+                {
+                    "role": "user",
+                    "content": "Say hello. Then ask if I want to hear a joke.",
+                },
                 #     {"role": "assistant", "content": "Hello! Why don't scientists trust atoms?"},
                 #     {
                 #         "role": "user",
