@@ -83,8 +83,8 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
   delays. The sample rate of the provided sound files now need to match the
   sample rate of the output transport.
 
-- All input frames (text, audio, image, etc.) are now system frames. This means
-  they are processed immediately by all processors instead of being queued
+- Input frames (audio, image and transport messages) are now system frames. This
+  means they are processed immediately by all processors instead of being queued
   internally.
 
 - Expanded the transcriptions.language module to support a superset of

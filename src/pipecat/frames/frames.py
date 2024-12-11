@@ -178,6 +178,35 @@ class TextFrame(DataFrame):
 
 
 @dataclass
+class TranscriptionFrame(TextFrame):
+    """A text frame with transcription-specific data. Will be placed in the
+    transport's receive queue when a participant speaks.
+
+    """
+
+    user_id: str
+    timestamp: str
+    language: Language | None = None
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
+class InterimTranscriptionFrame(TextFrame):
+    """A text frame with interim transcription-specific data. Will be placed in
+    the transport's receive queue when a participant speaks."""
+
+    text: str
+    user_id: str
+    timestamp: str
+    language: Language | None = None
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
 class LLMMessagesFrame(DataFrame):
     """A frame containing a list of LLM messages. Used to signal that an LLM
     service should run a chat completion and emit an LLMFullResponseStartFrame,
@@ -439,36 +468,6 @@ class TransportMessageUrgentFrame(SystemFrame):
 
     def __str__(self):
         return f"{self.name}(message: {self.message})"
-
-
-@dataclass
-class TranscriptionFrame(SystemFrame):
-    """A text frame with transcription-specific data. Will be placed in the
-    transport's receive queue when a participant speaks.
-
-    """
-
-    text: str
-    user_id: str
-    timestamp: str
-    language: Language | None = None
-
-    def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
-
-
-@dataclass
-class InterimTranscriptionFrame(SystemFrame):
-    """A text frame with interim transcription-specific data. Will be placed in
-    the transport's receive queue when a participant speaks."""
-
-    text: str
-    user_id: str
-    timestamp: str
-    language: Language | None = None
-
-    def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
 
 @dataclass
