@@ -359,7 +359,7 @@ class GoogleLLMService(LLMService):
     async def _process_context(self, context: OpenAILLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
         try:
-            logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
+            # logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
 
             # Convert OpenAI format messages to Google format
             google_messages = [

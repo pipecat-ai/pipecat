@@ -399,7 +399,7 @@ class ElevenLabsTTSService(WordTTSService):
                     yield TTSStartedFrame()
                     self._started = True
                     self._cumulative_time = 0
-
+                logger.info(f"===> elevenlabs Sending text: {text}")
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
