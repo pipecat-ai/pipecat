@@ -314,7 +314,6 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             sample_rate=self._params.audio_out_sample_rate,
             num_channels=self._params.audio_out_channels,
         )
-        logger.info(f"Writing raw audio frames: {frame}")
         if self._params.add_wav_header:
             with io.BytesIO() as buffer:
                 with wave.open(buffer, "wb") as wf:
@@ -329,6 +328,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
                 )
                 frame = wav_frame
 
+        logger.info(f"Writing audio frame: {frame}")
         await self._write_frame(frame)
 
         self._websocket_audio_buffer = bytes()
