@@ -33,7 +33,7 @@ class TransportParams(BaseModel):
     camera_out_color_format: str = "RGB"
     audio_out_enabled: bool = False
     audio_out_is_live: bool = False
-    audio_out_sample_rate: int = 16000
+    audio_out_sample_rate: int = 24000
     audio_out_channels: int = 1
     audio_out_bitrate: int = 96000
     audio_out_mixer: Optional[BaseAudioMixer] = None

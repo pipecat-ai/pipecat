@@ -24,7 +24,8 @@ from pipecat.frames.frames import (
     StartFrame,
     TransportMessageFrame,
     Frame,
-    StartInterruptionFrame
+    StartInterruptionFrame,
+    AudioRawFrame
 )
 from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -235,23 +236,44 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
         # Handle incoming messages
         async for message in websocket:
-            frame = self._params.serializer.deserialize(message)
+            # Check heartbeat timeout first
+            # if time.time() - last_pong_time > 90:  # 90 seconds without ping
+            #     logger.warning("Client heartbeat timeout, closing connection")
+            #     await websocket.close()
+            #     break
+            
+            if message.type == WSMsgType.BINARY:
+                    frame = self._params.serializer.deserialize(message.data)
+            elif message.type == WSMsgType.TEXT:
+                continue
 
             if not frame:
                 continue
 
-            if isinstance(frame, InputAudioRawFrame):
-                await self.push_audio_frame(frame)
+            
+            if isinstance(frame, AudioRawFrame):
+                time_since_last_log = time.time() - self.last_log_time
+                if time_since_last_log > 10:
+                    logger.info("Pushing audio frame")
+                    self.last_log_time = time.time()
+                    
+                await self.push_audio_frame(
+                    InputAudioRawFrame(
+                        audio=frame.audio,
+                        sample_rate=frame.sample_rate,
+                        num_channels=frame.num_channels,
+                    )
+                )
             else:
                 await self.push_frame(frame)
 
         # Notify disconnection
-        await self._callbacks.on_client_disconnected(websocket)
+        await self._callbacks.on_client_disconnected(websocket, user)
 
-        await self._websocket.close()
+        await self._websocket.close()        
         self._websocket = None
 
-        logger.info(f"Client {websocket.remote_address} disconnected")
+        logger.info(f"Client disconnected")
 
 
 class WebsocketServerOutputTransport(BaseOutputTransport):
@@ -264,7 +286,11 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
         self._websocket_audio_buffer = bytes()
 
+        self._send_interval = (self._audio_chunk_size / self._params.audio_out_sample_rate) / 2
+        self._next_send_time = 0
+
     async def set_client_connection(self, websocket: WebSocketResponse | None):
+        logger.info(F"Setting client connection for {self._websocket} to {websocket}")
         if self._websocket:
             await self._websocket.close()
             logger.warning("Only one client allowed, using new connection")
@@ -278,7 +304,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             self._next_send_time = 0
 
     async def write_raw_audio_frames(self, frames: bytes):
-        if not self._websocket:
+        if self._websocket == None:
             # Simulate audio playback with a sleep.
             await self._write_audio_sleep()
             return
@@ -288,7 +314,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             sample_rate=self._params.audio_out_sample_rate,
             num_channels=self._params.audio_out_channels,
         )
-
+        logger.info(f"Writing raw audio frames: {frame}")
         if self._params.add_wav_header:
             with io.BytesIO() as buffer:
                 with wave.open(buffer, "wb") as wf:
@@ -312,8 +338,8 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
     async def _write_frame(self, frame: Frame):
         payload = self._params.serializer.serialize(frame)
-        if payload and self._websocket:
-            await self._websocket.send(payload)
+        if payload and (self._websocket != None):
+            await self._websocket.send_bytes(payload)
 
     async def _write_audio_sleep(self):
         # Simulate a clock.

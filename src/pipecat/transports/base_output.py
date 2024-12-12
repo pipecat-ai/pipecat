@@ -465,7 +465,6 @@ class BaseOutputTransport(FrameProcessor):
 
                 # Also, push frame downstream in case anyone else needs it.
                 await self.push_frame(frame)
-
                 # Send audio.
                 await self.write_raw_audio_frames(frame.audio)
         except asyncio.CancelledError:
