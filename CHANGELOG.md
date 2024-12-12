@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tamil) and PlayHT (Afrikans, Albanian, Amharic, Arabic, Bengali, Croatian,
   Galician, Hebrew, Mandarin, Serbian, Tagalog, Urdu, Xhosa).
 
+### Deprecated
+
+- `AWSTTSService` is now deprecated, use `PollyTTSService` instead.
+
 ## [0.0.50] - 2024-12-11
 
 ### Added
