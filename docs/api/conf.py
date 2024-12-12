@@ -201,6 +201,7 @@ def setup(app):
         str(project_root / "src/pipecat/pipeline/to_be_updated"),
         str(project_root / "src/pipecat/processors/gstreamer"),
         str(project_root / "src/pipecat/services/to_be_updated"),
+        str(project_root / "src/pipecat/vad"),  # deprecated
         "**/test_*.py",
         "**/tests/*.py",
     ]
