@@ -84,11 +84,9 @@ class CanonicalMetricsService(AIService):
         self._output_dir = output_dir
 
     async def stop(self, frame: EndFrame):
-        await super().stop(frame)
         await self._process_audio()
 
     async def cancel(self, frame: CancelFrame):
-        await super().cancel(frame)
         await self._process_audio()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

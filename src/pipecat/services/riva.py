@@ -187,17 +187,14 @@ class ParakeetSTTService(STTService):
         return False
 
     async def start(self, frame: StartFrame):
-        await super().start(frame)
         self._thread_task = self.get_event_loop().create_task(self._thread_task_handler())
         self._response_task = self.get_event_loop().create_task(self._response_task_handler())
         self._response_queue = asyncio.Queue()
 
     async def stop(self, frame: EndFrame):
-        await super().stop(frame)
         await self._stop_tasks()
 
     async def cancel(self, frame: CancelFrame):
-        await super().cancel(frame)
         await self._stop_tasks()
 
     async def _stop_tasks(self):

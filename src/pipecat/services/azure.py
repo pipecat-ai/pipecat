@@ -676,16 +676,13 @@ class AzureSTTService(STTService):
         yield None
 
     async def start(self, frame: StartFrame):
-        await super().start(frame)
         self._speech_recognizer.start_continuous_recognition_async()
 
     async def stop(self, frame: EndFrame):
-        await super().stop(frame)
         self._speech_recognizer.stop_continuous_recognition_async()
         self._audio_stream.close()
 
     async def cancel(self, frame: CancelFrame):
-        await super().cancel(frame)
         self._speech_recognizer.stop_continuous_recognition_async()
         self._audio_stream.close()
 

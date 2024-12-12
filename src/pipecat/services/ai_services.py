@@ -111,11 +111,11 @@ class AIService(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
-            await self.start(frame)
+            await self._start(frame)
         elif isinstance(frame, CancelFrame):
-            await self.cancel(frame)
+            await self._cancel(frame)
         elif isinstance(frame, EndFrame):
-            await self.stop(frame)
+            await self._stop(frame)
 
     async def process_generator(self, generator: AsyncGenerator[Frame | None, None]):
         async for f in generator:
@@ -124,6 +124,15 @@ class AIService(FrameProcessor):
                     await self.push_error(f)
                 else:
                     await self.push_frame(f)
+
+    async def _start(self, frame: StartFrame):
+        await self.start(frame)
+
+    async def _stop(self, frame: EndFrame):
+        await self.stop(frame)
+
+    async def _cancel(self, frame: CancelFrame):
+        await self.cancel(frame)
 
 
 class LLMService(AIService):
@@ -248,19 +257,16 @@ class TTSService(AIService):
         pass
 
     async def start(self, frame: StartFrame):
-        await super().start(frame)
         if self._push_stop_frames:
             self._stop_frame_task = self.get_event_loop().create_task(self._stop_frame_handler())
 
     async def stop(self, frame: EndFrame):
-        await super().stop(frame)
         if self._stop_frame_task:
             self._stop_frame_task.cancel()
             await self._stop_frame_task
             self._stop_frame_task = None
 
     async def cancel(self, frame: CancelFrame):
-        await super().cancel(frame)
         if self._stop_frame_task:
             self._stop_frame_task.cancel()
             await self._stop_frame_task

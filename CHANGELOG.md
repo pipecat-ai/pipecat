@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- It's no longer necessary to call `super().start/stop/cancel(frame)` if you
+  subclass and implement `AIService.start/stop/cancel()`. This is all now done
+  internally and will avoid possible issues if you forget to add it.
+
 - It's no longer necessary to call `super().process_frame(frame, direction)` if
   you subclass and implement `FrameProcessor.process_frame()`. This is all now
   done internally and will avoid possible issues if you forget to add it.
