@@ -27,7 +27,6 @@ Audio Processing
 ~~~~~~~~~~~~~~~~
 
 * :mod:`Audio <pipecat.audio>`
-* :mod:`VAD <pipecat.vad>`
 
 Services
 ~~~~~~~~
@@ -69,7 +68,6 @@ Utilities
    Transcriptions <api/pipecat.transcriptions>
    Transports <api/pipecat.transports>
    Utils <api/pipecat.utils>
-   VAD <api/pipecat.vad>
 
 Indices and tables
 ==================
