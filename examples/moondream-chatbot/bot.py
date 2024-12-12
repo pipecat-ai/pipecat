@@ -81,8 +81,6 @@ class TalkingAnimation(FrameProcessor):
         self._is_talking = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, BotStartedSpeakingFrame):
             if not self._is_talking:
                 await self.push_frame(talking_frame)
@@ -103,8 +101,6 @@ class UserImageRequester(FrameProcessor):
         self.participant_id = participant_id
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if self.participant_id and isinstance(frame, TextFrame):
             if frame.text == user_request_answer:
                 await self.push_frame(
@@ -121,8 +117,6 @@ class TextFilterProcessor(FrameProcessor):
         self.text = text
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, TextFrame):
             if frame.text != self.text:
                 await self.push_frame(frame)
@@ -132,8 +126,6 @@ class TextFilterProcessor(FrameProcessor):
 
 class ImageFilterProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if not isinstance(frame, ImageRawFrame):
             await self.push_frame(frame, direction)
 

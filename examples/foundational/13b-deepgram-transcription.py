@@ -31,8 +31,6 @@ logger.add(sys.stderr, level="DEBUG")
 
 class TranscriptionLogger(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, TranscriptionFrame):
             print(f"Transcription: {frame.text}")
 

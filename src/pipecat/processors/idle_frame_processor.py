@@ -35,8 +35,6 @@ class IdleFrameProcessor(FrameProcessor):
         self._create_idle_task()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         await self.push_frame(frame, direction)
 
         # If we are not waiting for any specific frame set the event, otherwise

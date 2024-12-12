@@ -85,8 +85,6 @@ class ResponseAggregator(FrameProcessor):
     # and T2 would be dropped.
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         send_aggregation = False
 
         if isinstance(frame, self._start_frame):

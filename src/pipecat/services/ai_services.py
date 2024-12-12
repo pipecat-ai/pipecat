@@ -110,8 +110,6 @@ class AIService(FrameProcessor):
                 logger.warning(f"Unknown setting for {self.name} service: {key}")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, StartFrame):
             await self.start(frame)
         elif isinstance(frame, CancelFrame):

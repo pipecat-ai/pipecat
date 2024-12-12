@@ -90,8 +90,6 @@ class StatementJudgeAudioContextAccumulator(FrameProcessor):
         self._user_speaking = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         # ignore context frame
         if isinstance(frame, OpenAILLMContextFrame):
             return
@@ -133,8 +131,6 @@ class CompletenessCheck(FrameProcessor):
         self._audio_accumulator = audio_accumulator
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, TextFrame) and frame.text.startswith("YES"):
             logger.debug("Completeness check YES")
             await self.push_frame(UserStoppedSpeakingFrame())
@@ -159,8 +155,6 @@ class OutputGate(FrameProcessor):
         self._gate_open = True
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         # We must not block system frames.
         if isinstance(frame, SystemFrame):
             if isinstance(frame, StartFrame):
