@@ -63,6 +63,16 @@ autodoc_mock_imports = [
     "openpipe",
     "simli",
     "soundfile",
+    # Add these new mocks
+    "pyaudio",
+    "_tkinter",
+    "tkinter",
+    "daily",
+    "daily_python",
+    "pydantic.BaseModel",  # Mock base pydantic to avoid model conflicts
+    "pydantic.Field",
+    "pydantic._internal._model_construction",
+    "pydantic._internal._fields",
 ]
 
 # HTML output settings
@@ -87,19 +97,40 @@ def verify_modules():
         ],
         "serializers": ["livekit"],
         "vad": ["silero", "vad_analyzer"],
+        "transports": {
+            "services": ["daily", "livekit"],
+            "local": ["audio", "tk"],
+            "network": ["fastapi_websocket", "websocket_server"],
+        },
     }
 
     missing = []
     for category, modules in required_modules.items():
-        for module in modules:
-            try:
-                __import__(f"pipecat.{category}.{module}")
-                logger.info(f"Successfully imported pipecat.{category}.{module}")
-            except ImportError as e:
-                missing.append(f"pipecat.{category}.{module}")
-                logger.warning(
-                    f"Optional module not available: pipecat.{category}.{module} - {str(e)}"
-                )
+        if isinstance(modules, dict):
+            # Handle nested structure
+            for subcategory, submodules in modules.items():
+                for module in submodules:
+                    try:
+                        __import__(f"pipecat.{category}.{subcategory}.{module}")
+                        logger.info(
+                            f"Successfully imported pipecat.{category}.{subcategory}.{module}"
+                        )
+                    except (ImportError, TypeError, NameError) as e:
+                        missing.append(f"pipecat.{category}.{subcategory}.{module}")
+                        logger.warning(
+                            f"Optional module not available: pipecat.{category}.{subcategory}.{module} - {str(e)}"
+                        )
+        else:
+            # Handle flat structure
+            for module in modules:
+                try:
+                    __import__(f"pipecat.{category}.{module}")
+                    logger.info(f"Successfully imported pipecat.{category}.{module}")
+                except (ImportError, TypeError, NameError) as e:
+                    missing.append(f"pipecat.{category}.{module}")
+                    logger.warning(
+                        f"Optional module not available: pipecat.{category}.{module} - {str(e)}"
+                    )
 
     if missing:
         logger.warning(f"Some optional modules are not available: {missing}")
@@ -167,10 +198,8 @@ def setup(app):
     logger.info(f"Source directory: {source_dir}")
 
     excludes = [
+        str(project_root / "src/pipecat/pipeline/to_be_updated"),
         str(project_root / "src/pipecat/processors/gstreamer"),
-        str(project_root / "src/pipecat/transports/network"),
-        str(project_root / "src/pipecat/transports/services"),
-        str(project_root / "src/pipecat/transports/local"),
         str(project_root / "src/pipecat/services/to_be_updated"),
         "**/test_*.py",
         "**/tests/*.py",
@@ -179,12 +208,13 @@ def setup(app):
     try:
         main(
             [
-                "-f",
-                "-e",
-                "-M",
-                "--no-toc",
-                "--separate",
-                "--module-first",
+                "-f",  # Force overwriting
+                "-e",  # Don't generate empty files
+                "-M",  # Put module documentation before submodule documentation
+                "--no-toc",  # Don't create a table of contents file
+                "--separate",  # Put documentation for each module in its own page
+                "--module-first",  # Module documentation before submodule documentation
+                "--implicit-namespaces",  # Added: Handle implicit namespace packages
                 "-o",
                 output_dir,
                 source_dir,
@@ -195,7 +225,7 @@ def setup(app):
         logger.info("API documentation generated successfully!")
 
         # Process generated RST files to update titles
-        for rst_file in Path(output_dir).glob("*.rst"):
+        for rst_file in Path(output_dir).glob("**/*.rst"):  # Changed to recursive glob
             content = rst_file.read_text()
             lines = content.split("\n")
 

@@ -9,10 +9,6 @@ build:
       # Commands to run before the build
       - python -m pip install --upgrade pip
       - pip install wheel setuptools
-    post_create_environment:
-      # Install system dependencies required by some packages
-      - apt-get update
-      - apt-get install -y portaudio19-dev python3-pyaudio
     post_build:
       # Commands to run after the build
       - echo "Build completed"
@@ -36,6 +32,7 @@ python:
         - azure
         - canonical
         - cartesia
+        - daily
         - deepgram
         - elevenlabs
         - fal
@@ -48,6 +45,7 @@ python:
         - langchain
         - livekit
         - lmnt
+        - local
         - moondream
         - nim
         - noisereduce
@@ -64,14 +62,12 @@ formats:
   - epub
   - htmlzip
 
-# Cache dependencies to speed up builds
 search:
   ranking:
     api/*: 5
     getting-started/*: 4
     guides/*: 3
 
-# Configure submodules if needed
 submodules:
   include: all
   recursive: true

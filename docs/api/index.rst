@@ -22,7 +22,6 @@ Core Components
 * :mod:`Frames <pipecat.frames>`
 * :mod:`Processors <pipecat.processors>`
 * :mod:`Pipeline <pipecat.pipeline>`
-* :mod:`Services <pipecat.services>`
 
 Audio Processing
 ~~~~~~~~~~~~~~~~
@@ -30,10 +29,18 @@ Audio Processing
 * :mod:`Audio <pipecat.audio>`
 * :mod:`VAD <pipecat.vad>`
 
+Services
+~~~~~~~~
+
+* :mod:`Services <pipecat.services>`
+
 Transport & Serialization
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 * :mod:`Transports <pipecat.transports>`
+   * :mod:`Local <pipecat.transports.local>`
+   * :mod:`Network <pipecat.transports.network>`
+   * :mod:`Services <pipecat.transports.services>`
 * :mod:`Serializers <pipecat.serializers>`
 
 Utilities
@@ -46,7 +53,7 @@ Utilities
 * :mod:`Utils <pipecat.utils>`
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 3
    :caption: API Reference
    :hidden:
 
