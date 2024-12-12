@@ -13,61 +13,61 @@ Quick Links
 * `GitHub Repository <https://github.com/pipecat-ai/pipecat>`_
 * `Website <https://pipecat.ai>`_
 
-
 API Reference
 -------------
 
 Core Components
 ~~~~~~~~~~~~~~~
 
-* :mod:`pipecat.frames`
-* :mod:`pipecat.processors`
-* :mod:`pipecat.pipeline`
+* :mod:`Frames <pipecat.frames>`
+* :mod:`Processors <pipecat.processors>`
+* :mod:`Pipeline <pipecat.pipeline>`
 
 Audio Processing
 ~~~~~~~~~~~~~~~~
 
-* :mod:`pipecat.audio`
-* :mod:`pipecat.vad`
+* :mod:`Audio <pipecat.audio>`
 
 Services
 ~~~~~~~~
 
-* :mod:`pipecat.services`
+* :mod:`Services <pipecat.services>`
 
 Transport & Serialization
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* :mod:`pipecat.transports`
-* :mod:`pipecat.serializers`
+* :mod:`Transports <pipecat.transports>`
+   * :mod:`Local <pipecat.transports.local>`
+   * :mod:`Network <pipecat.transports.network>`
+   * :mod:`Services <pipecat.transports.services>`
+* :mod:`Serializers <pipecat.serializers>`
 
 Utilities
 ~~~~~~~~~
 
-* :mod:`pipecat.clocks`
-* :mod:`pipecat.metrics`
-* :mod:`pipecat.sync`
-* :mod:`pipecat.transcriptions`
-* :mod:`pipecat.utils`
+* :mod:`Clocks <pipecat.clocks>`
+* :mod:`Metrics <pipecat.metrics>`
+* :mod:`Sync <pipecat.sync>`
+* :mod:`Transcriptions <pipecat.transcriptions>`
+* :mod:`Utils <pipecat.utils>`
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 3
    :caption: API Reference
    :hidden:
 
-   api/pipecat.audio
-   api/pipecat.clocks
-   api/pipecat.frames
-   api/pipecat.metrics
-   api/pipecat.pipeline
-   api/pipecat.processors
-   api/pipecat.serializers
-   api/pipecat.services
-   api/pipecat.sync
-   api/pipecat.transcriptions
-   api/pipecat.transports
-   api/pipecat.utils
-   api/pipecat.vad
+   Audio <api/pipecat.audio>
+   Clocks <api/pipecat.clocks>
+   Frames <api/pipecat.frames>
+   Metrics <api/pipecat.metrics>
+   Pipeline <api/pipecat.pipeline>
+   Processors <api/pipecat.processors>
+   Serializers <api/pipecat.serializers>
+   Services <api/pipecat.services>
+   Sync <api/pipecat.sync>
+   Transcriptions <api/pipecat.transcriptions>
+   Transports <api/pipecat.transports>
+   Utils <api/pipecat.utils>
 
 Indices and tables
 ==================

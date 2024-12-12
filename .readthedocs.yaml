@@ -4,12 +4,65 @@ build:
   os: ubuntu-22.04
   tools:
     python: '3.12'
+  jobs:
+    pre_build:
+      # Commands to run before the build
+      - python -m pip install --upgrade pip
+      - pip install wheel setuptools
+    post_build:
+      # Commands to run after the build
+      - echo "Build completed"
 
 sphinx:
   configuration: docs/api/conf.py
+  fail_on_warning: false # Set to true if you want builds to fail on warnings
 
 python:
   install:
-    - requirements: docs/api/requirements.txt
+    - requirements: docs/api/requirements-base.txt
+    # Try to install Riva first, fall back to PlayHT if it fails
+    - requirements: docs/api/requirements-riva.txt || true
+    - requirements: docs/api/requirements-playht.txt || true
     - method: pip
       path: .
+      extra_requirements:
+        - anthropic
+        - assemblyai
+        - aws
+        - azure
+        - canonical
+        - cartesia
+        - daily
+        - deepgram
+        - elevenlabs
+        - fal
+        - fireworks
+        - gladia
+        - google
+        - grok
+        - groq
+        - krisp
+        - langchain
+        - livekit
+        - lmnt
+        - local
+        - moondream
+        - nim
+        - noisereduce
+        - openai
+        - openpipe
+        - silero
+        - simli
+        - soundfile
+        - websocket
+        - whisper
+
+search:
+  ranking:
+    api/*: 5
+    getting-started/*: 4
+    guides/*: 3
+
+submodules:
+  include: all
+  recursive: true
