@@ -34,6 +34,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         TextFrame: "text",
         InputAudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
+        TransportMessageFrame: "transport_message",
     }
     DESERIALIZABLE_FIELDS = {v: k for k, v in DESERIALIZABLE_TYPES.items()}
 

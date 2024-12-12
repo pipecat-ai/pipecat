@@ -300,41 +300,48 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartInterruptionFrame):
-            await self._write_frame(frame)
+                
+            # await self._write_frame(frame)
+            #Here we send our trasport message to the client
+            logger.info("=======================WE ARE INTERRUPTING===============================>")
+            interrupt_transport = TransportMessageFrame(json.dumps({"type": "interrupt"}))
+            await self.send_message(interrupt_transport)
             self._next_send_time = 0
 
     async def write_raw_audio_frames(self, frames: bytes):
+        
         if self._websocket == None:
-            # Simulate audio playback with a sleep.
-            await self._write_audio_sleep()
             return
+        
+        self._websocket_audio_buffer += frames
+        while len(self._websocket_audio_buffer) >= self._params.audio_frame_size:
+            frame = OutputAudioRawFrame(
+                audio=self._websocket_audio_buffer[: self._params.audio_frame_size],
+                sample_rate=self._params.audio_out_sample_rate,
+                num_channels=self._params.audio_out_channels,
+            )
 
-        frame = OutputAudioRawFrame(
-            audio=frames,
-            sample_rate=self._params.audio_out_sample_rate,
-            num_channels=self._params.audio_out_channels,
-        )
-        if self._params.add_wav_header:
-            with io.BytesIO() as buffer:
-                with wave.open(buffer, "wb") as wf:
-                    wf.setsampwidth(2)
-                    wf.setnchannels(frame.num_channels)
-                    wf.setframerate(frame.sample_rate)
-                    wf.writeframes(frame.audio)
+            if self._params.add_wav_header:
+                content = io.BytesIO()
+                ww = wave.open(content, "wb")
+                ww.setsampwidth(2)
+                ww.setnchannels(frame.num_channels)
+                ww.setframerate(frame.sample_rate)
+                ww.writeframes(frame.audio)
+                ww.close()
+                content.seek(0)
                 wav_frame = OutputAudioRawFrame(
-                    buffer.getvalue(),
-                    sample_rate=frame.sample_rate,
-                    num_channels=frame.num_channels,
+                    audio=content.read(), sample_rate=frame.sample_rate, num_channels=frame.num_channels
                 )
                 frame = wav_frame
 
-        logger.info(f"Writing audio frame: {frame}")
-        await self._write_frame(frame)
+            proto = self._params.serializer.serialize(frame)
+            if proto:
+                await self._websocket.send_bytes(proto)
 
-        self._websocket_audio_buffer = bytes()
-
-        # Simulate audio playback with a sleep.
-        await self._write_audio_sleep()
+            self._websocket_audio_buffer = self._websocket_audio_buffer[
+                self._params.audio_frame_size :
+            ]            
 
     async def _write_frame(self, frame: Frame):
         payload = self._params.serializer.serialize(frame)
@@ -354,6 +361,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
     async def send_message(self, message):
         if self._websocket is not None and not self._websocket.closed:
             try:
+                logger.info(f"Sending message: {message}")
                 proto = self._params.serializer.serialize(message)
                 if proto:
                     await self._websocket.send_bytes(proto)

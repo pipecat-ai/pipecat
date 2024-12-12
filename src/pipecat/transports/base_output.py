@@ -126,10 +126,6 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, (StartInterruptionFrame, StopInterruptionFrame)):
             await self.push_frame(frame, direction)
             await self._handle_interruptions(frame)
-            # Push a transport message for our client
-            logger.info("=======================WE ARE INTERRUPTING===============================>")
-            interrupt_transport = TransportMessageFrame(json.dumps({"type": "interrupt"}))
-            await self.send_message(interrupt_transport)
         elif isinstance(frame, TransportMessageUrgentFrame):
             await self.send_message(frame)
         elif isinstance(frame, SystemFrame):
