@@ -8,7 +8,7 @@ import asyncio
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
-from pydantic.main import BaseModel
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,

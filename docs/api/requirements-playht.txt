@@ -1,3 +1,0 @@
-# Force specific grpcio version for PlayHT
-grpcio>=1.68.0
-pipecat-ai[playht]

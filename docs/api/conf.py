@@ -44,7 +44,12 @@ autodoc_default_options = {
 autodoc_mock_imports = [
     "riva",
     "livekit",
-    "pyht",
+    "pyht",  # Base PlayHT package
+    "pyht.async_client",  # PlayHT specific imports
+    "pyht.client",
+    "pyht.protos",
+    "pyht.protos.api_pb2",
+    "pipecat_ai_playht",  # PlayHT wrapper
     "anthropic",
     "assemblyai",
     "boto3",
@@ -63,13 +68,14 @@ autodoc_mock_imports = [
     "openpipe",
     "simli",
     "soundfile",
-    # Add these new mocks
+    # Existing mocks
+    "pipecat_ai_krisp",
     "pyaudio",
     "_tkinter",
     "tkinter",
     "daily",
     "daily_python",
-    "pydantic.BaseModel",  # Mock base pydantic to avoid model conflicts
+    "pydantic.BaseModel",
     "pydantic.Field",
     "pydantic._internal._model_construction",
     "pydantic._internal._fields",
