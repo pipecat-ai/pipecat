@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AWSTTSService` is now deprecated, use `PollyTTSService` instead.
 
+### Fixed
+
+- Fixed a `BaseOutputTransport` issue that was causing non-audio frames being
+  processed before the previous audio frames were played. This will allow, for
+  example, sending a frame `A` after a `TTSSpeakFrame` and the frame `A` will
+  only be pushed downstream after the audio generated from `TTSSpeakFrame` has
+  been spoken.
+
 ## [0.0.50] - 2024-12-11
 
 ### Added
