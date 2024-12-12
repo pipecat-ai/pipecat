@@ -43,8 +43,6 @@ class UserIdleProcessor(FrameProcessor):
         await self._idle_task
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         # Check for end frames before processing
         if isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()

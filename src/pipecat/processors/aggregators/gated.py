@@ -56,8 +56,6 @@ class GatedAggregator(FrameProcessor):
         self._accumulator: List[Tuple[Frame, FrameDirection]] = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         # We must not block system frames.
         if isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)

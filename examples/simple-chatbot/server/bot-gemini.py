@@ -95,8 +95,6 @@ class TalkingAnimation(FrameProcessor):
             frame: The incoming frame to process
             direction: The direction of frame flow in the pipeline
         """
-        await super().process_frame(frame, direction)
-
         # Switch to talking animation when bot starts speaking
         if isinstance(frame, BotStartedSpeakingFrame):
             if not self._is_talking:

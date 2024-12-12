@@ -62,8 +62,6 @@ async def main():
                     self.text = ""
 
                 async def process_frame(self, frame: Frame, direction: FrameDirection):
-                    await super().process_frame(frame, direction)
-
                     if isinstance(frame, TextFrame):
                         self.text = frame.text
                     await self.push_frame(frame, direction)
@@ -75,8 +73,6 @@ async def main():
                     self.frame = None
 
                 async def process_frame(self, frame: Frame, direction: FrameDirection):
-                    await super().process_frame(frame, direction)
-
                     if isinstance(frame, TTSAudioRawFrame):
                         self.audio.extend(frame.audio)
                         self.frame = OutputAudioRawFrame(
@@ -90,8 +86,6 @@ async def main():
                     self.frame = None
 
                 async def process_frame(self, frame: Frame, direction: FrameDirection):
-                    await super().process_frame(frame, direction)
-
                     if isinstance(frame, URLImageRawFrame):
                         self.frame = frame
                     await self.push_frame(frame, direction)

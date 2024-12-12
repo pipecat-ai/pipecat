@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tamil) and PlayHT (Afrikans, Albanian, Amharic, Arabic, Bengali, Croatian,
   Galician, Hebrew, Mandarin, Serbian, Tagalog, Urdu, Xhosa).
 
+### Changed
+
+- It's no longer necessary to call `super().process_frame(frame, direction)` if
+  you subclass and implement `FrameProcessor.process_frame()`. This is all now
+  done internally and will avoid possible issues if you forget to add it.
+
 ### Deprecated
 
 - `AWSTTSService` is now deprecated, use `PollyTTSService` instead.

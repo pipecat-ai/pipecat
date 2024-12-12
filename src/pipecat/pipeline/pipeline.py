@@ -17,8 +17,6 @@ class PipelineSource(FrameProcessor):
         self._upstream_push_frame = upstream_push_frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         match direction:
             case FrameDirection.UPSTREAM:
                 await self._upstream_push_frame(frame, direction)
@@ -32,8 +30,6 @@ class PipelineSink(FrameProcessor):
         self._downstream_push_frame = downstream_push_frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         match direction:
             case FrameDirection.UPSTREAM:
                 await self.push_frame(frame, direction)
@@ -74,8 +70,6 @@ class Pipeline(BasePipeline):
         await self._cleanup_processors()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if direction == FrameDirection.DOWNSTREAM:
             await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
         elif direction == FrameDirection.UPSTREAM:
