@@ -22,6 +22,7 @@ Core Components
 * :mod:`Frames <pipecat.frames>`
 * :mod:`Processors <pipecat.processors>`
 * :mod:`Pipeline <pipecat.pipeline>`
+* :mod:`Services <pipecat.services>`
 
 Audio Processing
 ~~~~~~~~~~~~~~~~

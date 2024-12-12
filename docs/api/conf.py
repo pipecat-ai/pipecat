@@ -40,11 +40,69 @@ autodoc_default_options = {
     "show-inheritance": True,
 }
 
+# Mock imports for optional dependencies
+autodoc_mock_imports = [
+    "riva",
+    "livekit",
+    "pyht",
+    "anthropic",
+    "assemblyai",
+    "boto3",
+    "azure",
+    "cartesia",
+    "deepgram",
+    "elevenlabs",
+    "fal",
+    "gladia",
+    "google",
+    "krisp",
+    "langchain",
+    "lmnt",
+    "noisereduce",
+    "openai",
+    "openpipe",
+    "simli",
+    "soundfile",
+]
+
 # HTML output settings
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
 autodoc_typehints = "description"
 html_show_sphinx = False
+
+
+def verify_modules():
+    """Verify that required modules are available."""
+    required_modules = {
+        "services": [
+            "assemblyai",
+            "aws",
+            "cartesia",
+            "deepgram",
+            "google",
+            "lmnt",
+            "riva",
+            "simli",
+        ],
+        "serializers": ["livekit"],
+        "vad": ["silero", "vad_analyzer"],
+    }
+
+    missing = []
+    for category, modules in required_modules.items():
+        for module in modules:
+            try:
+                __import__(f"pipecat.{category}.{module}")
+                logger.info(f"Successfully imported pipecat.{category}.{module}")
+            except ImportError as e:
+                missing.append(f"pipecat.{category}.{module}")
+                logger.warning(
+                    f"Optional module not available: pipecat.{category}.{module} - {str(e)}"
+                )
+
+    if missing:
+        logger.warning(f"Some optional modules are not available: {missing}")
 
 
 def clean_title(title: str) -> str:
@@ -151,3 +209,7 @@ def setup(app):
 
     except Exception as e:
         logger.error(f"Error generating API documentation: {e}", exc_info=True)
+
+
+# Run module verification
+verify_modules()

@@ -11,7 +11,7 @@ import json
 import re
 from asyncio import CancelledError
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from loguru import logger
 from PIL import Image
@@ -75,8 +75,7 @@ class AnthropicContextAggregatorPair:
 
 
 class AnthropicLLMService(LLMService):
-    """
-    This class implements inference with Anthropic's AI models.
+    """This class implements inference with Anthropic's AI models.
 
     Can provide a custom client via the `client` kwarg, allowing you to
     use `AsyncAnthropicBedrock` and `AsyncAnthropicVertex` clients
@@ -328,7 +327,7 @@ class AnthropicLLMContext(OpenAILLMContext):
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
         *,
-        system: str | NotGiven = NOT_GIVEN,
+        system: Union[str, NotGiven] = NOT_GIVEN,
     ):
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
 
