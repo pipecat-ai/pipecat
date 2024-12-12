@@ -7,7 +7,7 @@ This directory contains the source files for auto-generating Pipecat's server AP
 1. Install documentation dependencies:
 
 ```bash
-pip install -r requirements-base.txt requirements-playht.txt requirements-riva.txt
+pip install -r requirements.txt
 ```
 
 2. Make the build scripts executable:
