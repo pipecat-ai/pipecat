@@ -92,7 +92,6 @@ class TavusVideoService(AIService):
         await self._send_audio_message(audio_base64, done=done)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
         if isinstance(frame, TTSStartedFrame):
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()

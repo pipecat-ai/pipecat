@@ -287,8 +287,6 @@ class CartesiaTTSService(WordTTSService):
                 await self._connect_websocket()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         # If we received a TTSSpeakFrame and the LLM response included text (it
         # might be that it's only a function calling response) we pause
         # processing more frames until we receive a BotStoppedSpeakingFrame.

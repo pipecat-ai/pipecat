@@ -107,7 +107,6 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
 
 class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
     async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
         # kind of a hack just to pass the LLMMessagesAppendFrame through, but it's fine for now
         if isinstance(frame, LLMMessagesAppendFrame):
             await self.push_frame(frame, direction)
@@ -305,8 +304,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         # logger.debug(f"Processing frame: {frame}")
 
         if isinstance(frame, TranscriptionFrame):

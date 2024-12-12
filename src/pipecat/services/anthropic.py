@@ -270,8 +270,6 @@ class AnthropicLLMService(LLMService):
             )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context: "AnthropicLLMContext" = AnthropicLLMContext.upgrade_to_anthropic(frame.context)
@@ -611,7 +609,6 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
             self._context = AnthropicLLMContext.from_openai_context(context)
 
     async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
         # Our parent method has already called push_frame(). So we can't interrupt the
         # flow here and we don't need to call push_frame() ourselves. Possibly something
         # to talk through (tagging @aleix). At some point we might need to refactor these
@@ -664,7 +661,6 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         self._pending_image_frame_message = None
 
     async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
         # See note above about not calling push_frame() here.
         if isinstance(frame, StartInterruptionFrame):
             self._function_call_in_progress = None

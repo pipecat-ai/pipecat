@@ -148,7 +148,6 @@ class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
     async def process_frame(
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ):
-        await super().process_frame(frame, direction)
         # Parent does not push LLMMessagesUpdateFrame. This ensures that in a typical pipeline,
         # messages are only processed by the user context aggregator, which is generally what we want. But
         # we also need to send new messages over the websocket, so the openai realtime API has them

@@ -16,7 +16,6 @@ from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
     EndFrame,
-    Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
@@ -334,12 +333,6 @@ class LiveKitInputTransport(BaseInputTransport):
         await self._client.disconnect()
         logger.info("LiveKitInputTransport stopped")
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, EndFrame):
-            await self.stop(frame)
-        else:
-            await super().process_frame(frame, direction)
-
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._client.disconnect()
@@ -410,12 +403,6 @@ class LiveKitOutputTransport(BaseOutputTransport):
         await super().stop(frame)
         await self._client.disconnect()
         logger.info("LiveKitOutputTransport stopped")
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, EndFrame):
-            await self.stop(frame)
-        else:
-            await super().process_frame(frame, direction)
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)

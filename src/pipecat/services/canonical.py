@@ -90,7 +90,6 @@ class CanonicalMetricsService(AIService):
         await self._process_audio()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
 
     async def _process_audio(self):

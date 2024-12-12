@@ -101,8 +101,6 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._next_send_time = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, StartInterruptionFrame):
             await self._write_frame(frame)
             self._next_send_time = 0

@@ -170,8 +170,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, TranscriptionFrame):
             pass
         elif isinstance(frame, OpenAILLMContextFrame):

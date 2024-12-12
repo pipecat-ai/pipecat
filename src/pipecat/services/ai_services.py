@@ -292,8 +292,6 @@ class TTSService(AIService):
         await self.queue_frame(TTSSpeakFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, TextFrame):
             await self._process_text_frame(frame)
         elif isinstance(frame, StartInterruptionFrame):
@@ -410,8 +408,6 @@ class WordTTSService(TTSService):
         await self._stop_words_task()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
 
@@ -498,8 +494,6 @@ class STTService(AIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes a frame of audio data, either buffering or transcribing it."""
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, AudioRawFrame):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We also push audio downstream in case someone
@@ -597,8 +591,6 @@ class ImageGenService(AIService):
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, TextFrame):
             await self.push_frame(frame, direction)
             await self.start_processing_metrics()
@@ -620,8 +612,6 @@ class VisionService(AIService):
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, VisionImageRawFrame):
             await self.start_processing_metrics()
             await self.process_generator(self.run_vision(frame))

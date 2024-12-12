@@ -286,8 +286,6 @@ class BaseOpenAILLMService(LLMService):
                     )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context: OpenAILLMContext = frame.context
@@ -475,7 +473,6 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
         super().__init__(context=context)
 
     async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
         # Our parent method has already called push_frame(). So we can't interrupt the
         # flow here and we don't need to call push_frame() ourselves.
         try:
@@ -516,7 +513,6 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         self._pending_image_frame_message = None
 
     async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
         # See note above about not calling push_frame() here.
         if isinstance(frame, StartInterruptionFrame):
             self._function_calls_in_progress.clear()
