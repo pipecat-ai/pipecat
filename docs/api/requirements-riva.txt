@@ -1,0 +1,3 @@
+# Force specific grpcio version for Riva
+grpcio==1.65.4
+pipecat-ai[riva]
