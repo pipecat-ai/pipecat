@@ -56,13 +56,32 @@ def clean_title(title: str) -> str:
     parts = title.split(".")
     title = parts[-1]
 
-    # Handle special cases for common acronyms
-    acronyms = ["ai", "aws", "api", "vad"]
+    # Special cases for service names and common acronyms
+    special_cases = {
+        "ai": "AI",
+        "aws": "AWS",
+        "api": "API",
+        "vad": "VAD",
+        "assemblyai": "AssemblyAI",
+        "deepgram": "Deepgram",
+        "elevenlabs": "ElevenLabs",
+        "openai": "OpenAI",
+        "openpipe": "OpenPipe",
+        "playht": "PlayHT",
+        "xtts": "XTTS",
+        "lmnt": "LMNT",
+    }
+
+    # Check if the entire title is a special case
+    if title.lower() in special_cases:
+        return special_cases[title.lower()]
+
+    # Otherwise, capitalize each word
     words = title.split("_")
     cleaned_words = []
     for word in words:
-        if word.lower() in acronyms:
-            cleaned_words.append(word.upper())
+        if word.lower() in special_cases:
+            cleaned_words.append(special_cases[word.lower()])
         else:
             cleaned_words.append(word.capitalize())
 
