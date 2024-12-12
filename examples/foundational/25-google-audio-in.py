@@ -95,8 +95,6 @@ class UserAudioCollector(FrameProcessor):
         self._user_speaking = False
 
     async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, TranscriptionFrame):
             # We could gracefully handle both audio input and text/transcription input ...
             # but let's leave that as an exercise to the reader. :-)
@@ -135,8 +133,6 @@ class InputTranscriptionContextFilter(FrameProcessor):
     """
 
     async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, SystemFrame):
             # We don't want to block system frames.
             await self.push_frame(frame, direction)
@@ -210,8 +206,6 @@ class InputTranscriptionFrameEmitter(FrameProcessor):
         self._aggregation = ""
 
     async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, TextFrame):
             self._aggregation += frame.text
         elif isinstance(frame, LLMFullResponseEndFrame):
@@ -262,8 +256,6 @@ class TranscriptionContextFixup(FrameProcessor):
         audio_part.text = self._transcript
 
     async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, LLMDemoTranscriptionFrame):
             logger.info(f"Transcription from Gemini: {frame.text}")
             self._transcript = frame.text

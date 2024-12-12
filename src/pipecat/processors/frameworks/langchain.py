@@ -36,8 +36,6 @@ class LangchainProcessor(FrameProcessor):
         self._participant_id = participant_id
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         if isinstance(frame, LLMMessagesFrame):
             # Messages are accumulated on the context as a list of messages.
             # The last one by the human is the one we want to send to the LLM.

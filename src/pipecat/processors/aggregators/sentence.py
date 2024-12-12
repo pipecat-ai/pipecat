@@ -33,8 +33,6 @@ class SentenceAggregator(FrameProcessor):
         self._aggregation = ""
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         # We ignore interim description at this point.
         if isinstance(frame, InterimTranscriptionFrame):
             return

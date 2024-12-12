@@ -68,8 +68,6 @@ class AudioBufferProcessor(FrameProcessor):
         self._bot_audio_buffer = bytearray()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
         # Include all audio from the user.
         if isinstance(frame, InputAudioRawFrame):
             resampled = resample_audio(frame.audio, frame.sample_rate, self._sample_rate)
