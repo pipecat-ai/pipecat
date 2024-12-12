@@ -1,8 +1,6 @@
-import importlib
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -24,7 +22,6 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.intersphinx",
-    "sphinx.ext.coverage",
 ]
 
 # Napoleon settings
@@ -50,62 +47,26 @@ autodoc_typehints = "description"
 html_show_sphinx = False
 
 
-def get_installed_services() -> Dict[str, Optional[str]]:
-    """Scan for installed pipecat services and return their status.
-    Returns a dictionary of service names and their import status/error message.
-    """
-    services_dir = project_root / "src" / "pipecat" / "services"
-    services_status = {}
+def clean_title(title: str) -> str:
+    """Automatically clean module titles."""
+    # Remove everything after space (like 'module', 'processor', etc.)
+    title = title.split(" ")[0]
 
-    if not services_dir.exists():
-        logger.warning(f"Services directory not found: {services_dir}")
-        return services_status
+    # Get the last part of the dot-separated path
+    parts = title.split(".")
+    title = parts[-1]
 
-    for item in services_dir.iterdir():
-        if item.is_dir() and not item.name.startswith("_") and not item.name == "to_be_updated":
-            service_name = item.name
-            try:
-                module = importlib.import_module(f"pipecat.services.{service_name}")
-                services_status[service_name] = None  # None indicates success
-                logger.info(f"Found service: {service_name} at {module.__file__}")
-            except ImportError as e:
-                services_status[service_name] = str(e)
-                logger.warning(f"Failed to import {service_name}: {e}")
+    # Handle special cases for common acronyms
+    acronyms = ["ai", "aws", "api", "vad"]
+    words = title.split("_")
+    cleaned_words = []
+    for word in words:
+        if word.lower() in acronyms:
+            cleaned_words.append(word.upper())
+        else:
+            cleaned_words.append(word.capitalize())
 
-    return services_status
-
-
-def generate_services_rst() -> str:
-    """Generate RST content for services section."""
-    services = get_installed_services()
-
-    # Sort services into successful and failed imports
-    successful = [name for name, status in services.items() if status is None]
-    failed = [(name, status) for name, status in services.items() if status is not None]
-
-    rst_content = [
-        "Services",
-        "~~~~~~~~",
-        "",
-        "Successfully Detected Services:",
-        "",
-    ]
-
-    for service in sorted(successful):
-        rst_content.append(f"* :mod:`pipecat.services.{service}`")
-
-    if failed:
-        rst_content.extend(
-            [
-                "",
-                "Services with Import Issues:",
-                "",
-            ]
-        )
-        for service, error in sorted(failed):
-            rst_content.append(f"* {service} (Import failed: {error})")
-
-    return "\n".join(rst_content)
+    return " ".join(cleaned_words)
 
 
 def setup(app):
@@ -127,15 +88,6 @@ def setup(app):
     logger.info(f"Generating API documentation...")
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"Source directory: {source_dir}")
-
-    # Get installed services
-    services = get_installed_services()
-    logger.info(f"Found {len(services)} services")
-    for service, status in services.items():
-        if status is None:
-            logger.info(f"Service available: {service}")
-        else:
-            logger.warning(f"Service import failed: {service} - {status}")
 
     excludes = [
         str(project_root / "src/pipecat/processors/gstreamer"),
@@ -165,10 +117,18 @@ def setup(app):
 
         logger.info("API documentation generated successfully!")
 
-        # Generate services index file
-        services_index = Path(output_dir) / "services_index.rst"
-        services_index.write_text(generate_services_rst())
-        logger.info(f"Generated services index at {services_index}")
+        # Process generated RST files to update titles
+        for rst_file in Path(output_dir).glob("*.rst"):
+            content = rst_file.read_text()
+            lines = content.split("\n")
+
+            # Find and clean up the title
+            if lines and "=" in lines[1]:  # Title is typically the first line
+                old_title = lines[0]
+                new_title = clean_title(old_title)
+                content = content.replace(old_title, new_title)
+                rst_file.write_text(content)
+                logger.info(f"Updated title: {old_title} -> {new_title}")
 
     except Exception as e:
         logger.error(f"Error generating API documentation: {e}", exc_info=True)
