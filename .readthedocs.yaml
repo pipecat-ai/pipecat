@@ -57,11 +57,6 @@ python:
         - websocket
         - whisper
 
-formats:
-  - pdf
-  - epub
-  - htmlzip
-
 search:
   ranking:
     api/*: 5
