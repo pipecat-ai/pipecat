@@ -10,20 +10,15 @@ echo "Creating test directory: $TEST_DIR"
 mkdir -p "$TEST_DIR"
 cd "$TEST_DIR"
 
-# Create single virtual environment
+# Create virtual environment
 python -m venv venv
 source venv/bin/activate
 
-echo "Installing base dependencies..."
+echo "Installing build dependencies..."
 pip install --upgrade pip wheel setuptools
-pip install -r "$DOCS_DIR/requirements-base.txt"
 
-# Try to install optional dependencies, but don't fail if they don't work
-echo "Installing Riva dependencies..."
-pip install -r "$DOCS_DIR/requirements-riva.txt" || echo "Failed to install Riva dependencies"
-
-echo "Installing PlayHT dependencies..."
-pip install -r "$DOCS_DIR/requirements-playht.txt" || echo "Failed to install PlayHT dependencies"
+echo "Installing documentation dependencies..."
+pip install -r "$DOCS_DIR/requirements.txt"
 
 echo "Building documentation..."
 cd "$DOCS_DIR"
@@ -31,6 +26,13 @@ sphinx-build -b html . "_build/html"
 
 echo "Build complete. Check _build/html directory for output."
 
+# Print summary
+echo -e "\n=== Build Summary ==="
+echo "Documentation: $DOCS_DIR/_build/html"
+echo "Test environment: $TEST_DIR"
+echo -e "\nTo view the documentation:"
+echo "open $DOCS_DIR/_build/html/index.html"
+
 # Print installed packages for verification
-echo "Installed packages:"
-pip freeze
+echo -e "\n=== Installed Packages ==="
+pip freeze | grep -E "sphinx|pipecat"
