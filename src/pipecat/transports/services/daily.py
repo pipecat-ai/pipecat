@@ -694,19 +694,17 @@ class DailyInputTransport(BaseInputTransport):
             self._audio_in_task = self.get_event_loop().create_task(self._audio_in_task_handler())
 
     async def stop(self, frame: EndFrame):
+        # Leave the room.
+        await self._client.leave()
+        # Stop audio thread.
+        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+            self._audio_in_task.cancel()
+            await self._audio_in_task
+            self._audio_in_task = None
         # Parent stop.
         await super().stop(frame)
-        # Leave the room.
-        await self._client.leave()
-        # Stop audio thread.
-        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
-            self._audio_in_task.cancel()
-            await self._audio_in_task
-            self._audio_in_task = None
 
     async def cancel(self, frame: CancelFrame):
-        # Parent stop.
-        await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
@@ -714,6 +712,8 @@ class DailyInputTransport(BaseInputTransport):
             self._audio_in_task.cancel()
             await self._audio_in_task
             self._audio_in_task = None
+        # Parent stop.
+        await super().cancel(frame)
 
     async def cleanup(self):
         await super().cleanup()
@@ -817,16 +817,16 @@ class DailyOutputTransport(BaseOutputTransport):
         await self._client.join()
 
     async def stop(self, frame: EndFrame):
+        # Leave the room.
+        await self._client.leave()
         # Parent stop.
         await super().stop(frame)
-        # Leave the room.
-        await self._client.leave()
 
     async def cancel(self, frame: CancelFrame):
-        # Parent stop.
-        await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
+        # Parent stop.
+        await super().cancel(frame)
 
     async def cleanup(self):
         await super().cleanup()
