@@ -76,7 +76,10 @@ class FastPitchTTSService(TTSService):
         )
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        def read_audio_responses():
+        def read_audio_responses(queue: asyncio.Queue):
+            def add_response(r):
+                asyncio.run_coroutine_threadsafe(queue.put(r), self.get_event_loop())
+
             try:
                 responses = self._service.synthesize_online(
                     text,
@@ -87,26 +90,32 @@ class FastPitchTTSService(TTSService):
                     quality=self._quality,
                     custom_dictionary={},
                 )
-                return responses
+                for r in responses:
+                    add_response(r)
+                add_response(None)
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                return []
+                add_response(None)
 
         await self.start_ttfb_metrics()
         yield TTSStartedFrame()
 
         logger.debug(f"Generating TTS: [{text}]")
-        responses = await asyncio.to_thread(read_audio_responses)
 
-        for resp in responses:
+        queue = asyncio.Queue()
+        await asyncio.to_thread(read_audio_responses, queue)
+
+        # Wait for the thread to start.
+        resp = await queue.get()
+        while resp:
             await self.stop_ttfb_metrics()
-
             frame = TTSAudioRawFrame(
                 audio=resp.audio,
                 sample_rate=self._sample_rate,
                 num_channels=1,
             )
             yield frame
+            resp = await queue.get()
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()
