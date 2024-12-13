@@ -29,6 +29,8 @@ class FunctionFilter(FrameProcessor):
         return isinstance(frame, SystemFrame) or direction != self._direction
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         passthrough = self._should_passthrough_frame(frame, direction)
         allowed = await self._filter(frame)
         if passthrough or allowed:

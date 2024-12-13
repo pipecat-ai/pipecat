@@ -161,13 +161,6 @@ class FrameProcessor:
     def get_clock(self) -> BaseClock:
         return self._clock
 
-    async def pause_processing_frames(self):
-        self.__should_block_frames = True
-
-    async def resume_processing_frames(self):
-        self.__input_event.set()
-        self.__should_block_frames = False
-
     async def queue_frame(
         self,
         frame: Frame,
@@ -182,13 +175,32 @@ class FrameProcessor:
 
         if isinstance(frame, SystemFrame):
             # We don't want to queue system frames.
-            await self._process_frame(frame, direction)
+            await self.process_frame(frame, direction)
         else:
             # We queue everything else.
             await self.__input_queue.put((frame, direction, callback))
 
+    async def pause_processing_frames(self):
+        self.__should_block_frames = True
+
+    async def resume_processing_frames(self):
+        self.__input_event.set()
+        self.__should_block_frames = False
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        pass
+        if isinstance(frame, StartFrame):
+            self._clock = frame.clock
+            self._allow_interruptions = frame.allow_interruptions
+            self._enable_metrics = frame.enable_metrics
+            self._enable_usage_metrics = frame.enable_usage_metrics
+            self._report_only_initial_ttfb = frame.report_only_initial_ttfb
+        elif isinstance(frame, StartInterruptionFrame):
+            await self._start_interruption()
+            await self.stop_all_metrics()
+        elif isinstance(frame, StopInterruptionFrame):
+            self._should_report_ttfb = True
+        elif isinstance(frame, CancelFrame):
+            self._cancelling = True
 
     async def push_error(self, error: ErrorFrame):
         await self.push_frame(error, FrameDirection.UPSTREAM)
@@ -215,28 +227,6 @@ class FrameProcessor:
         if event_name in self._event_handlers:
             raise Exception(f"Event handler {event_name} already registered")
         self._event_handlers[event_name] = []
-
-    #
-    # Frame processing
-    #
-
-    async def _process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, StartFrame):
-            self._clock = frame.clock
-            self._allow_interruptions = frame.allow_interruptions
-            self._enable_metrics = frame.enable_metrics
-            self._enable_usage_metrics = frame.enable_usage_metrics
-            self._report_only_initial_ttfb = frame.report_only_initial_ttfb
-        elif isinstance(frame, StartInterruptionFrame):
-            await self._start_interruption()
-            await self.stop_all_metrics()
-        elif isinstance(frame, StopInterruptionFrame):
-            self._should_report_ttfb = True
-        elif isinstance(frame, CancelFrame):
-            self._cancelling = True
-
-        # Call subclass.
-        await self.process_frame(frame, direction)
 
     #
     # Handle interruptions
@@ -299,7 +289,7 @@ class FrameProcessor:
                 (frame, direction, callback) = await self.__input_queue.get()
 
                 # Process the frame.
-                await self._process_frame(frame, direction)
+                await self.process_frame(frame, direction)
 
                 # If this frame has an associated callback, call it now.
                 if callback:

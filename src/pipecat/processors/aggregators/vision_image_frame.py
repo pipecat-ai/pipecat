@@ -31,6 +31,8 @@ class VisionImageFrameAggregator(FrameProcessor):
         self._describe_text = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, TextFrame):
             self._describe_text = frame.text
         elif isinstance(frame, InputImageRawFrame):

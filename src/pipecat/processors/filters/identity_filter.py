@@ -26,4 +26,5 @@ class IdentityFilter(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process an incoming frame by passing it through unchanged."""
+        await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)

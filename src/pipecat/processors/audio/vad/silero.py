@@ -39,6 +39,8 @@ class SileroVAD(FrameProcessor):
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, AudioRawFrame):
             await self._analyze_audio(frame)
             if self._audio_passthrough:

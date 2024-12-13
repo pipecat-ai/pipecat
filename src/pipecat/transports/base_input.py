@@ -79,6 +79,8 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         # Specific system frames
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
