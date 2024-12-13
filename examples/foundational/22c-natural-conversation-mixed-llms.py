@@ -101,12 +101,12 @@ HIGH PRIORITY SIGNALS:
 
 Examples:
 # Complete Wh-question
-[{"role": "assistant", "content": "I can help you learn."},
+[{"role": "assistant", "content": "I can help you learn."}, 
  {"role": "user", "content": "What's the fastest way to learn Spanish"}]
 Output: YES
 
 # Complete Yes/No question despite STT error
-[{"role": "assistant", "content": "I know about planets."},
+[{"role": "assistant", "content": "I know about planets."}, 
  {"role": "user", "content": "Is is Jupiter the biggest planet"}]
 Output: YES
 
@@ -118,12 +118,12 @@ Output: YES
 
 Examples:
 # Direct instruction
-[{"role": "assistant", "content": "I can explain many topics."},
+[{"role": "assistant", "content": "I can explain many topics."}, 
  {"role": "user", "content": "Tell me about black holes"}]
 Output: YES
 
 # Action demand
-[{"role": "assistant", "content": "I can help with math."},
+[{"role": "assistant", "content": "I can help with math."}, 
  {"role": "user", "content": "Solve this equation x plus 5 equals 12"}]
 Output: YES
 
@@ -134,12 +134,12 @@ Output: YES
 
 Examples:
 # Specific answer
-[{"role": "assistant", "content": "What's your favorite color?"},
+[{"role": "assistant", "content": "What's your favorite color?"}, 
  {"role": "user", "content": "I really like blue"}]
 Output: YES
 
 # Option selection
-[{"role": "assistant", "content": "Would you prefer morning or evening?"},
+[{"role": "assistant", "content": "Would you prefer morning or evening?"}, 
  {"role": "user", "content": "Morning"}]
 Output: YES
 
@@ -153,17 +153,17 @@ MEDIUM PRIORITY SIGNALS:
 
 Examples:
 # Self-correction reaching completion
-[{"role": "assistant", "content": "What would you like to know?"},
+[{"role": "assistant", "content": "What would you like to know?"}, 
  {"role": "user", "content": "Tell me about... no wait, explain how rainbows form"}]
 Output: YES
 
 # Topic change with complete thought
-[{"role": "assistant", "content": "The weather is nice today."},
+[{"role": "assistant", "content": "The weather is nice today."}, 
  {"role": "user", "content": "Actually can you tell me who invented the telephone"}]
 Output: YES
 
 # Mid-sentence completion
-[{"role": "assistant", "content": "Hello I'm ready."},
+[{"role": "assistant", "content": "Hello I'm ready."}, 
  {"role": "user", "content": "What's the capital of? France"}]
 Output: YES
 
@@ -175,12 +175,12 @@ Output: YES
 
 Examples:
 # Acknowledgment
-[{"role": "assistant", "content": "Should we talk about history?"},
+[{"role": "assistant", "content": "Should we talk about history?"}, 
  {"role": "user", "content": "Sure"}]
 Output: YES
 
 # Disagreement with completion
-[{"role": "assistant", "content": "Is that what you meant?"},
+[{"role": "assistant", "content": "Is that what you meant?"}, 
  {"role": "user", "content": "No not really"}]
 Output: YES
 
@@ -194,12 +194,12 @@ LOW PRIORITY SIGNALS:
 
 Examples:
 # Word repetition but complete
-[{"role": "assistant", "content": "I can help with that."},
+[{"role": "assistant", "content": "I can help with that."}, 
  {"role": "user", "content": "What what is the time right now"}]
 Output: YES
 
 # Missing punctuation but complete
-[{"role": "assistant", "content": "I can explain that."},
+[{"role": "assistant", "content": "I can explain that."}, 
  {"role": "user", "content": "Please tell me how computers work"}]
 Output: YES
 
@@ -211,12 +211,12 @@ Output: YES
 
 Examples:
 # Filler words but complete
-[{"role": "assistant", "content": "What would you like to know?"},
+[{"role": "assistant", "content": "What would you like to know?"}, 
  {"role": "user", "content": "Um uh how do airplanes fly"}]
 Output: YES
 
 # Thinking pause but incomplete
-[{"role": "assistant", "content": "I can explain anything."},
+[{"role": "assistant", "content": "I can explain anything."}, 
  {"role": "user", "content": "Well um I want to know about the"}]
 Output: NO
 
@@ -241,17 +241,17 @@ DECISION RULES:
 
 Examples:
 # Incomplete despite corrections
-[{"role": "assistant", "content": "What would you like to know about?"},
+[{"role": "assistant", "content": "What would you like to know about?"}, 
  {"role": "user", "content": "Can you tell me about"}]
 Output: NO
 
 # Complete despite multiple artifacts
-[{"role": "assistant", "content": "I can help you learn."},
+[{"role": "assistant", "content": "I can help you learn."}, 
  {"role": "user", "content": "How do you I mean what's the best way to learn programming"}]
 Output: YES
 
 # Trailing off incomplete
-[{"role": "assistant", "content": "I can explain anything."},
+[{"role": "assistant", "content": "I can explain anything."}, 
  {"role": "user", "content": "I was wondering if you could tell me why"}]
 Output: NO
 """
@@ -268,6 +268,7 @@ class StatementJudgeContextFilter(FrameProcessor):
         self._notifier = notifier
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
         # We must not block system frames.
         if isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
@@ -319,6 +320,8 @@ class CompletenessCheck(FrameProcessor):
         self._notifier = notifier
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, TextFrame) and frame.text == "YES":
             logger.debug("!!! Completeness check YES")
             await self.push_frame(UserStoppedSpeakingFrame())
@@ -341,6 +344,8 @@ class OutputGate(FrameProcessor):
         self._gate_open = True
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         # We must not block system frames.
         if isinstance(frame, SystemFrame):
             if isinstance(frame, StartFrame):

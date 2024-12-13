@@ -51,6 +51,8 @@ class TranslationProcessor(FrameProcessor):
         self._language = language
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, TextFrame):
             context = [
                 {
@@ -76,6 +78,8 @@ class TranslationSubtitles(FrameProcessor):
     # subtitles.
     #
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, TextFrame):
             message = {"language": self._language, "text": frame.text}
             await self.push_frame(DailyTransportMessageFrame(message))

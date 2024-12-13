@@ -86,6 +86,8 @@ class LLMResponseAggregator(FrameProcessor):
     # and T2 would be dropped.
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         send_aggregation = False
 
         if isinstance(frame, self._start_frame):
@@ -238,6 +240,8 @@ class LLMFullResponseAggregator(FrameProcessor):
         self._aggregation = ""
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, TextFrame):
             self._aggregation += frame.text
         elif isinstance(frame, LLMFullResponseEndFrame):

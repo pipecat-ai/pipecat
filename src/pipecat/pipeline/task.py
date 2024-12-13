@@ -45,6 +45,8 @@ class Source(FrameProcessor):
         self._up_queue = up_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         match direction:
             case FrameDirection.UPSTREAM:
                 await self._handle_upstream_frame(frame)
@@ -73,6 +75,8 @@ class Sink(FrameProcessor):
         self._down_queue = down_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         # We really just want to know when the EndFrame reached the sink.
         if isinstance(frame, EndFrame):
             await self._down_queue.put(frame)
