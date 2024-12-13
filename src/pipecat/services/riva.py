@@ -35,6 +35,8 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
+FASTPITCH_TIMEOUT_SECS = 5
+
 
 class FastPitchTTSService(TTSService):
     class InputParams(BaseModel):
@@ -102,20 +104,23 @@ class FastPitchTTSService(TTSService):
 
         logger.debug(f"Generating TTS: [{text}]")
 
-        queue = asyncio.Queue()
-        await asyncio.to_thread(read_audio_responses, queue)
+        try:
+            queue = asyncio.Queue()
+            await asyncio.to_thread(read_audio_responses, queue)
 
-        # Wait for the thread to start.
-        resp = await queue.get()
-        while resp:
-            await self.stop_ttfb_metrics()
-            frame = TTSAudioRawFrame(
-                audio=resp.audio,
-                sample_rate=self._sample_rate,
-                num_channels=1,
-            )
-            yield frame
-            resp = await queue.get()
+            # Wait for the thread to start.
+            resp = await asyncio.wait_for(queue.get(), FASTPITCH_TIMEOUT_SECS)
+            while resp:
+                await self.stop_ttfb_metrics()
+                frame = TTSAudioRawFrame(
+                    audio=resp.audio,
+                    sample_rate=self._sample_rate,
+                    num_channels=1,
+                )
+                yield frame
+                resp = await asyncio.wait_for(queue.get(), FASTPITCH_TIMEOUT_SECS)
+        except asyncio.TimeoutError:
+            logger.error(f"{self} timeout waiting for audio response")
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()
