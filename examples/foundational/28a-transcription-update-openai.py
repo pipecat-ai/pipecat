@@ -15,14 +15,14 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, LLMMessagesFrame
+from pipecat.frames.frames import LLMMessagesFrame, TranscriptionMessage, TranscriptionUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.anthropic import AnthropicLLMContext, AnthropicLLMService
+from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -31,26 +31,27 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-class TestAnthropicLLMService(AnthropicLLMService):
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, LLMMessagesFrame):
-            logger.info("Original OpenAI format messages:")
-            logger.info(frame.messages)
+class TranscriptHandler:
+    """Simple handler to demonstrate transcript processing."""
 
-            # Convert to Anthropic format
-            context = AnthropicLLMContext.from_messages(frame.messages)
-            logger.info("Converted to Anthropic format:")
-            logger.info(context.messages)
+    def __init__(self):
+        self.messages: List[TranscriptionMessage] = []
 
-            # Convert back to OpenAI format
-            openai_messages = []
-            for msg in context.messages:
-                converted = context.to_standard_messages(msg)
-                openai_messages.extend(converted)
-            logger.info("Converted back to OpenAI format:")
-            logger.info(openai_messages)
+    async def on_transcript_update(
+        self, processor: TranscriptProcessor, frame: TranscriptionUpdateFrame
+    ):
+        """Handle new transcript messages."""
+        self.messages.extend(frame.messages)
 
-        await super().process_frame(frame, direction)
+        # Log the new messages
+        logger.info("New transcript messages:")
+        for msg in frame.messages:
+            logger.info(f"{msg.role}: {msg.content}")
+
+        # Log the full transcript
+        logger.info("Full transcript:")
+        for msg in self.messages:
+            logger.info(f"{msg.role}: {msg.content}")
 
 
 async def main():
@@ -74,28 +75,29 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = TestAnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-opus-20240229"
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="gpt-4o",
         )
 
-        # Test messages including various formats
         messages = [
             {
                 "role": "system",
                 "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative, helpful, and brief way. Say hello.",
             },
-            {
-                "role": "assistant",
-                "content": [
-                    {"type": "text", "text": "Hello! How can I help you today?"},
-                    {"type": "text", "text": "I'm ready to assist."},
-                ],
-            },
-            {"role": "user", "content": "Hi there!"},
         ]
 
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
+
+        # Create transcript processor and handler
+        transcript_processor = TranscriptProcessor()
+        transcript_handler = TranscriptHandler()
+
+        # Register event handler for transcript updates
+        @transcript_processor.event_handler("on_transcript_update")
+        async def on_transcript_update(processor, frame):
+            await transcript_handler.on_transcript_update(processor, frame)
 
         pipeline = Pipeline(
             [
@@ -105,6 +107,7 @@ async def main():
                 tts,  # TTS
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
+                transcript_processor,  # Process transcripts
             ]
         )
 
