@@ -64,6 +64,7 @@ class StatementJudgeContextFilter(FrameProcessor):
         self._notifier = notifier
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
         # We must not block system frames.
         if isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
@@ -117,6 +118,7 @@ class CompletenessCheck(FrameProcessor):
         self._notifier = notifier
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
         if isinstance(frame, TextFrame) and frame.text == "YES":
             logger.debug("Completeness check YES")
             await self.push_frame(UserStoppedSpeakingFrame())
@@ -139,6 +141,8 @@ class OutputGate(FrameProcessor):
         self._gate_open = True
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         # We must not block system frames.
         if isinstance(frame, SystemFrame):
             if isinstance(frame, StartFrame):

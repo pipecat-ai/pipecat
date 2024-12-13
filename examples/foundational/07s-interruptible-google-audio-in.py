@@ -82,6 +82,8 @@ class UserAudioCollector(FrameProcessor):
         self._user_speaking = False
 
     async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, TranscriptionFrame):
             # We could gracefully handle both audio input and text/transcription input ...
             # but let's leave that as an exercise to the reader. :-)
@@ -124,6 +126,7 @@ class TranscriptExtractor(FrameProcessor):
         self._accumulating_transcript = False
 
     async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
         if isinstance(frame, LLMFullResponseStartFrame):
             self._processing_llm_response = True
             self._accumulating_transcript = True
@@ -177,6 +180,8 @@ class TanscriptionContextFixup(FrameProcessor):
             self._context.messages[-1].parts[-1].text += f"\n\n{marker}\n{self._transcript}\n"
 
     async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, MagicDemoTranscriptionFrame):
             self._transcript = frame.text
         elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(
