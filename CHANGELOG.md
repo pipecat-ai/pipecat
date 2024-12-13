@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tamil) and PlayHT (Afrikans, Albanian, Amharic, Arabic, Bengali, Croatian,
   Galician, Hebrew, Mandarin, Serbian, Tagalog, Urdu, Xhosa).
 
+### Changed
+
+- Changed: Room expiration (`exp`) in `DailyRoomProperties` is now optional
+  (None) by default instead of automatically setting a 5-minute expiration
+  time. You must explicitly set expiration time if desired.
+
 ### Deprecated
 
 - `AWSTTSService` is now deprecated, use `PollyTTSService` instead.
