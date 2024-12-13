@@ -60,6 +60,8 @@ for file in sound_files:
 
 class OutboundSoundEffectWrapper(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, LLMFullResponseEndFrame):
             await self.push_frame(sounds["ding1.wav"])
             # In case anything else downstream needs it
@@ -70,6 +72,8 @@ class OutboundSoundEffectWrapper(FrameProcessor):
 
 class InboundSoundEffectWrapper(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, OpenAILLMContextFrame):
             await self.push_frame(sounds["ding2.wav"])
             # In case anything else downstream needs it

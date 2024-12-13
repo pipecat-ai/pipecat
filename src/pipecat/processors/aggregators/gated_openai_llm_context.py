@@ -24,6 +24,8 @@ class GatedOpenAILLMContextAggregator(FrameProcessor):
         self._last_context_frame = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, StartFrame):
             await self.push_frame(frame)
             await self._start()

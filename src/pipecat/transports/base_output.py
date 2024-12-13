@@ -120,6 +120,8 @@ class BaseOutputTransport(FrameProcessor):
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         #
         # System frames (like StartInterruptionFrame) are pushed
         # immediately. Other frames require order so they are put in the sink

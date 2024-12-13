@@ -66,6 +66,8 @@ class GStreamerPipelineSource(FrameProcessor):
         bus.connect("message", self._on_gstreamer_message)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         # Specific system frames
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be

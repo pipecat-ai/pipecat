@@ -32,6 +32,8 @@ class WakeNotifierFilter(FrameProcessor):
         self._filter = filter
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, self._types) and await self._filter(frame):
             await self._notifier.notify()
 
