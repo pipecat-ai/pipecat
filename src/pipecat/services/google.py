@@ -412,6 +412,25 @@ class GoogleLLMContext(OpenAILLMContext):
         # self.add_message(message)
 
     def from_standard_message(self, message):
+        """Convert standard format message to Google Content object.
+
+        Handles conversion of text, images, and function calls to Google's format.
+        System messages are stored separately and return None.
+
+        Args:
+            message: Message in standard format:
+                {
+                    "role": "user/assistant/system/tool",
+                    "content": str | [{"type": "text/image_url", ...}] | None,
+                    "tool_calls": [{"function": {"name": str, "arguments": str}}]
+                }
+
+        Returns:
+            glm.Content object with:
+                - role: "user" or "model" (converted from "assistant")
+                - parts: List[Part] containing text, inline_data, or function calls
+            Returns None for system messages.
+        """
         role = message["role"]
         content = message.get("content", [])
         if role == "system":
@@ -461,6 +480,27 @@ class GoogleLLMContext(OpenAILLMContext):
         return message
 
     def to_standard_messages(self, obj) -> list:
+        """Convert Google Content object to standard structured format.
+
+        Handles text, images, and function calls from Google's Content/Part objects.
+
+        Args:
+            obj: Google Content object with:
+                - role: "model" (converted to "assistant") or "user"
+                - parts: List[Part] containing text, inline_data, or function calls
+
+        Returns:
+            List of messages in standard format:
+            [
+                {
+                    "role": "user/assistant/tool",
+                    "content": [
+                        {"type": "text", "text": str} |
+                        {"type": "image_url", "image_url": {"url": str}}
+                    ]
+                }
+            ]
+        """
         msg = {"role": obj.role, "content": []}
         if msg["role"] == "model":
             msg["role"] = "assistant"
