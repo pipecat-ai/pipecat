@@ -4,13 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import List
+from typing import List, Optional
 
 from loguru import logger
 
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    OpenAILLMContextAssistantTimestampFrame,
+    OpenAILLMContextUserTimestampFrame,
     TranscriptionMessage,
     TranscriptionUpdateFrame,
 )
@@ -19,12 +21,12 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class TranscriptProcessor(FrameProcessor):
-    """Processes LLM context frames to generate conversation transcripts.
+    """Processes LLM context frames to generate timestamped conversation transcripts.
 
-    This processor monitors OpenAILLMContextFrame frames and extracts conversation
-    content, filtering out system messages and function calls. When new messages
-    are detected, it emits a TranscriptionUpdateFrame containing only the new
-    messages.
+    This processor monitors OpenAILLMContextFrame frames and their corresponding
+    timestamp frames to build a chronological conversation transcript. Messages are
+    stored by role until their matching timestamp frame arrives, then emitted via
+    TranscriptionUpdateFrame.
 
     Each LLM context (OpenAI, Anthropic, Google) provides conversion to the standard format:
     [
@@ -39,8 +41,8 @@ class TranscriptProcessor(FrameProcessor):
     ]
 
     Events:
-        on_transcript_update: Emitted when new transcript messages are available.
-            Args: TranscriptionUpdateFrame containing new messages.
+        on_transcript_update: Emitted when timestamped messages are available.
+            Args: TranscriptionUpdateFrame containing timestamped messages.
 
     Example:
         ```python
@@ -49,7 +51,7 @@ class TranscriptProcessor(FrameProcessor):
         @transcript_processor.event_handler("on_transcript_update")
         async def on_transcript_update(processor, frame):
             for msg in frame.messages:
-                print(f"{msg.role}: {msg.content}")
+                print(f"[{msg.timestamp}] {msg.role}: {msg.content}")
         ```
     """
 
@@ -62,6 +64,8 @@ class TranscriptProcessor(FrameProcessor):
         super().__init__(**kwargs)
         self._processed_messages: List[TranscriptionMessage] = []
         self._register_event_handler("on_transcript_update")
+        self._pending_user_messages: List[TranscriptionMessage] = []
+        self._pending_assistant_messages: List[TranscriptionMessage] = []
 
     def _extract_messages(self, messages: List[dict]) -> List[TranscriptionMessage]:
         """Extract conversation messages from standard format.
@@ -112,7 +116,16 @@ class TranscriptProcessor(FrameProcessor):
         return current[processed_len:]
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process incoming frames, watching for OpenAILLMContextFrame.
+        """Process frames to build a timestamped conversation transcript.
+
+        Handles three frame types in sequence:
+        1. OpenAILLMContextFrame: Contains new messages to be timestamped
+        2. OpenAILLMContextUserTimestampFrame: Timestamp for user messages
+        3. OpenAILLMContextAssistantTimestampFrame: Timestamp for assistant messages
+
+        Messages are stored by role until their corresponding timestamp frame arrives.
+        When a timestamp frame is received, the matching messages are timestamped and
+        emitted in chronological order via TranscriptionUpdateFrame.
 
         Args:
             frame: The frame to process
@@ -124,27 +137,42 @@ class TranscriptProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, OpenAILLMContextFrame):
-            try:
-                # Convert context messages to standard format
-                standard_messages = []
-                for msg in frame.context.messages:
-                    converted = frame.context.to_standard_messages(msg)
-                    standard_messages.extend(converted)
+            # Extract and store messages by role
+            standard_messages = []
+            for msg in frame.context.messages:
+                converted = frame.context.to_standard_messages(msg)
+                standard_messages.extend(converted)
 
-                # Extract and process messages
-                current_messages = self._extract_messages(standard_messages)
-                new_messages = self._find_new_messages(current_messages)
+            current_messages = self._extract_messages(standard_messages)
+            new_messages = self._find_new_messages(current_messages)
 
-                if new_messages:
-                    # Update state and notify listeners
-                    self._processed_messages.extend(new_messages)
-                    update_frame = TranscriptionUpdateFrame(messages=new_messages)
-                    await self._call_event_handler("on_transcript_update", update_frame)
-                    await self.push_frame(update_frame)
+            # Store new messages by role
+            for msg in new_messages:
+                if msg.role == "user":
+                    self._pending_user_messages.append(msg)
+                elif msg.role == "assistant":
+                    self._pending_assistant_messages.append(msg)
 
-            except Exception as e:
-                logger.error(f"Error processing transcript in {self}: {e}")
-                await self.push_error(ErrorFrame(str(e)))
+        elif isinstance(frame, OpenAILLMContextUserTimestampFrame):
+            # Process pending user messages with timestamp
+            if self._pending_user_messages:
+                for msg in self._pending_user_messages:
+                    msg.timestamp = frame.timestamp
+                self._processed_messages.extend(self._pending_user_messages)
+                update_frame = TranscriptionUpdateFrame(messages=self._pending_user_messages)
+                await self._call_event_handler("on_transcript_update", update_frame)
+                await self.push_frame(update_frame)
+                self._pending_user_messages = []
 
-        # Always push the original frame downstream
+        elif isinstance(frame, OpenAILLMContextAssistantTimestampFrame):
+            # Process pending assistant messages with timestamp
+            if self._pending_assistant_messages:
+                for msg in self._pending_assistant_messages:
+                    msg.timestamp = frame.timestamp
+                self._processed_messages.extend(self._pending_assistant_messages)
+                update_frame = TranscriptionUpdateFrame(messages=self._pending_assistant_messages)
+                await self._call_event_handler("on_transcript_update", update_frame)
+                await self.push_frame(update_frame)
+                self._pending_assistant_messages = []
+
         await self.push_frame(frame, direction)

@@ -33,7 +33,10 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 class TranscriptHandler:
-    """Simple handler to demonstrate transcript processing."""
+    """Simple handler to demonstrate transcript processing.
+
+    Maintains a list of conversation messages and logs them with timestamps.
+    """
 
     def __init__(self):
         self.messages: List[TranscriptionMessage] = []
@@ -41,18 +44,25 @@ class TranscriptHandler:
     async def on_transcript_update(
         self, processor: TranscriptProcessor, frame: TranscriptionUpdateFrame
     ):
-        """Handle new transcript messages."""
+        """Handle new transcript messages.
+
+        Args:
+            processor: The TranscriptProcessor that emitted the update
+            frame: TranscriptionUpdateFrame containing new messages
+        """
         self.messages.extend(frame.messages)
 
         # Log the new messages
         logger.info("New transcript messages:")
         for msg in frame.messages:
-            logger.info(f"{msg.role}: {msg.content}")
+            timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
+            logger.info(f"{timestamp}{msg.role}: {msg.content}")
 
-        # Log the full transcript
-        logger.info("Full transcript:")
-        for msg in self.messages:
-            logger.info(f"{msg.role}: {msg.content}")
+        # # Log the full transcript
+        # logger.info("Full transcript:")
+        # for msg in self.messages:
+        #     timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
+        #     logger.info(f"{timestamp}{msg.role}: {msg.content}")
 
 
 async def main():
