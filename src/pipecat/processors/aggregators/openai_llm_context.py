@@ -115,8 +115,25 @@ class OpenAILLMContext:
     def from_standard_message(self, message):
         return message
 
-    # convert a message in this LLM's format to one or more messages in OpenAI format
     def to_standard_messages(self, obj) -> list:
+        """Convert OpenAI message to standard structured format.
+
+        Args:
+            obj: Message in OpenAI format {"role": "user", "content": "text"}
+
+        Returns:
+            List containing message with structured content:
+            [{"role": "user", "content": [{"type": "text", "text": "message"}]}]
+        """
+        # Skip messages without content
+        if not obj.get("content"):
+            return []
+
+        # Convert simple string content to structured format
+        if isinstance(obj["content"], str):
+            return [{"role": obj["role"], "content": [{"type": "text", "text": obj["content"]}]}]
+
+        # Return original message if content is already structured
         return [obj]
 
     def get_messages_for_initializing_history(self):
