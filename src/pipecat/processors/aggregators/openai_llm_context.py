@@ -112,7 +112,38 @@ class OpenAILLMContext:
             msgs.append(msg)
         return json.dumps(msgs)
 
-    def from_standard_message(self, message):
+    def from_standard_message(self, message) -> dict:
+        """Convert standard format message to OpenAI format.
+
+        Converts structured content back to OpenAI's simple string format.
+
+        Args:
+            message: Message in standard format:
+                {
+                    "role": "user/assistant",
+                    "content": [{"type": "text", "text": str}]
+                }
+
+        Returns:
+            Message in OpenAI format:
+            {
+                "role": "user/assistant",
+                "content": str
+            }
+        """
+        # If content is already a string, return as-is
+        if isinstance(message.get("content"), str):
+            return message
+
+        # Convert structured content to string
+        if isinstance(message.get("content"), list):
+            text_parts = []
+            for part in message["content"]:
+                if part.get("type") == "text":
+                    text_parts.append(part["text"])
+
+            return {"role": message["role"], "content": " ".join(text_parts) if text_parts else ""}
+
         return message
 
     def to_standard_messages(self, obj) -> list:
