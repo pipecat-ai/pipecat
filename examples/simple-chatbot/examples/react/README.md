@@ -1,6 +1,6 @@
 # React Implementation
 
-Basic implementation using the [Pipecat React SDK](https://docs.pipecat.ai/client/reference/react/introduction).
+Basic implementation using the [Pipecat React SDK](https://docs.pipecat.ai/client/react/introduction).
 
 ## Setup
 
