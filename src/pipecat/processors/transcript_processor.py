@@ -71,7 +71,9 @@ class TranscriptProcessor(FrameProcessor):
         """Extract conversation messages from standard format.
 
         Args:
-            messages: List of messages in standard format with structured content
+            messages: List of messages in OpenAI format, which can be either:
+                - Simple format: {"role": "user", "content": "Hello"}
+                - Content list: {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
 
         Returns:
             List[TranscriptionMessage]: Normalized conversation messages
@@ -82,9 +84,17 @@ class TranscriptProcessor(FrameProcessor):
             if msg["role"] not in ("user", "assistant"):
                 continue
 
-            content = msg.get("content", [])
-            if isinstance(content, list):
-                # Extract text from structured content
+            if "content" not in msg:
+                logger.warning(f"Message missing content field: {msg}")
+                continue
+
+            content = msg.get("content")
+            if isinstance(content, str):
+                # Handle simple string content
+                if content:
+                    result.append(TranscriptionMessage(role=msg["role"], content=content))
+            elif isinstance(content, list):
+                # Handle structured content
                 text_parts = []
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "text":
