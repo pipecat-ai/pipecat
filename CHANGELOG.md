@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only be pushed downstream after the audio generated from `TTSSpeakFrame` has
   been spoken.
 
+## [0.0.51] - 2024-12-16
+
+### Fixed
+
+- Fixed an issue in websocket-based TTS services that was causing infinite
+  reconnections (Cartesia, ElevenLabs, PlayHT and LMNT).
+
 ## [0.0.50] - 2024-12-11
 
 ### Added

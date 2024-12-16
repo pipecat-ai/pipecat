@@ -11,11 +11,13 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, 
 
 from loguru import logger
 from pydantic import BaseModel, model_validator
+from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
     StartFrame,
@@ -352,28 +354,44 @@ class ElevenLabsTTSService(WordTTSService):
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
+    async def _receive_messages(self):
+        async for message in self._websocket:
+            msg = json.loads(message)
+            if msg.get("audio"):
+                await self.stop_ttfb_metrics()
+                self.start_word_timestamps()
+
+                audio = base64.b64decode(msg["audio"])
+                frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
+                await self.push_frame(frame)
+            if msg.get("alignment"):
+                word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
+                await self.add_word_timestamps(word_times)
+                self._cumulative_time = word_times[-1][1]
+
+    async def _reconnect_websocket(self, retry_state: RetryCallState):
+        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
+        await self._disconnect_websocket()
+        await self._connect_websocket()
+
     async def _receive_task_handler(self):
         while True:
             try:
-                async for message in self._websocket:
-                    msg = json.loads(message)
-                    if msg.get("audio"):
-                        await self.stop_ttfb_metrics()
-                        self.start_word_timestamps()
-
-                        audio = base64.b64decode(msg["audio"])
-                        frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
-                        await self.push_frame(frame)
-                    if msg.get("alignment"):
-                        word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
-                        await self.add_word_timestamps(word_times)
-                        self._cumulative_time = word_times[-1][1]
+                async for attempt in AsyncRetrying(
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=4, max=10),
+                    before_sleep=self._reconnect_websocket,
+                    reraise=True,
+                ):
+                    with attempt:
+                        await self._receive_messages()
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self._disconnect_websocket()
-                await self._connect_websocket()
+                message = f"{self} error receiving messages: {e}"
+                logger.error(message)
+                await self.push_error(ErrorFrame(message, fatal=True))
+                break
 
     async def _keepalive_task_handler(self):
         while True:
