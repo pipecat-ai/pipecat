@@ -112,59 +112,39 @@ class OpenAILLMContext:
             msgs.append(msg)
         return json.dumps(msgs)
 
-    def from_standard_message(self, message) -> dict:
-        """Convert standard format message to OpenAI format.
+    def from_standard_message(self, message):
+        """Convert from OpenAI message format to OpenAI message format (passthrough).
 
-        Converts structured content back to OpenAI's simple string format.
+        OpenAI's format allows both simple string content and structured content:
+        - Simple: {"role": "user", "content": "Hello"}
+        - Structured: {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
+
+        Since OpenAI is our standard format, this is a passthrough function.
 
         Args:
-            message: Message in standard format:
-                {
-                    "role": "user/assistant",
-                    "content": [{"type": "text", "text": str}]
-                }
+            message (dict): Message in OpenAI format
 
         Returns:
-            Message in OpenAI format:
-            {
-                "role": "user/assistant",
-                "content": str
-            }
+            dict: Same message, unchanged
         """
-        # If content is already a string, return as-is
-        if isinstance(message.get("content"), str):
-            return message
-
-        # Convert structured content to string
-        if isinstance(message.get("content"), list):
-            text_parts = []
-            for part in message["content"]:
-                if part.get("type") == "text":
-                    text_parts.append(part["text"])
-
-            return {"role": message["role"], "content": " ".join(text_parts) if text_parts else ""}
-
         return message
 
     def to_standard_messages(self, obj) -> list:
-        """Convert OpenAI message to standard structured format.
+        """Convert from OpenAI message format to OpenAI message format (passthrough).
+
+        OpenAI's format is our standard format throughout Pipecat. This function
+        returns a list containing the original message to maintain consistency with
+        other LLM services that may need to return multiple messages.
 
         Args:
-            obj: Message in OpenAI format {"role": "user", "content": "text"}
+            obj (dict): Message in OpenAI format with either:
+                - Simple content: {"role": "user", "content": "Hello"}
+                - List content: {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
 
         Returns:
-            List containing message with structured content:
-            [{"role": "user", "content": [{"type": "text", "text": "message"}]}]
+            list: List containing the original messages, preserving whether
+                the content was in simple string or structured list format
         """
-        # Skip messages without content
-        if not obj.get("content"):
-            return []
-
-        # Convert simple string content to structured format
-        if isinstance(obj["content"], str):
-            return [{"role": obj["role"], "content": [{"type": "text", "text": obj["content"]}]}]
-
-        # Return original message if content is already structured
         return [obj]
 
     def get_messages_for_initializing_history(self):
