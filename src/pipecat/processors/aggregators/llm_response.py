@@ -15,7 +15,6 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
-    OpenAILLMContextUserTimestampFrame,
     StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
@@ -27,7 +26,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.time import time_now_iso8601
 
 
 class LLMResponseAggregator(FrameProcessor):
@@ -290,10 +288,6 @@ class LLMContextAggregator(LLMResponseAggregator):
 
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
-
-            # Push timestamp frame with current time
-            timestamp_frame = OpenAILLMContextUserTimestampFrame(timestamp=time_now_iso8601())
-            await self.push_frame(timestamp_frame)
 
             # Reset our accumulator state.
             self._reset()

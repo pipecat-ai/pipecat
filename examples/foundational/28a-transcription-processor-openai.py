@@ -15,13 +15,14 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame, TranscriptionMessage, TranscriptionUpdateFrame
+from pipecat.frames.frames import TranscriptionMessage, TranscriptionUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -57,12 +58,6 @@ class TranscriptHandler:
             timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
             logger.info(f"{timestamp}{msg.role}: {msg.content}")
 
-        # # Log the full transcript
-        # logger.info("Full transcript:")
-        # for msg in self.messages:
-        #     timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
-        #     logger.info(f"{timestamp}{msg.role}: {msg.content}")
-
 
 async def main():
     async with aiohttp.ClientSession() as session:
@@ -70,15 +65,17 @@ async def main():
 
         transport = DailyTransport(
             room_url,
-            token,
+            None,
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
-                transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
         )
+
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
@@ -101,23 +98,25 @@ async def main():
         context_aggregator = llm.create_context_aggregator(context)
 
         # Create transcript processor and handler
-        transcript_processor = TranscriptProcessor()
+        transcript = TranscriptProcessor()
         transcript_handler = TranscriptHandler()
 
         # Register event handler for transcript updates
-        @transcript_processor.event_handler("on_transcript_update")
+        @transcript.event_handler("on_transcript_update")
         async def on_transcript_update(processor, frame):
             await transcript_handler.on_transcript_update(processor, frame)
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                stt,  # STT
+                transcript.user(),  # User transcripts
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
-                transcript_processor,  # Process transcripts
+                transcript.assistant(),  # Assistant transcripts
             ]
         )
 
