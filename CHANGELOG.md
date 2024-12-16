@@ -5,6 +5,13 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.51] - 2024-12-16
+
+### Fixed
+
+- Fixed an issue in websocket-based TTS services that was causing infinite
+  reconnections (Cartesia, ElevenLabs, PlayHT and LMNT).
+
 ## [0.0.50] - 2024-12-11
 
 ### Added

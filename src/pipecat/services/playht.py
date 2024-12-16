@@ -15,6 +15,7 @@ import aiohttp
 import websockets
 from loguru import logger
 from pydantic import BaseModel
+from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -217,35 +218,51 @@ class PlayHTTTSService(TTSService):
         await self.stop_all_metrics()
         self._request_id = None
 
+    async def _receive_messages(self):
+        async for message in self._get_websocket():
+            if isinstance(message, bytes):
+                # Skip the WAV header message
+                if message.startswith(b"RIFF"):
+                    continue
+                await self.stop_ttfb_metrics()
+                frame = TTSAudioRawFrame(message, self._settings["sample_rate"], 1)
+                await self.push_frame(frame)
+            else:
+                logger.debug(f"Received text message: {message}")
+                try:
+                    msg = json.loads(message)
+                    if "request_id" in msg and msg["request_id"] == self._request_id:
+                        await self.push_frame(TTSStoppedFrame())
+                        self._request_id = None
+                    elif "error" in msg:
+                        logger.error(f"{self} error: {msg}")
+                        await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                except json.JSONDecodeError:
+                    logger.error(f"Invalid JSON message: {message}")
+
+    async def _reconnect_websocket(self, retry_state: RetryCallState):
+        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
+        await self._disconnect_websocket()
+        await self._connect_websocket()
+
     async def _receive_task_handler(self):
         while True:
             try:
-                async for message in self._get_websocket():
-                    if isinstance(message, bytes):
-                        # Skip the WAV header message
-                        if message.startswith(b"RIFF"):
-                            continue
-                        await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(message, self._settings["sample_rate"], 1)
-                        await self.push_frame(frame)
-                    else:
-                        logger.debug(f"Received text message: {message}")
-                        try:
-                            msg = json.loads(message)
-                            if "request_id" in msg and msg["request_id"] == self._request_id:
-                                await self.push_frame(TTSStoppedFrame())
-                                self._request_id = None
-                            elif "error" in msg:
-                                logger.error(f"{self} error: {msg}")
-                                await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
-                        except json.JSONDecodeError:
-                            logger.error(f"Invalid JSON message: {message}")
+                async for attempt in AsyncRetrying(
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=4, max=10),
+                    before_sleep=self._reconnect_websocket,
+                    reraise=True,
+                ):
+                    with attempt:
+                        await self._receive_messages()
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"{self} exception in receive task: {e}")
-                await self._disconnect_websocket()
-                await self._connect_websocket()
+                message = f"{self} error receiving messages: {e}"
+                logger.error(message)
+                await self.push_error(ErrorFrame(message, fatal=True))
+                break
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
