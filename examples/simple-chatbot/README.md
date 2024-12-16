@@ -24,12 +24,12 @@ This repository demonstrates a simple AI chatbot with real-time audio/video inte
 
 2. **JavaScript**
 
-   - Basic implementation using [Pipecat JavaScript SDK](https://docs.pipecat.ai/client/reference/js/introduction)
+   - Basic implementation using [Pipecat JavaScript SDK](https://docs.pipecat.ai/client/js/introduction)
    - No framework dependencies
    - Good for learning the fundamentals
 
 3. **React**
-   - Basic impelmentation using [Pipecat React SDK](https://docs.pipecat.ai/client/reference/react/introduction)
+   - Basic impelmentation using [Pipecat React SDK](https://docs.pipecat.ai/client/react/introduction)
    - Demonstrates the basic client principles with Pipecat React
 
 ## Quick Start
