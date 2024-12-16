@@ -208,13 +208,6 @@ class InterimTranscriptionFrame(TextFrame):
 
 
 @dataclass
-class OpenAILLMContextUserTimestampFrame(DataFrame):
-    """Timestamp information for user message in LLM context."""
-
-    timestamp: str
-
-
-@dataclass
 class OpenAILLMContextAssistantTimestampFrame(DataFrame):
     """Timestamp information for assistant message in LLM context."""
 

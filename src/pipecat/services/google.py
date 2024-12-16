@@ -24,7 +24,6 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMUpdateSettingsFrame,
     OpenAILLMContextAssistantTimestampFrame,
-    OpenAILLMContextUserTimestampFrame,
     TextFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -233,10 +232,6 @@ class GoogleUserContextAggregator(OpenAIUserContextAggregator):
             # Push context frame
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
-
-            # Push timestamp frame with current time
-            timestamp_frame = OpenAILLMContextUserTimestampFrame(timestamp=time_now_iso8601())
-            await self.push_frame(timestamp_frame)
 
             # Reset our accumulator state.
             self._reset()

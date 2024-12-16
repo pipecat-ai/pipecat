@@ -25,9 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Messages emitted with ISO 8601 timestamps indicating when they were spoken.
   - Supports all LLM formats (OpenAI, Anthropic, Google) via standard message
     format.
+  - Shared event handling for both user and assistant transcript updates.
   - New examples: `28a-transcription-processor-openai.py`,
     `28b-transcription-processor-anthropic.py`, and
-    `28c-transcription-processor-gemini.py`.
+    `28c-transcription-processor-gemini.py`
 
 - Add support for more languages to ElevenLabs (Arabic, Croatian, Filipino,
   Tamil) and PlayHT (Afrikans, Albanian, Amharic, Arabic, Bengali, Croatian,
