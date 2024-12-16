@@ -138,6 +138,9 @@ class DeepgramSTTService(STTService):
         merged_options = default_options
         if live_options:
             merged_options = LiveOptions(**{**default_options.to_dict(), **live_options.to_dict()})
+
+        # deepgram connection requires language to be a string
+        merged_options.language = merged_options.language.value
         self._settings = merged_options.to_dict()
 
         self._client = DeepgramClient(
