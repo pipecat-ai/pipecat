@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     format.
   - New examples: `28a-transcription-processor-openai.py`,
     `28b-transcription-processor-anthropic.py`, and
-    `28c-transcription-processor-gemini.py`
+    `28c-transcription-processor-gemini.py`.
 
 - Add support for more languages to ElevenLabs (Arabic, Croatian, Filipino,
   Tamil) and PlayHT (Afrikans, Albanian, Amharic, Arabic, Bengali, Croatian,

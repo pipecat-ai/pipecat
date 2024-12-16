@@ -5,7 +5,7 @@
 #
 
 from dataclasses import dataclass, field
-from typing import Any, List, Literal, Mapping, Optional, Tuple, TypeAlias
+from typing import Any, List, Literal, Mapping, Optional, Tuple
 
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.clocks.base_clock import BaseClock
@@ -240,6 +240,34 @@ class TranscriptionUpdateFrame(DataFrame):
     This frame is emitted when new messages are added to the conversation history,
     containing only the newly added messages rather than the full transcript.
     Messages have normalized roles (user/assistant) regardless of the LLM service used.
+    Messages are always in the OpenAI standard message format, which supports both:
+
+    Simple format:
+    [
+        {
+            "role": "user",
+            "content": "Hi, how are you?"
+        },
+        {
+            "role": "assistant",
+            "content": "Great! And you?"
+        }
+    ]
+
+    Content list format:
+    [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Hi, how are you?"}]
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "Great! And you?"}]
+        }
+    ]
+
+    OpenAI supports both formats. Anthropic and Google messages are converted to the
+    content list format.
     """
 
     messages: List[TranscriptionMessage]
