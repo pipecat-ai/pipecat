@@ -197,9 +197,7 @@ You can use [use-package](https://github.com/jwiegley/use-package) to install [e
   :hook ((python-mode . lazy-ruff-mode))
   :config
   (setq lazy-ruff-format-command "ruff format")
-  (setq lazy-ruff-only-format-block t)
-  (setq lazy-ruff-only-format-region t)
-  (setq lazy-ruff-only-format-buffer t))
+  (setq lazy-ruff-check-command "ruff check --select I"))
 ```
 
 `ruff` was installed in the `venv` environment described before, so you should be able to use [pyvenv-auto](https://github.com/ryotaro612/pyvenv-auto) to automatically load that environment inside Emacs.
@@ -209,7 +207,6 @@ You can use [use-package](https://github.com/jwiegley/use-package) to install [e
   :ensure t
   :defer t
   :hook ((python-mode . pyvenv-auto-run)))
-
 ```
 
 ### Visual Studio Code
