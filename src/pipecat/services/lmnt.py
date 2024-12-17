@@ -8,6 +8,7 @@ import asyncio
 from typing import AsyncGenerator
 
 from loguru import logger
+from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -159,31 +160,47 @@ class LmntTTSService(TTSService):
         except Exception as e:
             logger.error(f"{self} error closing connection: {e}")
 
+    async def _receive_messages(self):
+        async for msg in self._connection:
+            if "error" in msg:
+                logger.error(f'{self} error: {msg["error"]}')
+                await self.push_frame(TTSStoppedFrame())
+                await self.stop_all_metrics()
+                await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+            elif "audio" in msg:
+                await self.stop_ttfb_metrics()
+                frame = TTSAudioRawFrame(
+                    audio=msg["audio"],
+                    sample_rate=self._settings["output_format"]["sample_rate"],
+                    num_channels=1,
+                )
+                await self.push_frame(frame)
+            else:
+                logger.error(f"{self}: LMNT error, unknown message type: {msg}")
+
+    async def _reconnect_websocket(self, retry_state: RetryCallState):
+        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
+        await self._disconnect_lmnt()
+        await self._connect_lmnt()
+
     async def _receive_task_handler(self):
         while True:
             try:
-                async for msg in self._connection:
-                    if "error" in msg:
-                        logger.error(f'{self} error: {msg["error"]}')
-                        await self.push_frame(TTSStoppedFrame())
-                        await self.stop_all_metrics()
-                        await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
-                    elif "audio" in msg:
-                        await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(
-                            audio=msg["audio"],
-                            sample_rate=self._settings["output_format"]["sample_rate"],
-                            num_channels=1,
-                        )
-                        await self.push_frame(frame)
-                    else:
-                        logger.error(f"{self}: LMNT error, unknown message type: {msg}")
+                async for attempt in AsyncRetrying(
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=4, max=10),
+                    before_sleep=self._reconnect_websocket,
+                    reraise=True,
+                ):
+                    with attempt:
+                        await self._receive_messages()
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self._disconnect_lmnt()
-                await self._connect_lmnt()
+                message = f"{self} error receiving messages: {e}"
+                logger.error(message)
+                await self.push_error(ErrorFrame(message, fatal=True))
+                break
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")

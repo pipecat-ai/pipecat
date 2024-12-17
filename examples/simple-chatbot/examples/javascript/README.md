@@ -1,6 +1,6 @@
 # JavaScript Implementation
 
-Basic implementation using the [Pipecat JavaScript SDK](https://docs.pipecat.ai/client/reference/js/introduction).
+Basic implementation using the [Pipecat JavaScript SDK](https://docs.pipecat.ai/client/js/introduction).
 
 ## Setup
 

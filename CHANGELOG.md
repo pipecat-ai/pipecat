@@ -9,15 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add support for more languages to ElevenLabs (Arabic, Croatian, Filipino,
+- Pipecat now supports Python 3.13. We had a dependency on the `audioop` package
+  which was deprecated and now removed on Python 3.13. We are now using
+  `audioop-lts` (https://github.com/AbstractUmbra/audioop) to provide the same
+  functionality.
+
+- Added support for more languages to ElevenLabs (Arabic, Croatian, Filipino,
   Tamil) and PlayHT (Afrikans, Albanian, Amharic, Arabic, Bengali, Croatian,
   Galician, Hebrew, Mandarin, Serbian, Tagalog, Urdu, Xhosa).
 
 ### Changed
 
-- Changed: Room expiration (`exp`) in `DailyRoomProperties` is now optional
-  (None) by default instead of automatically setting a 5-minute expiration
-  time. You must explicitly set expiration time if desired.
+- Room expiration (`exp`) in `DailyRoomProperties` is now optional (`None`) by
+  default instead of automatically setting a 5-minute expiration time. You must
+  explicitly set expiration time if desired.
 
 ### Deprecated
 
@@ -32,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   example, sending a frame `A` after a `TTSSpeakFrame` and the frame `A` will
   only be pushed downstream after the audio generated from `TTSSpeakFrame` has
   been spoken.
+
+## [0.0.51] - 2024-12-16
+
+### Fixed
+
+- Fixed an issue in websocket-based TTS services that was causing infinite
+  reconnections (Cartesia, ElevenLabs, PlayHT and LMNT).
 
 ## [0.0.50] - 2024-12-11
 

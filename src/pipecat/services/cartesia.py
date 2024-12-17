@@ -12,6 +12,8 @@ from typing import AsyncGenerator, List, Optional, Union
 
 from loguru import logger
 from pydantic import BaseModel
+from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
+
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -239,52 +241,64 @@ class CartesiaTTSService(WordTTSService):
         msg = self._build_msg(text="", continue_transcript=False)
         await self._websocket.send(msg)
 
+    async def _receive_messages(self):
+        async for message in self._get_websocket():
+            msg = json.loads(message)
+            if not msg or msg["context_id"] != self._context_id:
+                continue
+            if msg["type"] == "done":
+                await self.stop_ttfb_metrics()
+                # Unset _context_id but not the _context_id_start_timestamp
+                # because we are likely still playing out audio and need the
+                # timestamp to set send context frames.
+                self._context_id = None
+                await self.add_word_timestamps(
+                    [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0), ("Reset", 0)]
+                )
+            elif msg["type"] == "timestamps":
+                await self.add_word_timestamps(
+                    list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
+                )
+            elif msg["type"] == "chunk":
+                await self.stop_ttfb_metrics()
+                self.start_word_timestamps()
+                frame = TTSAudioRawFrame(
+                    audio=base64.b64decode(msg["data"]),
+                    sample_rate=self._settings["output_format"]["sample_rate"],
+                    num_channels=1,
+                )
+                await self.push_frame(frame)
+            elif msg["type"] == "error":
+                logger.error(f"{self} error: {msg}")
+                await self.push_frame(TTSStoppedFrame())
+                await self.stop_all_metrics()
+                await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+            else:
+                logger.error(f"{self} error, unknown message type: {msg}")
+
+    async def _reconnect_websocket(self, retry_state: RetryCallState):
+        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
+        await self._disconnect_websocket()
+        await self._connect_websocket()
+
     async def _receive_task_handler(self):
         while True:
             try:
-                async for message in self._get_websocket():
-                    msg = json.loads(message)
-                    if not msg or msg["context_id"] != self._context_id:
-                        continue
-                    if msg["type"] == "done":
-                        await self.stop_ttfb_metrics()
-                        # Unset _context_id but not the _context_id_start_timestamp
-                        # because we are likely still playing out audio and need the
-                        # timestamp to set send context frames.
-                        self._context_id = None
-                        await self.add_word_timestamps(
-                            [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0), ("Reset", 0)]
-                        )
-                    elif msg["type"] == "timestamps":
-                        await self.add_word_timestamps(
-                            list(
-                                zip(
-                                    msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
-                                )
-                            )
-                        )
-                    elif msg["type"] == "chunk":
-                        await self.stop_ttfb_metrics()
-                        self.start_word_timestamps()
-                        frame = TTSAudioRawFrame(
-                            audio=base64.b64decode(msg["data"]),
-                            sample_rate=self._settings["output_format"]["sample_rate"],
-                            num_channels=1,
-                        )
-                        await self.push_frame(frame)
-                    elif msg["type"] == "error":
-                        logger.error(f"{self} error: {msg}")
-                        await self.push_frame(TTSStoppedFrame())
-                        await self.stop_all_metrics()
-                        await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
-                    else:
-                        logger.error(f"{self} error, unknown message type: {msg}")
+                async for attempt in AsyncRetrying(
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=4, max=10),
+                    before_sleep=self._reconnect_websocket,
+                    reraise=True,
+                ):
+                    with attempt:
+                        await self._receive_messages()
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self._disconnect_websocket()
-                await self._connect_websocket()
+                message = f"{self} error receiving messages: {e}"
+                logger.error(message)
+                await self.push_error(ErrorFrame(message, fatal=True))
+                break
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
