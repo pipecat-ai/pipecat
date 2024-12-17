@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only be pushed downstream after the audio generated from `TTSSpeakFrame` has
   been spoken.
 
+- Fixed a [bug](https://github.com/pipecat-ai/pipecat/issues/868) in `DeepgramSTTService` that was causing Language to be passed
+  as python object instead of a string, causing connection to fail.
+
 ## [0.0.51] - 2024-12-16
 
 ### Fixed
