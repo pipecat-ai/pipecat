@@ -1,11 +1,11 @@
 import asyncio
 import base64
-import json
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, Optional, Literal
 
 import websockets
 from loguru import logger
 from pydantic import BaseModel
+import ormsgpack  # Import ormsgpack for MessagePack encoding/decoding
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -45,8 +45,8 @@ def sample_rate_from_output_format(output_format: str) -> int:
     # FishAudio might have specific sample rates per format
     format_sample_rates = {
         "opus": 24000,
-        "mp3": 44100,
-        "wav": 44100,
+        "mp3": 24000,
+        "wav": 24000,
     }
     return format_sample_rates.get(output_format, 24000)  # Default to 24kHz
 
@@ -62,7 +62,7 @@ class FishAudioTTSService(TTSService):
         *,
         api_key: str,
         model_id: str,
-        output_format: FishAudioOutputFormat = "opus",
+        output_format: FishAudioOutputFormat = "wav",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -71,13 +71,13 @@ class FishAudioTTSService(TTSService):
             **kwargs,
         )
 
-        self._api_key = "api_key"
+        self._api_key = api_key
         self._model_id = model_id
         self._url = "wss://api.fish.audio/v1/tts/live"
         self._output_format = output_format
 
         self._settings = {
-            # "sample_rate": sample_rate_from_output_format(output_format),
+            "sample_rate": sample_rate_from_output_format(output_format),
             # "language": self.language_to_service_language(params.language)
             #     if params.language else "en-US",
             "latency": params.latency,
@@ -113,13 +113,12 @@ class FishAudioTTSService(TTSService):
 
     async def _connect(self):
         try:
-            # headers = {
-            #     "Authorization": f"Bearer {self._api_key}",
-            # }
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+            }
 
             self._websocket = await websockets.connect(self._url, extra_headers=headers)
             self._receive_task = asyncio.create_task(self._receive_task_handler())
-            logger.debug("Connected to fish.audio WebSocket")
 
             # Send 'start' event to initialize the session
             start_message = {
@@ -130,15 +129,15 @@ class FishAudioTTSService(TTSService):
                     "format": self._output_format,
                     "prosody": self._settings["prosody"],
                     "reference_id": self._settings["reference_id"],
+                    "sample_rate": self._settings["sample_rate"],
                 },
                 "debug": True,  # Added debug flag
-
             }
-            await self._websocket.send(json.dumps(start_message))
+            await self._websocket.send(ormsgpack.packb(start_message))
             logger.debug("Sent start event to fish.audio WebSocket")
 
         except Exception as e:
-            logger.error(f"Error connecting to fish.audio WebSocket: {e}")
+            logger.exception(f"Error connecting to fish.audio WebSocket: {e}")
             self._websocket = None
 
     async def _disconnect(self):
@@ -150,7 +149,7 @@ class FishAudioTTSService(TTSService):
                 stop_message = {
                     "event": "stop"
                 }
-                await self._websocket.send(json.dumps(stop_message))
+                await self._websocket.send(ormsgpack.packb(stop_message))
                 await self._websocket.close()
                 self._websocket = None
 
@@ -165,40 +164,45 @@ class FishAudioTTSService(TTSService):
 
     async def _receive_task_handler(self):
         try:
-            async for message in self._websocket:
-                # Messages can be text or binary
-                if isinstance(message, str):
-                    msg = json.loads(message)
-                    event = msg.get("event")
+            while True:
+                try:
+                    message = await self._websocket.recv()
+                    if isinstance(message, bytes):
+                        msg = ormsgpack.unpackb(message)
+                        event = msg.get("event")
 
-                    if event == "audio":
-                        await self.stop_ttfb_metrics()
-                        audio_data_base64 = msg.get("audio")
-                        audio_data = base64.b64decode(audio_data_base64)
-                        frame = TTSAudioRawFrame(
-                            audio_data, self._settings["sample_rate"], 1)
-                        await self.push_frame(frame)
-                    elif event == "finish":
-                        reason = msg.get("reason")
-                        if reason == "stop":
-                            await self.push_frame(TTSStoppedFrame())
-                            self._started = False
-                        elif reason == "error":
+                        if event == "audio":
+                            await self.stop_ttfb_metrics()
+                            audio_data = msg.get("audio")
+                            # Audio data is binary, no need to base64 decode
+                            frame = TTSAudioRawFrame(
+                                audio_data, self._settings["sample_rate"], 1)
+                            await self.push_frame(frame)
+                        elif event == "finish":
+                            reason = msg.get("reason")
+                            if reason == "stop":
+                                await self.push_frame(TTSStoppedFrame())
+                                self._started = False
+                            elif reason == "error":
+                                error_msg = msg.get("error", "Unknown error")
+                                logger.error(f"fish.audio error: {error_msg}")
+                                await self.push_error(ErrorFrame(f"fish.audio error: {error_msg}"))
+                                self._started = False
+                        elif event == "error":
                             error_msg = msg.get("error", "Unknown error")
                             logger.error(f"fish.audio error: {error_msg}")
                             await self.push_error(ErrorFrame(f"fish.audio error: {error_msg}"))
-                            self._started = False
-                    elif event == "error":
-                        error_msg = msg.get("error", "Unknown error")
-                        logger.error(f"fish.audio error: {error_msg}")
-                        await self.push_error(ErrorFrame(f"fish.audio error: {error_msg}"))
-                else:
-                    logger.warning(f"Received unexpected binary message: {message}")
-
-        except asyncio.CancelledError:
-            pass
+                        else:
+                            logger.warning(f"Unhandled event from fish.audio: {event}")
+                    else:
+                        logger.warning(f"Received unexpected message type: {type(message)}")
+                except asyncio.TimeoutError:
+                    logger.warning("No message received from fish.audio within timeout period")
+                except websockets.ConnectionClosed as e:
+                    logger.error(f"WebSocket connection closed: {e}")
+                    break
         except Exception as e:
-            logger.error(f"Exception in receive task: {e}")
+            logger.exception(f"Exception in receive task: {e}")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -215,7 +219,7 @@ class FishAudioTTSService(TTSService):
         await self.stop_all_metrics()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"Generating Fish TTS: [{text}]")
 
         try:
             if not self._websocket or self._websocket.closed:
@@ -231,15 +235,11 @@ class FishAudioTTSService(TTSService):
                 "event": "text",
                 "text": text + " "  # Ensure a space at the end
             }
+            logger.debug(f"Sending text message: {text_message}")
+            await self._websocket.send(ormsgpack.packb(text_message))
+            logger.debug("Sent text message to fish.audio WebSocket")
 
-            try:
-                await self._websocket.send(json.dumps(text_message))
-                await self.start_tts_usage_metrics(text)
-            except Exception as e:
-                logger.error(f"Error sending text to fish.audio WebSocket: {e}")
-                yield TTSStoppedFrame()
-                await self._disconnect()
-                return
+            await self.start_tts_usage_metrics(text)
 
             # The audio frames will be received in _receive_task_handler
             yield None
@@ -247,4 +247,3 @@ class FishAudioTTSService(TTSService):
         except Exception as e:
             logger.error(f"Error in run_tts: {e}")
             yield ErrorFrame(f"Error in run_tts: {str(e)}")
-
