@@ -65,8 +65,9 @@ async def main():
         )
 
         llm = NimLLMService(
-            api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.1-405b-instruct"
+            api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.3-70b-instruct"
         )
+
         # Register a function_name of None to get all functions
         # sent to the same callback with an additional function_name parameter.
         llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
@@ -76,18 +77,18 @@ async def main():
                 type="function",
                 function={
                     "name": "get_current_weather",
-                    "description": "Get the current weather",
+                    "description": "Returns the current weather at a location, if one is specified, and defaults to the user's location.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "location": {
                                 "type": "string",
-                                "description": "The city and state, e.g. San Francisco, CA",
+                                "description": "The location to find the weather of, or if not provided, it's the default location.",
                             },
                             "format": {
                                 "type": "string",
                                 "enum": ["celsius", "fahrenheit"],
-                                "description": "The temperature unit to use. Infer this from the users location.",
+                                "description": "Whether to use SI or USCS units (celsius or fahrenheit).",
                             },
                         },
                         "required": ["location", "format"],
