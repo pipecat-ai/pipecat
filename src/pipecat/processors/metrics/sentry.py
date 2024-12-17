@@ -36,8 +36,7 @@ class SentryMetrics(FrameProcessorMetrics):
                     start_timestamp=self._start_ttfb_time,
                 )
                 logger.debug(
-                    f"Sentry Span ID: {self._ttfb_metrics_span.span_id} Description: {
-                             self._ttfb_metrics_span.description} started."
+                    f"Sentry Span ID: {self._ttfb_metrics_span.span_id} Description: {self._ttfb_metrics_span.description} started."
                 )
             self._should_report_ttfb = not report_only_initial_ttfb
 
@@ -55,8 +54,7 @@ class SentryMetrics(FrameProcessorMetrics):
                 start_timestamp=self._start_processing_time,
             )
             logger.debug(
-                f"Sentry Span ID: {self._processing_metrics_span.span_id} Description: {
-                         self._processing_metrics_span.description} started."
+                f"Sentry Span ID: {self._processing_metrics_span.span_id} Description: {self._processing_metrics_span.description} started."
             )
 
     async def stop_processing_metrics(self):
