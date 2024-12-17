@@ -1,12 +1,10 @@
 import json
 
 import uvicorn
-
+from bot import run_bot
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse
-
-from bot import run_bot
 
 app = FastAPI()
 

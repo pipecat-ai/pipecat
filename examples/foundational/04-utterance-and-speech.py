@@ -8,26 +8,23 @@
 # This example broken on latest pipecat and needs updating.
 #
 
-import aiohttp
 import asyncio
 import os
 import sys
 
-from pipecat.pipeline.merge_pipeline import SequentialMergePipeline
-from pipecat.pipeline.pipeline import Pipeline
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.frames.frames import EndPipeFrame, LLMMessagesFrame, TextFrame
+from pipecat.pipeline.merge_pipeline import SequentialMergePipeline
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.services.azure import AzureLLMService, AzureTTSService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.transport_services import TransportServiceOutput
 from pipecat.services.transports.daily_transport import DailyTransport
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 

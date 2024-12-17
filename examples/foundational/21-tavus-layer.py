@@ -5,12 +5,15 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
-
 from typing import Any, Mapping
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -20,15 +23,10 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserResponseAggregator,
 )
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.openai import OpenAILLMService
 from pipecat.services.deepgram import DeepgramSTTService
+from pipecat.services.openai import OpenAILLMService
 from pipecat.services.tavus import TavusVideoService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
