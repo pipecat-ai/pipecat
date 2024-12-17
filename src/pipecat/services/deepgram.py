@@ -141,7 +141,7 @@ class DeepgramSTTService(STTService):
 
         # deepgram connection requires language to be a string
         if isinstance(merged_options.language, Language) and hasattr(
-                merged_options.language, "value"
+            merged_options.language, "value"
         ):
             merged_options.language = merged_options.language.value
 
