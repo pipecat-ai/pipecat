@@ -1,9 +1,9 @@
-build~=1.2.1
-grpcio-tools~=1.65.4
+build~=1.2.2
+grpcio-tools~=1.68.1
 pip-tools~=7.4.1
-pyright~=1.1.376
-pytest~=8.3.2
-ruff~=0.6.7
-setuptools~=72.2.0
+pyright~=1.1.390
+pytest~=8.3.4
+ruff~=0.8.3
+setuptools~=75.6.0
 setuptools_scm~=8.1.0
 python-dotenv~=1.0.1
