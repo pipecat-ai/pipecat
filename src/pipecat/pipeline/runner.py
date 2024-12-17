@@ -7,10 +7,10 @@
 import asyncio
 import signal
 
+from loguru import logger
+
 from pipecat.pipeline.task import PipelineTask
 from pipecat.utils.utils import obj_count, obj_id
-
-from loguru import logger
 
 
 class PipelineRunner:

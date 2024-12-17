@@ -89,9 +89,11 @@ fallback_version = "0.0.0-dev"
 exclude = ["*_pb2.py"]
 line-length = 100
 
+[tool.ruff.lint]
 select = [
     "D", # Docstring rules
+    "I", # Import rules
 ]
 
-[tool.ruff.pydocstyle]
+[tool.ruff.lint.pydocstyle]
 convention = "google"

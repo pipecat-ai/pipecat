@@ -8,10 +8,10 @@ import asyncio
 import base64
 import json
 import time
-
 from dataclasses import dataclass
 
 import websockets
+from loguru import logger
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -48,13 +48,11 @@ from pipecat.utils.time import time_now_iso8601
 
 from . import events
 from .context import (
+    OpenAIRealtimeAssistantContextAggregator,
     OpenAIRealtimeLLMContext,
     OpenAIRealtimeUserContextAggregator,
-    OpenAIRealtimeAssistantContextAggregator,
 )
-from .frames import RealtimeMessagesUpdateFrame, RealtimeFunctionCallResultFrame
-
-from loguru import logger
+from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
 
 
 @dataclass

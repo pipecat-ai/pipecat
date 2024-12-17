@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
+from pipecat.audio.filters.krisp_filter import KrispFilter
 from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -25,7 +26,6 @@ from pipecat.services.deepgram import DeepgramSTTService, DeepgramTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.vad.silero import SileroVADAnalyzer
-from pipecat.audio.filters.krisp_filter import KrispFilter
 
 load_dotenv(override=True)
 

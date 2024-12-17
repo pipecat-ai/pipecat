@@ -5,27 +5,25 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 import wave
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import OutputAudioRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.logger import FrameLogger
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.logger import FrameLogger
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMContextFrame, OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
