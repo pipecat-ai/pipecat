@@ -5,16 +5,15 @@
 #
 
 import asyncio
-
 from itertools import chain
 from typing import Awaitable, Callable, List
 
+from loguru import logger
+
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame, SystemFrame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame, SystemFrame
-
-from loguru import logger
 
 
 class Source(FrameProcessor):

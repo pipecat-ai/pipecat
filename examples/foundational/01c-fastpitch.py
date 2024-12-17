@@ -5,22 +5,20 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import EndFrame, TTSSpeakFrame
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.task import PipelineTask
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.services.riva import FastPitchTTSService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
-
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
 from runner import configure
 
-from loguru import logger
-
-from dotenv import load_dotenv
+from pipecat.frames.frames import EndFrame, TTSSpeakFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.services.riva import FastPitchTTSService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 

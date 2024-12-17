@@ -14,7 +14,6 @@ from loguru import logger
 from pydantic import BaseModel
 from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
-
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,

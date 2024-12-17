@@ -8,6 +8,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.utils import resample_audio
@@ -27,8 +28,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-
-from loguru import logger
 
 try:
     from livekit import rtc

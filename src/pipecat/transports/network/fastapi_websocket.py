@@ -10,8 +10,9 @@ import io
 import time
 import typing
 import wave
-
 from typing import Awaitable, Callable
+
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
@@ -26,8 +27,6 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-
-from loguru import logger
 
 try:
     from fastapi import WebSocket

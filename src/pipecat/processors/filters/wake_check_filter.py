@@ -6,13 +6,12 @@
 
 import re
 import time
-
 from enum import Enum
+
+from loguru import logger
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-from loguru import logger
 
 
 class WakeCheckFilter(FrameProcessor):

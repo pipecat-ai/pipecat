@@ -6,24 +6,22 @@
 
 import asyncio
 
+import numpy as np
+from loguru import logger
+
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
     OutputImageRawFrame,
-    TTSAudioRawFrame,
     StartInterruptionFrame,
-    EndFrame,
-    CancelFrame,
+    TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, StartFrame
-
-import numpy as np
-
-from loguru import logger
 
 try:
     from av.audio.frame import AudioFrame
     from av.audio.resampler import AudioResampler
-
     from simli import SimliClient, SimliConfig
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
