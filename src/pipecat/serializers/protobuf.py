@@ -6,8 +6,9 @@
 
 import dataclasses
 
-import pipecat.frames.protobufs.frames_pb2 as frame_protos
+from loguru import logger
 
+import pipecat.frames.protobufs.frames_pb2 as frame_protos
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -16,8 +17,6 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
-
-from loguru import logger
 
 
 class ProtobufFrameSerializer(FrameSerializer):

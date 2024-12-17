@@ -5,6 +5,7 @@
 #
 
 import time
+
 from loguru import logger
 
 try:

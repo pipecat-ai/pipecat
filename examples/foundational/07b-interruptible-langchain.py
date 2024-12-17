@@ -9,6 +9,14 @@ import os
 import sys
 
 import aiohttp
+from dotenv import load_dotenv
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_openai import ChatOpenAI
+from loguru import logger
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
@@ -22,18 +30,6 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.frameworks.langchain import LangchainProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_openai import ChatOpenAI
-
-from loguru import logger
-
-from runner import configure
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 

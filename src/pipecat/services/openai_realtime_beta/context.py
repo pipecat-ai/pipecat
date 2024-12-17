@@ -21,7 +21,7 @@ from pipecat.services.openai import (
 )
 
 from . import events
-from .frames import RealtimeMessagesUpdateFrame, RealtimeFunctionCallResultFrame
+from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
 
 
 class OpenAIRealtimeLLMContext(OpenAILLMContext):

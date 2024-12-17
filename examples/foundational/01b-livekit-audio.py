@@ -4,6 +4,9 @@ import os
 import sys
 
 import aiohttp
+from dotenv import load_dotenv
+from livekit import api
+from loguru import logger
 
 from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -11,12 +14,6 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.transports.services.livekit import LiveKitParams, LiveKitTransport
-
-from livekit import api
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 

@@ -6,13 +6,12 @@
 #
 
 import base64
-import json
 import io
-
-from pydantic import BaseModel, Field
+import json
 from typing import List, Literal, Optional
 
 from PIL import Image
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import ImageRawFrame
 

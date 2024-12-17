@@ -1,5 +1,6 @@
 import os
 import wave
+
 from PIL import Image
 
 from pipecat.frames.frames import OutputAudioRawFrame, OutputImageRawFrame
