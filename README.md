@@ -230,7 +230,7 @@ Install the
 1. **Name**: `Ruff formatter`
 2. **File type**: `Python`
 3. **Working directory**: `$ContentRoot$`
-4. **Arguments**: `format $FilePath$ --config pyproject.toml`
+4. **Arguments**: `format $FilePath$`
 5. **Program**: `$PyInterpreterDirectory$/ruff`
 
 ## Contributing
