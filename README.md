@@ -221,6 +221,15 @@ Install the
 }
 ```
 
+### PyCharm
+
+`ruff` was installed in the `venv` environment described before, now to enable autoformatting on save, go to `File` -> `Settings` -> `Tools` -> `File Watchers` and add a new watcher with the following settings: 
+1. **Name**: `Ruff formatter`
+2. **File type**: `Python`
+3. **Working directory**: `$ContentRoot$`
+4. **Arguments**: `format $FilePath$`
+5. **Program**: `$PyInterpreterDirectory$/ruff`
+
 ## Contributing
 
 We welcome contributions from the community! Whether you're fixing bugs, improving documentation, or adding new features, here's how you can help:
