@@ -6,12 +6,23 @@
 
 import base64
 import json
+import sys
 
 from pydantic import BaseModel
 
-from pipecat.audio.utils import ulaw_to_pcm, pcm_to_ulaw
 from pipecat.frames.frames import AudioRawFrame, Frame, InputAudioRawFrame, StartInterruptionFrame
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+
+if sys.version_info >= (3, 13):
+    try:
+        from pipecat.audio.utils import pcm_to_ulaw, ulaw_to_pcm
+    except ImportError:
+        raise ImportError(
+            "Audio processing support required for TwilioFrameSerializer. "
+            "Please install with: pip install pipecat-ai[audio]"
+        )
+else:
+    from pipecat.audio.utils import pcm_to_ulaw, ulaw_to_pcm
 
 
 class TwilioFrameSerializer(FrameSerializer):

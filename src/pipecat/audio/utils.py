@@ -4,7 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import audioop
+import sys
+
 import numpy as np
 import pyloudnorm as pyln
 import resampy
@@ -74,21 +75,50 @@ def exp_smoothing(value: float, prev_value: float, factor: float) -> float:
     return prev_value + factor * (value - prev_value)
 
 
-def ulaw_to_pcm(ulaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
-    # Convert μ-law to PCM
-    in_pcm_bytes = audioop.ulaw2lin(ulaw_bytes, 2)
+if sys.version_info >= (3, 13):
+    try:
+        import io
 
-    # Resample
-    out_pcm_bytes = audioop.ratecv(in_pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
+        import soundfile as sf
 
-    return out_pcm_bytes
+        def ulaw_to_pcm(ulaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int) -> bytes:
+            with io.BytesIO(ulaw_bytes) as buf:
+                data, _ = sf.read(
+                    buf, channels=1, samplerate=in_sample_rate, format="RAW", subtype="ULAW"
+                )
+                if in_sample_rate != out_sample_rate:
+                    data = resampy.resample(data, in_sample_rate, out_sample_rate)
+                return (data * 32767).astype(np.int16).tobytes()
 
+        def pcm_to_ulaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int) -> bytes:
+            data = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32767.0
+            if in_sample_rate != out_sample_rate:
+                data = resampy.resample(data, in_sample_rate, out_sample_rate)
+            with io.BytesIO() as buf:
+                sf.write(buf, data, out_sample_rate, format="RAW", subtype="ULAW")
+                return buf.getvalue()
+    except ImportError:
+        raise ImportError(
+            "For Python 3.13+, please install soundfile: pip install pipecat-ai[audio]"
+        )
 
-def pcm_to_ulaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
-    # Resample
-    in_pcm_bytes = audioop.ratecv(pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
+else:
+    import audioop
 
-    # Convert PCM to μ-law
-    ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)
+    def ulaw_to_pcm(ulaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
+        # Convert μ-law to PCM
+        in_pcm_bytes = audioop.ulaw2lin(ulaw_bytes, 2)
 
-    return ulaw_bytes
+        # Resample
+        out_pcm_bytes = audioop.ratecv(in_pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
+
+        return out_pcm_bytes
+
+    def pcm_to_ulaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
+        # Resample
+        in_pcm_bytes = audioop.ratecv(pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
+
+        # Convert PCM to μ-law
+        ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)
+
+        return ulaw_bytes
