@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Noise Suppression.
   (see https://picovoice.ai/platform/koala/)
 
+- Added `CerebrasLLMService` for Cerebras integration with an OpenAI-compatible
+  interface. Added foundational example `14k-function-calling-cerebras.py`.
+
 - Pipecat now supports Python 3.13. We had a dependency on the `audioop` package
   which was deprecated and now removed on Python 3.13. We are now using
   `audioop-lts` (https://github.com/AbstractUmbra/audioop) to provide the same
