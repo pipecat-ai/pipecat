@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `KoalaFilter` which implement on device noise reduction using Koala
+  Noise Suppression.
+  (see https://picovoice.ai/platform/koala/)
+
 - Pipecat now supports Python 3.13. We had a dependency on the `audioop` package
   which was deprecated and now removed on Python 3.13. We are now using
   `audioop-lts` (https://github.com/AbstractUmbra/audioop) to provide the same
