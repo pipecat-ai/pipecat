@@ -4,13 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from abc import ABC, abstractmethod
 from typing import List
 
-from loguru import logger
-
 from pipecat.frames.frames import (
-    ErrorFrame,
     Frame,
     OpenAILLMContextAssistantTimestampFrame,
     TranscriptionFrame,
@@ -21,7 +17,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFr
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
-class BaseTranscriptProcessor(FrameProcessor, ABC):
+class BaseTranscriptProcessor(FrameProcessor):
     """Base class for processing conversation transcripts.
 
     Provides common functionality for handling transcript messages and updates.
@@ -44,16 +40,6 @@ class BaseTranscriptProcessor(FrameProcessor, ABC):
             update_frame = TranscriptionUpdateFrame(messages=messages)
             await self._call_event_handler("on_transcript_update", update_frame)
             await self.push_frame(update_frame)
-
-    @abstractmethod
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process incoming frames to build conversation transcript.
-
-        Args:
-            frame: Input frame to process
-            direction: Frame processing direction
-        """
-        await super().process_frame(frame, direction)
 
 
 class UserTranscriptProcessor(BaseTranscriptProcessor):
@@ -195,18 +181,44 @@ class TranscriptProcessor:
         ```
     """
 
-    def __init__(self, **kwargs):
-        """Initialize factory with user and assistant processors."""
-        self._user_processor = UserTranscriptProcessor(**kwargs)
-        self._assistant_processor = AssistantTranscriptProcessor(**kwargs)
+    def __init__(self):
+        """Initialize factory."""
+        self._user_processor = None
+        self._assistant_processor = None
         self._event_handlers = {}
 
-    def user(self) -> UserTranscriptProcessor:
-        """Get the user transcript processor."""
+    def user(self, **kwargs) -> UserTranscriptProcessor:
+        """Get the user transcript processor.
+
+        Args:
+            **kwargs: Arguments specific to UserTranscriptProcessor
+        """
+        if self._user_processor is None:
+            self._user_processor = UserTranscriptProcessor(**kwargs)
+            # Apply any registered event handlers
+            for event_name, handler in self._event_handlers.items():
+
+                @self._user_processor.event_handler(event_name)
+                async def user_handler(processor, frame):
+                    return await handler(processor, frame)
+
         return self._user_processor
 
-    def assistant(self) -> AssistantTranscriptProcessor:
-        """Get the assistant transcript processor."""
+    def assistant(self, **kwargs) -> AssistantTranscriptProcessor:
+        """Get the assistant transcript processor.
+
+        Args:
+            **kwargs: Arguments specific to AssistantTranscriptProcessor
+        """
+        if self._assistant_processor is None:
+            self._assistant_processor = AssistantTranscriptProcessor(**kwargs)
+            # Apply any registered event handlers
+            for event_name, handler in self._event_handlers.items():
+
+                @self._assistant_processor.event_handler(event_name)
+                async def assistant_handler(processor, frame):
+                    return await handler(processor, frame)
+
         return self._assistant_processor
 
     def event_handler(self, event_name: str):
@@ -222,13 +234,18 @@ class TranscriptProcessor:
         def decorator(handler):
             self._event_handlers[event_name] = handler
 
-            @self._user_processor.event_handler(event_name)
-            async def user_handler(processor, frame):
-                return await handler(processor, frame)
+            # Apply handler to existing processors if they exist
+            if self._user_processor:
 
-            @self._assistant_processor.event_handler(event_name)
-            async def assistant_handler(processor, frame):
-                return await handler(processor, frame)
+                @self._user_processor.event_handler(event_name)
+                async def user_handler(processor, frame):
+                    return await handler(processor, frame)
+
+            if self._assistant_processor:
+
+                @self._assistant_processor.event_handler(event_name)
+                async def assistant_handler(processor, frame):
+                    return await handler(processor, frame)
 
             return handler
 
