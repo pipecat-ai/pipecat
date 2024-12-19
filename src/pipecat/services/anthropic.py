@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMUpdateSettingsFrame,
+    OpenAILLMContextAssistantTimestampFrame,
     StartInterruptionFrame,
     TextFrame,
     UserImageRawFrame,
@@ -43,6 +44,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
+from pipecat.utils.time import time_now_iso8601
 
 try:
     from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
@@ -378,6 +380,26 @@ class AnthropicLLMContext(OpenAILLMContext):
 
     # convert a message in Anthropic format into one or more messages in OpenAI format
     def to_standard_messages(self, obj):
+        """Convert Anthropic message format to standard structured format.
+
+        Handles text content and function calls for both user and assistant messages.
+
+        Args:
+            obj: Message in Anthropic format:
+                {
+                    "role": "user/assistant",
+                    "content": str | [{"type": "text/tool_use/tool_result", ...}]
+                }
+
+        Returns:
+            List of messages in standard format:
+            [
+                {
+                    "role": "user/assistant/tool",
+                    "content": [{"type": "text", "text": str}]
+                }
+            ]
+        """
         # todo: image format (?)
         # tool_use
         role = obj.get("role")
@@ -432,6 +454,30 @@ class AnthropicLLMContext(OpenAILLMContext):
                 return messages
 
     def from_standard_message(self, message):
+        """Convert standard format message to Anthropic format.
+
+        Handles conversion of text content, tool calls, and tool results.
+        Empty text content is converted to "(empty)".
+
+        Args:
+            message: Message in standard format:
+                {
+                    "role": "user/assistant/tool",
+                    "content": str | [{"type": "text", ...}],
+                    "tool_calls": [{"id": str, "function": {"name": str, "arguments": str}}]
+                }
+
+        Returns:
+            Message in Anthropic format:
+            {
+                "role": "user/assistant",
+                "content": str | [
+                    {"type": "text", "text": str} |
+                    {"type": "tool_use", "id": str, "name": str, "input": dict} |
+                    {"type": "tool_result", "tool_use_id": str, "content": str}
+                ]
+            }
+        """
         # todo: image messages (?)
         if message["role"] == "tool":
             return {
@@ -747,8 +793,13 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
 
+            # Push context frame
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
+
+            # Push timestamp frame with current time
+            timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
+            await self.push_frame(timestamp_frame)
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")

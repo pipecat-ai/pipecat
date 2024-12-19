@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMUpdateSettingsFrame,
+    OpenAILLMContextAssistantTimestampFrame,
     StartInterruptionFrame,
     TextFrame,
     TTSAudioRawFrame,
@@ -46,6 +47,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
+from pipecat.utils.time import time_now_iso8601
 
 try:
     from openai import (
@@ -597,8 +599,13 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
 
+            # Push context frame
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
+
+            # Push timestamp frame with current time
+            timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
+            await self.push_frame(timestamp_frame)
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
