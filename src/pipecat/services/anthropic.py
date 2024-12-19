@@ -154,8 +154,6 @@ class AnthropicLLMService(LLMService):
                 messages = context.get_messages_with_cache_control_markers()
 
             api_call = self._client.messages.create
-            if self._settings["enable_prompt_caching_beta"]:
-                api_call = self._client.beta.prompt_caching.messages.create
 
             await self.start_ttfb_metrics()
 
