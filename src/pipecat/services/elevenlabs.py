@@ -312,7 +312,7 @@ class ElevenLabsTTSService(WordTTSService):
             voice_id = self._voice_id
             model = self.model_name
             output_format = self._settings["output_format"]
-            url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}"
+            url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}&auto_mode=true"
 
             if self._settings["optimize_streaming_latency"]:
                 url += f"&optimize_streaming_latency={self._settings['optimize_streaming_latency']}"
