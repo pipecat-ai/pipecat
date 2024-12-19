@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `OpenAIRealtimeBetaLLMService` now takes a `model` parameter in the
+  constructor.
+
+- Updated the default model for the `OpenAIRealtimeBetaLLMService`.
+
 - Room expiration (`exp`) in `DailyRoomProperties` is now optional (`None`) by
   default instead of automatically setting a 5-minute expiration time. You must
   explicitly set expiration time if desired.
