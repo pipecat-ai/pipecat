@@ -55,9 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `auto_mode: True` for the `ElevenLabsTTSService`. This change
-  significantly reduces the latency by disabling the chunk schedule and all
-  buffers.
+- The default model for `ElevenLabsTTSService` is now `eleven_flash_v2_5`.
 
 - `OpenAIRealtimeBetaLLMService` now takes a `model` parameter in the
   constructor.
