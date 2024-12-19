@@ -135,6 +135,7 @@ class ElevenLabsTTSService(WordTTSService):
         similarity_boost: Optional[float] = None
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
+        auto_mode: Optional[bool] = True
 
         @model_validator(mode="after")
         def validate_voice_settings(self):
@@ -193,6 +194,7 @@ class ElevenLabsTTSService(WordTTSService):
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
+            "auto_mode": str(params.auto_mode).lower(),
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -312,7 +314,7 @@ class ElevenLabsTTSService(WordTTSService):
             voice_id = self._voice_id
             model = self.model_name
             output_format = self._settings["output_format"]
-            url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}&auto_mode=true"
+            url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}&auto_mode={self._settings['auto_mode']}"
 
             if self._settings["optimize_streaming_latency"]:
                 url += f"&optimize_streaming_latency={self._settings['optimize_streaming_latency']}"
