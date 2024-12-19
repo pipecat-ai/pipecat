@@ -242,8 +242,7 @@ class BaseOutputTransport(FrameProcessor):
             await self._set_camera_images(frame.images)
         elif isinstance(frame, TransportMessageFrame):
             await self.send_message(frame)
-        # We will push EndFrame later.
-        elif not isinstance(frame, EndFrame):
+        else:
             await self.push_frame(frame)
 
     async def _sink_clock_task_handler(self):
@@ -324,6 +323,10 @@ class BaseOutputTransport(FrameProcessor):
                     await self.push_frame(BotSpeakingFrame())
                     await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
 
+                # No need to push EndFrame, it's pushed from process_frame().
+                if isinstance(frame, EndFrame):
+                    break
+
                 # Handle frame.
                 await self._sink_frame_handler(frame)
 
@@ -333,9 +336,6 @@ class BaseOutputTransport(FrameProcessor):
                 # Send audio.
                 if isinstance(frame, OutputAudioRawFrame):
                     await self.write_raw_audio_frames(frame.audio)
-
-                if isinstance(frame, EndFrame):
-                    break
         except asyncio.CancelledError:
             pass
         except Exception as e:
