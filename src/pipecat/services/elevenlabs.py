@@ -11,11 +11,13 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, 
 
 from loguru import logger
 from pydantic import BaseModel, model_validator
+from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
     StartFrame,
@@ -44,6 +46,7 @@ ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_441
 
 def language_to_elevenlabs_language(language: Language) -> str | None:
     BASE_LANGUAGES = {
+        Language.AR: "ar",
         Language.BG: "bg",
         Language.CS: "cs",
         Language.DA: "da",
@@ -52,8 +55,10 @@ def language_to_elevenlabs_language(language: Language) -> str | None:
         Language.EN: "en",
         Language.ES: "es",
         Language.FI: "fi",
+        Language.FIL: "fil",
         Language.FR: "fr",
         Language.HI: "hi",
+        Language.HR: "hr",
         Language.HU: "hu",
         Language.ID: "id",
         Language.IT: "it",
@@ -68,6 +73,7 @@ def language_to_elevenlabs_language(language: Language) -> str | None:
         Language.RU: "ru",
         Language.SK: "sk",
         Language.SV: "sv",
+        Language.TA: "ta",
         Language.TR: "tr",
         Language.UK: "uk",
         Language.VI: "vi",
@@ -348,28 +354,44 @@ class ElevenLabsTTSService(WordTTSService):
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
+    async def _receive_messages(self):
+        async for message in self._websocket:
+            msg = json.loads(message)
+            if msg.get("audio"):
+                await self.stop_ttfb_metrics()
+                self.start_word_timestamps()
+
+                audio = base64.b64decode(msg["audio"])
+                frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
+                await self.push_frame(frame)
+            if msg.get("alignment"):
+                word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
+                await self.add_word_timestamps(word_times)
+                self._cumulative_time = word_times[-1][1]
+
+    async def _reconnect_websocket(self, retry_state: RetryCallState):
+        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
+        await self._disconnect_websocket()
+        await self._connect_websocket()
+
     async def _receive_task_handler(self):
         while True:
             try:
-                async for message in self._websocket:
-                    msg = json.loads(message)
-                    if msg.get("audio"):
-                        await self.stop_ttfb_metrics()
-                        self.start_word_timestamps()
-
-                        audio = base64.b64decode(msg["audio"])
-                        frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
-                        await self.push_frame(frame)
-                    if msg.get("alignment"):
-                        word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
-                        await self.add_word_timestamps(word_times)
-                        self._cumulative_time = word_times[-1][1]
+                async for attempt in AsyncRetrying(
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=4, max=10),
+                    before_sleep=self._reconnect_websocket,
+                    reraise=True,
+                ):
+                    with attempt:
+                        await self._receive_messages()
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"{self} exception: {e}")
-                await self._disconnect_websocket()
-                await self._connect_websocket()
+                message = f"{self} error receiving messages: {e}"
+                logger.error(message)
+                await self.push_error(ErrorFrame(message, fatal=True))
+                break
 
     async def _keepalive_task_handler(self):
         while True:

@@ -4,11 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import os
 import sys
 import wave
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
@@ -28,12 +32,6 @@ from pipecat.processors.logger import FrameLogger
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 

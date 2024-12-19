@@ -4,22 +4,21 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import io
 import os
 import uuid
 import wave
-
 from datetime import datetime
 from typing import Dict, List, Tuple
+
+import aiohttp
+from loguru import logger
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame
 from pipecat.processors.audio import audio_buffer_processor
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AIService
-
-from loguru import logger
 
 try:
     import aiofiles

@@ -6,6 +6,7 @@
 
 import asyncio
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
@@ -18,8 +19,6 @@ from pipecat.frames.frames import (
     SystemFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-from loguru import logger
 
 try:
     import gi

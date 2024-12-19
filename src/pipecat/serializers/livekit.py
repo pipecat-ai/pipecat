@@ -7,10 +7,10 @@
 import ctypes
 import pickle
 
+from loguru import logger
+
 from pipecat.frames.frames import Frame, InputAudioRawFrame, OutputAudioRawFrame
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
-
-from loguru import logger
 
 try:
     from livekit.rtc import AudioFrame

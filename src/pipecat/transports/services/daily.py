@@ -785,12 +785,13 @@ class DailyInputTransport(BaseInputTransport):
         render_frame = False
 
         curr_time = time.time()
-        prev_time = self._video_renderers[participant_id]["timestamp"] or curr_time
+        prev_time = self._video_renderers[participant_id]["timestamp"]
         framerate = self._video_renderers[participant_id]["framerate"]
 
         if framerate > 0:
             next_time = prev_time + 1 / framerate
-            render_frame = (curr_time - next_time) < 0.1
+            render_frame = (next_time - curr_time) < 0.1
+
         elif self._video_renderers[participant_id]["render_next_frame"]:
             self._video_renderers[participant_id]["render_next_frame"] = False
             render_frame = True
@@ -800,8 +801,7 @@ class DailyInputTransport(BaseInputTransport):
                 user_id=participant_id, image=buffer, size=size, format=format
             )
             await self.push_frame(frame)
-
-        self._video_renderers[participant_id]["timestamp"] = curr_time
+            self._video_renderers[participant_id]["timestamp"] = curr_time
 
 
 class DailyOutputTransport(BaseOutputTransport):

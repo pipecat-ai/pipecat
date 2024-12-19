@@ -5,11 +5,14 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
 from PIL import Image
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, OutputImageRawFrame, SystemFrame, TextFrame
@@ -20,14 +23,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.services.daily import DailyTransport
-
-from pipecat.transports.services.daily import DailyParams
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 

@@ -8,7 +8,7 @@ import asyncio
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
-from pydantic.main import BaseModel
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -34,6 +34,8 @@ except ModuleNotFoundError as e:
         "In order to use nvidia riva TTS or STT, you need to `pip install pipecat-ai[riva]`. Also, set `NVIDIA_API_KEY` environment variable."
     )
     raise Exception(f"Missing module: {e}")
+
+FASTPITCH_TIMEOUT_SECS = 5
 
 
 class FastPitchTTSService(TTSService):
@@ -76,7 +78,10 @@ class FastPitchTTSService(TTSService):
         )
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        def read_audio_responses():
+        def read_audio_responses(queue: asyncio.Queue):
+            def add_response(r):
+                asyncio.run_coroutine_threadsafe(queue.put(r), self.get_event_loop())
+
             try:
                 responses = self._service.synthesize_online(
                     text,
@@ -87,26 +92,35 @@ class FastPitchTTSService(TTSService):
                     quality=self._quality,
                     custom_dictionary={},
                 )
-                return responses
+                for r in responses:
+                    add_response(r)
+                add_response(None)
             except Exception as e:
                 logger.error(f"{self} exception: {e}")
-                return []
+                add_response(None)
 
         await self.start_ttfb_metrics()
         yield TTSStartedFrame()
 
         logger.debug(f"Generating TTS: [{text}]")
-        responses = await asyncio.to_thread(read_audio_responses)
 
-        for resp in responses:
-            await self.stop_ttfb_metrics()
+        try:
+            queue = asyncio.Queue()
+            await asyncio.to_thread(read_audio_responses, queue)
 
-            frame = TTSAudioRawFrame(
-                audio=resp.audio,
-                sample_rate=self._sample_rate,
-                num_channels=1,
-            )
-            yield frame
+            # Wait for the thread to start.
+            resp = await asyncio.wait_for(queue.get(), FASTPITCH_TIMEOUT_SECS)
+            while resp:
+                await self.stop_ttfb_metrics()
+                frame = TTSAudioRawFrame(
+                    audio=resp.audio,
+                    sample_rate=self._sample_rate,
+                    num_channels=1,
+                )
+                yield frame
+                resp = await asyncio.wait_for(queue.get(), FASTPITCH_TIMEOUT_SECS)
+        except asyncio.TimeoutError:
+            logger.error(f"{self} timeout waiting for audio response")
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()

@@ -5,7 +5,7 @@
 #
 
 from dataclasses import dataclass, field
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, List, Literal, Mapping, Optional, Tuple
 
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.clocks.base_clock import BaseClock
@@ -175,6 +175,99 @@ class TextFrame(DataFrame):
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, text: [{self.text}])"
+
+
+@dataclass
+class TranscriptionFrame(TextFrame):
+    """A text frame with transcription-specific data. Will be placed in the
+    transport's receive queue when a participant speaks.
+
+    """
+
+    user_id: str
+    timestamp: str
+    language: Language | None = None
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
+class InterimTranscriptionFrame(TextFrame):
+    """A text frame with interim transcription-specific data. Will be placed in
+    the transport's receive queue when a participant speaks.
+    """
+
+    text: str
+    user_id: str
+    timestamp: str
+    language: Language | None = None
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
+class OpenAILLMContextAssistantTimestampFrame(DataFrame):
+    """Timestamp information for assistant message in LLM context."""
+
+    timestamp: str
+
+
+@dataclass
+class TranscriptionMessage:
+    """A message in a conversation transcript containing the role and content.
+
+    Messages are in standard format with roles normalized to user/assistant.
+    """
+
+    role: Literal["user", "assistant"]
+    content: str
+    timestamp: str | None = None
+
+
+@dataclass
+class TranscriptionUpdateFrame(DataFrame):
+    """A frame containing new messages added to the conversation transcript.
+
+    This frame is emitted when new messages are added to the conversation history,
+    containing only the newly added messages rather than the full transcript.
+    Messages have normalized roles (user/assistant) regardless of the LLM service used.
+    Messages are always in the OpenAI standard message format, which supports both:
+
+    Simple format:
+    [
+        {
+            "role": "user",
+            "content": "Hi, how are you?"
+        },
+        {
+            "role": "assistant",
+            "content": "Great! And you?"
+        }
+    ]
+
+    Content list format:
+    [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Hi, how are you?"}]
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "Great! And you?"}]
+        }
+    ]
+
+    OpenAI supports both formats. Anthropic and Google messages are converted to the
+    content list format.
+    """
+
+    messages: List[TranscriptionMessage]
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, messages: {len(self.messages)})"
 
 
 @dataclass
@@ -442,36 +535,6 @@ class TransportMessageUrgentFrame(SystemFrame):
 
 
 @dataclass
-class TranscriptionFrame(SystemFrame):
-    """A text frame with transcription-specific data. Will be placed in the
-    transport's receive queue when a participant speaks.
-
-    """
-
-    text: str
-    user_id: str
-    timestamp: str
-    language: Language | None = None
-
-    def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
-
-
-@dataclass
-class InterimTranscriptionFrame(SystemFrame):
-    """A text frame with interim transcription-specific data. Will be placed in
-    the transport's receive queue when a participant speaks."""
-
-    text: str
-    user_id: str
-    timestamp: str
-    language: Language | None = None
-
-    def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
-
-
-@dataclass
 class UserImageRequestFrame(SystemFrame):
     """A frame user to request an image from the given user."""
 
@@ -547,7 +610,8 @@ class EndFrame(ControlFrame):
 @dataclass
 class LLMFullResponseStartFrame(ControlFrame):
     """Used to indicate the beginning of an LLM response. Following by one or
-    more TextFrame and a final LLMFullResponseEndFrame."""
+    more TextFrame and a final LLMFullResponseEndFrame.
+    """
 
     pass
 

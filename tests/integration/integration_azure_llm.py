@@ -1,16 +1,16 @@
-import unittest
-
 import asyncio
 import os
+import unittest
+
+from openai.types.chat import (
+    ChatCompletionSystemMessageParam,
+)
+
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
 from pipecat.services.azure import AzureLLMService
-
-from openai.types.chat import (
-    ChatCompletionSystemMessageParam,
-)
 
 if __name__ == "__main__":
 

@@ -9,6 +9,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `KoalaFilter` which implement on device noise reduction using Koala
+  Noise Suppression.
+  (see https://picovoice.ai/platform/koala/)
+
+- Added `CerebrasLLMService` for Cerebras integration with an OpenAI-compatible
+  interface. Added foundational example `14k-function-calling-cerebras.py`.
+
+- Pipecat now supports Python 3.13. We had a dependency on the `audioop` package
+  which was deprecated and now removed on Python 3.13. We are now using
+  `audioop-lts` (https://github.com/AbstractUmbra/audioop) to provide the same
+  functionality.
+
+- Added timestamped conversation transcript support:
+
+  - New `TranscriptProcessor` factory provides access to user and assistant
+    transcript processors.
+  - `UserTranscriptProcessor` processes user speech with timestamps from
+    transcription.
+  - `AssistantTranscriptProcessor` processes assistant responses with LLM
+    context timestamps.
+  - Messages emitted with ISO 8601 timestamps indicating when they were spoken.
+  - Supports all LLM formats (OpenAI, Anthropic, Google) via standard message
+    format.
+  - New examples: `28a-transcription-processor-openai.py`,
+    `28b-transcription-processor-anthropic.py`, and
+    `28c-transcription-processor-gemini.py`.
+
+- Add support for more languages to ElevenLabs (Arabic, Croatian, Filipino,
+  Tamil) and PlayHT (Afrikans, Albanian, Amharic, Arabic, Bengali, Croatian,
+  Galician, Hebrew, Mandarin, Serbian, Tagalog, Urdu, Xhosa).
+
+### Changed
+
+- `OpenAIRealtimeBetaLLMService` now takes a `model` parameter in the
+  constructor.
+
+- Updated the default model for the `OpenAIRealtimeBetaLLMService`.
+
+- Room expiration (`exp`) in `DailyRoomProperties` is now optional (`None`) by
+  default instead of automatically setting a 5-minute expiration time. You must
+  explicitly set expiration time if desired.
+
+### Deprecated
+
+- `AWSTTSService` is now deprecated, use `PollyTTSService` instead.
+
+### Fixed
+
+- Fixed an audio stuttering issue in `FastPitchTTSService`.
+
+- Fixed a `BaseOutputTransport` issue that was causing non-audio frames being
+  processed before the previous audio frames were played. This will allow, for
+  example, sending a frame `A` after a `TTSSpeakFrame` and the frame `A` will
+  only be pushed downstream after the audio generated from `TTSSpeakFrame` has
+  been spoken.
+
+- Fixed a [bug](https://github.com/pipecat-ai/pipecat/issues/868) in `DeepgramSTTService` that was causing Language to be passed
+  as python object instead of a string, causing connection to fail.
+
+## [0.0.51] - 2024-12-16
+
+### Fixed
+
+- Fixed an issue in websocket-based TTS services that was causing infinite
+  reconnections (Cartesia, ElevenLabs, PlayHT and LMNT).
+
+## [0.0.50] - 2024-12-11
+
+### Added
+
+- Added `GeminiMultimodalLiveLLMService`. This is an integration for Google's
+  Gemini Multimodal Live API, supporting:
+
+  - Real-time audio and video input processing
+  - Streaming text responses with TTS
+  - Audio transcription for both user and bot speech
+  - Function calling
+  - System instructions and context management
+  - Dynamic parameter updates (temperature, top_p, etc.)
+
+- Added `AudioTranscriber` utility class for handling audio transcription with
+  Gemini models.
+
+- Added new context classes for Gemini:
+
+  - `GeminiMultimodalLiveContext`
+  - `GeminiMultimodalLiveUserContextAggregator`
+  - `GeminiMultimodalLiveAssistantContextAggregator`
+  - `GeminiMultimodalLiveContextAggregatorPair`
+
+- Added new foundational examples for `GeminiMultimodalLiveLLMService`:
+
+  - `26-gemini-multimodal-live.py`
+  - `26a-gemini-multimodal-live-transcription.py`
+  - `26b-gemini-multimodal-live-video.py`
+  - `26c-gemini-multimodal-live-video.py`
+
 - Added `SimliVideoService`. This is an integration for Simli AI avatars.
   (see https://www.simli.com)
 
@@ -58,8 +155,8 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
   delays. The sample rate of the provided sound files now need to match the
   sample rate of the output transport.
 
-- All input frames (text, audio, image, etc.) are now system frames. This means
-  they are processed immediately by all processors instead of being queued
+- Input frames (audio, image and transport messages) are now system frames. This
+  means they are processed immediately by all processors instead of being queued
   internally.
 
 - Expanded the transcriptions.language module to support a superset of
