@@ -43,6 +43,12 @@ except ModuleNotFoundError as e:
 
 ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
 
+ELEVENLABS_MULTILINGUAL_MODELS = {
+    "eleven_turbo_v2_5",
+    "eleven_multilingual_v2",
+    "eleven_flash_v2_5",
+}
+
 
 def language_to_elevenlabs_language(language: Language) -> str | None:
     BASE_LANGUAGES = {
@@ -152,7 +158,7 @@ class ElevenLabsTTSService(WordTTSService):
         *,
         api_key: str,
         voice_id: str,
-        model: str = "eleven_turbo_v2_5",
+        model: str = "eleven_flash_v2_5",
         url: str = "wss://api.elevenlabs.io",
         output_format: ElevenLabsOutputFormat = "pcm_24000",
         params: InputParams = InputParams(),
@@ -319,13 +325,13 @@ class ElevenLabsTTSService(WordTTSService):
             if self._settings["optimize_streaming_latency"]:
                 url += f"&optimize_streaming_latency={self._settings['optimize_streaming_latency']}"
 
-            # Language can only be used with the 'eleven_turbo_v2_5' model
+            # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
             language = self._settings["language"]
-            if model == "eleven_turbo_v2_5":
+            if model in ELEVENLABS_MULTILINGUAL_MODELS:
                 url += f"&language_code={language}"
             else:
                 logger.warning(
-                    f"Language code [{language}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
+                    f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
                 )
 
             self._websocket = await websockets.connect(url)
