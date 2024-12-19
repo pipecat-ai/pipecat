@@ -23,10 +23,29 @@ from pipecat.services.nim import NimLLMService
 from pipecat.services.openai import OpenAILLMContext
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
+try:
+    from noaa_sdk import NOAA
+
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to run this example, please run `pip install noaa_sdk` and try again.")
+    raise Exception(f"Missing module: {e}")
+
 load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+system_prompt = """\
+You are a helpful assistant who converses with a user and answers questions. Respond concisely to general questions.
+
+Your response will be turned into speech so use only simple words and punctuation.
+
+You have access to two tools: get_weather and get_postalcode.
+
+You can respond to questions about the weather using the get_weather tool.
+When you are asked about the weather, infer from the location what the postal code is and use that as the zip_code argument in the get_weather tool.
+"""
 
 
 async def start_fetch_weather(function_name, llm, context):
@@ -38,8 +57,33 @@ async def start_fetch_weather(function_name, llm, context):
     logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
 
 
+async def get_noaa_simple_weather(zip_code: str, **kwargs):
+    logger.debug(f"noaa get simple weather for {zip_code}")
+    n = NOAA()
+    observations = n.get_observations(postalcode=zip_code, country="US", num_of_stations=1)
+    for observation in observations:
+        description = observation["textDescription"]
+        celcius_temp = observation["temperature"]["value"]
+
+    fahrenheit_temp = (celcius_temp * 9 / 5) + 32
+    return description, fahrenheit_temp
+
+
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await result_callback({"conditions": "nice", "temperature": "75"})
+    location = args["location"]
+    zip_code = args["zip_code"]
+    logger.info(f"fetch_weather_from_api * location: {location}, zip_code: {zip_code}")
+
+    if len(zip_code) == 5 and zip_code.isdigit():
+        description, fahrenheit_temp = await get_noaa_simple_weather(zip_code)
+    else:
+        return await result_callback(
+            f"I'm sorry, I can't get the weather for {location} right now. Can you ask again please?"
+        )
+
+    await result_callback(
+        f"The weather in {location} is currently {round(fahrenheit_temp)} degrees and {description}."
+    )
 
 
 async def main():
@@ -49,7 +93,7 @@ async def main():
         transport = DailyTransport(
             room_url,
             token,
-            "Respond bot",
+            "weather bot",
             DailyParams(
                 audio_out_enabled=True,
                 transcription_enabled=True,
@@ -61,7 +105,6 @@ async def main():
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
-            # text_filter=MarkdownTextFilter(),
         )
 
         llm = NimLLMService(
@@ -75,30 +118,54 @@ async def main():
             ChatCompletionToolParam(
                 type="function",
                 function={
-                    "name": "get_current_weather",
-                    "description": "Returns the current weather at a location, if one is specified, and defaults to the user's location.",
+                    "name": "get_weather",
+                    "description": "Get the current weather",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "location": {
                                 "type": "string",
-                                "description": "The location to find the weather of, or if not provided, it's the default location.",
+                                "description": "The location for the weather request.",
                             },
-                            "format": {
+                            "zip_code": {
                                 "type": "string",
-                                "enum": ["celsius", "fahrenheit"],
-                                "description": "Whether to use SI or USCS units (celsius or fahrenheit).",
+                                "description": "The location for the weather request. Must only be a 5 digit postal code.",
                             },
                         },
-                        "required": ["location", "format"],
+                        "required": ["location"],
                     },
                 },
-            )
+            ),
+            ChatCompletionToolParam(
+                type="function",
+                function={
+                    "name": "get_postalcode",
+                    "description": "Get the current weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {
+                                "type": "string",
+                                "description": "The location to provide a postalcode for.",
+                            },
+                            "zip_code": {
+                                "type": "string",
+                                "description": "Infer the postalcode from the location. Your options are any number between 00602 and 99999. Only respond with the 5 digit postal code.",
+                            },
+                        },
+                        "required": ["location"],
+                    },
+                },
+            ),
         ]
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": "Say hello and offer to provide weather information for anywhere in the United States of America.",
             },
         ]
 
