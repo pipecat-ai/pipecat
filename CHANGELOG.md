@@ -57,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that would cause `ParallelPipeline` to handle `EndFrame`
+  incorrectly causing the main pipeline to not terminate or terminate too early.
+
 - Fixed an audio stuttering issue in `FastPitchTTSService`.
 
 - Fixed a `BaseOutputTransport` issue that was causing non-audio frames being
