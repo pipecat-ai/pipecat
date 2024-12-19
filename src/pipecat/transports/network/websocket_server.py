@@ -72,14 +72,14 @@ class WebsocketServerInputTransport(BaseInputTransport):
         self._server_task = self.get_event_loop().create_task(self._server_task_handler())
 
     async def stop(self, frame: EndFrame):
+        await super().stop(frame)
         self._stop_server_event.set()
         await self._server_task
-        await super().stop(frame)
 
     async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
         self._stop_server_event.set()
         await self._server_task
-        await super().cancel(frame)
 
     async def _server_task_handler(self):
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
