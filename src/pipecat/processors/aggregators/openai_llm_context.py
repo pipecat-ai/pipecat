@@ -113,10 +113,38 @@ class OpenAILLMContext:
         return json.dumps(msgs)
 
     def from_standard_message(self, message):
+        """Convert from OpenAI message format to OpenAI message format (passthrough).
+
+        OpenAI's format allows both simple string content and structured content:
+        - Simple: {"role": "user", "content": "Hello"}
+        - Structured: {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
+
+        Since OpenAI is our standard format, this is a passthrough function.
+
+        Args:
+            message (dict): Message in OpenAI format
+
+        Returns:
+            dict: Same message, unchanged
+        """
         return message
 
-    # convert a message in this LLM's format to one or more messages in OpenAI format
     def to_standard_messages(self, obj) -> list:
+        """Convert from OpenAI message format to OpenAI message format (passthrough).
+
+        OpenAI's format is our standard format throughout Pipecat. This function
+        returns a list containing the original message to maintain consistency with
+        other LLM services that may need to return multiple messages.
+
+        Args:
+            obj (dict): Message in OpenAI format with either:
+                - Simple content: {"role": "user", "content": "Hello"}
+                - List content: {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
+
+        Returns:
+            list: List containing the original messages, preserving whether
+                the content was in simple string or structured list format
+        """
         return [obj]
 
     def get_messages_for_initializing_history(self):

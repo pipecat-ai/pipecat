@@ -21,7 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `audioop-lts` (https://github.com/AbstractUmbra/audioop) to provide the same
   functionality.
 
-- Added support for more languages to ElevenLabs (Arabic, Croatian, Filipino,
+- Added timestamped conversation transcript support:
+
+  - New `TranscriptProcessor` factory provides access to user and assistant
+    transcript processors.
+  - `UserTranscriptProcessor` processes user speech with timestamps from
+    transcription.
+  - `AssistantTranscriptProcessor` processes assistant responses with LLM
+    context timestamps.
+  - Messages emitted with ISO 8601 timestamps indicating when they were spoken.
+  - Supports all LLM formats (OpenAI, Anthropic, Google) via standard message
+    format.
+  - New examples: `28a-transcription-processor-openai.py`,
+    `28b-transcription-processor-anthropic.py`, and
+    `28c-transcription-processor-gemini.py`.
+
+- Add support for more languages to ElevenLabs (Arabic, Croatian, Filipino,
   Tamil) and PlayHT (Afrikans, Albanian, Amharic, Arabic, Bengali, Croatian,
   Galician, Hebrew, Mandarin, Serbian, Tagalog, Urdu, Xhosa).
 
