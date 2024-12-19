@@ -323,19 +323,19 @@ class LiveKitInputTransport(BaseInputTransport):
         logger.info("LiveKitInputTransport started")
 
     async def stop(self, frame: EndFrame):
+        await super().stop(frame)
         await self._client.disconnect()
         if self._audio_in_task:
             self._audio_in_task.cancel()
             await self._audio_in_task
-        await super().stop(frame)
         logger.info("LiveKitInputTransport stopped")
 
     async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
         await self._client.disconnect()
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_in_task.cancel()
             await self._audio_in_task
-        await super().cancel(frame)
 
     def vad_analyzer(self) -> VADAnalyzer | None:
         return self._vad_analyzer
@@ -397,13 +397,13 @@ class LiveKitOutputTransport(BaseOutputTransport):
         logger.info("LiveKitOutputTransport started")
 
     async def stop(self, frame: EndFrame):
-        await self._client.disconnect()
         await super().stop(frame)
+        await self._client.disconnect()
         logger.info("LiveKitOutputTransport stopped")
 
     async def cancel(self, frame: CancelFrame):
-        await self._client.disconnect()
         await super().cancel(frame)
+        await self._client.disconnect()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         if isinstance(frame, (LiveKitTransportMessageFrame, LiveKitTransportMessageUrgentFrame)):
