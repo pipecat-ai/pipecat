@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added an `auto_mode` input parameter to `ElevenLabsTTSService`. `auto_mode`
+  is set to `True` by default. Enabling this setting disables the chunk
+  schedule and all buffers, which reduces latency.
+
 - Added `KoalaFilter` which implement on device noise reduction using Koala
   Noise Suppression.
   (see https://picovoice.ai/platform/koala/)
@@ -41,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Galician, Hebrew, Mandarin, Serbian, Tagalog, Urdu, Xhosa).
 
 ### Changed
+
+- `auto_mode: True` for the `ElevenLabsTTSService`. This change
+  significantly reduces the latency by disabling the chunk schedule and all
+  buffers.
 
 - `OpenAIRealtimeBetaLLMService` now takes a `model` parameter in the
   constructor.
