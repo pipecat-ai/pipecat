@@ -134,10 +134,10 @@ class FishAudioTTSService(TTSService):
                 "debug": True,  # Added debug flag
             }
             await self._websocket.send(ormsgpack.packb(start_message))
-            logger.debug("Sent start event to fish.audio WebSocket")
+            # logger.debug("Sent start event to fish.audio WebSocket")
 
         except Exception as e:
-            logger.exception(f"Error connecting to fish.audio WebSocket: {e}")
+            # logger.exception(f"Error connecting to fish.audio WebSocket: {e}")
             self._websocket = None
 
     async def _disconnect(self):
@@ -192,8 +192,6 @@ class FishAudioTTSService(TTSService):
                             error_msg = msg.get("error", "Unknown error")
                             logger.error(f"fish.audio error: {error_msg}")
                             await self.push_error(ErrorFrame(f"fish.audio error: {error_msg}"))
-                        else:
-                            logger.warning(f"Unhandled event from fish.audio: {event}")
                     else:
                         logger.warning(f"Received unexpected message type: {type(message)}")
                 except asyncio.TimeoutError:
