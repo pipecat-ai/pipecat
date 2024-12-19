@@ -48,7 +48,7 @@ from pipecat.processors.frameworks.rtvi import (
     RTVISpeakingProcessor,
     RTVIUserTranscriptionProcessor,
 )
-from pipecat.services.fish import FishAudioTTSService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
