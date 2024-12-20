@@ -43,6 +43,12 @@ except ModuleNotFoundError as e:
 
 ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
 
+ELEVENLABS_MULTILINGUAL_MODELS = {
+    "eleven_turbo_v2_5",
+    "eleven_multilingual_v2",
+    "eleven_flash_v2_5",
+}
+
 
 def language_to_elevenlabs_language(language: Language) -> str | None:
     BASE_LANGUAGES = {
@@ -135,6 +141,7 @@ class ElevenLabsTTSService(WordTTSService):
         similarity_boost: Optional[float] = None
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
+        auto_mode: Optional[bool] = True
 
         @model_validator(mode="after")
         def validate_voice_settings(self):
@@ -151,7 +158,7 @@ class ElevenLabsTTSService(WordTTSService):
         *,
         api_key: str,
         voice_id: str,
-        model: str = "eleven_turbo_v2_5",
+        model: str = "eleven_flash_v2_5",
         url: str = "wss://api.elevenlabs.io",
         output_format: ElevenLabsOutputFormat = "pcm_24000",
         params: InputParams = InputParams(),
@@ -193,6 +200,7 @@ class ElevenLabsTTSService(WordTTSService):
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
+            "auto_mode": str(params.auto_mode).lower(),
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -312,18 +320,18 @@ class ElevenLabsTTSService(WordTTSService):
             voice_id = self._voice_id
             model = self.model_name
             output_format = self._settings["output_format"]
-            url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}&auto_mode=true"
+            url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}&auto_mode={self._settings['auto_mode']}"
 
             if self._settings["optimize_streaming_latency"]:
                 url += f"&optimize_streaming_latency={self._settings['optimize_streaming_latency']}"
 
-            # Language can only be used with the 'eleven_turbo_v2_5' model
+            # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
             language = self._settings["language"]
-            if model == "eleven_turbo_v2_5":
+            if model in ELEVENLABS_MULTILINGUAL_MODELS:
                 url += f"&language_code={language}"
             else:
                 logger.warning(
-                    f"Language code [{language}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
+                    f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
                 )
 
             self._websocket = await websockets.connect(url)
