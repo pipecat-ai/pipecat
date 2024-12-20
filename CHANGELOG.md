@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `DailyTransport.send_dtmf()` to send dial-out DTMF tones.
+
+- Added `DailyTransport.sip_call_transfer()` to forward SIP and PSTN calls to
+  another address or number.  For example, transfer a SIP call to a different
+  SIP address or transfer a PSTN phone number to a different PSTN phone number.
+
+- Added `DailyTransport.sip_refer()` to transfer incoming SIP/PSTN calls from
+  outside Daily to another SIP/PSTN address.
+
 - Added `KoalaFilter` which implement on device noise reduction using Koala
   Noise Suppression.
   (see https://picovoice.ai/platform/koala/)
