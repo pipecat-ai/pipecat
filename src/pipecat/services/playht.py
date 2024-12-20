@@ -209,7 +209,7 @@ class PlayHTTTSService(TTSService):
     async def _get_websocket_url(self):
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                "https://api.play.ht/api/v3/websocket-auth",
+                "https://api.play.ht/api/v4/websocket-auth",
                 headers={
                     "Authorization": f"Bearer {self._api_key}",
                     "X-User-Id": self._user_id,
@@ -218,10 +218,19 @@ class PlayHTTTSService(TTSService):
             ) as response:
                 if response.status in (200, 201):
                     data = await response.json()
-                    if "websocket_url" in data and isinstance(data["websocket_url"], str):
-                        self._websocket_url = data["websocket_url"]
+                    # Handle the new response format with multiple URLs
+                    if "websocket_urls" in data:
+                        # Select URL based on voice_engine
+                        if self._settings["voice_engine"] in data["websocket_urls"]:
+                            self._websocket_url = data["websocket_urls"][
+                                self._settings["voice_engine"]
+                            ]
+                        else:
+                            raise ValueError(
+                                f"Unsupported voice engine: {self._settings['voice_engine']}"
+                            )
                     else:
-                        raise ValueError("Invalid or missing WebSocket URL in response")
+                        raise ValueError("Invalid response: missing websocket_urls")
                 else:
                     raise Exception(f"Failed to get WebSocket URL: {response.status}")
 
@@ -248,9 +257,14 @@ class PlayHTTTSService(TTSService):
                 logger.debug(f"Received text message: {message}")
                 try:
                     msg = json.loads(message)
-                    if "request_id" in msg and msg["request_id"] == self._request_id:
-                        await self.push_frame(TTSStoppedFrame())
-                        self._request_id = None
+                    if msg.get("type") == "start":
+                        # Handle start of stream
+                        logger.debug(f"Started processing request: {msg.get('request_id')}")
+                    elif msg.get("type") == "end":
+                        # Handle end of stream
+                        if "request_id" in msg and msg["request_id"] == self._request_id:
+                            await self.push_frame(TTSStoppedFrame())
+                            self._request_id = None
                     elif "error" in msg:
                         logger.error(f"{self} error: {msg}")
                         await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
