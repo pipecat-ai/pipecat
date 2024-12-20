@@ -42,10 +42,10 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import (
-    RTVIProcessor,
-    RTVIConfig,
     RTVIBotTranscriptionProcessor,
+    RTVIConfig,
     RTVIMetricsProcessor,
+    RTVIProcessor,
     RTVISpeakingProcessor,
     RTVIUserTranscriptionProcessor,
 )
