@@ -8,7 +8,6 @@ import asyncio
 import os
 import sys
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
