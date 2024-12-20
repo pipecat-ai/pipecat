@@ -88,14 +88,16 @@ class DialoutBot:
                 phone_numbers = [
                     "+12097135124",  # James
                     "+12097135125",  # James
-                    "+19499870006",  # Varun
+                    self.phone_number,
+                    # "+19499870006",  # Varun
                 ]
                 return phone_numbers[callId % len(phone_numbers)]
             else:
                 phone_numbers = [
                     "+14155204406",  # James
                     "+18187229086",  # James (Avoca)
-                    "+16673870006",  # Varun
+                    self.phone_number,
+                    # "+16673870006",  # Varun
                 ]
                 return phone_numbers[callId % len(phone_numbers)]
 

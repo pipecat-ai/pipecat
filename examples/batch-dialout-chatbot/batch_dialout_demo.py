@@ -25,7 +25,7 @@ async def run_bot(id: int, run_number: int, bot_run_time: int, phone_number: str
         )
 
         # Create daily.co room with dialin and dialout enabled
-        exp = time.time() + bot_run_time
+        exp = time.time() + bot_run_time + 600
         room_params = DailyRoomParams(
             properties=DailyRoomProperties(
                 exp=exp,
@@ -59,6 +59,7 @@ async def run_bot(id: int, run_number: int, bot_run_time: int, phone_number: str
                 [id, "Rate Limit Error", datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]]
             )
 
+        await asyncio.sleep(15)
         bot_proc = f"python3 -m batch_dialout_bot -u {room.url} -t {token} -i {id} -r {run_number} -p {phone_number}"
 
         try:
@@ -96,8 +97,8 @@ async def main():
             ]
             print(f"-- Number of bots: {len(bots)}")
             await asyncio.gather(*bots)
-            print(f"-- Waiting {bot_run_time + 30} seconds...")
-            await asyncio.sleep(bot_run_time + 30)
+            print(f"-- Waiting {bot_run_time} seconds...")
+            await asyncio.sleep(bot_run_time)
             print(f"-- Finished waiting {bot_run_time} seconds...")
 
 
