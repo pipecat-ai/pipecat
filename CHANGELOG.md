@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `PlayHTTTSService` uses the new v4 websocket API, which also fixes an issue
+  where text inputted to the TTS didn't return audio.
+
 - The default model for `ElevenLabsTTSService` is now `eleven_flash_v2_5`.
 
 - `OpenAIRealtimeBetaLLMService` now takes a `model` parameter in the
