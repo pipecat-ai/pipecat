@@ -156,7 +156,6 @@ class FishAudioTTSService(TTSService):
                     if isinstance(msg, dict):
                         event = msg.get("event")
                         if event == "audio":
-                            await self.stop_ttfb_metrics()
                             audio_data = msg.get("audio")
                             # Only process larger chunks to remove msgpack overhead
                             if audio_data and len(audio_data) > 1024:
@@ -164,6 +163,7 @@ class FishAudioTTSService(TTSService):
                                     audio_data, self._settings["sample_rate"], 1
                                 )
                                 await self.push_frame(frame)
+                                await self.stop_ttfb_metrics()
                                 continue
 
             except Exception as e:
@@ -216,6 +216,7 @@ class FishAudioTTSService(TTSService):
 
             if not self._request_id:
                 await self.start_ttfb_metrics()
+                await self.start_tts_usage_metrics(text)
                 yield TTSStartedFrame()
                 self._request_id = str(uuid.uuid4())
 
