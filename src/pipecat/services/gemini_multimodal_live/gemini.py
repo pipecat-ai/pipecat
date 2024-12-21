@@ -177,6 +177,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._receive_task = None
         self._context = None
 
+        self._connected = False
         self._disconnecting = False
         self._api_session_ready = False
         self._run_llm_when_api_session_ready = False
@@ -230,7 +231,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        await self._connect()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -434,8 +434,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def _ws_send(self, message):
         # logger.debug(f"Sending message to websocket: {message}")
         try:
-            if self._websocket:
-                await self._websocket.send(json.dumps(message))
+            if not self._websocket:
+                await self._connect()
+            await self._websocket.send(json.dumps(message))
         except Exception as e:
             if self._disconnecting:
                 return
