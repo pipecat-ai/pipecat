@@ -155,7 +155,6 @@ class FishAudioTTSService(TTSService):
                     msg = ormsgpack.unpackb(message)
                     if isinstance(msg, dict):
                         event = msg.get("event")
-                        print(f"Received event: {event}")
                         if event == "audio":
                             await self.stop_ttfb_metrics()
                             audio_data = msg.get("audio")
@@ -220,12 +219,23 @@ class FishAudioTTSService(TTSService):
                 yield TTSStartedFrame()
                 self._request_id = str(uuid.uuid4())
 
+            # Send the text
             text_message = {
                 "event": "text",
                 "text": text,
             }
-            await self._get_websocket().send(ormsgpack.packb(text_message))
-            await self.start_tts_usage_metrics(text)
+            try:
+                await self._get_websocket().send(ormsgpack.packb(text_message))
+                await self.start_tts_usage_metrics(text)
+
+                # Send flush event to force audio generation
+                flush_message = {"event": "flush"}
+                await self._get_websocket().send(ormsgpack.packb(flush_message))
+            except Exception as e:
+                logger.error(f"{self} error sending message: {e}")
+                yield TTSStoppedFrame()
+                await self._disconnect()
+                await self._connect()
 
             yield None
 
