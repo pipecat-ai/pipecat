@@ -13,6 +13,7 @@ langchain~=0.2.14
 livekit~=0.13.1
 lmnt~=1.1.4
 loguru~=0.7.2
+noaa_sdk~=0.1.21
 numpy~=1.26.4
 openai~=1.37.2
 openpipe~=4.24.0
