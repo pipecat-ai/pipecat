@@ -518,6 +518,16 @@ class DailyTransportClient(EventHandler):
         self._client.stop_recording(stream_id, completion=completion_callback(future))
         await future
 
+    async def send_prebuilt_chat_message(self, message: str, user_name: str | None = None):
+        if not self._joined:
+            return
+
+        future = self._loop.create_future()
+        self._client.send_prebuilt_chat_message(
+            message, user_name=user_name, completion=completion_callback(future)
+        )
+        await future
+
     async def capture_participant_transcription(self, participant_id: str):
         if not self._params.transcription_enabled:
             return
@@ -984,6 +994,15 @@ class DailyTransport(BaseTransport):
 
     async def stop_recording(self, stream_id=None):
         await self._client.stop_recording(stream_id)
+
+    async def send_prebuilt_chat_message(self, message: str, user_name: str | None = None):
+        """Sends a chat message to Daily's Prebuilt main room.
+
+        Args:
+        message: The chat message to send
+        user_name: Optional user name that will appear as sender of the message
+        """
+        await self._client.send_prebuilt_chat_message(message, user_name)
 
     async def capture_participant_transcription(self, participant_id: str):
         await self._client.capture_participant_transcription(participant_id)
