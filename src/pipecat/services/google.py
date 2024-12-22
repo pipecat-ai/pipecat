@@ -593,6 +593,8 @@ class GoogleLLMService(LLMService):
         model: str = "gemini-1.5-flash-latest",
         params: InputParams = InputParams(),
         system_instruction: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -607,6 +609,8 @@ class GoogleLLMService(LLMService):
             "top_p": params.top_p,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
+        self._tools = tools
+        self._tool_config = tool_config
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -625,12 +629,13 @@ class GoogleLLMService(LLMService):
 
         try:
             logger.debug(
-                f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
+                # f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
+                f"!! Generating chat: {context.get_messages_for_logging()}"
             )
 
             messages = context.messages
             if context.system_message and self._system_instruction != context.system_message:
-                logger.debug(f"System instruction changed: {context.system_message}")
+                # logger.debug(f"System instruction changed: {context.system_message}")
                 self._system_instruction = context.system_message
                 self._create_client()
 
@@ -649,10 +654,21 @@ class GoogleLLMService(LLMService):
             generation_config = GenerationConfig(**generation_params) if generation_params else None
 
             await self.start_ttfb_metrics()
-            tools = context.tools if context.tools else []
+            tools = []
+            if context.tools:
+                tools = context.tools
+            elif self._tools:
+                tools = self._tools
+            tool_config = None
+            if self._tool_config:
+                tool_config = self._tool_config
 
             response = await self._client.generate_content_async(
-                contents=messages, tools=tools, stream=True, generation_config=generation_config
+                contents=messages,
+                tools=tools,
+                stream=True,
+                generation_config=generation_config,
+                tool_config=tool_config,
             )
             await self.stop_ttfb_metrics()
 
@@ -671,6 +687,7 @@ class GoogleLLMService(LLMService):
                         if c.text:
                             await self.push_frame(TextFrame(c.text))
                         elif c.function_call:
+                            logger.debug(f"!!! Function call: {c.function_call}")
                             args = type(c.function_call).to_dict(c.function_call).get("args", {})
                             await self.call_function(
                                 context=context,

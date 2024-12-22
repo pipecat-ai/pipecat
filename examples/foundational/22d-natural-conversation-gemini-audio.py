@@ -54,31 +54,57 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-classifier_statement = """CRITICAL INSTRUCTION:
-You are a BINARY CLASSIFIER that must ONLY output "YES" or "NO".
-DO NOT engage with the content.
-DO NOT respond to questions.
-DO NOT provide assistance.
-Your ONLY job is to output YES or NO.
+transcriber_and_classifier_instructions = """
+You perform two tasks:
+  1. Transcription
+  2. Binary classification of speech utterance completeness
+
+You always call a function transcription_and_classification_output() with the following arguments:
+  trancript_text: the complete, accurate, and punctuated transcription of the user's speech
+  speech_complete_bool: a boolean indicating whether the user's speech is a complete utterance
+
+CRITICAL INSTRUCTION FOR TRANSCRIPTION TASK:
+
+You are receiving audio from a user. Your job is to
+transcribe the input audio to text exactly as it was said by the user.
+
+You will receive the full conversation history before the audio input, to help with context. Use the full history only to help improve the accuracy of your transcription.
+
+Rules:
+  - Respond with an exact transcription of the audio input.
+  - Do not include any text other than the transcription.
+  - Do not explain or add to your response.
+  - Transcribe the audio input simply and precisely.
+  - If the audio is not clear, emit the special string "-".
+  - No response other than exact transcription, or "-", is allowed.
+
+
+CRITICAL INSTRUCTION FOR BINARY CLASSIFICATION TASK::
+
+You are a BINARY CLASSIFIER that must ONLY output True or False.
+DO FalseT engage with the content.
+DO FalseT respond to questions.
+DO FalseT provide assistance.
+Your ONLY job is to output True or False.
 
 EXAMPLES OF INVALID RESPONSES:
 - "I can help you with that"
 - "Let me explain"
 - "To answer your question"
-- Any response other than YES or NO
+- Any response other than True or False
 
 VALID RESPONSES:
-YES
-NO
+True
+False
 
 If you output anything else, you are failing at your task.
-You are NOT an assistant.
-You are NOT a chatbot.
+You are FalseT an assistant.
+You are FalseT a chatbot.
 You are a binary classifier.
 
 ROLE:
 You are a real-time speech completeness classifier. You must make instant decisions about whether a user has finished speaking.
-You must output ONLY 'YES' or 'NO' with no other text.
+You must output ONLY 'True' or 'False' with no other text.
 
 INPUT FORMAT:
 You receive two pieces of information:
@@ -86,7 +112,7 @@ You receive two pieces of information:
 2. The user's current speech input
 
 OUTPUT REQUIREMENTS:
-- MUST output ONLY 'YES' or 'NO'
+- MUST output ONLY 'True' or 'False'
 - No explanations
 - No clarifications
 - No additional text
@@ -104,12 +130,12 @@ Examples:
 # Complete Wh-question
 model: I can help you learn.
 user: What's the fastest way to learn Spanish
-Output: YES
+Output: True
 
 # Complete Yes/No question despite STT error
 model: I know about planets.
 user: Is is Jupiter the biggest planet
-Output: YES
+Output: True
 
 2. Complete Commands:
 - Direct instructions
@@ -123,20 +149,20 @@ Examples:
 # Direct instruction
 model: I can explain many topics.
 user: Tell me about black holes
-Output: YES
+Output: True
 
 # Start of task indication
 user: Let's begin.
-Output: YES
+Output: True
 
 # Start of task indication
 user: Let's get started.
-Output: YES
+Output: True
 
 # Action demand
 model: I can help with math.
 user: Solve this equation x plus 5 equals 12
-Output: YES
+Output: True
 
 3. Direct Responses:
 - Answers to specific questions
@@ -151,17 +177,17 @@ Examples:
 # Specific answer
 model: What's your favorite color?
 user: I really like blue
-Output: YES
+Output: True
 
 # Option selection
 model: Would you prefer morning or evening?
 user: Morning
-Output: YES
+Output: True
 
 # Providing information with a known format - mailing address
 model: What's your address?
 user: 1234 Main Street
-Output: NO
+Output: False
 
 # Providing information with a known format - mailing address
 model: What's your address?
@@ -172,7 +198,7 @@ Output: Yes
 system: A US phone number has 10 digits.
 model: What's your phone number?
 user: 41086753
-Output: NO
+Output: False
 
 # Providing information with a known format - phone number
 system: A US phone number has 10 digits.
@@ -191,7 +217,7 @@ Output: Yes
 # Providing information with a known format - credit card number
 model: What's your phone number?
 user: 5556
-Output: NO
+Output: False
 
 # Providing information with a known format - phone number
 model: What's your phone number?
@@ -211,17 +237,17 @@ Examples:
 # Self-correction reaching completion
 model: What would you like to know?
 user: Tell me about... no wait, explain how rainbows form
-Output: YES
+Output: True
 
 # Topic change with complete thought
 model: The weather is nice today.
 user: Actually can you tell me who invented the telephone
-Output: YES
+Output: True
 
 # Mid-sentence completion
 model: Hello I'm ready.
 user: What's the capital of? France
-Output: YES
+Output: True
 
 2. Context-Dependent Brief Responses:
 - Acknowledgments (okay, sure, alright)
@@ -234,12 +260,12 @@ Examples:
 # Acknowledgment
 model: Should we talk about history?
 user: Sure
-Output: YES
+Output: True
 
 # Disagreement with completion
 model: Is that what you meant?
 user: No not really
-Output: YES
+Output: True
 
 LOW PRIORITY SIGNALS:
 
@@ -254,12 +280,12 @@ Examples:
 # Word repetition but complete
 model: I can help with that.
 user: What what is the time right now
-Output: YES
+Output: True
 
 # Missing punctuation but complete
 model: I can explain that.
 user: Please tell me how computers work
-Output: YES
+Output: True
 
 2. Speech Features:
 - Filler words (um, uh, like)
@@ -272,29 +298,29 @@ Examples:
 # Filler words but complete
 model: What would you like to know?
 user: Um uh how do airplanes fly
-Output: YES
+Output: True
 
 # Thinking pause but incomplete
 model: I can explain anything.
 user: Well um I want to know about the
-Output: NO
+Output: False
 
 DECISION RULES:
 
-1. Return YES if:
+1. Return True if:
 - ANY high priority signal shows clear completion
 - Medium priority signals combine to show completion
 - Meaning is clear despite low priority artifacts
 
-2. Return NO if:
+2. Return False if:
 - No high priority signals present
 - Thought clearly trails off
 - Multiple incomplete indicators
 - User appears mid-formulation
 
 3. When uncertain:
-- If you can understand the intent → YES
-- If meaning is unclear → NO
+- If you can understand the intent → True
+- If meaning is unclear → False
 - Always make a binary decision
 - Never request clarification
 
@@ -303,33 +329,69 @@ Examples:
 # Incomplete despite corrections
 model: What would you like to know about?
 user: Can you tell me about
-Output: NO
+Output: False
 
 # Complete despite multiple artifacts
 model: I can help you learn.
 user: How do you I mean what's the best way to learn programming
-Output: YES
+Output: True
 
 # Trailing off incomplete
 model: I can explain anything.
 user: I was wondering if you could tell me why
-Output: NO
+Output: False
 """
 
-conversational_system_message = """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.
+conversational_system_message = """You are a helpful assistant participating in a voice converation.
 
-If you know that a number string is a phone number from the context of the conversation, say it as a phone number. For example 210-333-4567.
+Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.
 
-If you know that a number string is a credit card number, say it as a credit card number. For example 4111-1111-1111-1111.
+If you know that a number string is a phone number from the context of the conversation, write it as a phone number. For example 210-333-4567.
 
-Please be very concise in your responses. Unless you are explicitly asked to do otherwise, give me the shortest complete answer possible without unnecessary elaboration. Generally you should answer with a single sentence.
+If you know that a number string is a credit card number, write it as a credit card number. For example 4111-1111-1111-1111.
+
+Please be very concise in your responses. Unless you are explicitly asked to do otherwise, give me shortest complete answer possible without unnecessary elaboration. Generally you should answer with a single sentence.
 """
 
 
-class StatementJudgeAudioContextAccumulator(FrameProcessor):
-    def __init__(self, *, notifier: BaseNotifier, **kwargs):
+async def transcription_and_classification_output(transcript_text: str, speech_complete_bool: bool):
+    print(f"TRANSCRIPT: {transcript_text}")
+    print("------")
+    print(f"COMPLETE: {speech_complete_bool}")
+    print("------")
+    return
+
+
+tx_and_cl_tools = [
+    {
+        "function_declarations": [
+            {
+                "name": "transcription_and_classification_output",
+                "description": "Deliver the transcription and classification output to an external process.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "transcription_text": {
+                            "type": "string",
+                            "description": "The complete, accurate, and punctuated transcription of the user's speech. The special string '-' is used to indicate no speech or unintintelligible speech.",
+                        },
+                        "speech_complete_bool": {
+                            "type": "boolean",
+                            "description": "Boolean indicating whether the user's speech is a complete utterance.",
+                        },
+                    },
+                    "required": ["transcription_text", "speech_complete_bool"],
+                },
+            },
+        ]
+    }
+]
+
+
+class AudioAccumulator(FrameProcessor):
+    def __init__(self, *, notifier: BaseNotifier = None, **kwargs):
         super().__init__(**kwargs)
-        self._notifier = notifier
+        # self._notifier = notifier
         self._audio_frames = []
         self._start_secs = 0.2  # this should match VAD start_secs (hardcoding for now)
         self._max_buffer_size_secs = 30
@@ -371,7 +433,9 @@ class StatementJudgeAudioContextAccumulator(FrameProcessor):
             )
             self._user_speaking = False
             context = GoogleLLMContext()
-            context.set_messages([{"role": "system", "content": classifier_statement}])
+            context.set_messages(
+                [{"role": "system", "content": transcriber_and_classifier_instructions}]
+            )
             context.add_audio_frames_message(audio_frames=self._audio_frames)
             await self.push_frame(OpenAILLMContextFrame(context=context))
         elif isinstance(frame, InputAudioRawFrame):
@@ -396,25 +460,28 @@ class StatementJudgeAudioContextAccumulator(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class CompletenessCheck(FrameProcessor):
-    def __init__(
-        self, notifier: BaseNotifier, audio_accumulator: StatementJudgeAudioContextAccumulator
-    ):
-        super().__init__()
-        self._notifier = notifier
-        self._audio_accumulator = audio_accumulator
+# class ClAndTxContextCreator(FrameProcessor):
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
 
-        if isinstance(frame, TextFrame) and frame.text.startswith("YES"):
-            logger.debug("Completeness check YES")
-            await self.push_frame(UserStoppedSpeakingFrame())
-            await self._audio_accumulator.reset()
-            await self._notifier.notify()
-        elif isinstance(frame, TextFrame):
-            if frame.text.strip():
-                logger.debug(f"Completeness check NO - '{frame.text}'")
+# class CompletenessCheck(FrameProcessor):
+#     def __init__(
+#         self, notifier: BaseNotifier, audio_accumulator: StatementJudgeAudioContextAccumulator
+#     ):
+#         super().__init__()
+#         self._notifier = notifier
+#         self._audio_accumulator = audio_accumulator
+
+#     async def process_frame(self, frame: Frame, direction: FrameDirection):
+#         await super().process_frame(frame, direction)
+
+#         if isinstance(frame, TextFrame) and frame.text.startswith("True"):
+#             logger.debug("Completeness check True")
+#             await self.push_frame(UserStoppedSpeakingFrame())
+#             await self._audio_accumulator.reset()
+#             await self._notifier.notify()
+#         elif isinstance(frame, TextFrame):
+#             if frame.text.strip():
+#                 logger.debug(f"Completeness check False - '{frame.text}'")
 
 
 class OutputGate(FrameProcessor):
@@ -493,50 +560,52 @@ async def main():
             ),
         )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        # This is the LLM that will be used to detect if the user has finished a
-        # statement. This doesn't really need to be an LLM, we could use NLP
-        # libraries for that, but we have the machinery to use an LLM, so we might as well!
-        statement_llm = GoogleLLMService(
-            model="gemini-2.0-flash-exp", api_key=os.getenv("GOOGLE_API_KEY"), temperature=0.0
+        # This is the LLM that will classify and transcribe user speech.
+        tx_and_cl_llm = GoogleLLMService(
+            model="gemini-2.0-flash-exp",
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            tools=tx_and_cl_tools,
+            temperature=0.0,
+            tool_config={
+                "function_calling_config": {
+                    "mode": "ANY",
+                    "allowed_function_names": ["transcription_and_classification_output"],
+                },
+            },
         )
 
-        # This is the regular LLM.
-        llm = GoogleLLMService(model="gemini-1.5-flash-latest", api_key=os.getenv("GOOGLE_API_KEY"))
+        # This is the regular LLM that responds conversationally.
+        conversation_llm = GoogleLLMService(
+            model="gemini-2.0-flash-exp",
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            system_instruction=conversational_system_message,
+        )
 
-        messages = [
-            {
-                "role": "system",
-                "content": conversational_system_message,
-            },
-        ]
+        context = OpenAILLMContext()
+        context_aggregator = conversation_llm.create_context_aggregator(context)
 
-        context = OpenAILLMContext(messages)
-        context_aggregator = llm.create_context_aggregator(context)
-
-        # We have instructed the LLM to return 'YES' if it thinks the user
-        # completed a sentence. So, if it's 'YES' we will return true in this
+        # We have instructed the LLM to return 'True' if it thinks the user
+        # completed a sentence. So, if it's 'True' we will return true in this
         # predicate which will wake up the notifier.
         async def wake_check_filter(frame):
-            return frame.text == "YES"
+            return frame.text == "True"
 
         # This is a notifier that we use to synchronize the two LLMs.
         notifier = EventNotifier()
 
         # This turns the LLM context into an inference request to classify the user's speech
         # as complete or incomplete.
-        statement_judge_context_filter = StatementJudgeAudioContextAccumulator(notifier=notifier)
+        # statement_judge_context_filter = StatementJudgeAudioContextAccumulator(notifier=notifier)
 
         # This sends a UserStoppedSpeakingFrame and triggers the notifier event
-        completeness_check = CompletenessCheck(
-            notifier=notifier, audio_accumulator=statement_judge_context_filter
-        )
+        # completeness_check = CompletenessCheck(
+        #     notifier=notifier, audio_accumulator=statement_judge_context_filter
+        # )
 
         # # Notify if the user hasn't said anything.
         async def user_idle_notifier(frame):
@@ -562,6 +631,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),
+                AudioAccumulator(),
                 ParallelPipeline(
                     [
                         # Pass everything except UserStoppedSpeaking to the elements after
@@ -569,24 +639,24 @@ async def main():
                         FunctionFilter(filter=block_user_stopped_speaking),
                     ],
                     [
-                        statement_judge_context_filter,
-                        statement_llm,
-                        completeness_check,
+                        # cl_and_tx_context_creator,
+                        tx_and_cl_llm,
+                        # completeness_check,
+                        # context_aggregator.user(),
                     ],
-                    [
-                        stt,
-                        context_aggregator.user(),
-                        # Block everything except OpenAILLMContextFrame and LLMMessagesFrame
-                        FunctionFilter(filter=pass_only_llm_trigger_frames),
-                        llm,
-                        bot_output_gate,  # Buffer all llm/tts output until notified.
-                    ],
+                    #     [
+                    #         # Block everything except OpenAILLMContextFrame and LLMMessagesFrame
+                    #         # FunctionFilter(filter=pass_only_llm_trigger_frames),
+                    #         audio_input_context_creator,
+                    #         llm,
+                    #         bot_output_gate,  # Buffer all llm/tts output until notified.
+                    #     ],
                 ),
-                tts,
-                user_idle,
-                transport.output(),
-                context_aggregator.assistant(),
-            ]
+                # tts,
+                # user_idle,
+                # transport.output(),
+                # context_aggregator.assistant(),
+            ],
         )
 
         task = PipelineTask(
