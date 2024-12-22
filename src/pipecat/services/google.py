@@ -635,7 +635,7 @@ class GoogleLLMService(LLMService):
 
             messages = context.messages
             if context.system_message and self._system_instruction != context.system_message:
-                # logger.debug(f"System instruction changed: {context.system_message}")
+                logger.debug(f"System instruction changed: {context.system_message}")
                 self._system_instruction = context.system_message
                 self._create_client()
 
@@ -673,15 +673,16 @@ class GoogleLLMService(LLMService):
             await self.stop_ttfb_metrics()
 
             if response.usage_metadata:
+                # Use only the prompt token count from the response object
                 prompt_tokens = response.usage_metadata.prompt_token_count
-                completion_tokens = response.usage_metadata.candidates_token_count
-                total_tokens = response.usage_metadata.total_token_count
+                total_tokens = prompt_tokens
 
             async for chunk in response:
                 if chunk.usage_metadata:
-                    prompt_tokens += response.usage_metadata.prompt_token_count
-                    completion_tokens += response.usage_metadata.candidates_token_count
-                    total_tokens += response.usage_metadata.total_token_count
+                    # Use only the completion_tokens from the chunks. Prompt tokens are already counted and
+                    # are repeated here.
+                    completion_tokens += chunk.usage_metadata.candidates_token_count
+                    total_tokens += chunk.usage_metadata.candidates_token_count
                 try:
                     for c in chunk.parts:
                         if c.text:
