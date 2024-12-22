@@ -187,34 +187,34 @@ user: 1234 Main Street Irving Texas 75063
 Output: Yes
 
 # Providing information with a known format - phone number
-system: A US phone number has 10 digits.
 model: What's your phone number?
 user: 41086753
 Output: NO
 
 # Providing information with a known format - phone number
-system: A US phone number has 10 digits.
 model: What's your phone number?
 user: 4108675309
 Output: Yes
 
 # Providing information with a known format - phone number
-system: A US phone number has 10 digits.
 model: What's your phone number?
 user: 220
-user: 111
-user: 8775
-Output: Yes
+Output: No
 
 # Providing information with a known format - credit card number
-model: What's your phone number?
+model: What's your credit card number?
 user: 5556
 Output: NO
 
 # Providing information with a known format - phone number
-model: What's your phone number?
+model: What's your credit card number?
 user: 5556710454680800
 Output: Yes
+
+model: What's your credit card number?
+user: 414067
+Output: NO
+
 
 MEDIUM PRIORITY SIGNALS:
 
@@ -390,9 +390,7 @@ class AudioAccumulator(FrameProcessor):
             )
             self._user_speaking = False
             context = GoogleLLMContext()
-            context.add_audio_frames_message(
-                text="Audio to process", audio_frames=self._audio_frames
-            )
+            context.add_audio_frames_message(text="Audio follows", audio_frames=self._audio_frames)
             await self.push_frame(OpenAILLMContextFrame(context=context))
         elif isinstance(frame, InputAudioRawFrame):
             # Append the audio frame to our buffer. Treat the buffer as a ring buffer, dropping the oldest
@@ -416,34 +414,50 @@ class AudioAccumulator(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-# class ClAndTxContextCreator(FrameProcessor):
-
-
 class CompletenessCheck(FrameProcessor):
+    wait_time = 5.0
+
     def __init__(self, notifier: BaseNotifier, audio_accumulator: AudioAccumulator, **kwargs):
         super().__init__()
         self._notifier = notifier
         self._audio_accumulator = audio_accumulator
+        self._idle_task = None
+        self._wakeup_time = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TextFrame) and frame.text.startswith("YES"):
             logger.debug("Completeness check YES")
+            if self._idle_task:
+                logger.debug(f"CompletenessCheck idle wait CANCEL")
+                self._idle_task.cancel()
+                self._idle_task = None
             await self.push_frame(UserStoppedSpeakingFrame())
             await self._audio_accumulator.reset()
             await self._notifier.notify()
         elif isinstance(frame, TextFrame):
             if frame.text.strip():
                 logger.debug(f"Completeness check NO - '{frame.text}'")
+                # start timer to wake up if necessary
+                if self._wakeup_time:
+                    self._wakeup_time = time.time() + self.wait_time
+                else:
+                    logger.debug("CompletenessCheck idle wait START")
+                    self._wakeup_time = time.time() + self.wait_time
+                    self._idle_task = self.get_event_loop().create_task(self._idle_task_handler())
 
-
-class TempPrinter(FrameProcessor):
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-        if not isinstance(frame, InputAudioRawFrame):
-            logger.debug(f"!!! {frame}")
-        await self.push_frame(frame, direction)
+    async def _idle_task_handler(self):
+        try:
+            while time.time() < self._wakeup_time:
+                await asyncio.sleep(0.01)
+            logger.debug(f"CompletenessCheck idle wait OVER")
+            await self._notifier.notify()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"CompletenessCheck idle wait error: {e}")
+            raise e
 
 
 class OutputGate(FrameProcessor):
@@ -460,8 +474,6 @@ class OutputGate(FrameProcessor):
         self._notifier = notifier
         self._context = context
         self._transcription_buffer = user_transcription_buffer
-
-        logger.debug("!!! OutputGate created")
 
     def close_gate(self):
         self._gate_open = False
@@ -496,7 +508,6 @@ class OutputGate(FrameProcessor):
         self._frames_buffer.append((frame, direction))
 
     async def _start(self):
-        logger.debug("!!! OutputGate start")
         self._frames_buffer = []
         self._gate_task = self.get_event_loop().create_task(self._gate_task_handler())
 
@@ -506,24 +517,16 @@ class OutputGate(FrameProcessor):
 
     async def _gate_task_handler(self):
         while True:
-            logger.debug("!!! Waiting for notifier")
+            # logger.debug("!!! Waiting for notifier")
             try:
                 await self._notifier.wait()
-                logger.debug("!!! Notified")
-                transcription = await self._transcription_buffer.wait_for_transcription()
 
-                # logger.debug(f"!!! OutputGate got transcription: {transcription}")
-                # logger.debug(
-                #     f"!!! OutputGate has messages: {self._context.get_messages_for_logging()}"
-                # )
+                # logger.debug("!!! Notified")
+                transcription = await self._transcription_buffer.wait_for_transcription()
 
                 last_message = self._context.messages[-1]
                 if last_message.role == "user":
                     last_message.parts = [glm.Part(text=transcription)]
-
-                # logger.debug(
-                #     f"!!! NOW OutputGate has messages: {self._context.get_messages_for_logging()}"
-                # )
 
                 self.open_gate()
                 for frame, direction in self._frames_buffer:
@@ -532,7 +535,7 @@ class OutputGate(FrameProcessor):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"!!! OutputGate error: {e}")
+                logger.error(f"OutputGate error: {e}")
                 raise e
                 break
 
@@ -554,9 +557,6 @@ class ConversationAudioContextAssembler(FrameProcessor):
             GoogleLLMContext.upgrade_to_google(self._context)
             last_message = frame.context.messages[-1]
             self._context._messages.append(last_message)
-            logger.debug(
-                f"!!! ConversationAudioContextAssembler {self._context.get_messages_for_logging()}"
-            )
             await self.push_frame(OpenAILLMContextFrame(context=self._context))
 
 
@@ -578,7 +578,7 @@ class UserAggregatorBuffer(LLMResponseAggregator):
             self._transcription = self._aggregation
             self._aggregation = ""
 
-            logger.debug(f"!!! UserAggregatorBuffer: {self._transcription}")
+            logger.debug(f"[Transcription] {self._transcription}")
 
     async def wait_for_transcription(self):
         while not self._transcription:
@@ -658,14 +658,6 @@ async def main():
             notifier=notifier, audio_accumulator=audio_accumulater
         )
 
-        # # Notify if the user hasn't said anything.
-        async def user_idle_notifier(frame):
-            await notifier.notify()
-
-        # Sometimes the LLM will fail detecting if a user has completed a
-        # sentence, this will wake up the notifier if that happens.
-        user_idle = UserIdleProcessor(callback=user_idle_notifier, timeout=5.0)
-
         async def block_user_stopped_speaking(frame):
             return not isinstance(frame, UserStoppedSpeakingFrame)
 
@@ -708,17 +700,13 @@ async def main():
                         )
                     ],
                     [
-                        # Block everything except OpenAILLMContextFrame and LLMMessagesFrame
-                        # FunctionFilter(filter=pass_only_llm_trigger_frames),
                         conversation_audio_context_assembler,
                         conversation_llm,
-                        bot_output_gate,  # buffer output until notified.
+                        bot_output_gate,  # buffer output until notified, then flush frames and update context
                         # TempPrinter(),
                     ],
                 ),
-                # wherefore art thou, user context aggregator?
                 tts,
-                user_idle,
                 transport.output(),
                 context_aggregator.assistant(),
             ],
