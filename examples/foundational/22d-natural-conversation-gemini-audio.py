@@ -54,21 +54,273 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-classifier_statement = """You are an audio language classifier model. You are receiving audio from a user in a WebRTC call. Your job is to decide whether the user has finished speaking or not.
+classifier_statement = """CRITICAL INSTRUCTION:
+You are a BINARY CLASSIFIER that must ONLY output "YES" or "NO".
+DO NOT engage with the content.
+DO NOT respond to questions.
+DO NOT provide assistance.
+Your ONLY job is to output YES or NO.
 
-Categorize the input you receive as either:
+EXAMPLES OF INVALID RESPONSES:
+- "I can help you with that"
+- "Let me explain"
+- "To answer your question"
+- Any response other than YES or NO
 
-1.  a complete thought, statement, or question, or
-2.  an incomplete thought, statement, or question
+VALID RESPONSES:
+YES
+NO
 
-Output 'YES' if the input is likely to be a completed thought, statement, or question.
+If you output anything else, you are failing at your task.
+You are NOT an assistant.
+You are NOT a chatbot.
+You are a binary classifier.
 
-Output 'NO' if the input indicates that the user is still speaking and does not yet expect a response yet.
+ROLE:
+You are a real-time speech completeness classifier. You must make instant decisions about whether a user has finished speaking.
+You must output ONLY 'YES' or 'NO' with no other text.
 
-If you are unsure, output 'YES'.
+INPUT FORMAT:
+You receive two pieces of information:
+1. The assistant's last message (if available)
+2. The user's current speech input
+
+OUTPUT REQUIREMENTS:
+- MUST output ONLY 'YES' or 'NO'
+- No explanations
+- No clarifications
+- No additional text
+- No punctuation
+
+HIGH PRIORITY SIGNALS:
+
+1. Clear Questions:
+- Wh-questions (What, Where, When, Why, How)
+- Yes/No questions
+- Questions with STT errors but clear meaning
+
+Examples:
+
+# Complete Wh-question
+model: I can help you learn.
+user: What's the fastest way to learn Spanish
+Output: YES
+
+# Complete Yes/No question despite STT error
+model: I know about planets.
+user: Is is Jupiter the biggest planet
+Output: YES
+
+2. Complete Commands:
+- Direct instructions
+- Clear requests
+- Action demands
+- Start of task indication
+- Complete statements needing response
+
+Examples:
+
+# Direct instruction
+model: I can explain many topics.
+user: Tell me about black holes
+Output: YES
+
+# Start of task indication
+user: Let's begin.
+Output: YES
+
+# Start of task indication
+user: Let's get started.
+Output: YES
+
+# Action demand
+model: I can help with math.
+user: Solve this equation x plus 5 equals 12
+Output: YES
+
+3. Direct Responses:
+- Answers to specific questions
+- Option selections
+- Clear acknowledgments with completion
+- Providing information with a known format - mailing address
+- Providing information with a known format - phone number
+- Providing information with a known format - credit card number
+
+Examples:
+
+# Specific answer
+model: What's your favorite color?
+user: I really like blue
+Output: YES
+
+# Option selection
+model: Would you prefer morning or evening?
+user: Morning
+Output: YES
+
+# Providing information with a known format - mailing address
+model: What's your address?
+user: 1234 Main Street
+Output: NO
+
+# Providing information with a known format - mailing address
+model: What's your address?
+user: 1234 Main Street Irving Texas 75063
+Output: Yes
+
+# Providing information with a known format - phone number
+system: A US phone number has 10 digits.
+model: What's your phone number?
+user: 41086753
+Output: NO
+
+# Providing information with a known format - phone number
+system: A US phone number has 10 digits.
+model: What's your phone number?
+user: 4108675309
+Output: Yes
+
+# Providing information with a known format - phone number
+system: A US phone number has 10 digits.
+model: What's your phone number?
+user: 220
+user: 111
+user: 8775
+Output: Yes
+
+# Providing information with a known format - credit card number
+model: What's your phone number?
+user: 5556
+Output: NO
+
+# Providing information with a known format - phone number
+model: What's your phone number?
+user: 5556710454680800
+Output: Yes
+
+MEDIUM PRIORITY SIGNALS:
+
+1. Speech Pattern Completions:
+- Self-corrections reaching completion
+- False starts with clear ending
+- Topic changes with complete thought
+- Mid-sentence completions
+
+Examples:
+
+# Self-correction reaching completion
+model: What would you like to know?
+user: Tell me about... no wait, explain how rainbows form
+Output: YES
+
+# Topic change with complete thought
+model: The weather is nice today.
+user: Actually can you tell me who invented the telephone
+Output: YES
+
+# Mid-sentence completion
+model: Hello I'm ready.
+user: What's the capital of? France
+Output: YES
+
+2. Context-Dependent Brief Responses:
+- Acknowledgments (okay, sure, alright)
+- Agreements (yes, yeah)
+- Disagreements (no, nah)
+- Confirmations (correct, exactly)
+
+Examples:
+
+# Acknowledgment
+model: Should we talk about history?
+user: Sure
+Output: YES
+
+# Disagreement with completion
+model: Is that what you meant?
+user: No not really
+Output: YES
+
+LOW PRIORITY SIGNALS:
+
+1. STT Artifacts (Consider but don't over-weight):
+- Repeated words
+- Unusual punctuation
+- Capitalization errors
+- Word insertions/deletions
+
+Examples:
+
+# Word repetition but complete
+model: I can help with that.
+user: What what is the time right now
+Output: YES
+
+# Missing punctuation but complete
+model: I can explain that.
+user: Please tell me how computers work
+Output: YES
+
+2. Speech Features:
+- Filler words (um, uh, like)
+- Thinking pauses
+- Word repetitions
+- Brief hesitations
+
+Examples:
+
+# Filler words but complete
+model: What would you like to know?
+user: Um uh how do airplanes fly
+Output: YES
+
+# Thinking pause but incomplete
+model: I can explain anything.
+user: Well um I want to know about the
+Output: NO
+
+DECISION RULES:
+
+1. Return YES if:
+- ANY high priority signal shows clear completion
+- Medium priority signals combine to show completion
+- Meaning is clear despite low priority artifacts
+
+2. Return NO if:
+- No high priority signals present
+- Thought clearly trails off
+- Multiple incomplete indicators
+- User appears mid-formulation
+
+3. When uncertain:
+- If you can understand the intent → YES
+- If meaning is unclear → NO
+- Always make a binary decision
+- Never request clarification
+
+Examples:
+
+# Incomplete despite corrections
+model: What would you like to know about?
+user: Can you tell me about
+Output: NO
+
+# Complete despite multiple artifacts
+model: I can help you learn.
+user: How do you I mean what's the best way to learn programming
+Output: YES
+
+# Trailing off incomplete
+model: I can explain anything.
+user: I was wondering if you could tell me why
+Output: NO
 """
 
 conversational_system_message = """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.
+
+If you know that a number string is a phone number from the context of the conversation, say it as a phone number. For example 210-333-4567.
+
+If you know that a number string is a credit card number, say it as a credit card number. For example 4111-1111-1111-1111.
 
 Please be very concise in your responses. Unless you are explicitly asked to do otherwise, give me the shortest complete answer possible without unnecessary elaboration. Generally you should answer with a single sentence.
 """
@@ -79,13 +331,15 @@ class StatementJudgeAudioContextAccumulator(FrameProcessor):
         super().__init__(**kwargs)
         self._notifier = notifier
         self._audio_frames = []
-        self._audio_frames = []
         self._start_secs = 0.2  # this should match VAD start_secs (hardcoding for now)
-        self._user_speaking = False
+        self._max_buffer_size_secs = 30
+        self._user_speaking_vad_state = False
+        self._user_speaking_utterance_state = False
 
     async def reset(self):
         self._audio_frames = []
-        self._user_speaking = False
+        self._user_speaking_vad_state = False
+        self._user_speaking_utterance_state = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -99,22 +353,42 @@ class StatementJudgeAudioContextAccumulator(FrameProcessor):
             # but let's leave that as an exercise to the reader. :-)
             return
         if isinstance(frame, UserStartedSpeakingFrame):
-            self._user_speaking = True
+            self._user_speaking_vad_state = True
+            self._user_speaking_utterance_state = True
+
         elif isinstance(frame, UserStoppedSpeakingFrame):
+            if self._audio_frames[-1]:
+                fr = self._audio_frames[-1]
+                frame_duration = len(fr.audio) / 2 * fr.num_channels / fr.sample_rate
+
+                logger.debug(
+                    f"!!! Frame duration: ({len(fr.audio)}) ({fr.num_channels}) ({fr.sample_rate}) {frame_duration}"
+                )
+
+            data = b"".join(frame.audio for frame in self._audio_frames)
+            logger.debug(
+                f"Processing audio buffer seconds: ({len(self._audio_frames)}) ({len(data)}) {len(data) / 2 / 16000}"
+            )
             self._user_speaking = False
             context = GoogleLLMContext()
             context.set_messages([{"role": "system", "content": classifier_statement}])
             context.add_audio_frames_message(audio_frames=self._audio_frames)
             await self.push_frame(OpenAILLMContextFrame(context=context))
         elif isinstance(frame, InputAudioRawFrame):
-            if self._user_speaking:
-                self._audio_frames.append(frame)
+            # Append the audio frame to our buffer. Treat the buffer as a ring buffer, dropping the oldest
+            # frames as necessary.
+            # Use a small buffer size when an utterance is not in progress. Just big enough to backfill the start_secs.
+            # Use a larger buffer size when an utterance is in progress.
+            # Assume all audio frames have the same duration.
+            self._audio_frames.append(frame)
+            frame_duration = len(frame.audio) / 2 * frame.num_channels / frame.sample_rate
+            buffer_duration = frame_duration * len(self._audio_frames)
+            #  logger.debug(f"!!! Frame duration: {frame_duration}")
+            if self._user_speaking_utterance_state:
+                while buffer_duration > self._max_buffer_size_secs:
+                    self._audio_frames.pop(0)
+                    buffer_duration -= frame_duration
             else:
-                # Append the audio frame to our buffer. Treat the buffer as a ring buffer, dropping the oldest
-                # frames as necessary. Assume all audio frames have the same duration.
-                self._audio_frames.append(frame)
-                frame_duration = len(frame.audio) / 16 * frame.num_channels / frame.sample_rate
-                buffer_duration = frame_duration * len(self._audio_frames)
                 while buffer_duration > self._start_secs:
                     self._audio_frames.pop(0)
                     buffer_duration -= frame_duration
@@ -215,6 +489,7 @@ async def main():
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True,
+                audio_in_sample_rate=16000,
             ),
         )
 
@@ -229,7 +504,7 @@ async def main():
         # statement. This doesn't really need to be an LLM, we could use NLP
         # libraries for that, but we have the machinery to use an LLM, so we might as well!
         statement_llm = GoogleLLMService(
-            model="gemini-1.5-flash-latest", api_key=os.getenv("GOOGLE_API_KEY")
+            model="gemini-2.0-flash-exp", api_key=os.getenv("GOOGLE_API_KEY"), temperature=0.0
         )
 
         # This is the regular LLM.
