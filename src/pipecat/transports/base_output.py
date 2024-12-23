@@ -242,8 +242,6 @@ class BaseOutputTransport(FrameProcessor):
             await self._set_camera_images(frame.images)
         elif isinstance(frame, TransportMessageFrame):
             await self.send_message(frame)
-        else:
-            await self.push_frame(frame)
 
     async def _sink_clock_task_handler(self):
         running = True
@@ -262,7 +260,12 @@ class BaseOutputTransport(FrameProcessor):
                     if timestamp > current_time:
                         wait_time = nanoseconds_to_seconds(timestamp - current_time)
                         await asyncio.sleep(wait_time)
+
+                    # Handle frame.
                     await self._sink_frame_handler(frame)
+
+                    # Also, push frame downstream in case anyone else needs it.
+                    await self.push_frame(frame)
 
                 self._sink_clock_queue.task_done()
             except asyncio.CancelledError:
