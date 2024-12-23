@@ -177,7 +177,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._receive_task = None
         self._context = None
 
-        self._connected = False
         self._disconnecting = False
         self._api_session_ready = False
         self._run_llm_when_api_session_ready = False
