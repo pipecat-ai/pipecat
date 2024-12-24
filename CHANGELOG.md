@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Constructor arguments for GoogleLLMService to directly set tools and tool_config.
+
+- Smart turn detection example (`22d-natural-conversation-gemini-audio.py`) that
+  leverages Gemini 2.0 capabilities ().
+  (see https://x.com/kwindla/status/1870974144831275410)
+
 - Added `DailyTransport.send_dtmf()` to send dial-out DTMF tones.
 
 - Added `DailyTransport.sip_call_transfer()` to forward SIP and PSTN calls to
@@ -74,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AWSTTSService` is now deprecated, use `PollyTTSService` instead.
 
 ### Fixed
+
+- Fixed token counting in `GoogleLLMService`. Tokens were summed incorrectly
+  (double-counted in many cases).
 
 - Fixed an issue that could cause the bot to stop talking if there was a user
   interruption before getting any audio from the TTS service.
