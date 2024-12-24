@@ -82,7 +82,10 @@ whisper = [ "faster-whisper~=1.1.0" ]
 where = ["src"]
 
 [tool.pytest.ini_options]
+addopts = "--verbose --disable-warnings"
+testpaths = ["tests"]
 pythonpath = ["src"]
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"

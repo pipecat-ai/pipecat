@@ -311,8 +311,15 @@ class FrameProcessor:
         self.__push_frame_task = self.get_event_loop().create_task(self.__push_frame_task_handler())
 
     async def __cancel_push_task(self):
-        self.__push_frame_task.cancel()
-        await self.__push_frame_task
+        try:
+            self.__push_frame_task.cancel()
+            await self.__push_frame_task
+        except asyncio.CancelledError:
+            # TODO(aleix: Investigate why this is really needed. So far, this is
+            # necessary because of how pytest works. If a task is cancelled,
+            # pytest will know the task has been cancelled even if
+            # `asyncio.CancelledError` is handled internally in the task.
+            pass
 
     async def __push_frame_task_handler(self):
         running = True
