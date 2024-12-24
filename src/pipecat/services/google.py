@@ -593,6 +593,8 @@ class GoogleLLMService(LLMService):
         model: str = "gemini-1.5-flash-latest",
         params: InputParams = InputParams(),
         system_instruction: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -607,6 +609,8 @@ class GoogleLLMService(LLMService):
             "top_p": params.top_p,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
+        self._tools = tools
+        self._tool_config = tool_config
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -625,7 +629,8 @@ class GoogleLLMService(LLMService):
 
         try:
             logger.debug(
-                f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
+                # f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
+                f"Generating chat: {context.get_messages_for_logging()}"
             )
 
             messages = context.messages
@@ -649,28 +654,41 @@ class GoogleLLMService(LLMService):
             generation_config = GenerationConfig(**generation_params) if generation_params else None
 
             await self.start_ttfb_metrics()
-            tools = context.tools if context.tools else []
+            tools = []
+            if context.tools:
+                tools = context.tools
+            elif self._tools:
+                tools = self._tools
+            tool_config = None
+            if self._tool_config:
+                tool_config = self._tool_config
 
             response = await self._client.generate_content_async(
-                contents=messages, tools=tools, stream=True, generation_config=generation_config
+                contents=messages,
+                tools=tools,
+                stream=True,
+                generation_config=generation_config,
+                tool_config=tool_config,
             )
             await self.stop_ttfb_metrics()
 
             if response.usage_metadata:
+                # Use only the prompt token count from the response object
                 prompt_tokens = response.usage_metadata.prompt_token_count
-                completion_tokens = response.usage_metadata.candidates_token_count
-                total_tokens = response.usage_metadata.total_token_count
+                total_tokens = prompt_tokens
 
             async for chunk in response:
                 if chunk.usage_metadata:
-                    prompt_tokens += response.usage_metadata.prompt_token_count
-                    completion_tokens += response.usage_metadata.candidates_token_count
-                    total_tokens += response.usage_metadata.total_token_count
+                    # Use only the completion_tokens from the chunks. Prompt tokens are already counted and
+                    # are repeated here.
+                    completion_tokens += chunk.usage_metadata.candidates_token_count
+                    total_tokens += chunk.usage_metadata.candidates_token_count
                 try:
                     for c in chunk.parts:
                         if c.text:
                             await self.push_frame(TextFrame(c.text))
                         elif c.function_call:
+                            logger.debug(f"!!! Function call: {c.function_call}")
                             args = type(c.function_call).to_dict(c.function_call).get("args", {})
                             await self.call_function(
                                 context=context,
