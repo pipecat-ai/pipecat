@@ -7,10 +7,9 @@
 import time
 
 import numpy as np
+from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
-
-from loguru import logger
 
 # How often should we reset internal model state
 _MODEL_RESET_STATES_TIME = 5.0

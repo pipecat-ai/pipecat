@@ -5,21 +5,24 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
 from PIL import Image
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    Frame,
     ImageRawFrame,
+    LLMMessagesFrame,
     OutputImageRawFrame,
     SpriteFrame,
-    Frame,
-    LLMMessagesFrame,
-    TTSAudioRawFrame,
-    TTSStoppedFrame,
     TextFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
@@ -36,12 +39,6 @@ from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.moondream import MoondreamService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -83,14 +80,15 @@ class TalkingAnimation(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TTSAudioRawFrame):
+        if isinstance(frame, BotStartedSpeakingFrame):
             if not self._is_talking:
                 await self.push_frame(talking_frame)
                 self._is_talking = True
-        elif isinstance(frame, TTSStoppedFrame):
+        elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_frame(quiet_frame)
             self._is_talking = False
-        await self.push_frame(frame)
+
+        await self.push_frame(frame, direction)
 
 
 class UserImageRequester(FrameProcessor):
@@ -126,7 +124,7 @@ class TextFilterProcessor(FrameProcessor):
             if frame.text != self.text:
                 await self.push_frame(frame)
         else:
-            await self.push_frame(frame)
+            await self.push_frame(frame, direction)
 
 
 class ImageFilterProcessor(FrameProcessor):
@@ -134,7 +132,7 @@ class ImageFilterProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if not isinstance(frame, ImageRawFrame):
-            await self.push_frame(frame)
+            await self.push_frame(frame, direction)
 
 
 async def main():

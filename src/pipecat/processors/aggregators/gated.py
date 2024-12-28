@@ -6,10 +6,10 @@
 
 from typing import List, Tuple
 
+from loguru import logger
+
 from pipecat.frames.frames import Frame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-from loguru import logger
 
 
 class GatedAggregator(FrameProcessor):

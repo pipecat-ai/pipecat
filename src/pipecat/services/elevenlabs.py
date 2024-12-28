@@ -11,11 +11,13 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, 
 
 from loguru import logger
 from pydantic import BaseModel, model_validator
+from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
     StartFrame,
@@ -41,9 +43,16 @@ except ModuleNotFoundError as e:
 
 ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
 
+ELEVENLABS_MULTILINGUAL_MODELS = {
+    "eleven_turbo_v2_5",
+    "eleven_multilingual_v2",
+    "eleven_flash_v2_5",
+}
+
 
 def language_to_elevenlabs_language(language: Language) -> str | None:
     BASE_LANGUAGES = {
+        Language.AR: "ar",
         Language.BG: "bg",
         Language.CS: "cs",
         Language.DA: "da",
@@ -52,8 +61,10 @@ def language_to_elevenlabs_language(language: Language) -> str | None:
         Language.EN: "en",
         Language.ES: "es",
         Language.FI: "fi",
+        Language.FIL: "fil",
         Language.FR: "fr",
         Language.HI: "hi",
+        Language.HR: "hr",
         Language.HU: "hu",
         Language.ID: "id",
         Language.IT: "it",
@@ -68,6 +79,7 @@ def language_to_elevenlabs_language(language: Language) -> str | None:
         Language.RU: "ru",
         Language.SK: "sk",
         Language.SV: "sv",
+        Language.TA: "ta",
         Language.TR: "tr",
         Language.UK: "uk",
         Language.VI: "vi",
@@ -129,6 +141,7 @@ class ElevenLabsTTSService(WordTTSService):
         similarity_boost: Optional[float] = None
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
+        auto_mode: Optional[bool] = True
 
         @model_validator(mode="after")
         def validate_voice_settings(self):
@@ -145,7 +158,7 @@ class ElevenLabsTTSService(WordTTSService):
         *,
         api_key: str,
         voice_id: str,
-        model: str = "eleven_turbo_v2_5",
+        model: str = "eleven_flash_v2_5",
         url: str = "wss://api.elevenlabs.io",
         output_format: ElevenLabsOutputFormat = "pcm_24000",
         params: InputParams = InputParams(),
@@ -187,6 +200,7 @@ class ElevenLabsTTSService(WordTTSService):
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
+            "auto_mode": str(params.auto_mode).lower(),
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -281,27 +295,46 @@ class ElevenLabsTTSService(WordTTSService):
             await self.resume_processing_frames()
 
     async def _connect(self):
+        await self._connect_websocket()
+
+        self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+        self._keepalive_task = self.get_event_loop().create_task(self._keepalive_task_handler())
+
+    async def _disconnect(self):
+        if self._receive_task:
+            self._receive_task.cancel()
+            await self._receive_task
+            self._receive_task = None
+
+        if self._keepalive_task:
+            self._keepalive_task.cancel()
+            await self._keepalive_task
+            self._keepalive_task = None
+
+        await self._disconnect_websocket()
+
+    async def _connect_websocket(self):
         try:
+            logger.debug("Connecting to ElevenLabs")
+
             voice_id = self._voice_id
             model = self.model_name
             output_format = self._settings["output_format"]
-            url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}"
+            url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}&auto_mode={self._settings['auto_mode']}"
 
             if self._settings["optimize_streaming_latency"]:
                 url += f"&optimize_streaming_latency={self._settings['optimize_streaming_latency']}"
 
-            # Language can only be used with the 'eleven_turbo_v2_5' model
+            # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
             language = self._settings["language"]
-            if model == "eleven_turbo_v2_5":
+            if model in ELEVENLABS_MULTILINGUAL_MODELS:
                 url += f"&language_code={language}"
             else:
                 logger.warning(
-                    f"Language code [{language}] not applied. Language codes can only be used with the 'eleven_turbo_v2_5' model."
+                    f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
                 )
 
             self._websocket = await websockets.connect(url)
-            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
-            self._keepalive_task = self.get_event_loop().create_task(self._keepalive_task_handler())
 
             # According to ElevenLabs, we should always start with a single space.
             msg: Dict[str, Any] = {
@@ -315,49 +348,58 @@ class ElevenLabsTTSService(WordTTSService):
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
 
-    async def _disconnect(self):
+    async def _disconnect_websocket(self):
         try:
             await self.stop_all_metrics()
 
             if self._websocket:
+                logger.debug("Disconnecting from ElevenLabs")
                 await self._websocket.send(json.dumps({"text": ""}))
                 await self._websocket.close()
                 self._websocket = None
-
-            if self._receive_task:
-                self._receive_task.cancel()
-                await self._receive_task
-                self._receive_task = None
-
-            if self._keepalive_task:
-                self._keepalive_task.cancel()
-                await self._keepalive_task
-                self._keepalive_task = None
 
             self._started = False
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
+    async def _receive_messages(self):
+        async for message in self._websocket:
+            msg = json.loads(message)
+            if msg.get("audio"):
+                await self.stop_ttfb_metrics()
+                self.start_word_timestamps()
+
+                audio = base64.b64decode(msg["audio"])
+                frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
+                await self.push_frame(frame)
+            if msg.get("alignment"):
+                word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
+                await self.add_word_timestamps(word_times)
+                self._cumulative_time = word_times[-1][1]
+
+    async def _reconnect_websocket(self, retry_state: RetryCallState):
+        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
+        await self._disconnect_websocket()
+        await self._connect_websocket()
+
     async def _receive_task_handler(self):
-        try:
-            async for message in self._websocket:
-                msg = json.loads(message)
-                if msg.get("audio"):
-                    await self.stop_ttfb_metrics()
-                    self.start_word_timestamps()
-
-                    audio = base64.b64decode(msg["audio"])
-                    frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
-                    await self.push_frame(frame)
-
-                if msg.get("alignment"):
-                    word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
-                    await self.add_word_timestamps(word_times)
-                    self._cumulative_time = word_times[-1][1]
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
+        while True:
+            try:
+                async for attempt in AsyncRetrying(
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=4, max=10),
+                    before_sleep=self._reconnect_websocket,
+                    reraise=True,
+                ):
+                    with attempt:
+                        await self._receive_messages()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                message = f"{self} error receiving messages: {e}"
+                logger.error(message)
+                await self.push_error(ErrorFrame(message, fatal=True))
+                break
 
     async def _keepalive_task_handler(self):
         while True:

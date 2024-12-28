@@ -4,10 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import os
 import sys
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.frames.frames import Frame, LLMMessagesFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -24,12 +28,6 @@ from pipecat.transports.services.daily import (
     DailyTransport,
     DailyTransportMessageFrame,
 )
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 

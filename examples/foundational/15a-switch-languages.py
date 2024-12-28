@@ -5,29 +5,28 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from deepgram import LiveOptions
+from dotenv import load_dotenv
+from loguru import logger
+from openai.types.chat import ChatCompletionToolParam
+from runner import configure
+
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame, TTSUpdateSettingsFrame
-from pipecat.pipeline.pipeline import Pipeline
+from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from openai.types.chat import ChatCompletionToolParam
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -61,11 +60,14 @@ async def main():
             "Pipecat",
             DailyParams(
                 audio_out_enabled=True,
-                transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True,
             ),
+        )
+
+        stt = DeepgramSTTService(
+            api_key=os.getenv("DEEPGRAM_API_KEY"), live_options=LiveOptions(language="multi")
         )
 
         english_tts = CartesiaTTSService(
@@ -113,6 +115,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                stt,  # STT
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 ParallelPipeline(  # TTS (bot will speak the chosen language)
