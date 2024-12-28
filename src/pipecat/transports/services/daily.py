@@ -527,7 +527,7 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def capture_participant_audio(self, participant_id: str):
-        await self._client.update_subscriptions({participant_id: {"media": {"microphone": "subscribed"}}})
+        await self.update_subscriptions({participant_id: {"media": {"microphone": "subscribed"}}})
 
     async def send_prebuilt_chat_message(self, message: str, user_name: str | None = None):
         if not self._joined:
