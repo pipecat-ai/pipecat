@@ -8,7 +8,7 @@ from abc import abstractmethod
 from enum import Enum
 
 from loguru import logger
-from pydantic.main import BaseModel
+from pydantic import BaseModel
 
 from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 

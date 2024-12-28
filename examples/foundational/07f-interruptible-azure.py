@@ -4,10 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import os
 import sys
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
@@ -17,13 +21,6 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.azure import AzureLLMService, AzureSTTService, AzureTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 

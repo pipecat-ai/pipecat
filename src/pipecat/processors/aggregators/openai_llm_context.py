@@ -19,9 +19,8 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    VisionImageRawFrame,
 )
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
     from openai._types import NOT_GIVEN, NotGiven
@@ -71,28 +70,6 @@ class OpenAILLMContext:
             context.add_message(message)
         return context
 
-    # todo: deprecate from_image_frame. It's only used to create a single-use
-    # context, which isn't useful for most real-world applications.
-    @staticmethod
-    def from_image_frame(frame: VisionImageRawFrame) -> "OpenAILLMContext":
-        """
-        For images, we are deviating from the OpenAI messages shape. OpenAI
-        expects images to be base64 encoded, but other vision models may not.
-        So we'll store the image as bytes and do the base64 encoding as needed
-        in the LLM service.
-
-        NOTE: the above only applies to the deprecated use of this method. The
-        add_image_frame_message() below does the base64 encoding as expected
-        in the OpenAI format.
-        """
-        context = OpenAILLMContext()
-        buffer = io.BytesIO()
-        Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
-        context.add_message(
-            {"content": frame.text, "role": "user", "data": buffer, "mime_type": "image/jpeg"}
-        )
-        return context
-
     @property
     def messages(self) -> List[ChatCompletionMessageParam]:
         return self._messages
@@ -136,10 +113,38 @@ class OpenAILLMContext:
         return json.dumps(msgs)
 
     def from_standard_message(self, message):
+        """Convert from OpenAI message format to OpenAI message format (passthrough).
+
+        OpenAI's format allows both simple string content and structured content:
+        - Simple: {"role": "user", "content": "Hello"}
+        - Structured: {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
+
+        Since OpenAI is our standard format, this is a passthrough function.
+
+        Args:
+            message (dict): Message in OpenAI format
+
+        Returns:
+            dict: Same message, unchanged
+        """
         return message
 
-    # convert a message in this LLM's format to one or more messages in OpenAI format
     def to_standard_messages(self, obj) -> list:
+        """Convert from OpenAI message format to OpenAI message format (passthrough).
+
+        OpenAI's format is our standard format throughout Pipecat. This function
+        returns a list containing the original message to maintain consistency with
+        other LLM services that may need to return multiple messages.
+
+        Args:
+            obj (dict): Message in OpenAI format with either:
+                - Simple content: {"role": "user", "content": "Hello"}
+                - List content: {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
+
+        Returns:
+            list: List containing the original messages, preserving whether
+                the content was in simple string or structured list format
+        """
         return [obj]
 
     def get_messages_for_initializing_history(self):
@@ -167,12 +172,12 @@ class OpenAILLMContext:
         Image.frombytes(format, size, image).save(buffer, format="JPEG")
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-        content = [
-            {"type": "text", "text": text},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
-        ]
+        content = []
         if text:
             content.append({"type": "text", "text": text})
+        content.append(
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
+        )
         self.add_message({"role": "user", "content": content})
 
     def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: str = None):
@@ -196,25 +201,42 @@ class OpenAILLMContext:
         # Push a SystemFrame downstream. This frame will let our assistant context aggregator
         # know that we are in the middle of a function call. Some contexts/aggregators may
         # not need this. But some definitely do (Anthropic, for example).
-        await llm.push_frame(
-            FunctionCallInProgressFrame(
+        # Also push a SystemFrame upstream for use by other processors, like STTMuteFilter.
+        progress_frame_downstream = FunctionCallInProgressFrame(
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+        )
+        progress_frame_upstream = FunctionCallInProgressFrame(
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+        )
+
+        # Push frame both downstream and upstream
+        await llm.push_frame(progress_frame_downstream, FrameDirection.DOWNSTREAM)
+        await llm.push_frame(progress_frame_upstream, FrameDirection.UPSTREAM)
+
+        # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
+        async def function_call_result_callback(result):
+            result_frame_downstream = FunctionCallResultFrame(
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
+                result=result,
+                run_llm=run_llm,
             )
-        )
+            result_frame_upstream = FunctionCallResultFrame(
+                function_name=function_name,
+                tool_call_id=tool_call_id,
+                arguments=arguments,
+                result=result,
+                run_llm=run_llm,
+            )
 
-        # Define a callback function that pushes a FunctionCallResultFrame downstream.
-        async def function_call_result_callback(result):
-            await llm.push_frame(
-                FunctionCallResultFrame(
-                    function_name=function_name,
-                    tool_call_id=tool_call_id,
-                    arguments=arguments,
-                    result=result,
-                    run_llm=run_llm,
-                )
-            )
+            # Push frame both downstream and upstream
+            await llm.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
+            await llm.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
 
         await f(function_name, tool_call_id, arguments, llm, self, function_call_result_callback)
 

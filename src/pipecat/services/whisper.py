@@ -7,17 +7,15 @@
 """This module implements Whisper transcription with a locally-downloaded model."""
 
 import asyncio
-
 from enum import Enum
 from typing import AsyncGenerator
 
 import numpy as np
+from loguru import logger
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.ai_services import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
-
-from loguru import logger
 
 try:
     from faster_whisper import WhisperModel

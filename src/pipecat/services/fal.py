@@ -4,19 +4,17 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import io
 import os
+from typing import AsyncGenerator, Dict, Optional, Union
 
+import aiohttp
+from loguru import logger
+from PIL import Image
 from pydantic import BaseModel
-from typing import AsyncGenerator, Optional, Union, Dict
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
 from pipecat.services.ai_services import ImageGenService
-
-from PIL import Image
-
-from loguru import logger
 
 try:
     import fal_client

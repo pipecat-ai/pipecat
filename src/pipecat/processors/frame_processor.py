@@ -268,6 +268,7 @@ class FrameProcessor:
             raise
 
     def __create_input_task(self):
+        self.__should_block_frames = False
         self.__input_queue = asyncio.Queue()
         self.__input_frame_task = self.get_event_loop().create_task(
             self.__input_frame_task_handler()

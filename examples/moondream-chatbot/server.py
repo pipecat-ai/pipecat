@@ -4,14 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
-import os
 import argparse
+import os
 import subprocess
-
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+import aiohttp
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 

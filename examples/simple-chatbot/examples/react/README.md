@@ -1,6 +1,6 @@
 # React Implementation
 
-Basic implementation using the RTVI React SDK.
+Basic implementation using the [Pipecat React SDK](https://docs.pipecat.ai/client/react/introduction).
 
 ## Setup
 
