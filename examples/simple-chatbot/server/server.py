@@ -4,8 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""
-RTVI Bot Server Implementation
+"""RTVI Bot Server Implementation.
 
 This FastAPI server manages RTVI bot instances and provides endpoints for both
 direct browser access and RTVI client connections. It handles:
@@ -49,8 +48,8 @@ daily_helpers = {}
 
 
 def cleanup():
-    """
-    Cleanup function to terminate all bot processes.
+    """Cleanup function to terminate all bot processes.
+
     Called during server shutdown.
     """
     for entry in bot_procs.values():
@@ -59,10 +58,22 @@ def cleanup():
         proc.wait()
 
 
+def get_bot_file():
+    bot_implementation = os.getenv("BOT_IMPLEMENTATION", "openai").lower().strip()
+    # If blank or None, default to openai
+    if not bot_implementation:
+        bot_implementation = "openai"
+    if bot_implementation not in ["openai", "gemini"]:
+        raise ValueError(
+            f"Invalid BOT_IMPLEMENTATION: {bot_implementation}. Must be 'openai' or 'gemini'"
+        )
+    return f"bot-{bot_implementation}"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    FastAPI lifespan manager that handles startup and shutdown tasks:
+    """FastAPI lifespan manager that handles startup and shutdown tasks.
+
     - Creates aiohttp session
     - Initializes Daily API helper
     - Cleans up resources on shutdown
@@ -92,8 +103,7 @@ app.add_middleware(
 
 
 async def create_room_and_token() -> tuple[str, str]:
-    """
-    Helper function to create a Daily room and generate an access token.
+    """Helper function to create a Daily room and generate an access token.
 
     Returns:
         tuple[str, str]: A tuple containing (room_url, token)
@@ -114,8 +124,8 @@ async def create_room_and_token() -> tuple[str, str]:
 
 @app.get("/")
 async def start_agent(request: Request):
-    """
-    Endpoint for direct browser access to the bot.
+    """Endpoint for direct browser access to the bot.
+
     Creates a room, starts a bot instance, and redirects to the Daily room URL.
 
     Returns:
@@ -137,8 +147,9 @@ async def start_agent(request: Request):
 
     # Spawn a new bot process
     try:
+        bot_file = get_bot_file()
         proc = subprocess.Popen(
-            [f"python3 -m bot -u {room_url} -t {token}"],
+            [f"python3 -m {bot_file} -u {room_url} -t {token}"],
             shell=True,
             bufsize=1,
             cwd=os.path.dirname(os.path.abspath(__file__)),
@@ -152,8 +163,8 @@ async def start_agent(request: Request):
 
 @app.post("/connect")
 async def rtvi_connect(request: Request) -> Dict[Any, Any]:
-    """
-    RTVI connect endpoint that creates a room and returns connection credentials.
+    """RTVI connect endpoint that creates a room and returns connection credentials.
+
     This endpoint is called by RTVI clients to establish a connection.
 
     Returns:
@@ -168,8 +179,9 @@ async def rtvi_connect(request: Request) -> Dict[Any, Any]:
 
     # Start the bot process
     try:
+        bot_file = get_bot_file()
         proc = subprocess.Popen(
-            [f"python3 -m bot -u {room_url} -t {token}"],
+            [f"python3 -m {bot_file} -u {room_url} -t {token}"],
             shell=True,
             bufsize=1,
             cwd=os.path.dirname(os.path.abspath(__file__)),
@@ -184,8 +196,7 @@ async def rtvi_connect(request: Request) -> Dict[Any, Any]:
 
 @app.get("/status/{pid}")
 def get_status(pid: int):
-    """
-    Get the status of a specific bot process.
+    """Get the status of a specific bot process.
 
     Args:
         pid (int): Process ID of the bot

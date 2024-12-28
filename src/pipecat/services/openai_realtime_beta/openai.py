@@ -8,10 +8,10 @@ import asyncio
 import base64
 import json
 import time
-
 from dataclasses import dataclass
 
 import websockets
+from loguru import logger
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -48,13 +48,11 @@ from pipecat.utils.time import time_now_iso8601
 
 from . import events
 from .context import (
+    OpenAIRealtimeAssistantContextAggregator,
     OpenAIRealtimeLLMContext,
     OpenAIRealtimeUserContextAggregator,
-    OpenAIRealtimeAssistantContextAggregator,
 )
-from .frames import RealtimeMessagesUpdateFrame, RealtimeFunctionCallResultFrame
-
-from loguru import logger
+from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
 
 
 @dataclass
@@ -74,15 +72,17 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self,
         *,
         api_key: str,
-        base_url="wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01",
+        model: str = "gpt-4o-realtime-preview-2024-12-17",
+        base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: events.SessionProperties = events.SessionProperties(),
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
         **kwargs,
     ):
-        super().__init__(base_url=base_url, **kwargs)
+        full_url = f"{base_url}?model={model}"
+        super().__init__(base_url=full_url, **kwargs)
         self.api_key = api_key
-        self.base_url = base_url
+        self.base_url = full_url
 
         self._session_properties: events.SessionProperties = session_properties
         self._audio_input_paused = start_audio_paused

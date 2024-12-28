@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
-    TransportMessageFrame,
     TransportMessageUrgentFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -59,7 +58,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.string import match_endofsentence
 
-RTVI_PROTOCOL_VERSION = "0.2"
+RTVI_PROTOCOL_VERSION = "0.3.0"
 
 ActionResult = Union[bool, int, float, str, list, dict]
 
@@ -657,6 +656,8 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, ErrorFrame):
             await self._send_error_frame(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, TransportMessageUrgentFrame):
+            await self._handle_transport_message(frame)
         # All other system frames
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
@@ -667,8 +668,6 @@ class RTVIProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             await self._stop(frame)
         # Data frames
-        elif isinstance(frame, TransportMessageFrame):
-            await self._handle_transport_message(frame)
         elif isinstance(frame, RTVIActionFrame):
             await self._action_queue.put(frame)
         # Other frames
@@ -722,7 +721,7 @@ class RTVIProcessor(FrameProcessor):
             except asyncio.CancelledError:
                 break
 
-    async def _handle_transport_message(self, frame: TransportMessageFrame):
+    async def _handle_transport_message(self, frame: TransportMessageUrgentFrame):
         try:
             message = RTVIMessage.model_validate(frame.message)
             await self._message_queue.put(message)

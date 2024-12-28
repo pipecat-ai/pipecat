@@ -19,9 +19,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.aws import AWSTTSService
-from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.openai import OpenAILLMService
+from pipecat.services.nim import NimLLMService
+from pipecat.services.riva import FastPitchTTSService, ParakeetSTTService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -46,17 +45,13 @@ async def main():
             ),
         )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = ParakeetSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
 
-        tts = AWSTTSService(
-            api_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            region=os.getenv("AWS_REGION"),
-            voice_id="Amy",
-            params=AWSTTSService.InputParams(engine="neural", language="en-GB", rate="1.05"),
+        llm = NimLLMService(
+            api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.1-405b-instruct"
         )
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        tts = FastPitchTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
 
         messages = [
             {
@@ -84,7 +79,6 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])
