@@ -5,9 +5,14 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from openai.types.chat import ChatCompletionToolParam
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
@@ -17,14 +22,6 @@ from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMContext
 from pipecat.services.together import TogetherLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from openai.types.chat import ChatCompletionToolParam
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -125,7 +122,7 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            # await tts.say("Hi! Ask me about the weather in San Francisco.")
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
 

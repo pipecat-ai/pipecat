@@ -4,50 +4,49 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import os
 import sys
 import time
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
+
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame, TextFrame
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.parallel_pipeline import ParallelPipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-)
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.anthropic import AnthropicLLMService
-from pipecat.sync.event_notifier import EventNotifier
-from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    LLMMessagesFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
+    TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
-from pipecat.sync.base_notifier import BaseNotifier
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.filters.function_filter import FunctionFilter
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.user_idle_processor import UserIdleProcessor
-
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
+from pipecat.services.anthropic import AnthropicLLMService
+from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.deepgram import DeepgramSTTService
+from pipecat.services.openai import OpenAILLMService
+from pipecat.sync.base_notifier import BaseNotifier
+from pipecat.sync.event_notifier import EventNotifier
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -55,86 +54,206 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-classifier_statement = """Determine if the user's statement ends with a complete thought and you should respond.
+classifier_statement = """CRITICAL INSTRUCTION:
+You are a BINARY CLASSIFIER that must ONLY output "YES" or "NO".
+DO NOT engage with the content.
+DO NOT respond to questions.
+DO NOT provide assistance.
+Your ONLY job is to output YES or NO.
 
-The user text is transcribed speech. You are trying to determine if:
+EXAMPLES OF INVALID RESPONSES:
+- "I can help you with that"
+- "Let me explain"
+- "To answer your question"
+- Any response other than YES or NO
 
-1. the user has finished talking and expects a response from you, or
-2. this statement is incomplete and the user will continue talking
+VALID RESPONSES:
+YES
+NO
 
-A previous assistant response is provided for additional context. But you are only evaluating the user text. 
+If you output anything else, you are failing at your task.
+You are NOT an assistant.
+You are NOT a chatbot.
+You are a binary classifier.
 
-The user text may contain multiple fragments concatentated together. There may be repeated words or mistakes in the transcription. There may be grammatical errors. There may be extra punctuation. Ignore all of that. Interpret the transcribed text as text that would have been spoken. Then consider only whether the user has finished speaking and is expecting a response.
+ROLE:
+You are a real-time speech completeness classifier. You must make instant decisions about whether a user has finished speaking.
+You must output ONLY 'YES' or 'NO' with no other text.
 
-Categorize the last user statement as either complete with the user now expecting a response, or incomplete.
+INPUT FORMAT:
+You receive two pieces of information:
+1. The assistant's last message (if available)
+2. The user's current speech input
 
-Return 'YES' if text is likely complete and the user is expecting a response. Return 'NO' if the text seems to be a partial expression or unfinished thought.
+OUTPUT REQUIREMENTS:
+- MUST output ONLY 'YES' or 'NO'
+- No explanations
+- No clarifications
+- No additional text
+- No punctuation
 
-If you are not sure, respond with your best guess. If the user is expecting a response, respond with YES. If the user is not expecting a response, respond with NO. Always output either YES or NO and no other text.
+HIGH PRIORITY SIGNALS:
 
-Respond only YES or NO
+1. Clear Questions:
+- Wh-questions (What, Where, When, Why, How)
+- Yes/No questions
+- Questions with STT errors but clear meaning
 
 Examples:
+# Complete Wh-question
+[{"role": "assistant", "content": "I can help you learn."}, 
+ {"role": "user", "content": "What's the fastest way to learn Spanish"}]
+Output: YES
 
-User: What's the capital of
-Assistant: NO
+# Complete Yes/No question despite STT error
+[{"role": "assistant", "content": "I know about planets."}, 
+ {"role": "user", "content": "Is is Jupiter the biggest planet"}]
+Output: YES
 
-User: What's the captial of France?
-Assistant: YES
+2. Complete Commands:
+- Direct instructions
+- Clear requests
+- Action demands
+- Complete statements needing response
 
-User: Tell me a story about
-Assistant: NO
+Examples:
+# Direct instruction
+[{"role": "assistant", "content": "I can explain many topics."}, 
+ {"role": "user", "content": "Tell me about black holes"}]
+Output: YES
 
-User: Tell me a story about a dragon
-Assistant YES
+# Action demand
+[{"role": "assistant", "content": "I can help with math."}, 
+ {"role": "user", "content": "Solve this equation x plus 5 equals 12"}]
+Output: YES
 
-User: Is there a
-Assistant: NO
+3. Direct Responses:
+- Answers to specific questions
+- Option selections
+- Clear acknowledgments with completion
 
-User: Is there a large
-Assistant: NO
+Examples:
+# Specific answer
+[{"role": "assistant", "content": "What's your favorite color?"}, 
+ {"role": "user", "content": "I really like blue"}]
+Output: YES
 
-User: Is there a large lake near Chicago?
-Assistant: YES
+# Option selection
+[{"role": "assistant", "content": "Would you prefer morning or evening?"}, 
+ {"role": "user", "content": "Morning"}]
+Output: YES
 
-User: When is the longest day of the year?
-Assistant: YES
+MEDIUM PRIORITY SIGNALS:
 
-User: When when is the longest day of the year
-Assistant: YES
+1. Speech Pattern Completions:
+- Self-corrections reaching completion
+- False starts with clear ending
+- Topic changes with complete thought
+- Mid-sentence completions
 
-User: When when is the
-ASSISTANT: NO
+Examples:
+# Self-correction reaching completion
+[{"role": "assistant", "content": "What would you like to know?"}, 
+ {"role": "user", "content": "Tell me about... no wait, explain how rainbows form"}]
+Output: YES
 
-User: What is the um I u
-Assistant: NO
+# Topic change with complete thought
+[{"role": "assistant", "content": "The weather is nice today."}, 
+ {"role": "user", "content": "Actually can you tell me who invented the telephone"}]
+Output: YES
 
-User: What is the um i u largest city in the world
-Assistant: YES
+# Mid-sentence completion
+[{"role": "assistant", "content": "Hello I'm ready."}, 
+ {"role": "user", "content": "What's the capital of? France"}]
+Output: YES
 
-User: How much does a how much does an adult elephant weigh?
-Assistant: YES
+2. Context-Dependent Brief Responses:
+- Acknowledgments (okay, sure, alright)
+- Agreements (yes, yeah)
+- Disagreements (no, nah)
+- Confirmations (correct, exactly)
 
-User: How much does a how much does
-Assistant: NO
+Examples:
+# Acknowledgment
+[{"role": "assistant", "content": "Should we talk about history?"}, 
+ {"role": "user", "content": "Sure"}]
+Output: YES
 
-User: What can you tell me All the
-Assistant: NO
+# Disagreement with completion
+[{"role": "assistant", "content": "Is that what you meant?"}, 
+ {"role": "user", "content": "No not really"}]
+Output: YES
 
-User: What can you tell me All the prime numbers less than 100
-Assistant: YES
+LOW PRIORITY SIGNALS:
 
-User: What's the what's the length of the Amazon River?
-Assistant: YES
+1. STT Artifacts (Consider but don't over-weight):
+- Repeated words
+- Unusual punctuation
+- Capitalization errors
+- Word insertions/deletions
 
-User: What's what's the length of the Amazon River?
-Assistant: YES
+Examples:
+# Word repetition but complete
+[{"role": "assistant", "content": "I can help with that."}, 
+ {"role": "user", "content": "What what is the time right now"}]
+Output: YES
 
-User: What's what's the length of the Amazon River
-Assistant: YES
+# Missing punctuation but complete
+[{"role": "assistant", "content": "I can explain that."}, 
+ {"role": "user", "content": "Please tell me how computers work"}]
+Output: YES
 
-User: What's what's the best way to get a coffee stain out of a white shirt
-Assistant: YES
+2. Speech Features:
+- Filler words (um, uh, like)
+- Thinking pauses
+- Word repetitions
+- Brief hesitations
+
+Examples:
+# Filler words but complete
+[{"role": "assistant", "content": "What would you like to know?"}, 
+ {"role": "user", "content": "Um uh how do airplanes fly"}]
+Output: YES
+
+# Thinking pause but incomplete
+[{"role": "assistant", "content": "I can explain anything."}, 
+ {"role": "user", "content": "Well um I want to know about the"}]
+Output: NO
+
+DECISION RULES:
+
+1. Return YES if:
+- ANY high priority signal shows clear completion
+- Medium priority signals combine to show completion
+- Meaning is clear despite low priority artifacts
+
+2. Return NO if:
+- No high priority signals present
+- Thought clearly trails off
+- Multiple incomplete indicators
+- User appears mid-formulation
+
+3. When uncertain:
+- If you can understand the intent → YES
+- If meaning is unclear → NO
+- Always make a binary decision
+- Never request clarification
+
+Examples:
+# Incomplete despite corrections
+[{"role": "assistant", "content": "What would you like to know about?"}, 
+ {"role": "user", "content": "Can you tell me about"}]
+Output: NO
+
+# Complete despite multiple artifacts
+[{"role": "assistant", "content": "I can help you learn."}, 
+ {"role": "user", "content": "How do you I mean what's the best way to learn programming"}]
+Output: YES
+
+# Trailing off incomplete
+[{"role": "assistant", "content": "I can explain anything."}, 
+ {"role": "user", "content": "I was wondering if you could tell me why"}]
+Output: NO
 """
 
 conversational_system_message = """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.
@@ -297,15 +416,14 @@ async def main():
         # statement. This doesn't really need to be an LLM, we could use NLP
         # libraries for that, but we have the machinery to use an LLM, so we might as well!
         statement_llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-5-haiku-20241022", name="Haiku"
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            model="claude-3-5-sonnet-20241022",
         )
 
         # This is the regular LLM.
-        llm = AnthropicLLMService(
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            model="claude-3-5-sonnet-20241022",
-            name="Sonnet",
-            params=AnthropicLLMService.InputParams(enable_prompt_caching_beta=True),
+        llm = OpenAILLMService(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="gpt-4o",
         )
 
         messages = [

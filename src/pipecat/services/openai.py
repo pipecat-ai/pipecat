@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMUpdateSettingsFrame,
+    OpenAILLMContextAssistantTimestampFrame,
     StartInterruptionFrame,
     TextFrame,
     TTSAudioRawFrame,
@@ -46,6 +47,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
+from pipecat.utils.time import time_now_iso8601
 
 try:
     from openai import (
@@ -294,7 +296,10 @@ class BaseOpenAILLMService(LLMService):
         elif isinstance(frame, LLMMessagesFrame):
             context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
-            context = OpenAILLMContext.from_image_frame(frame)
+            context = OpenAILLMContext()
+            context.add_image_frame_message(
+                format=frame.format, size=frame.size, image=frame.image, text=frame.text
+            )
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
@@ -379,14 +384,25 @@ class OpenAIImageGenService(ImageGenService):
 
 
 class OpenAITTSService(TTSService):
-    """This service uses the OpenAI TTS API to generate audio from text.
-    The returned audio is PCM encoded at 24kHz. When using the DailyTransport, set the sample rate in the DailyParams accordingly:
-    ```
+    """OpenAI Text-to-Speech service that generates audio from text.
+
+    This service uses the OpenAI TTS API to generate PCM-encoded audio at 24kHz.
+    When using with DailyTransport, configure the sample rate in DailyParams
+    as shown below:
+
     DailyParams(
         audio_out_enabled=True,
         audio_out_sample_rate=24_000,
     )
-    ```
+
+    Args:
+        api_key: OpenAI API key. Defaults to None.
+        voice: Voice ID to use. Defaults to "alloy".
+        model: TTS model to use ("tts-1" or "tts-1-hd"). Defaults to "tts-1".
+        sample_rate: Output audio sample rate in Hz. Defaults to 24000.
+        **kwargs: Additional keyword arguments passed to TTSService.
+
+    The service returns PCM-encoded audio at the specified sample rate.
     """
 
     def __init__(
@@ -545,7 +561,6 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     self._context.add_message(
                         {
                             "role": "assistant",
-                            "content": "",  # content field required for Grok function calling
                             "tool_calls": [
                                 {
                                     "id": frame.tool_call_id,
@@ -584,8 +599,13 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
 
+            # Push context frame
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
+
+            # Push timestamp frame with current time
+            timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
+            await self.push_frame(timestamp_frame)
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")

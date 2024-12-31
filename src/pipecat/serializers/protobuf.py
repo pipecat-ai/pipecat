@@ -6,25 +6,40 @@
 
 import dataclasses
 
-import pipecat.frames.protobufs.frames_pb2 as frame_protos
-
-from pipecat.frames.frames import AudioRawFrame, Frame, TextFrame, TranscriptionFrame
-from pipecat.serializers.base_serializer import FrameSerializer
-
 from loguru import logger
+
+import pipecat.frames.protobufs.frames_pb2 as frame_protos
+from pipecat.frames.frames import (
+    Frame,
+    InputAudioRawFrame,
+    OutputAudioRawFrame,
+    TextFrame,
+    TranscriptionFrame,
+)
+from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
 
 class ProtobufFrameSerializer(FrameSerializer):
     SERIALIZABLE_TYPES = {
         TextFrame: "text",
-        AudioRawFrame: "audio",
+        OutputAudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
     }
-
     SERIALIZABLE_FIELDS = {v: k for k, v in SERIALIZABLE_TYPES.items()}
+
+    DESERIALIZABLE_TYPES = {
+        TextFrame: "text",
+        InputAudioRawFrame: "audio",
+        TranscriptionFrame: "transcription",
+    }
+    DESERIALIZABLE_FIELDS = {v: k for k, v in DESERIALIZABLE_TYPES.items()}
 
     def __init__(self):
         pass
+
+    @property
+    def type(self) -> FrameSerializerType:
+        return FrameSerializerType.BINARY
 
     def serialize(self, frame: Frame) -> str | bytes | None:
         proto_frame = frame_protos.Frame()
@@ -34,13 +49,13 @@ class ProtobufFrameSerializer(FrameSerializer):
 
         # ignoring linter errors; we check that type(frame) is in this dict above
         proto_optional_name = self.SERIALIZABLE_TYPES[type(frame)]  # type: ignore
+        proto_attr = getattr(proto_frame, proto_optional_name)
         for field in dataclasses.fields(frame):  # type: ignore
             value = getattr(frame, field.name)
-            if value:
-                setattr(getattr(proto_frame, proto_optional_name), field.name, value)
+            if value and hasattr(proto_attr, field.name):
+                setattr(proto_attr, field.name, value)
 
-        result = proto_frame.SerializeToString()
-        return result
+        return proto_frame.SerializeToString()
 
     def deserialize(self, data: str | bytes) -> Frame | None:
         """Returns a Frame object from a Frame protobuf. Used to convert frames
@@ -63,25 +78,25 @@ class ProtobufFrameSerializer(FrameSerializer):
 
         proto = frame_protos.Frame.FromString(data)
         which = proto.WhichOneof("frame")
-        if which not in self.SERIALIZABLE_FIELDS:
+        if which not in self.DESERIALIZABLE_FIELDS:
             logger.error("Unable to deserialize a valid frame")
             return None
 
-        class_name = self.SERIALIZABLE_FIELDS[which]
+        class_name = self.DESERIALIZABLE_FIELDS[which]
         args = getattr(proto, which)
         args_dict = {}
         for field in proto.DESCRIPTOR.fields_by_name[which].message_type.fields:
             args_dict[field.name] = getattr(args, field.name)
 
         # Remove special fields if needed
-        id = getattr(args, "id")
-        name = getattr(args, "name")
-        pts = getattr(args, "pts")
-        if not id:
+        id = getattr(args, "id", None)
+        name = getattr(args, "name", None)
+        pts = getattr(args, "pts", None)
+        if not id and "id" in args_dict:
             del args_dict["id"]
-        if not name:
+        if not name and "name" in args_dict:
             del args_dict["name"]
-        if not pts:
+        if not pts and "pts" in args_dict:
             del args_dict["pts"]
 
         # Create the instance
@@ -89,10 +104,10 @@ class ProtobufFrameSerializer(FrameSerializer):
 
         # Set special fields
         if id:
-            setattr(instance, "id", getattr(args, "id"))
+            setattr(instance, "id", getattr(args, "id", None))
         if name:
-            setattr(instance, "name", getattr(args, "name"))
+            setattr(instance, "name", getattr(args, "name", None))
         if pts:
-            setattr(instance, "pts", getattr(args, "pts"))
+            setattr(instance, "pts", getattr(args, "pts", None))
 
         return instance

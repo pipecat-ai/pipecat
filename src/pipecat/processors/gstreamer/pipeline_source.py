@@ -6,6 +6,7 @@
 
 import asyncio
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
@@ -18,8 +19,6 @@ from pipecat.frames.frames import (
     SystemFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-from loguru import logger
 
 try:
     import gi
@@ -39,7 +38,7 @@ class GStreamerPipelineSource(FrameProcessor):
     class OutputParams(BaseModel):
         video_width: int = 1280
         video_height: int = 720
-        audio_sample_rate: int = 16000
+        audio_sample_rate: int = 24000
         audio_channels: int = 1
         clock_sync: bool = True
 

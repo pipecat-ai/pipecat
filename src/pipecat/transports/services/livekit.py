@@ -8,6 +8,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.utils import resample_audio
@@ -27,8 +28,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-
-from loguru import logger
 
 try:
     from livekit import rtc
@@ -83,6 +82,7 @@ class LiveKitTransportClient:
         self._room = rtc.Room(loop=loop)
         self._participant_id: str = ""
         self._connected = False
+        self._disconnect_counter = 0
         self._audio_source: rtc.AudioSource | None = None
         self._audio_track: rtc.LocalAudioTrack | None = None
         self._audio_tracks = {}
@@ -105,6 +105,8 @@ class LiveKitTransportClient:
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def connect(self):
         if self._connected:
+            # Increment disconnect counter if already connected.
+            self._disconnect_counter += 1
             return
 
         logger.info(f"Connecting to {self._room_name}")
@@ -116,6 +118,9 @@ class LiveKitTransportClient:
                 options=rtc.RoomOptions(auto_subscribe=True),
             )
             self._connected = True
+            # Increment disconnect counter if we successfully connected.
+            self._disconnect_counter += 1
+
             self._participant_id = self._room.local_participant.sid
             logger.info(f"Connected to {self._room_name}")
 
@@ -142,7 +147,10 @@ class LiveKitTransportClient:
             raise
 
     async def disconnect(self):
-        if not self._connected:
+        # Decrement leave counter when leaving.
+        self._disconnect_counter -= 1
+
+        if not self._connected or self._disconnect_counter > 0:
             return
 
         logger.info(f"Disconnecting from {self._room_name}")
@@ -315,21 +323,12 @@ class LiveKitInputTransport(BaseInputTransport):
         logger.info("LiveKitInputTransport started")
 
     async def stop(self, frame: EndFrame):
-        if self._audio_in_task:
-            self._audio_in_task.cancel()
-            try:
-                await self._audio_in_task
-            except asyncio.CancelledError:
-                pass
         await super().stop(frame)
         await self._client.disconnect()
+        if self._audio_in_task:
+            self._audio_in_task.cancel()
+            await self._audio_in_task
         logger.info("LiveKitInputTransport stopped")
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, EndFrame):
-            await self.stop(frame)
-        else:
-            await super().process_frame(frame, direction)
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
@@ -342,7 +341,7 @@ class LiveKitInputTransport(BaseInputTransport):
         return self._vad_analyzer
 
     async def push_app_message(self, message: Any, sender: str):
-        frame = LiveKitTransportMessageFrame(message=message, participant_id=sender)
+        frame = LiveKitTransportMessageUrgentFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     async def _audio_in_task_handler(self):
@@ -401,12 +400,6 @@ class LiveKitOutputTransport(BaseOutputTransport):
         await super().stop(frame)
         await self._client.disconnect()
         logger.info("LiveKitOutputTransport stopped")
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if isinstance(frame, EndFrame):
-            await self.stop(frame)
-        else:
-            await super().process_frame(frame, direction)
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
@@ -517,12 +510,6 @@ class LiveKitTransport(BaseTransport):
 
     async def _on_disconnected(self):
         await self._call_event_handler("on_disconnected")
-        # Attempt to reconnect
-        try:
-            await self._client.connect()
-            await self._call_event_handler("on_connected")
-        except Exception as e:
-            logger.error(f"Failed to reconnect: {e}")
 
     async def _on_participant_connected(self, participant_id: str):
         await self._call_event_handler("on_participant_connected", participant_id)

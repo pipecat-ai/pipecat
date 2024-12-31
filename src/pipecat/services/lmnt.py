@@ -8,6 +8,7 @@ import asyncio
 from typing import AsyncGenerator
 
 from loguru import logger
+from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -36,24 +37,27 @@ except ModuleNotFoundError as e:
 
 
 def language_to_lmnt_language(language: Language) -> str | None:
-    language_map = {
+    BASE_LANGUAGES = {
         Language.DE: "de",
         Language.EN: "en",
-        Language.EN_US: "en",
-        Language.EN_AU: "en",
-        Language.EN_GB: "en",
-        Language.EN_NZ: "en",
-        Language.EN_IN: "en",
         Language.ES: "es",
         Language.FR: "fr",
-        Language.FR_CA: "fr",
-        Language.PT: "pt",
-        Language.PT_BR: "pt",
-        Language.ZH: "zh",
-        Language.ZH_TW: "zh",
         Language.KO: "ko",
+        Language.PT: "pt",
+        Language.ZH: "zh",
     }
-    return language_map.get(language)
+
+    result = BASE_LANGUAGES.get(language)
+
+    # If not found in base languages, try to find the base language from a variant
+    if not result:
+        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
+        lang_str = str(language.value)
+        base_code = lang_str.split("-")[0].lower()
+        # Look up the base code in our supported languages
+        result = base_code if base_code in BASE_LANGUAGES.values() else None
+
+    return result
 
 
 class LmntTTSService(TTSService):
@@ -113,7 +117,22 @@ class LmntTTSService(TTSService):
             self._started = False
 
     async def _connect(self):
+        await self._connect_lmnt()
+
+        self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+
+    async def _disconnect(self):
+        await self._disconnect_lmnt()
+
+        if self._receive_task:
+            self._receive_task.cancel()
+            await self._receive_task
+            self._receive_task = None
+
+    async def _connect_lmnt(self):
         try:
+            logger.debug("Connecting to LMNT")
+
             self._speech = Speech()
             self._connection = await self._speech.synthesize_streaming(
                 self._voice_id,
@@ -121,51 +140,67 @@ class LmntTTSService(TTSService):
                 sample_rate=self._settings["output_format"]["sample_rate"],
                 language=self._settings["language"],
             )
-            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
         except Exception as e:
-            logger.exception(f"{self} initialization error: {e}")
+            logger.error(f"{self} initialization error: {e}")
             self._connection = None
 
-    async def _disconnect(self):
+    async def _disconnect_lmnt(self):
         try:
             await self.stop_all_metrics()
 
-            if self._receive_task:
-                self._receive_task.cancel()
-                await self._receive_task
-                self._receive_task = None
             if self._connection:
+                logger.debug("Disconnecting from LMNT")
                 await self._connection.socket.close()
                 self._connection = None
             if self._speech:
                 await self._speech.close()
                 self._speech = None
+
             self._started = False
         except Exception as e:
-            logger.exception(f"{self} error closing websocket: {e}")
+            logger.error(f"{self} error closing connection: {e}")
+
+    async def _receive_messages(self):
+        async for msg in self._connection:
+            if "error" in msg:
+                logger.error(f'{self} error: {msg["error"]}')
+                await self.push_frame(TTSStoppedFrame())
+                await self.stop_all_metrics()
+                await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+            elif "audio" in msg:
+                await self.stop_ttfb_metrics()
+                frame = TTSAudioRawFrame(
+                    audio=msg["audio"],
+                    sample_rate=self._settings["output_format"]["sample_rate"],
+                    num_channels=1,
+                )
+                await self.push_frame(frame)
+            else:
+                logger.error(f"{self}: LMNT error, unknown message type: {msg}")
+
+    async def _reconnect_websocket(self, retry_state: RetryCallState):
+        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
+        await self._disconnect_lmnt()
+        await self._connect_lmnt()
 
     async def _receive_task_handler(self):
-        try:
-            async for msg in self._connection:
-                if "error" in msg:
-                    logger.error(f'{self} error: {msg["error"]}')
-                    await self.push_frame(TTSStoppedFrame())
-                    await self.stop_all_metrics()
-                    await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
-                elif "audio" in msg:
-                    await self.stop_ttfb_metrics()
-                    frame = TTSAudioRawFrame(
-                        audio=msg["audio"],
-                        sample_rate=self._settings["output_format"]["sample_rate"],
-                        num_channels=1,
-                    )
-                    await self.push_frame(frame)
-                else:
-                    logger.error(f"LMNT error, unknown message type: {msg}")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+        while True:
+            try:
+                async for attempt in AsyncRetrying(
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=4, max=10),
+                    before_sleep=self._reconnect_websocket,
+                    reraise=True,
+                ):
+                    with attempt:
+                        await self._receive_messages()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                message = f"{self} error receiving messages: {e}"
+                logger.error(message)
+                await self.push_error(ErrorFrame(message, fatal=True))
+                break
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -191,4 +226,4 @@ class LmntTTSService(TTSService):
                 return
             yield None
         except Exception as e:
-            logger.exception(f"{self} exception: {e}")
+            logger.error(f"{self} exception: {e}")

@@ -8,16 +8,17 @@ import asyncio
 import io
 import time
 import wave
-
 from typing import Awaitable, Callable
-from pydantic.main import BaseModel
+
+from loguru import logger
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    OutputAudioRawFrame,
     StartFrame,
     StartInterruptionFrame,
 )
@@ -27,8 +28,6 @@ from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-
-from loguru import logger
 
 try:
     import websockets
@@ -69,8 +68,8 @@ class WebsocketServerInputTransport(BaseInputTransport):
         self._stop_server_event = asyncio.Event()
 
     async def start(self, frame: StartFrame):
-        self._server_task = self.get_event_loop().create_task(self._server_task_handler())
         await super().start(frame)
+        self._server_task = self.get_event_loop().create_task(self._server_task_handler())
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -105,14 +104,8 @@ class WebsocketServerInputTransport(BaseInputTransport):
             if not frame:
                 continue
 
-            if isinstance(frame, AudioRawFrame):
-                await self.push_audio_frame(
-                    InputAudioRawFrame(
-                        audio=frame.audio,
-                        sample_rate=frame.sample_rate,
-                        num_channels=frame.num_channels,
-                    )
-                )
+            if isinstance(frame, InputAudioRawFrame):
+                await self.push_audio_frame(frame)
             else:
                 await self.push_frame(frame)
 
@@ -148,36 +141,48 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartInterruptionFrame):
+            await self._write_frame(frame)
             self._next_send_time = 0
 
     async def write_raw_audio_frames(self, frames: bytes):
         if not self._websocket:
+            # Simulate audio playback with a sleep.
+            await self._write_audio_sleep()
             return
 
-        frame = AudioRawFrame(
+        frame = OutputAudioRawFrame(
             audio=frames,
             sample_rate=self._params.audio_out_sample_rate,
             num_channels=self._params.audio_out_channels,
         )
 
         if self._params.add_wav_header:
-            content = io.BytesIO()
-            ww = wave.open(content, "wb")
-            ww.setsampwidth(2)
-            ww.setnchannels(frame.num_channels)
-            ww.setframerate(frame.sample_rate)
-            ww.writeframes(frame.audio)
-            ww.close()
-            content.seek(0)
-            wav_frame = AudioRawFrame(
-                content.read(), sample_rate=frame.sample_rate, num_channels=frame.num_channels
-            )
-            frame = wav_frame
+            with io.BytesIO() as buffer:
+                with wave.open(buffer, "wb") as wf:
+                    wf.setsampwidth(2)
+                    wf.setnchannels(frame.num_channels)
+                    wf.setframerate(frame.sample_rate)
+                    wf.writeframes(frame.audio)
+                wav_frame = OutputAudioRawFrame(
+                    buffer.getvalue(),
+                    sample_rate=frame.sample_rate,
+                    num_channels=frame.num_channels,
+                )
+                frame = wav_frame
 
-        proto = self._params.serializer.serialize(frame)
-        if proto:
-            await self._websocket.send(proto)
+        await self._write_frame(frame)
 
+        self._websocket_audio_buffer = bytes()
+
+        # Simulate audio playback with a sleep.
+        await self._write_audio_sleep()
+
+    async def _write_frame(self, frame: Frame):
+        payload = self._params.serializer.serialize(frame)
+        if payload and self._websocket:
+            await self._websocket.send(payload)
+
+    async def _write_audio_sleep(self):
         # Simulate a clock.
         current_time = time.monotonic()
         sleep_duration = max(0, self._next_send_time - current_time)
@@ -186,8 +191,6 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             self._next_send_time = time.monotonic() + self._send_interval
         else:
             self._next_send_time += self._send_interval
-
-        self._websocket_audio_buffer = bytes()
 
 
 class WebsocketServerTransport(BaseTransport):

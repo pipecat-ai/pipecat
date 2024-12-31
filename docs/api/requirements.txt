@@ -1,0 +1,40 @@
+# Sphinx dependencies
+sphinx>=8.1.3
+sphinx-rtd-theme
+sphinx-markdown-builder
+sphinx-autodoc-typehints
+toml
+
+# Install all extras individually to ensure they're properly resolved
+pipecat-ai[anthropic]
+pipecat-ai[assemblyai]
+pipecat-ai[aws]
+pipecat-ai[azure]
+pipecat-ai[canonical]
+pipecat-ai[cartesia]
+pipecat-ai[daily]
+pipecat-ai[deepgram]
+pipecat-ai[elevenlabs]
+pipecat-ai[fal]
+pipecat-ai[fireworks]
+pipecat-ai[gladia]
+pipecat-ai[google]
+pipecat-ai[grok]
+pipecat-ai[groq]
+# pipecat-ai[krisp] # Mocked instead
+pipecat-ai[langchain]
+pipecat-ai[livekit]
+pipecat-ai[lmnt]
+pipecat-ai[local]
+pipecat-ai[moondream]
+pipecat-ai[nim]
+pipecat-ai[noisereduce]
+pipecat-ai[openai]
+# pipecat-ai[openpipe]
+# pipecat-ai[playht] # Mocked due to grpcio conflict with riva
+pipecat-ai[riva]
+pipecat-ai[silero]
+pipecat-ai[simli]
+pipecat-ai[soundfile]
+pipecat-ai[websocket]
+pipecat-ai[whisper]

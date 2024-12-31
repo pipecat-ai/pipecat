@@ -6,14 +6,15 @@
 
 from typing import Dict, List
 
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai import BaseOpenAILLMService
-
 from loguru import logger
 
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.openai import OpenAILLMService
+
 try:
-    from openpipe import AsyncOpenAI as OpenPipeAI, AsyncStream
-    from openai.types.chat import ChatCompletionMessageParam, ChatCompletionChunk
+    from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+    from openpipe import AsyncOpenAI as OpenPipeAI
+    from openpipe import AsyncStream
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -22,7 +23,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class OpenPipeLLMService(BaseOpenAILLMService):
+class OpenPipeLLMService(OpenAILLMService):
     def __init__(
         self,
         *,

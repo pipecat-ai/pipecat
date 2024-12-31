@@ -5,9 +5,13 @@
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
@@ -17,12 +21,6 @@ from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.google import GoogleLLMService
 from pipecat.services.openai import OpenAILLMContext
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -64,7 +62,11 @@ async def main():
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
-        llm = GoogleLLMService(model="gemini-1.5-flash-latest", api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = GoogleLLMService(
+            model="gemini-1.5-flash-latest",
+            # model="gemini-exp-1114",
+            api_key=os.getenv("GOOGLE_API_KEY"),
+        )
         llm.register_function("get_weather", get_weather)
         llm.register_function("get_image", get_image)
 
@@ -151,7 +153,6 @@ indicate you should use the get_image tool are:
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
             ),
         )
 

@@ -11,7 +11,6 @@ import numpy as np
 from loguru import logger
 
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
-from pipecat.audio.utils import resample_audio
 from pipecat.frames.frames import MixerControlFrame, MixerEnableFrame, MixerUpdateSettingsFrame
 
 try:
@@ -27,9 +26,8 @@ except ModuleNotFoundError as e:
 class SoundfileMixer(BaseAudioMixer):
     """This is an audio mixer that mixes incoming audio with audio from a
     file. It uses the soundfile library to load files so it supports multiple
-    formats. The audio files need to only have one channel (mono) but they can
-    have any sample rate that will be resampled to the output transport sample
-    rate.
+    formats. The audio files need to only have one channel (mono) and it needs
+    to match the sample rate of the output transport.
 
     Multiple files can be loaded, each with a different name. The
     `MixerUpdateSettingsFrame` has the following settings available: `sound`
@@ -103,16 +101,17 @@ class SoundfileMixer(BaseAudioMixer):
 
     def _load_sound_file(self, sound_name: str, file_name: str):
         try:
-            logger.debug(f"Loading background sound from {file_name}")
+            logger.debug(f"Loading mixer sound from {file_name}")
             sound, sample_rate = sf.read(file_name, dtype="int16")
 
-            audio = sound.tobytes()
-            if sample_rate != self._sample_rate:
-                logger.debug(f"Resampling background sound to {self._sample_rate}")
-                audio = resample_audio(audio, sample_rate, self._sample_rate)
-
-            # Convert from np to bytes again.
-            self._sounds[sound_name] = np.frombuffer(audio, dtype=np.int16)
+            if sample_rate == self._sample_rate:
+                audio = sound.tobytes()
+                # Convert from np to bytes again.
+                self._sounds[sound_name] = np.frombuffer(audio, dtype=np.int16)
+            else:
+                logger.warning(
+                    f"Sound file {file_name} has incorrect sample rate {sample_rate} (should be {self._sample_rate})"
+                )
         except Exception as e:
             logger.error(f"Unable to open file {file_name}: {e}")
 
@@ -121,7 +120,7 @@ class SoundfileMixer(BaseAudioMixer):
         file.
 
         """
-        if not self._mixing:
+        if not self._mixing or not self._current_sound in self._sounds:
             return audio
 
         audio_np = np.frombuffer(audio, dtype=np.int16)
