@@ -25,7 +25,7 @@ async def run_bot(id: int, run_number: int, bot_run_time: int, phone_number: str
         )
 
         # Create daily.co room with dialin and dialout enabled
-        exp = time.time() + bot_run_time + 600
+        exp = time.time() + bot_run_time + 600 + 60
         room_params = DailyRoomParams(
             properties=DailyRoomProperties(
                 exp=exp,
