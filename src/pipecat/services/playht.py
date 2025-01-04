@@ -37,8 +37,7 @@ from pipecat.transcriptions.language import Language
 
 try:
     from pyht.async_client import AsyncClient
-    from pyht.client import TTSOptions
-    from pyht.protos.api_pb2 import Format
+    from pyht.client import Format, TTSOptions
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
