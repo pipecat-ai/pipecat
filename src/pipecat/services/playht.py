@@ -37,8 +37,8 @@ from pipecat.transcriptions.language import Language
 
 try:
     from pyht.async_client import AsyncClient
-    from pyht.client import TTSOptions
-    from pyht.protos.api_pb2 import Format
+    from pyht.client import Format, TTSOptions
+    from pyht.client import Language as PlayHTLanguage
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -363,7 +363,7 @@ class PlayHTHttpTTSService(TTSService):
         api_key: str,
         user_id: str,
         voice_url: str,
-        voice_engine: str = "Play3.0-mini",
+        voice_engine: str = "Play3.0-mini-http",  # Options: Play3.0-mini-http, Play3.0-mini-ws
         sample_rate: int = 24000,
         params: InputParams = InputParams(),
         **kwargs,
@@ -389,9 +389,19 @@ class PlayHTHttpTTSService(TTSService):
         }
         self.set_model_name(voice_engine)
         self.set_voice(voice_url)
+
+        language_str = self._settings["language"]
+        playht_language = None
+        if language_str:
+            # Convert string to PlayHT Language enum
+            for lang in PlayHTLanguage:
+                if lang.value == language_str:
+                    playht_language = lang
+                    break
+
         self._options = TTSOptions(
             voice=self._voice_id,
-            language=self._settings["language"],
+            language=playht_language,
             sample_rate=self._settings["sample_rate"],
             format=self._settings["format"],
             speed=self._settings["speed"],

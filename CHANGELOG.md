@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new foundational example `07e-interruptible-playht-http.py` for easy
+  testing of `PlayHTHttpTTSService`.
+
 - Added support for Google TTS Journey voices in `GoogleTTSService`.
 
 - Added `29-livekit-audio-chat.py`, as a new foundational examples for
@@ -27,11 +30,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Changed the default model for `PlayHTHttpTTSService` to `Play3.0-mini-http`.
+
 - api_key, aws_access_key_id and region are no longer required parameters for the PollyTTSService (AWSTTSService)
+
 - Added `session_timeout` example in `examples/websocket-server/bot.py` to handle session timeout event.
+
 - Changed `InputParams` in `src/pipecat/services/gemini_multimodal_live/gemini.py` to support different modalities.
 
 ### Fixed
+
+- Fixed an import issue for `PlayHTHttpTTSService`.
+
+- Fixed an issue where languages couldn't be used with the `PlayHTHttpTTSService`.
 
 - Fixed an issue where `OpenAIRealtimeBetaLLMService` audio chunks were hitting
   an error when truncating audio content.
