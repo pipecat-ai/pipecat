@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Added new foundational examples for `LiveKitTransportLayer` -
+### Added
 
-  - `29-livekit-audio-chat.py` - Supports both Audio to Audio and Text to Audio
-    chat pipelines.
+- Added support for Google TTS Journey voices in `GoogleTTSService`.
+
+- Added `29-livekit-audio-chat.py`, as a new foundational examples for
+  `LiveKitTransportLayer`.
 
 ## [0.0.52] - 2024-12-24
 
