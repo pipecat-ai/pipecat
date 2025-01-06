@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -68,8 +68,7 @@ talking_frame = SpriteFrame(images=sprites)
 
 
 class TalkingAnimation(FrameProcessor):
-    """
-    This class starts a talking animation when it receives an first AudioFrame,
+    """This class starts a talking animation when it receives an first AudioFrame,
     and then returns to a "quiet" sprite when it sees a TTSStoppedFrame.
     """
 
