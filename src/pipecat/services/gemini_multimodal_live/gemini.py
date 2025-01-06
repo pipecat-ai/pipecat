@@ -604,6 +604,11 @@ class GeminiMultimodalLiveLLMService(LLMService):
         part = evt.serverContent.modelTurn.parts[0]
         if not part:
             return
+
+        text = part.text
+        if text:
+            await self.push_frame(TextFrame(text=text))
+
         inline_data = part.inlineData
         if not inline_data:
             return
