@@ -274,7 +274,7 @@ class TranscriptionUpdateFrame(DataFrame):
 class LLMMessagesFrame(DataFrame):
     """A frame containing a list of LLM messages. Used to signal that an LLM
     service should run a chat completion and emit an LLMFullResponseStartFrame,
-    TextFrames and an LLMFullResponseStartFrame. Note that the `messages`
+    TextFrames and an LLMFullResponseEndFrame. Note that the `messages`
     property in this class is mutable, and will be be updated by various
     aggregators.
 
