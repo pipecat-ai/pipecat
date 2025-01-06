@@ -6,29 +6,26 @@ import sys
 
 import aiohttp
 from deepgram import LiveOptions
+from dotenv import load_dotenv
+from livekit import api
+from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
-    TextFrame,
     BotInterruptionFrame,
-    UserStartedSpeakingFrame,
+    TextFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask, PipelineParams
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.livekit import LiveKitParams, LiveKitTransport
-
-from livekit import api
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -99,7 +96,7 @@ async def configure_livekit():
     user_token = generate_token(room_name, "User", api_key, api_secret)
     logger.info(f"User token: {user_token}")
 
-    return (url, token, room_name)
+    return url, token, room_name
 
 
 async def main():
