@@ -576,6 +576,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     self._context.add_message(
                         {
                             "role": "tool",
+                            "tool_call_name": frame.function_name,
                             "content": json.dumps(frame.result),
                             "tool_call_id": frame.tool_call_id,
                         }
