@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `29-livekit-audio-chat.py`, as a new foundational examples for
   `LiveKitTransportLayer`.
 
+### Fixed
+
+- Fixed an issue where `OpenAIRealtimeBetaLLMService` audio chunks were hitting
+  an error when truncating audio content.
+
 ## [0.0.52] - 2024-12-24
 
 ### Added
