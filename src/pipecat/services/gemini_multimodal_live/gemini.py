@@ -199,6 +199,28 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
+        self.config = events.Config.model_validate(
+            {
+                "setup": {
+                    "model": self._model_name,
+                    "generation_config": {
+                        "frequency_penalty": self._settings["frequency_penalty"],
+                        "max_output_tokens": self._settings["max_tokens"],  # Not supported yet
+                        "presence_penalty": self._settings["presence_penalty"],
+                        "temperature": self._settings["temperature"],
+                        "top_k": self._settings["top_k"],
+                        "top_p": self._settings["top_p"],
+                        "response_modalities": ["AUDIO"],
+                        "speech_config": {
+                            "voice_config": {
+                                "prebuilt_voice_config": {"voice_name": self._voice_id}
+                            },
+                        },
+                    },
+                },
+            }
+        )
+
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -207,6 +229,16 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     def set_video_input_paused(self, paused: bool):
         self._video_input_paused = paused
+
+    def set_model_only_audio(self):
+        self.config.setup.generation_config["response_modalities"] = ["AUDIO"]
+        self.config.setup.generation_config["speech_config"] = {
+            "voice_config": {"prebuilt_voice_config": {"voice_name": self._voice_id}}
+        }
+
+    def set_model_only_text(self):
+        self.config.setup.generation_config["response_modalities"] = ["TEXT"]
+        self.config.setup.generation_config["speech_config"] = None
 
     async def set_context(self, context: OpenAILLMContext):
         """Set the context explicitly from outside the pipeline.
@@ -372,39 +404,18 @@ class GeminiMultimodalLiveLLMService(LLMService):
             logger.info(f"Connecting to {uri}")
             self._websocket = await websockets.connect(uri=uri)
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
-            config = events.Config.model_validate(
-                {
-                    "setup": {
-                        "model": self._model_name,
-                        "generation_config": {
-                            "frequency_penalty": self._settings["frequency_penalty"],
-                            "max_output_tokens": self._settings["max_tokens"],  # Not supported yet
-                            "presence_penalty": self._settings["presence_penalty"],
-                            "temperature": self._settings["temperature"],
-                            "top_k": self._settings["top_k"],
-                            "top_p": self._settings["top_p"],
-                            "response_modalities": ["AUDIO"],
-                            "speech_config": {
-                                "voice_config": {
-                                    "prebuilt_voice_config": {"voice_name": self._voice_id}
-                                },
-                            },
-                        },
-                    },
-                }
-            )
 
             system_instruction = self._system_instruction or ""
             if self._context and hasattr(self._context, "extract_system_instructions"):
                 system_instruction += "\n" + self._context.extract_system_instructions()
             if system_instruction:
                 logger.debug(f"Setting system instruction: {system_instruction}")
-                config.setup.system_instruction = events.SystemInstruction(
+                self.config.setup.system_instruction = events.SystemInstruction(
                     parts=[events.ContentPart(text=system_instruction)]
                 )
             if self._tools:
-                config.setup.tools = self._tools
-            await self.send_client_event(config)
+                self.config.setup.tools = self._tools
+            await self.send_client_event(self.config)
 
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
