@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -43,7 +43,6 @@ class CanonicalMetricsService(AIService):
     uploads it to Canonical Voice API for audio processing.
 
     Args:
-
         call_id (str): Your unique identifier for the call. This is used to match the call in the Canonical Voice system to the call in your system.
         assistant (str): Identifier for the AI assistant. This can be whatever you want, it's intended for you convenience so you can distinguish
         between different assistants and a grouping mechanism for calls.
