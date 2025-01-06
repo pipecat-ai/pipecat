@@ -865,8 +865,15 @@ class GoogleTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
-            ssml = self._construct_ssml(text)
-            synthesis_input = texttospeech_v1.SynthesisInput(ssml=ssml)
+            is_journey_voice = "journey" in self._voice_id.lower()
+
+            # Create synthesis input based on voice_id
+            if is_journey_voice:
+                synthesis_input = texttospeech_v1.SynthesisInput(text=text)
+            else:
+                ssml = self._construct_ssml(text)
+                synthesis_input = texttospeech_v1.SynthesisInput(ssml=ssml)
+
             voice = texttospeech_v1.VoiceSelectionParams(
                 language_code=self._settings["language"], name=self._voice_id
             )
