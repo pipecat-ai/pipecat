@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -44,7 +44,9 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import (
     RTVIBotTranscriptionProcessor,
+    RTVIConfig,
     RTVIMetricsProcessor,
+    RTVIProcessor,
     RTVISpeakingProcessor,
     RTVIUserTranscriptionProcessor,
 )
@@ -201,9 +203,13 @@ async def main():
         # This will send `metrics` messages.
         rtvi_metrics = RTVIMetricsProcessor()
 
+        # Handles RTVI messages from the client
+        rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+
         pipeline = Pipeline(
             [
                 transport.input(),
+                rtvi,
                 rtvi_speaking,
                 rtvi_user_transcription,
                 context_aggregator.user(),
@@ -226,6 +232,10 @@ async def main():
             ),
         )
         await task.queue_frame(quiet_frame)
+
+        @rtvi.event_handler("on_client_ready")
+        async def on_client_ready(rtvi):
+            await rtvi.set_bot_ready()
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

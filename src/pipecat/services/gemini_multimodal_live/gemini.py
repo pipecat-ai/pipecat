@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -230,7 +230,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        await self._connect()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -434,8 +433,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def _ws_send(self, message):
         # logger.debug(f"Sending message to websocket: {message}")
         try:
-            if self._websocket:
-                await self._websocket.send(json.dumps(message))
+            if not self._websocket:
+                await self._connect()
+            await self._websocket.send(json.dumps(message))
         except Exception as e:
             if self._disconnecting:
                 return

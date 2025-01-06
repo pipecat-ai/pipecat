@@ -1,25 +1,24 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import io
 import os
 import uuid
 import wave
-
 from datetime import datetime
 from typing import Dict, List, Tuple
+
+import aiohttp
+from loguru import logger
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame
 from pipecat.processors.audio import audio_buffer_processor
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AIService
-
-from loguru import logger
 
 try:
     import aiofiles
@@ -44,7 +43,6 @@ class CanonicalMetricsService(AIService):
     uploads it to Canonical Voice API for audio processing.
 
     Args:
-
         call_id (str): Your unique identifier for the call. This is used to match the call in the Canonical Voice system to the call in your system.
         assistant (str): Identifier for the AI assistant. This can be whatever you want, it's intended for you convenience so you can distinguish
         between different assistants and a grouping mechanism for calls.

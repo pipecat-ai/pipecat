@@ -1,6 +1,8 @@
 import re
 
 from async_timeout import timeout
+from prompts import CUE_ASSISTANT_TURN, CUE_USER_TURN, IMAGE_GEN_PROMPT
+from utils.helpers import load_sounds
 
 from pipecat.frames.frames import (
     Frame,
@@ -10,9 +12,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.services.daily import DailyTransportMessageFrame
-
-from utils.helpers import load_sounds
-from prompts import IMAGE_GEN_PROMPT, CUE_USER_TURN, CUE_ASSISTANT_TURN
 
 sounds = load_sounds(["talking.wav", "listening.wav", "ding.wav"])
 

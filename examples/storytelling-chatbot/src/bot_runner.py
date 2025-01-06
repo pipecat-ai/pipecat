@@ -1,33 +1,29 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import argparse
-import subprocess
 import os
-
+import subprocess
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, Request, HTTPException
+import aiohttp
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from pipecat.transports.services.helpers.daily_rest import (
     DailyRESTHelper,
     DailyRoomObject,
-    DailyRoomProperties,
     DailyRoomParams,
+    DailyRoomProperties,
 )
-
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -158,8 +154,7 @@ async def catch_all(path_name: Optional[str] = ""):
 
 
 async def virtualize_bot(room_url: str, token: str):
-    """
-    This is an example of how to virtualize the bot using Fly.io
+    """This is an example of how to virtualize the bot using Fly.io
     You can adapt this method to use whichever cloud provider you prefer.
     """
     FLY_API_HOST = os.getenv("FLY_API_HOST", "https://api.machines.dev/v1")

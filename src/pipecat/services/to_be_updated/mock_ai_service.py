@@ -1,6 +1,7 @@
 import io
-import requests
 import time
+
+import requests
 from PIL import Image
 from services.ai_service import AIService
 

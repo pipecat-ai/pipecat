@@ -1,10 +1,12 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 from typing import Union
+
+from loguru import logger
 
 from pipecat.frames.frames import (
     Frame,
@@ -14,8 +16,6 @@ from pipecat.frames.frames import (
     TextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-from loguru import logger
 
 try:
     from langchain_core.messages import AIMessageChunk

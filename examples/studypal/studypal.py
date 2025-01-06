@@ -1,12 +1,15 @@
-import aiohttp
 import asyncio
+import io
 import os
 import sys
-import io
 
-from bs4 import BeautifulSoup
-from pypdf import PdfReader
+import aiohttp
 import tiktoken
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from loguru import logger
+from pypdf import PdfReader
+from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMMessagesFrame
@@ -17,12 +20,6 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 

@@ -1,24 +1,21 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
 import inspect
-
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from pydantic import ConfigDict
-from pydantic import BaseModel
+from loguru import logger
+from pydantic import BaseModel, ConfigDict
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.processors.frame_processor import FrameProcessor
-
-from loguru import logger
 
 
 class TransportParams(BaseModel):
