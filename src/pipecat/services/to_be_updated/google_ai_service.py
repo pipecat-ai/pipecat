@@ -1,11 +1,12 @@
-from services.ai_service import AIService
-import openai
 import os
+
+import openai
 
 # To use Google Cloud's AI products, you'll need to install Google Cloud
 # CLI and enable the TTS and in your project:
 # https://cloud.google.com/sdk/docs/install
 from google.cloud import texttospeech
+from services.ai_service import AIService
 
 
 class GoogleAIService(AIService):

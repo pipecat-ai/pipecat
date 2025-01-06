@@ -1,18 +1,17 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 #
 
 import base64
-import json
 import io
-
-from pydantic import BaseModel, Field
+import json
 from typing import List, Literal, Optional
 
 from PIL import Image
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import ImageRawFrame
 

@@ -1,10 +1,13 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import unittest
+
+from langchain.prompts import ChatPromptTemplate
+from langchain_core.language_models import FakeStreamingListLLM
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -24,9 +27,6 @@ from pipecat.processors.aggregators.llm_response import (
 )
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.processors.frameworks.langchain import LangchainProcessor
-
-from langchain.prompts import ChatPromptTemplate
-from langchain_core.language_models import FakeStreamingListLLM
 
 
 class TestLangchain(unittest.IsolatedAsyncioTestCase):

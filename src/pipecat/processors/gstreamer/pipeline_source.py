@@ -1,11 +1,12 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
@@ -18,8 +19,6 @@ from pipecat.frames.frames import (
     SystemFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-from loguru import logger
 
 try:
     import gi

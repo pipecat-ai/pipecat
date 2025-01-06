@@ -1,34 +1,21 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import os
 import sys
-
-import google.ai.generativelanguage as glm
-
 from dataclasses import dataclass
+
+import aiohttp
+import google.ai.generativelanguage as glm
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.parallel_pipeline import ParallelPipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.google import GoogleLLMService, GoogleLLMContext
-from pipecat.processors.frame_processor import FrameProcessor
-from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -40,6 +27,18 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
+from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.google import GoogleLLMContext, GoogleLLMService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -81,8 +80,7 @@ Rules:
 
 
 class UserAudioCollector(FrameProcessor):
-    """
-    This FrameProcessor collects audio frames in a buffer, then adds them to the
+    """This FrameProcessor collects audio frames in a buffer, then adds them to the
     LLM context when the user stops speaking.
     """
 
@@ -126,8 +124,7 @@ class UserAudioCollector(FrameProcessor):
 
 
 class InputTranscriptionContextFilter(FrameProcessor):
-    """
-    This FrameProcessor blocks all frames except the OpenAILLMContextFrame that triggers
+    """This FrameProcessor blocks all frames except the OpenAILLMContextFrame that triggers
     LLM inference. (And system frames, which are needed for the pipeline element lifecycle.)
 
     We take the context object out of the OpenAILLMContextFrame and use it to create a new
@@ -187,8 +184,7 @@ class InputTranscriptionContextFilter(FrameProcessor):
 
 @dataclass
 class LLMDemoTranscriptionFrame(Frame):
-    """
-    It would be nice if we could just use a TranscriptionFrame to send our transcriber
+    """It would be nice if we could just use a TranscriptionFrame to send our transcriber
     LLM's transcription output down the pipelline. But we can't, because TranscriptionFrame
     is a child class of TextFrame, which in our pipeline will be interpreted by the TTS
     service as text that should be turned into speech. We could restructure this pipeline,
@@ -200,8 +196,7 @@ class LLMDemoTranscriptionFrame(Frame):
 
 
 class InputTranscriptionFrameEmitter(FrameProcessor):
-    """
-    A simple FrameProcessor that aggregates the TextFrame output from the transcriber LLM
+    """A simple FrameProcessor that aggregates the TextFrame output from the transcriber LLM
     and then sends the full response down the pipeline as an LLMDemoTranscriptionFrame.
     """
 
@@ -222,8 +217,7 @@ class InputTranscriptionFrameEmitter(FrameProcessor):
 
 
 class TranscriptionContextFixup(FrameProcessor):
-    """
-    This FrameProcessor looks for the LLMDemoTranscriptionFrame and swaps out the
+    """This FrameProcessor looks for the LLMDemoTranscriptionFrame and swaps out the
     audio part of the most recent user message with the text transcription.
 
     Audio is big, using a lot of tokens and network bandwidth. So doing this is

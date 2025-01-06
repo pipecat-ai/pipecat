@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -21,7 +21,7 @@ from pipecat.services.openai import (
 )
 
 from . import events
-from .frames import RealtimeMessagesUpdateFrame, RealtimeFunctionCallResultFrame
+from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
 
 
 class OpenAIRealtimeLLMContext(OpenAILLMContext):

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,10 +7,10 @@
 import ctypes
 import pickle
 
+from loguru import logger
+
 from pipecat.frames.frames import Frame, InputAudioRawFrame, OutputAudioRawFrame
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
-
-from loguru import logger
 
 try:
     from livekit.rtc import AudioFrame
