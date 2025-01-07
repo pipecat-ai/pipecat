@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `29-livekit-audio-chat.py`, as a new foundational examples for
   `LiveKitTransportLayer`.
 
+### Changed
+
+- api_key, aws_access_key_id and region are no longer required parameters for the PollyTTSService (AWSTTSService)
+
 ### Fixed
 
 - Fixed an issue where `OpenAIRealtimeBetaLLMService` audio chunks were hitting
