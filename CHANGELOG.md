@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `29-livekit-audio-chat.py`, as a new foundational examples for
   `LiveKitTransportLayer`.
+- Added `enable_prejoin_ui`, `max_participants` and `start_video_off` params
+  to `DailyRoomProperties`.
 
 ### Fixed
 
