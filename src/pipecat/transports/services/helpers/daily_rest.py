@@ -43,9 +43,12 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         enable_emoji_reactions: Whether emoji reactions are enabled
         eject_at_room_exp: Whether to remove participants when room expires
         enable_dialout: Whether SIP dial-out is enabled
+        max_participants: Maximum number of participants allowed in the room
         sip: SIP configuration parameters
         sip_uri: SIP URI information returned by Daily
         start_video_off: Whether video is off by default
+
+    Reference: https://docs.daily.co/reference/rest-api/rooms/create-room#properties
     """
 
     exp: Optional[float] = None
