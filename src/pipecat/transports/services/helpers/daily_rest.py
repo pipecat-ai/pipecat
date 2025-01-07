@@ -39,20 +39,25 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     Attributes:
         exp: Optional Unix epoch timestamp for room expiration (e.g., time.time() + 300 for 5 minutes)
         enable_chat: Whether chat is enabled in the room
+        enable_prejoin_ui: Whether the pre-join UI is enabled
         enable_emoji_reactions: Whether emoji reactions are enabled
         eject_at_room_exp: Whether to remove participants when room expires
         enable_dialout: Whether SIP dial-out is enabled
         sip: SIP configuration parameters
         sip_uri: SIP URI information returned by Daily
+        start_video_off: Whether video is off by default
     """
 
     exp: Optional[float] = None
     enable_chat: bool = False
+    enable_prejoin_ui: bool = True
     enable_emoji_reactions: bool = False
     eject_at_room_exp: bool = True
     enable_dialout: Optional[bool] = None
+    max_participants: Optional[int] = None
     sip: Optional[DailyRoomSipParams] = None
     sip_uri: Optional[dict] = None
+    start_video_off: bool = False
 
     @property
     def sip_endpoint(self) -> str:
