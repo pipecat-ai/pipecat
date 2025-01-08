@@ -6,6 +6,7 @@
 
 import asyncio
 import base64
+from enum import Enum
 import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -132,6 +133,11 @@ class GeminiMultimodalLiveContextAggregatorPair:
         return self._assistant
 
 
+class GeminiMultimodalModalities(Enum):
+    TEXT = "TEXT"
+    AUDIO = "AUDIO"
+
+
 class InputParams(BaseModel):
     frequency_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=4096, ge=1)
@@ -139,6 +145,9 @@ class InputParams(BaseModel):
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     top_k: Optional[int] = Field(default=None, ge=0)
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    modalities: Optional[GeminiMultimodalModalities] = Field(
+        default=GeminiMultimodalModalities.TEXT
+    )
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -197,30 +206,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "temperature": params.temperature,
             "top_k": params.top_k,
             "top_p": params.top_p,
+            "modalities": params.modalities,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
-
-        self.config = events.Config.model_validate(
-            {
-                "setup": {
-                    "model": self._model_name,
-                    "generation_config": {
-                        "frequency_penalty": self._settings["frequency_penalty"],
-                        "max_output_tokens": self._settings["max_tokens"],  # Not supported yet
-                        "presence_penalty": self._settings["presence_penalty"],
-                        "temperature": self._settings["temperature"],
-                        "top_k": self._settings["top_k"],
-                        "top_p": self._settings["top_p"],
-                        "response_modalities": ["AUDIO"],
-                        "speech_config": {
-                            "voice_config": {
-                                "prebuilt_voice_config": {"voice_name": self._voice_id}
-                            },
-                        },
-                    },
-                },
-            }
-        )
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -231,15 +219,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
     def set_video_input_paused(self, paused: bool):
         self._video_input_paused = paused
 
-    def set_model_only_audio(self):
-        self.config.setup.generation_config["response_modalities"] = ["AUDIO"]
-        self.config.setup.generation_config["speech_config"] = {
-            "voice_config": {"prebuilt_voice_config": {"voice_name": self._voice_id}}
-        }
-
-    def set_model_only_text(self):
-        self.config.setup.generation_config["response_modalities"] = ["TEXT"]
-        self.config.setup.generation_config["speech_config"] = None
+    def set_model_modalities(self, modalities: GeminiMultimodalModalities):
+        self._settings["modalities"] = modalities
 
     async def set_context(self, context: OpenAILLMContext):
         """Set the context explicitly from outside the pipeline.
@@ -401,6 +382,27 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # handle disconnections in the send/recv code paths.
                 return
 
+            config = events.Config.model_validate(
+                {
+                    "setup": {
+                        "model": self._model_name,
+                        "generation_config": {
+                            "frequency_penalty": self._settings["frequency_penalty"],
+                            "max_output_tokens": self._settings["max_tokens"],  # Not supported yet
+                            "presence_penalty": self._settings["presence_penalty"],
+                            "temperature": self._settings["temperature"],
+                            "top_k": self._settings["top_k"],
+                            "top_p": self._settings["top_p"],
+                            "response_modalities": self._settings["modalities"].value,
+                            "speech_config": {
+                                "voice_config": {
+                                    "prebuilt_voice_config": {"voice_name": self._voice_id}
+                                },
+                            },
+                        },
+                    },
+                }
+            )
             uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self.api_key}"
             logger.info(f"Connecting to {uri}")
             self._websocket = await websockets.connect(uri=uri)
@@ -411,12 +413,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 system_instruction += "\n" + self._context.extract_system_instructions()
             if system_instruction:
                 logger.debug(f"Setting system instruction: {system_instruction}")
-                self.config.setup.system_instruction = events.SystemInstruction(
+                config.setup.system_instruction = events.SystemInstruction(
                     parts=[events.ContentPart(text=system_instruction)]
                 )
             if self._tools:
-                self.config.setup.tools = self._tools
-            await self.send_client_event(self.config)
+                config.setup.tools = self._tools
+            await self.send_client_event(config)
 
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
