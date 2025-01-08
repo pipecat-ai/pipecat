@@ -119,9 +119,9 @@ class PollyTTSService(TTSService):
     def __init__(
         self,
         *,
-        api_key: str,
-        aws_access_key_id: str,
-        region: str,
+        api_key: Optional[str] = None,
+        aws_access_key_id: Optional[str] = None,
+        region: Optional[str] = None,
         voice_id: str = "Joanna",
         sample_rate: int = 24000,
         params: InputParams = InputParams(),
