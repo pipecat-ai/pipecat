@@ -9,7 +9,6 @@ import os
 import sys
 
 import aiohttp
-from agent.services.tts.cartesia_multilingual import CartesiaMultiLingualTTSService
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
@@ -19,7 +18,11 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
+from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.gemini_multimodal_live.gemini import (
+    GeminiMultimodalLiveLLMService,
+    GeminiMultimodalModalities,
+)
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -54,9 +57,11 @@ async def main():
             api_key=os.getenv("GOOGLE_API_KEY"),
             # system_instruction="Talk like a pirate."
         )
-        llm.set_model_only_text()  # This forces model to produce text only responses
+        llm.set_model_modalities(
+            GeminiMultimodalModalities.TEXT
+        )  # This forces model to produce text only responses
 
-        tts = CartesiaMultiLingualTTSService(api_key=os.getenv("CARTESIA_API_KEY"))
+        tts = CartesiaTTSService(api_key=os.getenv("CARTESIA_API_KEY"))
 
         pipeline = Pipeline(
             [
