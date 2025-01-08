@@ -458,7 +458,7 @@ async def on_audio_data(processor, audio, sample_rate, num_channels):
 ### Deprecated
 
 - `LLMUserResponseAggregator` and `LLMAssistantResponseAggregator` are
-  mostly deprecated, use `OpenAILLMContext` instead.
+  deprecated. Use `OpenAILLMContext` instead.
 
 - The `vad` package is now deprecated and `audio.vad` should be used
   instead. The `avd` package will get removed in a future release.

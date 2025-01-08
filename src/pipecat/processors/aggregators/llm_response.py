@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import warnings
 from typing import List, Type
 
 from pipecat.frames.frames import (
@@ -26,6 +27,16 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+
+def _deprecation_warning(old_class: str):
+    warnings.warn(
+        f"{old_class} is deprecated and will be removed in a future version. "
+        f"Instead, create an OpenAILLMContext and use llm.create_context_aggregator(context) "
+        f"to get context-aware aggregators via .user() and .assistant() methods.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
 
 class LLMResponseAggregator(FrameProcessor):
@@ -175,7 +186,10 @@ class LLMResponseAggregator(FrameProcessor):
 
 
 class LLMAssistantResponseAggregator(LLMResponseAggregator):
+    """DEPRECATED: Create an OpenAILLMContext and use llm.create_context_aggregator(context).assistant() instead."""
+
     def __init__(self, messages: List[dict] = []):
+        _deprecation_warning("LLMAssistantResponseAggregator")
         super().__init__(
             messages=messages,
             role="assistant",
@@ -187,7 +201,10 @@ class LLMAssistantResponseAggregator(LLMResponseAggregator):
 
 
 class LLMUserResponseAggregator(LLMResponseAggregator):
+    """DEPRECATED: Create an OpenAILLMContext and use llm.create_context_aggregator(context).user() instead."""
+
     def __init__(self, messages: List[dict] = []):
+        _deprecation_warning("LLMUserResponseAggregator")
         super().__init__(
             messages=messages,
             role="user",
