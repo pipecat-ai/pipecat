@@ -15,10 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LiveKitTransportLayer`.
 - Added `enable_prejoin_ui`, `max_participants` and `start_video_off` params
   to `DailyRoomProperties`.
-- Added `session_timeout` param in `FastAPIWebsocketTransport` and `WebsocketServerTransport`
-  to set the session timeout in seconds, this triggers callback method `on_session_timeout`
-  where you can handle the timeout event as per business logic. Refer to `examples/websocket-server/bot.py`.
-
+- Added `session_timeout` to `FastAPIWebsocketTransport` and `WebsocketServerTransport`
+  for configuring session timeouts (in seconds). Triggers `on_session_timeout` for custom timeout handling. 
+  See (examples/websocket-server/bot.py)[https://github.com/pipecat-ai/pipecat/blob/main/examples/websocket-server/bot.py].
 
 ### Changed
 
