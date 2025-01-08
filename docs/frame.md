@@ -96,9 +96,6 @@ Notable control frames:
 
 ## 7. Special Purpose Frames
 
-### AppFrame
-Base class for application-specific custom frames.
-
 ### MetricsFrame
 Contains performance metrics data.
 

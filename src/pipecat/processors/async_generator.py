@@ -1,11 +1,10 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
-
 from typing import Any, AsyncGenerator
 
 from pipecat.frames.frames import (
@@ -13,7 +12,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
 )
-from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.serializers.base_serializer import FrameSerializer
 
 

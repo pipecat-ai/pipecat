@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -108,7 +108,7 @@ def language_to_aws_language(language: Language) -> str | None:
     return language_map.get(language)
 
 
-class AWSTTSService(TTSService):
+class PollyTTSService(TTSService):
     class InputParams(BaseModel):
         engine: Optional[str] = None
         language: Optional[Language] = Language.EN
@@ -244,3 +244,16 @@ class AWSTTSService(TTSService):
 
         finally:
             yield TTSStoppedFrame()
+
+
+class AWSTTSService(PollyTTSService):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'AWSTTSService' is deprecated, use 'PollyTTSService' instead.", DeprecationWarning
+            )

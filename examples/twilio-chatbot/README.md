@@ -28,56 +28,82 @@ This project is a FastAPI-based chatbot that integrates with Twilio to handle We
 ## Installation
 
 1. **Set up a virtual environment** (optional but recommended):
-    ```sh
-    python -m venv venv
-    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-    ```
+
+   ```sh
+   python -m venv venv
+   source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+   ```
 
 2. **Install dependencies**:
-    ```sh
-    pip install -r requirements.txt
-    ```
+
+   ```sh
+   pip install -r requirements.txt
+   ```
 
 3. **Create .env**:
-    create .env based on env.example
+   Copy the example environment file and update with your settings:
+
+   ```sh
+   cp env.example .env
+   ```
 
 4. **Install ngrok**:
-    Follow the instructions on the [ngrok website](https://ngrok.com/download) to download and install ngrok.
+   Follow the instructions on the [ngrok website](https://ngrok.com/download) to download and install ngrok.
 
 ## Configure Twilio URLs
 
 1. **Start ngrok**:
-    In a new terminal, start ngrok to tunnel the local server:
-    ```sh
-    ngrok http 8765
-    ```
+   In a new terminal, start ngrok to tunnel the local server:
+
+   ```sh
+   ngrok http 8765
+   ```
 
 2. **Update the Twilio Webhook**:
-    Copy the ngrok URL and update your Twilio phone number webhook URL to `http://<ngrok_url>/`.
 
-3. **Update streams.xml**:
-    Copy the ngrok URL and update templates/streams.xml with `wss://<ngrok_url>/ws`.
+   - Go to your Twilio phone number's configuration page
+   - Under "Voice Configuration", in the "A call comes in" section:
+     - Select "Webhook" from the dropdown
+     - Enter your ngrok URL (e.g., http://<ngrok_url>)
+     - Ensure "HTTP POST" is selected
+   - Click Save at the bottom of the page
+
+3. **Configure streams.xml**:
+   - Copy the template file to create your local version:
+     ```sh
+     cp templates/streams.xml.template templates/streams.xml
+     ```
+   - In `templates/streams.xml`, replace `<your server url>` with your ngrok URL (without `https://`)
+   - The final URL should look like: `wss://abc123.ngrok.io/ws`
 
 ## Running the Application
 
-### Using Python
+Choose one of these two methods to run the application:
 
-1. **Run the FastAPI application**:
-    ```sh
-    python server.py
-    ```
+### Using Python (Option 1)
 
-### Using Docker
+**Run the FastAPI application**:
+
+```sh
+# Make sure you’re in the project directory and your virtual environment is activated
+python server.py
+```
+
+### Using Docker (Option 2)
 
 1. **Build the Docker image**:
-    ```sh
-    docker build -t twilio-chatbot .
-    ```
+
+   ```sh
+   docker build -t twilio-chatbot .
+   ```
 
 2. **Run the Docker container**:
-    ```sh
-    docker run -it --rm -p 8765:8765 twilio-chatbot
-    ```
+   ```sh
+   docker run -it --rm -p 8765:8765 twilio-chatbot
+   ```
+
+The server will start on port 8765. Keep this running while you test with Twilio.
+
 ## Usage
 
-To start a call, simply make a call to your Twilio phone number. The webhook URL will direct the call to your FastAPI application, which will handle it accordingly.
+To start a call, simply make a call to your configured Twilio phone number. The webhook URL will direct the call to your FastAPI application, which will handle it accordingly.

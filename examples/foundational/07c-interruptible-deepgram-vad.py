@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,18 +9,23 @@ import os
 import sys
 
 import aiohttp
+from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import (
+    BotInterruptionFrame,
+    LLMMessagesFrame,
+    StopInterruptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.aws import AWSTTSService
-from pipecat.services.deepgram import DeepgramSTTService
+from pipecat.services.deepgram import DeepgramSTTService, DeepgramTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -39,22 +44,17 @@ async def main():
             None,
             "Respond bot",
             DailyParams(
+                audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True,
             ),
         )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-        tts = AWSTTSService(
-            api_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            region=os.getenv("AWS_REGION"),
-            voice_id="Amy",
-            params=AWSTTSService.InputParams(engine="neural", language="en-GB", rate="1.05"),
+        stt = DeepgramSTTService(
+            api_key=os.getenv("DEEPGRAM_API_KEY"),
+            live_options=LiveOptions(vad_events=True, utterance_end_ms="1000"),
         )
+
+        tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
@@ -82,9 +82,16 @@ async def main():
 
         task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
+        @stt.event_handler("on_speech_started")
+        async def on_speech_started(stt, *args, **kwargs):
+            await task.queue_frames([BotInterruptionFrame(), UserStartedSpeakingFrame()])
+
+        @stt.event_handler("on_utterance_end")
+        async def on_utterance_end(stt, *args, **kwargs):
+            await task.queue_frames([StopInterruptionFrame(), UserStoppedSpeakingFrame()])
+
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([LLMMessagesFrame(messages)])

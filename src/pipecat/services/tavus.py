@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,24 +7,24 @@
 
 """This module implements Tavus as a sink transport layer"""
 
-import aiohttp
 import base64
 
+import aiohttp
+from loguru import logger
+
+from pipecat.audio.utils import resample_audio
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
-    TTSAudioRawFrame,
+    StartInterruptionFrame,
     TransportMessageUrgentFrame,
+    TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    StartInterruptionFrame,
-    EndFrame,
-    CancelFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AIService
-from pipecat.audio.utils import resample_audio
-
-from loguru import logger
 
 
 class TavusVideoService(AIService):

@@ -1,13 +1,13 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
-
 from typing import AsyncIterable, Iterable
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.clocks.base_clock import BaseClock
@@ -23,12 +23,10 @@ from pipecat.frames.frames import (
     StartFrame,
     StopTaskFrame,
 )
-from pipecat.metrics.metrics import TTFBMetricsData, ProcessingMetricsData
+from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
-
-from loguru import logger
 
 
 class PipelineParams(BaseModel):
