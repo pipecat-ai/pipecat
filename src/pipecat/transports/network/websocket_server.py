@@ -124,9 +124,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
         logger.info(f"Client {websocket.remote_address} disconnected")
 
     async def _monitor_websocket(self, websocket: websockets.WebSocketServerProtocol):
-        """
-        Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event.
-        """
+        """Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event."""
         try:
             await asyncio.sleep(self._params.session_timeout)
             if not websocket.closed:
@@ -228,7 +226,7 @@ class WebsocketServerTransport(BaseTransport):
         self._callbacks = WebsocketServerCallbacks(
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
-            on_session_timeout=self._on_session_timeout
+            on_session_timeout=self._on_session_timeout,
         )
         self._input: WebsocketServerInputTransport | None = None
         self._output: WebsocketServerOutputTransport | None = None
@@ -268,4 +266,3 @@ class WebsocketServerTransport(BaseTransport):
 
     async def _on_session_timeout(self, websocket):
         await self._call_event_handler("on_session_timeout", websocket)
-

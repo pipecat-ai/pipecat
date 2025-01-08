@@ -67,7 +67,10 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        self._monitor_websocket_task = self.get_event_loop().create_task(self._monitor_websocket())
+        if self._params.session_timeout:
+            self._monitor_websocket_task = self.get_event_loop().create_task(
+                self._monitor_websocket()
+            )
         await self._callbacks.on_client_connected(self._websocket)
         self._receive_task = self.get_event_loop().create_task(self._receive_messages())
 
@@ -92,9 +95,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         await self._callbacks.on_client_disconnected(self._websocket)
 
     async def _monitor_websocket(self):
-        """
-        Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event.
-        """
+        """Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event."""
         try:
             await asyncio.sleep(self._params.session_timeout)
             await self._callbacks.on_session_timeout(self._websocket)
