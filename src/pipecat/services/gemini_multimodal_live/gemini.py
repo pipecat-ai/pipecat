@@ -146,7 +146,7 @@ class InputParams(BaseModel):
     top_k: Optional[int] = Field(default=None, ge=0)
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     modalities: Optional[GeminiMultimodalModalities] = Field(
-        default=GeminiMultimodalModalities.TEXT
+        default=GeminiMultimodalModalities.AUDIO
     )
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
