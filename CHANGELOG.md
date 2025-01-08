@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to `DailyRoomProperties`.
 - Added `session_timeout` to `FastAPIWebsocketTransport` and `WebsocketServerTransport`
   for configuring session timeouts (in seconds). Triggers `on_session_timeout` for custom timeout handling. 
-  See (examples/websocket-server/bot.py)[https://github.com/pipecat-ai/pipecat/blob/main/examples/websocket-server/bot.py].
+  See [examples/websocket-server/bot.py](https://github.com/pipecat-ai/pipecat/blob/main/examples/websocket-server/bot.py).
 
 ### Changed
 
