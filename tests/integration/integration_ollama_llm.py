@@ -1,13 +1,13 @@
-import unittest
-
 import asyncio
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+import unittest
 
 from openai.types.chat import (
     ChatCompletionSystemMessageParam,
+)
+
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
 )
 from pipecat.services.ollama import OLLamaLLMService
 

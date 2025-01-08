@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,10 +7,9 @@
 import time
 
 import numpy as np
+from loguru import logger
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
-
-from loguru import logger
 
 # How often should we reset internal model state
 _MODEL_RESET_STATES_TIME = 5.0

@@ -1,15 +1,13 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import numpy as np
-
-from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
-
 from loguru import logger
 
+from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.frames.frames import FilterControlFrame, FilterEnableFrame
 
 try:

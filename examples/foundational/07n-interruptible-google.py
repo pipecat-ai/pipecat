@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -22,6 +22,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.google import GoogleTTSService
 from pipecat.services.openai import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -50,8 +51,8 @@ async def main():
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = GoogleTTSService(
-            voice_id="en-US-Neural2-J",
-            params=GoogleTTSService.InputParams(language="en-US", rate="1.05"),
+            voice_id="en-US-Journey-F",
+            params=GoogleTTSService.InputParams(language=Language.EN_US),
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")

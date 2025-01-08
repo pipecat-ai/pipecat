@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,10 +8,10 @@ import asyncio
 import base64
 import json
 import time
-
 from dataclasses import dataclass
 
 import websockets
+from loguru import logger
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -48,13 +48,11 @@ from pipecat.utils.time import time_now_iso8601
 
 from . import events
 from .context import (
+    OpenAIRealtimeAssistantContextAggregator,
     OpenAIRealtimeLLMContext,
     OpenAIRealtimeUserContextAggregator,
-    OpenAIRealtimeAssistantContextAggregator,
 )
-from .frames import RealtimeMessagesUpdateFrame, RealtimeFunctionCallResultFrame
-
-from loguru import logger
+from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
 
 
 @dataclass
@@ -74,15 +72,17 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self,
         *,
         api_key: str,
-        base_url="wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01",
+        model: str = "gpt-4o-realtime-preview-2024-12-17",
+        base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: events.SessionProperties = events.SessionProperties(),
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
         **kwargs,
     ):
-        super().__init__(base_url=base_url, **kwargs)
+        full_url = f"{base_url}?model={model}"
+        super().__init__(base_url=full_url, **kwargs)
         self.api_key = api_key
-        self.base_url = base_url
+        self.base_url = full_url
 
         self._session_properties: events.SessionProperties = session_properties
         self._audio_input_paused = start_audio_paused
@@ -152,17 +152,38 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_bot_stopped_speaking(self):
         self._current_audio_response = None
 
+    def _calculate_audio_duration_ms(
+        self, total_bytes: int, sample_rate: int = 24000, bytes_per_sample: int = 2
+    ) -> int:
+        """Calculate audio duration in milliseconds based on PCM audio parameters."""
+        samples = total_bytes / bytes_per_sample
+        duration_seconds = samples / sample_rate
+        return int(duration_seconds * 1000)
+
     async def _truncate_current_audio_response(self):
+        """Truncates the current audio response at the appropriate duration.
+
+        Calculates the actual duration of the audio content and truncates at the shorter of
+        either the wall clock time or the actual audio duration to prevent invalid truncation
+        requests.
+        """
         # if the bot is still speaking, truncate the last message
         if self._current_audio_response:
             current = self._current_audio_response
             self._current_audio_response = None
+
+            # Calculate actual audio duration instead of using wall clock time
+            audio_duration_ms = self._calculate_audio_duration_ms(current.total_size)
+
+            # Use the shorter of wall clock time or actual audio duration
             elapsed_ms = int(time.time() * 1000 - current.start_time_ms)
+            truncate_ms = min(elapsed_ms, audio_duration_ms)
+
             await self.send_client_event(
                 events.ConversationItemTruncateEvent(
                     item_id=current.item_id,
                     content_index=current.content_index,
-                    audio_end_ms=elapsed_ms,
+                    audio_end_ms=truncate_ms,
                 )
             )
 

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -73,9 +73,9 @@ class XTTSService(TTSService):
         self,
         *,
         voice_id: str,
-        language: Language,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
+        language: Language = Language.EN,
         sample_rate: int = 24000,
         **kwargs,
     ):

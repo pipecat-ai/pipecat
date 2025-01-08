@@ -1,17 +1,19 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import argparse
 import os
+
+import aiohttp
 
 from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper
 
 
 async def configure(aiohttp_session: aiohttp.ClientSession):
+    """Configure the Daily room and Daily REST helper."""
     parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")
     parser.add_argument(
         "-u", "--url", type=str, required=False, help="URL of the Daily room to join"
