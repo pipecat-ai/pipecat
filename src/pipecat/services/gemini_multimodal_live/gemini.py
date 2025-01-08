@@ -188,6 +188,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_is_speaking = False
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
+        self._bot_text_buffer = ""
 
         self._settings = {
             "frequency_penalty": params.frequency_penalty,
@@ -618,6 +619,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         text = part.text
         if text:
+            if not self._bot_text_buffer:
+                await self.push_frame(LLMFullResponseStartFrame())
+
+            self._bot_text_buffer += text
             await self.push_frame(TextFrame(text=text))
 
         inline_data = part.inlineData
@@ -660,9 +665,15 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def _handle_evt_turn_complete(self, evt):
         self._bot_is_speaking = False
         audio = self._bot_audio_buffer
+        text = self._bot_text_buffer
         self._bot_audio_buffer = bytearray()
+        self._bot_text_buffer = ""
+
         if audio and self._transcribe_model_audio and self._context:
             asyncio.create_task(self._handle_transcribe_model_audio(audio, self._context))
+        elif text:
+            await self.push_frame(LLMFullResponseEndFrame())
+
         await self.push_frame(TTSStoppedFrame())
 
     def create_context_aggregator(
