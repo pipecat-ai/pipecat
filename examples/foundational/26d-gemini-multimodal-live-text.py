@@ -9,6 +9,7 @@ import os
 import sys
 
 import aiohttp
+from agent.services.tts.cartesia_multilingual import CartesiaMultiLingualTTSService
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
@@ -19,7 +20,6 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
-from agent.services.tts.cartesia_multilingual import CartesiaMultiLingualTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)

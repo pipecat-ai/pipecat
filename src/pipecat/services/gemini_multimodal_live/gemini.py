@@ -6,9 +6,9 @@
 
 import asyncio
 import base64
-from enum import Enum
 import json
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 import websockets
