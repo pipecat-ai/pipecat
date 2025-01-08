@@ -13,12 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `29-livekit-audio-chat.py`, as a new foundational examples for
   `LiveKitTransportLayer`.
+
 - Added `enable_prejoin_ui`, `max_participants` and `start_video_off` params
   to `DailyRoomProperties`.
+
 - Added `session_timeout` to `FastAPIWebsocketTransport` and `WebsocketServerTransport`
   for configuring session timeouts (in seconds). Triggers `on_session_timeout` for custom timeout handling.
   See [examples/websocket-server/bot.py](https://github.com/pipecat-ai/pipecat/blob/main/examples/websocket-server/bot.py).
+
 - Added the new modalities option and helper function to set Gemini output modalities.
+
 - Added `examples/foundational/26d-gemini-multimodal-live-text.py` which is using Gemini as TEXT modality and using another TTS provider for TTS process.
 
 ### Changed
@@ -31,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where `OpenAIRealtimeBetaLLMService` audio chunks were hitting
   an error when truncating audio content.
+
+- Fixed an issue where setting the voice and model for `RimeHttpTTSService` wasn't working.
 
 ## [0.0.52] - 2024-12-24
 
