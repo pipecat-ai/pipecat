@@ -382,6 +382,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # handle disconnections in the send/recv code paths.
                 return
 
+            uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self.api_key}"
+            logger.info(f"Connecting to {uri}")
+            self._websocket = await websockets.connect(uri=uri)
+            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
             config = events.Config.model_validate(
                 {
                     "setup": {
@@ -403,10 +407,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     },
                 }
             )
-            uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self.api_key}"
-            logger.info(f"Connecting to {uri}")
-            self._websocket = await websockets.connect(uri=uri)
-            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
 
             system_instruction = self._system_instruction or ""
             if self._context and hasattr(self._context, "extract_system_instructions"):
