@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "ai.pipecat.simple_chatbot_client"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "ai.pipecat.simple_chatbot_client"
