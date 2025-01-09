@@ -336,6 +336,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
             #   2. The last message is a tool call result
             if not self._context:
                 self._context = context
+                if frame.context.tools:
+                    self._tools = frame.context.tools
                 await self._create_initial_response()
             elif context.messages and context.messages[-1].get("role") == "tool":
                 # Support just one tool call per context frame for now
@@ -417,6 +419,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     parts=[events.ContentPart(text=system_instruction)]
                 )
             if self._tools:
+                logger.debug(f"Gemini is configuring to use tools{self._tools}")
                 config.setup.tools = self._tools
             await self.send_client_event(config)
 
