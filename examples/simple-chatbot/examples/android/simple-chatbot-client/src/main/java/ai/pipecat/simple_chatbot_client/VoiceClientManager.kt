@@ -9,16 +9,14 @@ import ai.pipecat.client.result.Future
 import ai.pipecat.client.result.RTVIError
 import ai.pipecat.client.result.Result
 import ai.pipecat.client.types.ActionDescription
-import ai.pipecat.client.types.Option
 import ai.pipecat.client.types.Participant
 import ai.pipecat.client.types.PipecatMetrics
 import ai.pipecat.client.types.RTVIURLEndpoints
 import ai.pipecat.client.types.ServiceConfig
-import ai.pipecat.client.types.ServiceRegistration
 import ai.pipecat.client.types.Tracks
 import ai.pipecat.client.types.Transcript
 import ai.pipecat.client.types.TransportState
-import ai.pipecat.client.types.Value
+import ai.pipecat.simple_chatbot_client.utils.Timestamp
 import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.Immutable
@@ -26,7 +24,6 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import ai.pipecat.simple_chatbot_client.utils.Timestamp
 
 @Immutable
 data class Error(val message: String)

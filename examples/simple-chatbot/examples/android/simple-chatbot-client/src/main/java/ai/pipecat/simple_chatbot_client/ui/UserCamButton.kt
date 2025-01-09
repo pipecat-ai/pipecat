@@ -1,9 +1,9 @@
 package ai.pipecat.simple_chatbot_client.ui
 
-import ai.pipecat.simple_chatbot_client.R
-import ai.pipecat.simple_chatbot_client.ui.theme.Colors
 import ai.pipecat.client.daily.VoiceClientVideoView
 import ai.pipecat.client.types.MediaTrackId
+import ai.pipecat.simple_chatbot_client.R
+import ai.pipecat.simple_chatbot_client.ui.theme.Colors
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
