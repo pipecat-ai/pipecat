@@ -1,13 +1,13 @@
 [versions]
 accompanistPermissions = "0.34.0"
 agp = "8.5.2"
-constraintlayoutCompose = "1.0.1"
+constraintlayoutCompose = "1.1.0"
 pipecatClientDaily = "0.3.2"
 kotlin = "2.0.20"
-coreKtx = "1.13.1"
-lifecycleRuntimeKtx = "2.8.6"
-activityCompose = "1.9.2"
-composeBom = "2024.09.03"
+coreKtx = "1.15.0"
+lifecycleRuntimeKtx = "2.8.7"
+activityCompose = "1.9.3"
+composeBom = "2024.12.01"
 kotlinxSerializationJson = "1.7.1"
 kotlinxSerializationPlugin = "2.0.20"
 
