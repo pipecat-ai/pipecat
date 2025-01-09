@@ -56,6 +56,8 @@ async def main():
         llm = GeminiMultimodalLiveLLMService(
             api_key=os.getenv("GOOGLE_API_KEY"),
             # system_instruction="Talk like a pirate."
+            transcribe_user_audio=True,
+            transcribe_model_audio=True,
         )
         llm.set_model_modalities(
             GeminiMultimodalModalities.TEXT
