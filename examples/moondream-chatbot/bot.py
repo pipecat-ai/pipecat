@@ -20,7 +20,6 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     Frame,
     ImageRawFrame,
-    LLMMessagesFrame,
     OutputImageRawFrame,
     SpriteFrame,
     TextFrame,
@@ -203,7 +202,7 @@ async def main():
             await transport.capture_participant_transcription(participant["id"])
             await transport.capture_participant_video(participant["id"], framerate=0)
             ir.set_participant_id(participant["id"])
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
 
