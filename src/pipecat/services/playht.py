@@ -15,7 +15,6 @@ import aiohttp
 import websockets
 from loguru import logger
 from pydantic import BaseModel
-from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -33,6 +32,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService
+from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -101,7 +101,7 @@ def language_to_playht_language(language: Language) -> str | None:
     return result
 
 
-class PlayHTTTSService(TTSService):
+class PlayHTTTSService(TTSService, WebsocketService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
@@ -119,15 +119,16 @@ class PlayHTTTSService(TTSService):
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(
+        TTSService.__init__(
+            self,
             sample_rate=sample_rate,
             **kwargs,
         )
+        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._user_id = user_id
         self._websocket_url = None
-        self._websocket = None
         self._receive_task = None
         self._request_id = None
 
@@ -270,30 +271,6 @@ class PlayHTTTSService(TTSService):
                         await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
-
-    async def _reconnect_websocket(self, retry_state: RetryCallState):
-        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
-        await self._disconnect_websocket()
-        await self._connect_websocket()
-
-    async def _receive_task_handler(self):
-        while True:
-            try:
-                async for attempt in AsyncRetrying(
-                    stop=stop_after_attempt(3),
-                    wait=wait_exponential(multiplier=1, min=4, max=10),
-                    before_sleep=self._reconnect_websocket,
-                    reraise=True,
-                ):
-                    with attempt:
-                        await self._receive_messages()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                message = f"{self} error receiving messages: {e}"
-                logger.error(message)
-                await self.push_error(ErrorFrame(message, fatal=True))
-                break
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
