@@ -30,10 +30,8 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 # Function handlers for the LLM
-search_tool = {'google_search': {}}
-tools = [
-    search_tool
-]
+search_tool = {"google_search": {}}
+tools = [search_tool]
 
 system_instruction = """
 You are an expert at providing the most recent news from any place. Your responses will be converted to audio, so avoid using special characters or overly complex formatting. 
@@ -76,7 +74,12 @@ async def main():
         )
 
         context = OpenAILLMContext(
-            [{"role": "user", "content": "Start by greeting the user warmly, introducing yourself, and mentioning the current day. Be friendly and engaging to set a positive tone for the interaction."}],
+            [
+                {
+                    "role": "user",
+                    "content": "Start by greeting the user warmly, introducing yourself, and mentioning the current day. Be friendly and engaging to set a positive tone for the interaction.",
+                }
+            ],
         )
         context_aggregator = llm.create_context_aggregator(context)
 
