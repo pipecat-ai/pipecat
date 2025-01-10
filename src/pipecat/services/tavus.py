@@ -35,7 +35,7 @@ class TavusVideoService(AIService):
         *,
         api_key: str,
         replica_id: str,
-        persona_id: str = "pipecat0",
+        persona_id: str = "pipecat0",  # Use `pipecat0` so that your TTS voice is used in place of the Tavus persona
         session: aiohttp.ClientSession,
         **kwargs,
     ) -> None:
