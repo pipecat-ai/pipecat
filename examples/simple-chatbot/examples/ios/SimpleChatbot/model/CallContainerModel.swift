@@ -127,55 +127,73 @@ extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
     }
     
     func onTransportStateChanged(state: TransportState) {
-        self.handleEvent(eventName: "onTransportStateChanged", eventValue: state)
-        self.voiceClientStatus = state.description
-        self.isInCall = ( state == .connecting || state == .connected || state == .ready || state == .authenticating )
-    }
-    
-    @MainActor
-    func onBotReady(botReadyData: BotReadyData) {
-        self.handleEvent(eventName: "onBotReady.")
-        self.isBotReady = true
-        if let expirationTime = self.rtviClientIOS?.expiry() {
-            self.startTimer(withExpirationTime: expirationTime)
+        Task { @MainActor in
+            self.handleEvent(eventName: "onTransportStateChanged", eventValue: state)
+            self.voiceClientStatus = state.description
+            self.isInCall = ( state == .connecting || state == .connected || state == .ready || state == .authenticating )
         }
     }
     
-    @MainActor
+    func onBotReady(botReadyData: BotReadyData) {
+        Task { @MainActor in
+            self.handleEvent(eventName: "onBotReady.")
+            self.isBotReady = true
+            if let expirationTime = self.rtviClientIOS?.expiry() {
+                self.startTimer(withExpirationTime: expirationTime)
+            }
+        }
+    }
+    
     func onConnected() {
-        self.isMicEnabled = self.rtviClientIOS?.isMicEnabled ?? false
+        Task { @MainActor in
+            self.isMicEnabled = self.rtviClientIOS?.isMicEnabled ?? false
+        }
     }
     
     func onDisconnected() {
-        self.stopTimer()
-        self.isBotReady = false
+        Task { @MainActor in
+            self.stopTimer()
+            self.isBotReady = false
+        }
     }
     
     func onRemoteAudioLevel(level: Float, participant: Participant) {
-        self.remoteAudioLevel = level
+        Task { @MainActor in
+            self.remoteAudioLevel = level
+        }
     }
     
     func onUserAudioLevel(level: Float) {
-        self.localAudioLevel = level
+        Task { @MainActor in
+            self.localAudioLevel = level
+        }
     }
     
     func onUserTranscript(data: Transcript) {
-        if (data.final ?? false) {
-            self.handleEvent(eventName: "onUserTranscript", eventValue: data.text)
+        Task { @MainActor in
+            if (data.final ?? false) {
+                self.handleEvent(eventName: "onUserTranscript", eventValue: data.text)
+            }
         }
     }
     
     func onBotTranscript(data: String) {
-        self.handleEvent(eventName: "onBotTranscript", eventValue: data)
+        Task { @MainActor in
+            self.handleEvent(eventName: "onBotTranscript", eventValue: data)
+        }
     }
     
     func onError(message: String) {
-        self.handleEvent(eventName: "onError", eventValue: message)
-        self.showError(message: message)
+        Task { @MainActor in
+            self.handleEvent(eventName: "onError", eventValue: message)
+            self.showError(message: message)
+        }
     }
     
     func onTracksUpdated(tracks: Tracks) {
-        self.handleEvent(eventName: "onTracksUpdated", eventValue: tracks)
+        Task { @MainActor in
+            self.handleEvent(eventName: "onTracksUpdated", eventValue: tracks)
+        }
     }
     
 }
