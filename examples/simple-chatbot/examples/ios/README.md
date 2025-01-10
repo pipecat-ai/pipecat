@@ -4,7 +4,7 @@ Basic implementation using the [Pipecat iOS SDK](https://docs.pipecat.ai/client/
 
 ## Prerequisites
 
-1. Run the bot server. See the [server README](../../README).
+1. Run the bot server. See the [server README](../../server).
 2. Install [Xcode 15](https://developer.apple.com/xcode/), and set up your device [to run your own applications](https://developer.apple.com/documentation/xcode/distributing-your-app-to-registered-devices).
 
 ## Running locally
