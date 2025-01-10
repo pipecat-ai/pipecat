@@ -39,7 +39,6 @@ async def main():
         tavus = TavusVideoService(
             api_key=os.getenv("TAVUS_API_KEY"),
             replica_id=os.getenv("TAVUS_REPLICA_ID"),
-            persona_id=os.getenv("TAVUS_PERSONA_ID", "pipecat0"),
             session=session,
         )
 
