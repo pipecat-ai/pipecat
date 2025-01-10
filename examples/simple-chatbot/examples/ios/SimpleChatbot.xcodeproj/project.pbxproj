@@ -684,10 +684,10 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		90B6AB2F2D1359ED00DFF1D9 /* XCRemoteSwiftPackageReference "pipecat-client-ios-daily" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/pipecat-ai/pipecat-client-ios-daily/";
+			repositoryURL = "https://github.com/pipecat-ai/pipecat-client-ios-daily";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.3.0;
+				minimumVersion = 0.3.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
