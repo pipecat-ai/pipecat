@@ -63,7 +63,7 @@ async def main():
             GeminiMultimodalModalities.TEXT
         )  # This forces model to produce text only responses
 
-        tts = CartesiaTTSService(api_key=os.getenv("CARTESIA_API_KEY"))
+        tts = CartesiaTTSService(api_key=os.getenv("CARTESIA_API_KEY"), voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22")
 
         pipeline = Pipeline(
             [
