@@ -9,7 +9,7 @@ import copy
 import io
 import json
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, List
+from typing import Any, Awaitable, Callable, List, Optional
 
 from loguru import logger
 from PIL import Image
@@ -219,22 +219,31 @@ class OpenAILLMContext:
 
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
         async def function_call_result_callback(result):
+            # Extract result and frame parameters if provided
+            if isinstance(result, dict) and "result" in result:
+                frame_run_llm = result.get("run_llm", run_llm)
+                frame_override = result.get("override_run_llm", False)
+            else:
+                frame_run_llm = run_llm
+                frame_override = False
+
             result_frame_downstream = FunctionCallResultFrame(
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
                 result=result,
-                run_llm=run_llm,
+                run_llm=frame_run_llm,
+                override_run_llm=frame_override,
             )
             result_frame_upstream = FunctionCallResultFrame(
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
                 result=result,
-                run_llm=run_llm,
+                run_llm=frame_run_llm,
+                override_run_llm=frame_override,
             )
 
-            # Push frame both downstream and upstream
             await llm.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
             await llm.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
 
