@@ -775,7 +775,14 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                             ],
                         }
                     )
-                    run_llm = True
+                    if frame.override_run_llm:
+                        # Explicit override
+                        print("Explicit override")
+                        run_llm = frame.run_llm
+                    else:
+                        # Default behavior
+                        print("Default behavior")
+                        run_llm = True
             elif aggregation:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
