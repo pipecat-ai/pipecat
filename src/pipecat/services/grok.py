@@ -65,8 +65,12 @@ class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
                             "tool_call_id": frame.tool_call_id,
                         }
                     )
-                    # Only run the LLM if there are no more function calls in progress.
-                    run_llm = not bool(self._function_calls_in_progress)
+                    if frame.override_run_llm:
+                        # Explicit override
+                        run_llm = frame.run_llm
+                    else:
+                        # Default behavior
+                        run_llm = not bool(self._function_calls_in_progress)
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
