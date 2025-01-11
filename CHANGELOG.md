@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Added `aws_session_token` to the `PollyTTSService`.
+
 - Changed the default model for `PlayHTHttpTTSService` to `Play3.0-mini-http`.
 
 - api_key, aws_access_key_id and region are no longer required parameters for the PollyTTSService (AWSTTSService)
