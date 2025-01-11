@@ -330,6 +330,7 @@ class FunctionCallResultFrame(DataFrame):
     arguments: str
     result: Any
     run_llm: bool = True
+    override_run_llm: bool = False
 
 
 @dataclass
