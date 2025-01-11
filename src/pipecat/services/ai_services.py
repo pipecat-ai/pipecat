@@ -25,12 +25,12 @@ from pipecat.frames.frames import (
     STTMuteFrame,
     STTUpdateSettingsFrame,
     TextFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSUpdateSettingsFrame,
-    TranscriptionFrame,
     UserImageRequestFrame,
     VisionImageRawFrame,
 )
