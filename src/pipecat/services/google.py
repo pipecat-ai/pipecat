@@ -282,7 +282,12 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
                             ],
                         )
                     )
-                    run_llm = not bool(self._function_calls_in_progress)
+                    if frame.override_run_llm:
+                        # Explicit override
+                        run_llm = frame.run_llm
+                    else:
+                        # Default behavior
+                        run_llm = not bool(self._function_calls_in_progress)
             else:
                 if aggregation.strip():
                     self._context.add_message(
