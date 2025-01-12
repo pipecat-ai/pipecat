@@ -6,10 +6,10 @@ Basic implementation using the [Pipecat React SDK](https://docs.pipecat.ai/clien
 
 1. Run the bot server; see [README](../../README).
 
-2. Navigate to the `examples/react` directory:
+2. Navigate to the `client/react` directory:
 
 ```bash
-cd examples/react
+cd client/react
 ```
 
 3. Install dependencies:
