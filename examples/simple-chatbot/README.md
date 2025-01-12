@@ -62,9 +62,9 @@ This repository demonstrates a simple AI chatbot with real-time audio/video inte
 
 ### Next, connect using your preferred client app:
 
-- [Daily Prebuilt](examples/prebuilt/README.md)
-- [JavaScript Guide](examples/javascript/README.md)
-- [React Guide](examples/react/README.md)
+- [Daily Prebuilt](client/prebuilt/README.md)
+- [JavaScript Guide](client/javascript/README.md)
+- [React Guide](client/react/README.md)
 
 ## Important Note
 
@@ -90,7 +90,7 @@ simple-chatbot/
 │   ├── runner.py        # Server runner utilities
 │   ├── server.py        # FastAPI server
 │   └── requirements.txt
-└── examples/            # Client implementations
+└── client/              # Client implementations
     ├── prebuilt/        # Daily Prebuilt connection
     ├── javascript/      # Pipecat JavaScript client
     └── react/           # Pipecat React client
