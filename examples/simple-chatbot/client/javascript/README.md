@@ -6,10 +6,10 @@ Basic implementation using the [Pipecat JavaScript SDK](https://docs.pipecat.ai/
 
 1. Run the bot server. See the [server README](../../README).
 
-2. Navigate to the `examples/javascript` directory:
+2. Navigate to the `client/javascript` directory:
 
 ```bash
-cd examples/javascript
+cd client/javascript
 ```
 
 3. Install dependencies:
