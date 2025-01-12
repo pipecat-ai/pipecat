@@ -357,9 +357,6 @@ class LiveKitInputTransport(BaseInputTransport):
                         sample_rate=pipecat_audio_frame.sample_rate,
                         num_channels=pipecat_audio_frame.num_channels,
                     )
-                    await self.push_frame(
-                        pipecat_audio_frame
-                    )  # TODO: ensure audio frames are pushed with the default BaseInputTransport.push_audio_frame()
                     await self.push_audio_frame(input_audio_frame)
             except asyncio.CancelledError:
                 logger.info("Audio input task cancelled")
