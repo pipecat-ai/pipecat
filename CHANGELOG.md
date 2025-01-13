@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added support in `FunctionCallResultFrame` for controlling LLM completions
-  via `override_run_llm` flag. When set to `True`, the `run_llm` parameter
-  determines whether a completion is triggered, allowing finer control over LLM
-  behavior in function calls.
+- Added `FunctionCallResultProperties` dataclass to provide a structured way to
+  control function call behavior, including:
+
+  - `run_llm`: Controls whether to trigger LLM completion
+  - `on_context_updated`: Optional callback triggered after context update
 
 - Added a new foundational example `07e-interruptible-playht-http.py` for easy
   testing of `PlayHTHttpTTSService`.
@@ -35,12 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Added `aws_session_token` to the `PollyTTSService`.
+- Modified `OpenAIAssistantContextAggregator` to support controlled completions
+  and to emit context update callbacks via `FunctionCallResultProperties`.
 
-- Modified `OpenAIAssistantContextAggregator` to respect `override_run_llm`
-  flag when processing function call results. This allows external control over
-  whether function calls trigger LLM completions while maintaining backward
-  compatibility with existing code.
+- Added `aws_session_token` to the `PollyTTSService`.
 
 - Changed the default model for `PlayHTHttpTTSService` to `Play3.0-mini-http`.
 

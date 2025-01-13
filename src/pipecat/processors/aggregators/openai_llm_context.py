@@ -218,30 +218,20 @@ class OpenAILLMContext:
         await llm.push_frame(progress_frame_upstream, FrameDirection.UPSTREAM)
 
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
-        async def function_call_result_callback(result):
-            # Extract result and frame parameters if provided
-            if isinstance(result, dict) and "result" in result:
-                frame_run_llm = result.get("run_llm", run_llm)
-                frame_override = result.get("override_run_llm", False)
-            else:
-                frame_run_llm = run_llm
-                frame_override = False
-
+        async def function_call_result_callback(result, *, properties=None):
             result_frame_downstream = FunctionCallResultFrame(
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
                 result=result,
-                run_llm=frame_run_llm,
-                override_run_llm=frame_override,
+                properties=properties,
             )
             result_frame_upstream = FunctionCallResultFrame(
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
                 result=result,
-                run_llm=frame_run_llm,
-                override_run_llm=frame_override,
+                properties=properties,
             )
 
             await llm.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)

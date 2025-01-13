@@ -5,7 +5,7 @@
 #
 
 from dataclasses import dataclass, field
-from typing import Any, List, Literal, Mapping, Optional, Tuple
+from typing import Any, Awaitable, Callable, List, Literal, Mapping, Optional, Tuple
 
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.clocks.base_clock import BaseClock
@@ -322,6 +322,14 @@ class LLMEnablePromptCachingFrame(DataFrame):
 
 
 @dataclass
+class FunctionCallResultProperties:
+    """Properties for a function call result frame."""
+
+    run_llm: Optional[bool] = None
+    on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
+
+
+@dataclass
 class FunctionCallResultFrame(DataFrame):
     """A frame containing the result of an LLM function (tool) call."""
 
@@ -329,8 +337,7 @@ class FunctionCallResultFrame(DataFrame):
     tool_call_id: str
     arguments: str
     result: Any
-    run_llm: bool = True
-    override_run_llm: bool = False
+    properties: Optional[FunctionCallResultProperties] = None
 
 
 @dataclass
