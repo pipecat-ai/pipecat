@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `FunctionCallResultProperties` dataclass to provide a structured way to
+  control function call behavior, including:
+
+  - `run_llm`: Controls whether to trigger LLM completion
+  - `on_context_updated`: Optional callback triggered after context update
+
 - Added a new foundational example `07e-interruptible-playht-http.py` for easy
   testing of `PlayHTHttpTTSService`.
 
@@ -29,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `examples/foundational/26d-gemini-multimodal-live-text.py` which is using Gemini as TEXT modality and using another TTS provider for TTS process.
 
 ### Changed
+
+- Modified `OpenAIAssistantContextAggregator` to support controlled completions
+  and to emit context update callbacks via `FunctionCallResultProperties`.
 
 - Added `aws_session_token` to the `PollyTTSService`.
 
