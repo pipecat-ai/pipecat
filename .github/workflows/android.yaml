@@ -4,9 +4,13 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "examples/simple-chatbot/client/android/**"
   pull_request:
     branches:
       - "**"
+    paths:
+      - "examples/simple-chatbot/client/android/**"
   workflow_dispatch:
     inputs:
       sdk_git_ref:
