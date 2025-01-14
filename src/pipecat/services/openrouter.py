@@ -39,7 +39,7 @@ class OpenRouterLLMService(OpenAILLMService):
         self,
         *,
         api_key: str | None = None,
-        model: str = "openai/gpt-4o-latest",
+        model: str = "openai/gpt-4o-2024-11-20",
         base_url: str = "https://openrouter.ai/api/v1",
         **kwargs,
     ):
