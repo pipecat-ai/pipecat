@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new `WebsocketService` based class for TTS services, containing
+  base functions and retry logic.
+
+- Added `DeepSeekLLMService` for DeepSeek integration with an OpenAI-compatible
+  interface. Added foundational example `14l-function-calling-deepseek.py`.
+
+- Added `FunctionCallResultProperties` dataclass to provide a structured way to
+  control function call behavior, including:
+
+  - `run_llm`: Controls whether to trigger LLM completion
+  - `on_context_updated`: Optional callback triggered after context update
+
 - Added a new foundational example `07e-interruptible-playht-http.py` for easy
   testing of `PlayHTHttpTTSService`.
 
@@ -20,25 +32,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `enable_prejoin_ui`, `max_participants` and `start_video_off` params
   to `DailyRoomProperties`.
 
-- Added `session_timeout` to `FastAPIWebsocketTransport` and `WebsocketServerTransport`
-  for configuring session timeouts (in seconds). Triggers `on_session_timeout` for custom timeout handling.
+- Added `session_timeout` to `FastAPIWebsocketTransport` and
+  `WebsocketServerTransport` for configuring session timeouts (in
+  seconds). Triggers `on_session_timeout` for custom timeout handling.
   See [examples/websocket-server/bot.py](https://github.com/pipecat-ai/pipecat/blob/main/examples/websocket-server/bot.py).
 
-- Added the new modalities option and helper function to set Gemini output modalities.
+- Added the new modalities option and helper function to set Gemini output
+  modalities.
 
-- Added `examples/foundational/26d-gemini-multimodal-live-text.py` which is using Gemini as TEXT modality and using another TTS provider for TTS process.
+- Added `examples/foundational/26d-gemini-multimodal-live-text.py` which is
+  using Gemini as TEXT modality and using another TTS provider for TTS process.
 
 ### Changed
 
+- Modified `OpenAIAssistantContextAggregator` to support controlled completions
+  and to emit context update callbacks via `FunctionCallResultProperties`.
+
+- Added `aws_session_token` to the `PollyTTSService`.
+
 - Changed the default model for `PlayHTHttpTTSService` to `Play3.0-mini-http`.
 
-- api_key, aws_access_key_id and region are no longer required parameters for the PollyTTSService (AWSTTSService)
+- `api_key`, `aws_access_key_id` and `region` are no longer required parameters
+  for the PollyTTSService (AWSTTSService)
 
-- Added `session_timeout` example in `examples/websocket-server/bot.py` to handle session timeout event.
+- Added `session_timeout` example in `examples/websocket-server/bot.py` to
+  handle session timeout event.
 
-- Changed `InputParams` in `src/pipecat/services/gemini_multimodal_live/gemini.py` to support different modalities.
+- Changed `InputParams` in
+  `src/pipecat/services/gemini_multimodal_live/gemini.py` to support different
+  modalities.
 
 ### Fixed
+
+- Fixed an issue where websocket based TTS services could incorrectly terminate
+  their connection due to a retry counter not resetting.
+
+- Fixed a `PipelineTask` issue that would cause a dangling task after stopping
+  the pipeline with an `EndFrame`.
 
 - Fixed an import issue for `PlayHTHttpTTSService`.
 
@@ -47,7 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue where `OpenAIRealtimeBetaLLMService` audio chunks were hitting
   an error when truncating audio content.
 
-- Fixed an issue where setting the voice and model for `RimeHttpTTSService` wasn't working.
+- Fixed an issue where setting the voice and model for `RimeHttpTTSService`
+  wasn't working.
 
 ## [0.0.52] - 2024-12-24
 
