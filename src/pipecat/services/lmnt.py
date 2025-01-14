@@ -113,7 +113,9 @@ class LmntTTSService(TTSService, WebsocketService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+        self._receive_task = self.get_event_loop().create_task(
+            self._receive_task_handler(self.push_error)
+        )
 
     async def _disconnect(self):
         await self._disconnect_websocket()
