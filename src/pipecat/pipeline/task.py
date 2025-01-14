@@ -180,6 +180,7 @@ class PipelineTask:
         if should_cleanup:
             await self._source.cleanup()
             await self._pipeline.cleanup()
+            await self._sink.cleanup()
         # We just enqueue None to terminate the task gracefully.
         self._process_up_task.cancel()
         await self._process_up_task
