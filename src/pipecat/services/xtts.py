@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,9 +7,9 @@
 from typing import Any, AsyncGenerator, Dict
 
 import aiohttp
-import numpy as np
 from loguru import logger
 
+from pipecat.audio.utils import resample_audio
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -21,14 +21,6 @@ from pipecat.frames.frames import (
 from pipecat.services.ai_services import TTSService
 from pipecat.transcriptions.language import Language
 
-try:
-    import resampy
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use XTTS, you need to `pip install pipecat-ai[xtts]`.")
-    raise Exception(f"Missing module: {e}")
-
-
 # The server below can connect to XTTS through a local running docker
 #
 # Docker command: $ docker run --gpus=all -e COQUI_TOS_AGREED=1 --rm -p 8000:80 ghcr.io/coqui-ai/xtts-streaming-server:latest-cuda121
@@ -38,47 +30,42 @@ except ModuleNotFoundError as e:
 
 
 def language_to_xtts_language(language: Language) -> str | None:
-    match language:
-        case Language.CS:
-            return "cs"
-        case Language.DE:
-            return "de"
-        case (
-            Language.EN
-            | Language.EN_US
-            | Language.EN_AU
-            | Language.EN_GB
-            | Language.EN_NZ
-            | Language.EN_IN
-        ):
-            return "en"
-        case Language.ES:
-            return "es"
-        case Language.FR:
-            return "fr"
-        case Language.HI:
-            return "hi"
-        case Language.HU:
-            return "hu"
-        case Language.IT:
-            return "it"
-        case Language.JA:
-            return "ja"
-        case Language.KO:
-            return "ko"
-        case Language.NL:
-            return "nl"
-        case Language.PL:
-            return "pl"
-        case Language.PT | Language.PT_BR:
-            return "pt"
-        case Language.RU:
-            return "ru"
-        case Language.TR:
-            return "tr"
-        case Language.ZH:
-            return "zh-cn"
-    return None
+    BASE_LANGUAGES = {
+        Language.CS: "cs",
+        Language.DE: "de",
+        Language.EN: "en",
+        Language.ES: "es",
+        Language.FR: "fr",
+        Language.HI: "hi",
+        Language.HU: "hu",
+        Language.IT: "it",
+        Language.JA: "ja",
+        Language.KO: "ko",
+        Language.NL: "nl",
+        Language.PL: "pl",
+        Language.PT: "pt",
+        Language.RU: "ru",
+        Language.TR: "tr",
+        # Special case for Chinese base language
+        Language.ZH: "zh-cn",
+    }
+
+    result = BASE_LANGUAGES.get(language)
+
+    # If not found in base languages, try to find the base language from a variant
+    if not result:
+        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
+        lang_str = str(language.value)
+        base_code = lang_str.split("-")[0].lower()
+
+        # Special handling for Chinese variants
+        if base_code == "zh":
+            result = "zh-cn"
+        else:
+            # Look up the base code in our supported languages
+            result = base_code if base_code in BASE_LANGUAGES.values() else None
+
+    return result
 
 
 class XTTSService(TTSService):
@@ -86,15 +73,16 @@ class XTTSService(TTSService):
         self,
         *,
         voice_id: str,
-        language: Language,
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
+        language: Language = Language.EN,
+        sample_rate: int = 24000,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = {
-            "language": language,
+            "language": self.language_to_service_language(language),
             "base_url": base_url,
         }
         self.set_voice(voice_id)
@@ -103,6 +91,9 @@ class XTTSService(TTSService):
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    def language_to_service_language(self, language: Language) -> str | None:
+        return language_to_xtts_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -131,11 +122,9 @@ class XTTSService(TTSService):
 
         url = self._settings["base_url"] + "/tts_stream"
 
-        language = language_to_xtts_language(self._settings["language"])
-
         payload = {
             "text": text.replace(".", "").replace("*", ""),
-            "language": language,
+            "language": self._settings["language"],
             "speaker_embedding": embeddings["speaker_embedding"],
             "gpt_cond_latent": embeddings["gpt_cond_latent"],
             "add_wav_header": False,
@@ -159,34 +148,30 @@ class XTTSService(TTSService):
             async for chunk in r.content.iter_chunked(1024):
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
-                    # Append new chunk to the buffer
+                    # Append new chunk to the buffer.
                     buffer.extend(chunk)
 
-                    # Check if buffer has enough data for processing
+                    # Check if buffer has enough data for processing.
                     while (
                         len(buffer) >= 48000
                     ):  # Assuming at least 0.5 seconds of audio data at 24000 Hz
-                        # Process the buffer up to a safe size for resampling
+                        # Process the buffer up to a safe size for resampling.
                         process_data = buffer[:48000]
-                        # Remove processed data from buffer
+                        # Remove processed data from buffer.
                         buffer = buffer[48000:]
 
-                        # Convert the byte data to numpy array for resampling
-                        audio_np = np.frombuffer(process_data, dtype=np.int16)
-                        # Resample the audio from 24000 Hz to 16000 Hz
-                        resampled_audio = resampy.resample(audio_np, 24000, 16000)
-                        # Convert the numpy array back to bytes
-                        resampled_audio_bytes = resampled_audio.astype(np.int16).tobytes()
+                        # XTTS uses 24000 so we need to resample to our desired rate.
+                        resampled_audio = resample_audio(
+                            bytes(process_data), 24000, self._sample_rate
+                        )
                         # Create the frame with the resampled audio
-                        frame = TTSAudioRawFrame(resampled_audio_bytes, 16000, 1)
+                        frame = TTSAudioRawFrame(resampled_audio, self._sample_rate, 1)
                         yield frame
 
-            # Process any remaining data in the buffer
+            # Process any remaining data in the buffer.
             if len(buffer) > 0:
-                audio_np = np.frombuffer(buffer, dtype=np.int16)
-                resampled_audio = resampy.resample(audio_np, 24000, 16000)
-                resampled_audio_bytes = resampled_audio.astype(np.int16).tobytes()
-                frame = TTSAudioRawFrame(resampled_audio_bytes, 16000, 1)
+                resampled_audio = resample_audio(bytes(buffer), 24000, self._sample_rate)
+                frame = TTSAudioRawFrame(resampled_audio, self._sample_rate, 1)
                 yield frame
 
             yield TTSStoppedFrame()

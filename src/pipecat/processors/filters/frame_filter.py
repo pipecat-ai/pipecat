@@ -1,17 +1,17 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import List
+from typing import Tuple, Type
 
-from pipecat.frames.frames import AppFrame, ControlFrame, Frame, SystemFrame
+from pipecat.frames.frames import EndFrame, Frame, SystemFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class FrameFilter(FrameProcessor):
-    def __init__(self, types: List[type]):
+    def __init__(self, types: Tuple[Type[Frame]]):
         super().__init__()
         self._types = types
 
@@ -20,15 +20,10 @@ class FrameFilter(FrameProcessor):
     #
 
     def _should_passthrough_frame(self, frame):
-        for t in self._types:
-            if isinstance(frame, t):
-                return True
+        if isinstance(frame, self._types):
+            return True
 
-        return (
-            isinstance(frame, AppFrame)
-            or isinstance(frame, ControlFrame)
-            or isinstance(frame, SystemFrame)
-        )
+        return isinstance(frame, (EndFrame, SystemFrame))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

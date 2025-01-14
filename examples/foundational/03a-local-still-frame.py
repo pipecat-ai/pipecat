@@ -1,15 +1,17 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
-
 import tkinter as tk
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
 
 from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -18,10 +20,6 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.services.fal import FalImageGenService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.local.tk import TkLocalTransport
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 

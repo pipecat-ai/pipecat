@@ -1,40 +1,37 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import os
 import sys
 import wave
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
-    LLMMessagesFrame,
     OutputAudioRawFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMUserResponseAggregator,
-    LLMAssistantResponseAggregator,
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.logger import FrameLogger
-from pipecat.services.cartesia import CartesiaHttpTTSService
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -75,7 +72,7 @@ class InboundSoundEffectWrapper(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, LLMMessagesFrame):
+        if isinstance(frame, OpenAILLMContextFrame):
             await self.push_frame(sounds["ding2.wav"])
             # In case anything else downstream needs it
             await self.push_frame(frame, direction)
@@ -101,7 +98,7 @@ async def main():
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
-        tts = CartesiaHttpTTSService(
+        tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
@@ -113,8 +110,8 @@ async def main():
             },
         ]
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
         out_sound = OutboundSoundEffectWrapper()
         in_sound = InboundSoundEffectWrapper()
         fl = FrameLogger("LLM Out")
@@ -123,7 +120,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),
-                tma_in,
+                context_aggregator.user(),
                 in_sound,
                 fl2,
                 llm,
@@ -131,13 +128,13 @@ async def main():
                 tts,
                 out_sound,
                 transport.output(),
-                tma_out,
+                context_aggregator.assistant(),
             ]
         )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             await tts.say("Hi, I'm listening!")
             await transport.send_audio(sounds["ding1.wav"])
 

@@ -1,13 +1,15 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from pipecat.frames.frames import BotSpeakingFrame, Frame, AudioRawFrame, TransportMessageFrame
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from loguru import logger
 from typing import Optional
+
+from loguru import logger
+
+from pipecat.frames.frames import AudioRawFrame, BotSpeakingFrame, Frame, TransportMessageFrame
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 logger = logger.opt(ansi=True)
 

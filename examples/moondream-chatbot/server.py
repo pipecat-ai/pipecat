@@ -1,17 +1,16 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
-import os
 import argparse
+import os
 import subprocess
-
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+import aiohttp
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -57,7 +56,7 @@ app.add_middleware(
 )
 
 
-@app.get("/start")
+@app.get("/")
 async def start_agent(request: Request):
     print(f"!!! Creating room")
     room = await daily_helpers["rest"].create_room(DailyRoomParams())

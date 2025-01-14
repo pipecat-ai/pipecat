@@ -7,14 +7,14 @@ provisioning a room and starting a Pipecat bot in response.
 Refer to README for more information.
 """
 
-import aiohttp
-import os
 import argparse
+import os
 import subprocess
-
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+import aiohttp
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from twilio.twiml.voice_response import VoiceResponse
@@ -22,12 +22,10 @@ from twilio.twiml.voice_response import VoiceResponse
 from pipecat.transports.services.helpers.daily_rest import (
     DailyRESTHelper,
     DailyRoomObject,
+    DailyRoomParams,
     DailyRoomProperties,
     DailyRoomSipParams,
-    DailyRoomParams,
 )
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -108,11 +106,9 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
     if vendor == "daily":
-        bot_proc = f"python3 - m bot_daily - u {room.url} - t {token} - i {
-            callId} - d {callDomain}"
+        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain}"
     else:
-        bot_proc = f"python3 - m bot_twilio - u {room.url} - t {
-            token} - i {callId} - s {room.config.sip_endpoint}"
+        bot_proc = f"python3 -m bot_twilio -u {room.url} -t {token} -i {callId} -s {room.config.sip_endpoint}"
 
     try:
         subprocess.Popen(

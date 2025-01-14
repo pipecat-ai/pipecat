@@ -1,23 +1,20 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
-
-from PIL import Image
-
 from typing import AsyncGenerator
+
+from loguru import logger
+from PIL import Image
 
 from pipecat.frames.frames import ErrorFrame, Frame, TextFrame, VisionImageRawFrame
 from pipecat.services.ai_services import VisionService
 
-from loguru import logger
-
 try:
     import torch
-
     from transformers import AutoModelForCausalLM, AutoTokenizer
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -26,9 +23,7 @@ except ModuleNotFoundError as e:
 
 
 def detect_device():
-    """
-    Detects the appropriate device to run on, and return the device and dtype.
-    """
+    """Detects the appropriate device to run on, and return the device and dtype."""
     try:
         import intel_extension_for_pytorch
 

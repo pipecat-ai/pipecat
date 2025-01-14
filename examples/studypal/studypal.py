@@ -1,31 +1,25 @@
-import aiohttp
 import asyncio
+import io
 import os
 import sys
-import io
 
-from bs4 import BeautifulSoup
-from pypdf import PdfReader
+import aiohttp
 import tiktoken
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from loguru import logger
+from pypdf import PdfReader
+from runner import configure
 
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -131,9 +125,7 @@ async def main():
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id=os.getenv("CARTESIA_VOICE_ID", "4d2fd738-3b3d-4368-957a-bb4805275bd9"),
             # British Narration Lady: 4d2fd738-3b3d-4368-957a-bb4805275bd9
-            params=CartesiaTTSService.InputParams(
-                sample_rate=44100,
-            ),
+            sample_rate=44100,
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
@@ -150,17 +142,17 @@ Your task is to help the user understand and learn from this article in 2 senten
             },
         ]
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),
-                tma_in,
+                context_aggregator.user(),
                 llm,
                 tts,
                 transport.output(),
-                tma_out,
+                context_aggregator.assistant(),
             ]
         )
 
@@ -168,14 +160,18 @@ Your task is to help the user understand and learn from this article in 2 senten
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             messages.append(
                 {
                     "role": "system",
                     "content": "Hello! I'm ready to discuss the article with you. What would you like to learn about?",
                 }
             )
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
 
         runner = PipelineRunner()
 

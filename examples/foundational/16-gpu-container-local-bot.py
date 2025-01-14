@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -13,14 +13,11 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.deepgram import DeepgramTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import (
@@ -28,7 +25,6 @@ from pipecat.transports.services.daily import (
     DailyTransport,
     DailyTransportMessageFrame,
 )
-from pipecat.vad.silero import SileroVADAnalyzer
 
 load_dotenv(override=True)
 
@@ -75,17 +71,17 @@ async def main():
             },
         ]
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                tma_in,  # User responses
+                context_aggregator.user(),
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
-                tma_out,  # Assistant spoken responses
+                context_aggregator.assistant(),
             ]
         )
 
@@ -95,13 +91,13 @@ async def main():
         # bot can "hear" and respond to them.
         @transport.event_handler("on_participant_joined")
         async def on_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
 
         # When the first participant joins, the bot should introduce itself.
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         # Handle "latency-ping" messages. The client will send app messages that look like
         # this:
@@ -123,7 +119,7 @@ async def main():
                         )
                     )
                     # And push to the pipeline for the Daily transport.output to send
-                    await tma_in.push_frame(
+                    await task.queue_frame(
                         DailyTransportMessageFrame(
                             message={"latency-pong-pipeline-delivery": {"ts": ts}},
                             participant_id=sender,

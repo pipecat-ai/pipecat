@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,10 +7,10 @@
 import asyncio
 import signal
 
+from loguru import logger
+
 from pipecat.pipeline.task import PipelineTask
 from pipecat.utils.utils import obj_count, obj_id
-
-from loguru import logger
 
 
 class PipelineRunner:

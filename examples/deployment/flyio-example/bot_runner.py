@@ -1,28 +1,26 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import argparse
-import subprocess
 import os
-
+import subprocess
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, HTTPException
+import aiohttp
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from pipecat.transports.services.helpers.daily_rest import (
     DailyRESTHelper,
     DailyRoomObject,
-    DailyRoomProperties,
     DailyRoomParams,
+    DailyRoomProperties,
 )
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -124,7 +122,7 @@ async def spawn_fly_machine(room_url: str, token: str):
     print(f"Machine joined room: {room_url}")
 
 
-@app.post("/start_bot")
+@app.post("/")
 async def start_bot(request: Request) -> JSONResponse:
     try:
         data = await request.json()

@@ -1,10 +1,12 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 from typing import Union
+
+from loguru import logger
 
 from pipecat.frames.frames import (
     Frame,
@@ -14,8 +16,6 @@ from pipecat.frames.frames import (
     TextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-from loguru import logger
 
 try:
     from langchain_core.messages import AIMessageChunk
@@ -39,7 +39,7 @@ class LangchainProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, LLMMessagesFrame):
-            # Messages are accumulated by the `LLMUserResponseAggregator` in a list of messages.
+            # Messages are accumulated on the context as a list of messages.
             # The last one by the human is the one we want to send to the LLM.
             logger.debug(f"Got transcription frame {frame}")
             text: str = frame.messages[-1]["content"]

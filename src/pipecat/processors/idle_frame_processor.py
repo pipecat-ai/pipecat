@@ -1,11 +1,10 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
-
 from typing import Awaitable, Callable, List
 
 from pipecat.frames.frames import Frame

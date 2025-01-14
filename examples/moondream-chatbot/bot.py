@@ -1,34 +1,36 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
 from PIL import Image
+from runner import configure
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    Frame,
     ImageRawFrame,
     OutputImageRawFrame,
     SpriteFrame,
-    Frame,
-    LLMMessagesFrame,
-    TTSAudioRawFrame,
-    TTSStoppedFrame,
     TextFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
 )
-
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMUserResponseAggregator
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -36,13 +38,6 @@ from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.moondream import MoondreamService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -72,8 +67,7 @@ talking_frame = SpriteFrame(images=sprites)
 
 
 class TalkingAnimation(FrameProcessor):
-    """
-    This class starts a talking animation when it receives an first AudioFrame,
+    """This class starts a talking animation when it receives an first AudioFrame,
     and then returns to a "quiet" sprite when it sees a TTSStoppedFrame.
     """
 
@@ -84,14 +78,15 @@ class TalkingAnimation(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TTSAudioRawFrame):
+        if isinstance(frame, BotStartedSpeakingFrame):
             if not self._is_talking:
                 await self.push_frame(talking_frame)
                 self._is_talking = True
-        elif isinstance(frame, TTSStoppedFrame):
+        elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_frame(quiet_frame)
             self._is_talking = False
-        await self.push_frame(frame)
+
+        await self.push_frame(frame, direction)
 
 
 class UserImageRequester(FrameProcessor):
@@ -127,7 +122,7 @@ class TextFilterProcessor(FrameProcessor):
             if frame.text != self.text:
                 await self.push_frame(frame)
         else:
-            await self.push_frame(frame)
+            await self.push_frame(frame, direction)
 
 
 class ImageFilterProcessor(FrameProcessor):
@@ -135,7 +130,7 @@ class ImageFilterProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if not isinstance(frame, ImageRawFrame):
-            await self.push_frame(frame)
+            await self.push_frame(frame, direction)
 
 
 async def main():
@@ -183,17 +178,19 @@ async def main():
             },
         ]
 
-        ura = LLMUserResponseAggregator(messages)
+        context = OpenAILLMContext(messages)
+        context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),
-                ura,
+                context_aggregator.user(),
                 llm,
                 ParallelPipeline([sa, ir, va, moondream], [tf, imgf]),
                 tts,
                 ta,
                 transport.output(),
+                context_aggregator.assistant(),
             ]
         )
 
@@ -202,10 +199,10 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
-            transport.capture_participant_video(participant["id"], framerate=0)
+            await transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_video(participant["id"], framerate=0)
             ir.set_participant_id(participant["id"])
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
 

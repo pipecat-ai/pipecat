@@ -1,18 +1,26 @@
+#
+# Copyright (c) 2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import argparse
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from processors import StoryImageProcessor, StoryProcessor
+from prompts import CUE_USER_TURN, LLM_BASE_PROMPT, LLM_INTRO_PROMPT
+from utils.helpers import load_images, load_sounds
 
-from pipecat.frames.frames import LLMMessagesFrame, StopTaskFrame, EndFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame, StopTaskFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.services.openai import OpenAILLMService
@@ -21,14 +29,6 @@ from pipecat.transports.services.daily import (
     DailyTransport,
     DailyTransportMessageFrame,
 )
-
-from processors import StoryProcessor, StoryImageProcessor
-from prompts import LLM_BASE_PROMPT, LLM_INTRO_PROMPT, CUE_USER_TURN
-from utils.helpers import load_sounds, load_images
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -85,8 +85,8 @@ async def main(room_url, token=None):
         story_pages = []
 
         # We need aggregators to keep track of user and LLM responses
-        llm_responses = LLMAssistantResponseAggregator(message_history)
-        user_responses = LLMUserResponseAggregator(message_history)
+        context = OpenAILLMContext(message_history)
+        context_aggregator = llm_service.create_context_aggregator(context)
 
         # -------------- Processors ------------- #
 
@@ -108,7 +108,7 @@ async def main(room_url, token=None):
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             logger.debug("Participant joined, storytime commence!")
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             await intro_task.queue_frames(
                 [
                     images["book1"],
@@ -129,13 +129,13 @@ async def main(room_url, token=None):
         main_pipeline = Pipeline(
             [
                 transport.input(),
-                user_responses,
+                context_aggregator.user(),
                 llm_service,
                 story_processor,
                 image_processor,
                 tts_service,
                 transport.output(),
-                llm_responses,
+                context_aggregator.assistant(),
             ]
         )
 

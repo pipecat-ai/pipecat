@@ -1,34 +1,31 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
-from pipecat.frames.frames import LLMMessagesFrame
-from pipecat.pipeline.pipeline import Pipeline
+import aiohttp
+from deepgram import LiveOptions
+from dotenv import load_dotenv
+from loguru import logger
+from openai.types.chat import ChatCompletionToolParam
+from runner import configure
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.whisper import Model, WhisperSTTService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
-
-from openai.types.chat import ChatCompletionToolParam
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -61,7 +58,6 @@ async def main():
             token,
             "Pipecat",
             DailyParams(
-                audio_in_enabled=True,
                 audio_out_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
@@ -69,7 +65,9 @@ async def main():
             ),
         )
 
-        stt = WhisperSTTService(model=Model.LARGE)
+        stt = DeepgramSTTService(
+            api_key=os.getenv("DEEPGRAM_API_KEY"), live_options=LiveOptions(language="multi")
+        )
 
         english_tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
@@ -132,7 +130,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_transcription(participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             messages.append(
                 {
@@ -140,7 +138,7 @@ async def main():
                     "content": f"Please introduce yourself to the user and let them know the languages you speak. Your initial responses should be in {current_language}.",
                 }
             )
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
 

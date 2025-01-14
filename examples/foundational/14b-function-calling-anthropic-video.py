@@ -1,28 +1,26 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
-import aiohttp
 import os
 import sys
 
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.anthropic import AnthropicLLMService
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.vad.silero import SileroVADAnalyzer
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -67,7 +65,8 @@ async def main():
 
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY"),
-            model="claude-3-5-sonnet-20240620",
+            # model="claude-3-5-sonnet-20240620",
+            model="claude-3-5-sonnet-latest",
             enable_prompt_caching_beta=True,
         )
         llm.register_function("get_weather", get_weather)
@@ -160,8 +159,8 @@ If you need to use a tool, simply use the tool. Do not tell the user the tool yo
         async def on_first_participant_joined(transport, participant):
             global video_participant_id
             video_participant_id = participant["id"]
-            transport.capture_participant_transcription(video_participant_id)
-            transport.capture_participant_video(video_participant_id, framerate=0)
+            await transport.capture_participant_transcription(video_participant_id)
+            await transport.capture_participant_video(video_participant_id, framerate=0)
             # Kick off the conversation.
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 

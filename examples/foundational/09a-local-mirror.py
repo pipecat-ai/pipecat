@@ -1,14 +1,17 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
 import asyncio
 import sys
-
 import tkinter as tk
+
+import aiohttp
+from dotenv import load_dotenv
+from loguru import logger
+from runner import configure
 
 from pipecat.frames.frames import (
     Frame,
@@ -24,12 +27,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.local.tk import TkLocalTransport
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
-from runner import configure
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
@@ -65,7 +62,7 @@ async def main():
         tk_root.title("Local Mirror")
 
         daily_transport = DailyTransport(
-            room_url, token, "Test", DailyParams(audio_in_enabled=True)
+            room_url, token, "Test", DailyParams(audio_in_enabled=True, audio_in_sample_rate=24000)
         )
 
         tk_transport = TkLocalTransport(
@@ -81,7 +78,7 @@ async def main():
 
         @daily_transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            transport.capture_participant_video(participant["id"])
+            await transport.capture_participant_video(participant["id"])
 
         pipeline = Pipeline([daily_transport.input(), MirrorProcessor(), tk_transport.output()])
 

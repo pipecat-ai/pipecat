@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,7 +11,7 @@ import json
 import re
 from asyncio import CancelledError
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from loguru import logger
 from PIL import Image
@@ -21,11 +21,13 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMUpdateSettingsFrame,
+    OpenAILLMContextAssistantTimestampFrame,
     StartInterruptionFrame,
     TextFrame,
     UserImageRawFrame,
@@ -43,6 +45,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
+from pipecat.utils.time import time_now_iso8601
 
 try:
     from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
@@ -75,7 +78,11 @@ class AnthropicContextAggregatorPair:
 
 
 class AnthropicLLMService(LLMService):
-    """This class implements inference with Anthropic's AI models"""
+    """This class implements inference with Anthropic's AI models.
+
+    Can provide a custom client via the `client` kwarg, allowing you to
+    use `AsyncAnthropicBedrock` and `AsyncAnthropicVertex` clients
+    """
 
     class InputParams(BaseModel):
         enable_prompt_caching_beta: Optional[bool] = False
@@ -89,12 +96,15 @@ class AnthropicLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "claude-3-5-sonnet-20240620",
+        model: str = "claude-3-5-sonnet-20241022",
         params: InputParams = InputParams(),
+        client=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._client = AsyncAnthropic(api_key=api_key)
+        self._client = client or AsyncAnthropic(
+            api_key=api_key
+        )  # if the client is provided, use it and remove it, otherwise create a new one
         self.set_model_name(model)
         self._settings = {
             "max_tokens": params.max_tokens,
@@ -267,7 +277,7 @@ class AnthropicLLMService(LLMService):
 
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
-            context = frame.context
+            context: "AnthropicLLMContext" = AnthropicLLMContext.upgrade_to_anthropic(frame.context)
         elif isinstance(frame, LLMMessagesFrame):
             context = AnthropicLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
@@ -320,7 +330,7 @@ class AnthropicLLMContext(OpenAILLMContext):
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
         *,
-        system: str | NotGiven = NOT_GIVEN,
+        system: Union[str, NotGiven] = NOT_GIVEN,
     ):
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
 
@@ -331,6 +341,14 @@ class AnthropicLLMContext(OpenAILLMContext):
         self.turns_above_cache_threshold = 0
 
         self.system = system
+
+    @staticmethod
+    def upgrade_to_anthropic(obj: OpenAILLMContext) -> "AnthropicLLMContext":
+        logger.debug(f"Upgrading to Anthropic: {obj}")
+        if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AnthropicLLMContext):
+            obj.__class__ = AnthropicLLMContext
+            obj._restructure_from_openai_messages()
+        return obj
 
     @classmethod
     def from_openai_context(cls, openai_context: OpenAILLMContext):
@@ -360,6 +378,144 @@ class AnthropicLLMContext(OpenAILLMContext):
         self.turns_above_cache_threshold = 0
         self._messages[:] = messages
         self._restructure_from_openai_messages()
+
+    # convert a message in Anthropic format into one or more messages in OpenAI format
+    def to_standard_messages(self, obj):
+        """Convert Anthropic message format to standard structured format.
+
+        Handles text content and function calls for both user and assistant messages.
+
+        Args:
+            obj: Message in Anthropic format:
+                {
+                    "role": "user/assistant",
+                    "content": str | [{"type": "text/tool_use/tool_result", ...}]
+                }
+
+        Returns:
+            List of messages in standard format:
+            [
+                {
+                    "role": "user/assistant/tool",
+                    "content": [{"type": "text", "text": str}]
+                }
+            ]
+        """
+        # todo: image format (?)
+        # tool_use
+        role = obj.get("role")
+        content = obj.get("content")
+        if role == "assistant":
+            if isinstance(content, str):
+                return [{"role": role, "content": [{"type": "text", "text": content}]}]
+            elif isinstance(content, list):
+                text_items = []
+                tool_items = []
+                for item in content:
+                    if item["type"] == "text":
+                        text_items.append({"type": "text", "text": item["text"]})
+                    elif item["type"] == "tool_use":
+                        tool_items.append(
+                            {
+                                "type": "function",
+                                "id": item["id"],
+                                "function": {
+                                    "name": item["name"],
+                                    "arguments": json.dumps(item["input"]),
+                                },
+                            }
+                        )
+                messages = []
+                if text_items:
+                    messages.append({"role": role, "content": text_items})
+                if tool_items:
+                    messages.append({"role": role, "tool_calls": tool_items})
+                return messages
+        elif role == "user":
+            if isinstance(content, str):
+                return [{"role": role, "content": [{"type": "text", "text": content}]}]
+            elif isinstance(content, list):
+                text_items = []
+                tool_items = []
+                for item in content:
+                    if item["type"] == "text":
+                        text_items.append({"type": "text", "text": item["text"]})
+                    elif item["type"] == "tool_result":
+                        tool_items.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": item["tool_use_id"],
+                                "content": item["content"],
+                            }
+                        )
+                messages = []
+                if text_items:
+                    messages.append({"role": role, "content": text_items})
+                messages.extend(tool_items)
+                return messages
+
+    def from_standard_message(self, message):
+        """Convert standard format message to Anthropic format.
+
+        Handles conversion of text content, tool calls, and tool results.
+        Empty text content is converted to "(empty)".
+
+        Args:
+            message: Message in standard format:
+                {
+                    "role": "user/assistant/tool",
+                    "content": str | [{"type": "text", ...}],
+                    "tool_calls": [{"id": str, "function": {"name": str, "arguments": str}}]
+                }
+
+        Returns:
+            Message in Anthropic format:
+            {
+                "role": "user/assistant",
+                "content": str | [
+                    {"type": "text", "text": str} |
+                    {"type": "tool_use", "id": str, "name": str, "input": dict} |
+                    {"type": "tool_result", "tool_use_id": str, "content": str}
+                ]
+            }
+        """
+        # todo: image messages (?)
+        if message["role"] == "tool":
+            return {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": message["tool_call_id"],
+                        "content": message["content"],
+                    },
+                ],
+            }
+        if message.get("tool_calls"):
+            tc = message["tool_calls"]
+            ret = {"role": "assistant", "content": []}
+            for tool_call in tc:
+                function = tool_call["function"]
+                arguments = json.loads(function["arguments"])
+                new_tool_use = {
+                    "type": "tool_use",
+                    "id": tool_call["id"],
+                    "name": function["name"],
+                    "input": arguments,
+                }
+                ret["content"].append(new_tool_use)
+            return ret
+        # check for empty text strings
+        content = message.get("content")
+        if isinstance(content, str):
+            if content == "":
+                content = "(empty)"
+        elif isinstance(content, list):
+            for item in content:
+                if item["type"] == "text" and item["text"] == "":
+                    item["text"] = "(empty)"
+
+        return message
 
     def add_image_frame_message(
         self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
@@ -429,6 +585,12 @@ class AnthropicLLMContext(OpenAILLMContext):
             return self.messages
 
     def _restructure_from_openai_messages(self):
+        # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
+        try:
+            self._messages[:] = [self.from_standard_message(m) for m in self._messages]
+        except Exception as e:
+            logger.error(f"Error mapping messages: {e}")
+
         # See if we should pull the system message out of our context.messages list. (For
         # compatibility with Open AI messages format.)
         if self.messages and self.messages[0]["role"] == "system":
@@ -441,6 +603,39 @@ class AnthropicLLMContext(OpenAILLMContext):
                 # list.
                 self.system = self.messages[0]["content"]
                 self.messages.pop(0)
+
+        # Merge consecutive messages with the same role.
+        i = 0
+        while i < len(self.messages) - 1:
+            current_message = self.messages[i]
+            next_message = self.messages[i + 1]
+            if current_message["role"] == next_message["role"]:
+                # Convert content to list of dictionaries if it's a string
+                if isinstance(current_message["content"], str):
+                    current_message["content"] = [
+                        {"type": "text", "text": current_message["content"]}
+                    ]
+                if isinstance(next_message["content"], str):
+                    next_message["content"] = [{"type": "text", "text": next_message["content"]}]
+                # Concatenate the content
+                current_message["content"].extend(next_message["content"])
+                # Remove the next message from the list
+                self.messages.pop(i + 1)
+            else:
+                i += 1
+
+        # Avoid empty content in messages
+        for message in self.messages:
+            if isinstance(message["content"], str) and message["content"] == "":
+                message["content"] = "(empty)"
+            elif isinstance(message["content"], list) and len(message["content"]) == 0:
+                message["content"] = [{"type": "text", "text": "(empty)"}]
+
+    def get_messages_for_persistent_storage(self):
+        messages = super().get_messages_for_persistent_storage()
+        if self.system:
+            messages.insert(0, {"role": "system", "content": self.system})
+        return messages
 
     def get_messages_for_logging(self) -> str:
         msgs = []
@@ -530,6 +725,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
             ):
                 self._function_call_in_progress = None
                 self._function_call_result = frame
+                await self._push_aggregation()
             else:
                 logger.warning(
                     "FunctionCallResultFrame tool_call_id != InProgressFrame tool_call_id"
@@ -538,12 +734,16 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                 self._function_call_result = None
         elif isinstance(frame, AnthropicImageMessageFrame):
             self._pending_image_frame_message = frame
+            await self._push_aggregation()
 
     async def _push_aggregation(self):
-        if not self._aggregation:
+        if not (
+            self._aggregation or self._function_call_result or self._pending_image_frame_message
+        ):
             return
 
         run_llm = False
+        properties: Optional[FunctionCallResultProperties] = None
 
         aggregation = self._aggregation
         self._reset()
@@ -551,22 +751,21 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         try:
             if self._function_call_result:
                 frame = self._function_call_result
+                properties = frame.properties
                 self._function_call_result = None
                 if frame.result:
-                    self._context.add_message(
+                    assistant_message = {"role": "assistant", "content": []}
+                    if aggregation:
+                        assistant_message["content"].append({"type": "text", "text": aggregation})
+                    assistant_message["content"].append(
                         {
-                            "role": "assistant",
-                            "content": [
-                                {"type": "text", "text": aggregation},
-                                {
-                                    "type": "tool_use",
-                                    "id": frame.tool_call_id,
-                                    "name": frame.function_name,
-                                    "input": frame.arguments,
-                                },
-                            ],
+                            "type": "tool_use",
+                            "id": frame.tool_call_id,
+                            "name": frame.function_name,
+                            "input": frame.arguments,
                         }
                     )
+                    self._context.add_message(assistant_message)
                     self._context.add_message(
                         {
                             "role": "user",
@@ -579,8 +778,13 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                             ],
                         }
                     )
-                    run_llm = True
-            else:
+                    if properties and properties.run_llm is not None:
+                        # If the tool call result has a run_llm property, use it
+                        run_llm = properties.run_llm
+                    else:
+                        # Default behavior
+                        run_llm = True
+            elif aggregation:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
             if self._pending_image_frame_message:
@@ -597,8 +801,17 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
 
+            # Emit the on_context_updated callback once the function call result is added to the context
+            if properties and properties.on_context_updated is not None:
+                await properties.on_context_updated()
+
+            # Push context frame
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
+
+            # Push timestamp frame with current time
+            timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
+            await self.push_frame(timestamp_frame)
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")

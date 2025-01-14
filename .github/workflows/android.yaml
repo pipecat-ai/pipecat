@@ -1,0 +1,48 @@
+name: android
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "examples/simple-chatbot/client/android/**"
+  pull_request:
+    branches:
+      - "**"
+    paths:
+      - "examples/simple-chatbot/client/android/**"
+  workflow_dispatch:
+    inputs:
+      sdk_git_ref:
+        type: string
+        description: "Which git ref of the app to build"
+
+concurrency:
+  group: build-android-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk:
+    name: "Simple chatbot demo"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.sdk_git_ref || github.ref }}
+
+      - name: "Install Java"
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build demo app
+        working-directory: examples/simple-chatbot/client/android
+        run: ./gradlew :simple-chatbot-client:assembleDebug
+
+      - name: Upload demo APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Simple Chatbot Android Client
+          path: examples/simple-chatbot/client/android/simple-chatbot-client/build/outputs/apk/debug/simple-chatbot-client-debug.apk

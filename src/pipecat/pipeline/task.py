@@ -1,13 +1,13 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
-
 from typing import AsyncIterable, Iterable
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.clocks.base_clock import BaseClock
@@ -23,12 +23,10 @@ from pipecat.frames.frames import (
     StartFrame,
     StopTaskFrame,
 )
-from pipecat.metrics.metrics import TTFBMetricsData, ProcessingMetricsData
+from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
-
-from loguru import logger
 
 
 class PipelineParams(BaseModel):
@@ -156,26 +154,24 @@ class PipelineTask:
         start_frame = StartFrame(
             allow_interruptions=self._params.allow_interruptions,
             enable_metrics=self._params.enable_metrics,
-            enable_usage_metrics=self._params.enable_metrics,
+            enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             clock=self._clock,
         )
-        await self._source.process_frame(start_frame, FrameDirection.DOWNSTREAM)
+        await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
 
         if self._params.enable_metrics and self._params.send_initial_empty_metrics:
-            await self._source.process_frame(
-                self._initial_metrics_frame(), FrameDirection.DOWNSTREAM
-            )
+            await self._source.queue_frame(self._initial_metrics_frame(), FrameDirection.DOWNSTREAM)
 
         running = True
         should_cleanup = True
         while running:
             try:
                 frame = await self._push_queue.get()
-                await self._source.process_frame(frame, FrameDirection.DOWNSTREAM)
+                await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
                 if isinstance(frame, EndFrame):
                     await self._wait_for_endframe()
-                running = not (isinstance(frame, StopTaskFrame) or isinstance(frame, EndFrame))
+                running = not isinstance(frame, (StopTaskFrame, EndFrame))
                 should_cleanup = not isinstance(frame, StopTaskFrame)
                 self._push_queue.task_done()
             except asyncio.CancelledError:

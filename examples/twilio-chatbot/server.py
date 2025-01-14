@@ -1,12 +1,10 @@
 import json
 
 import uvicorn
-
+from bot import run_bot
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import HTMLResponse
-
-from bot import run_bot
 
 app = FastAPI()
 
@@ -19,7 +17,7 @@ app.add_middleware(
 )
 
 
-@app.post("/start_call")
+@app.post("/")
 async def start_call():
     print("POST TwiML")
     return HTMLResponse(content=open("templates/streams.xml").read(), media_type="application/xml")

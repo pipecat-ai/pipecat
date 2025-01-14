@@ -1,15 +1,25 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
-import base64
-
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 from dataclasses import dataclass
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Union,
+)
+
+from loguru import logger
+from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -20,28 +30,35 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    FunctionCallResultFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    OutputAudioRawFrame,
+    MetricsFrame,
     StartFrame,
     SystemFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
     TextFrame,
     TranscriptionFrame,
-    TransportMessageFrame,
+    TransportMessageUrgentFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     UserStartedSpeakingFrame,
-    FunctionCallResultFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.metrics.metrics import (
+    LLMUsageMetricsData,
+    ProcessingMetricsData,
+    TTFBMetricsData,
+    TTSUsageMetricsData,
+)
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.string import match_endofsentence
 
-from loguru import logger
-
-
-RTVI_PROTOCOL_VERSION = "0.2"
+RTVI_PROTOCOL_VERSION = "0.3.0"
 
 ActionResult = Union[bool, int, float, str, list, dict]
 
@@ -273,6 +290,12 @@ class RTVITextMessageData(BaseModel):
     text: str
 
 
+class RTVIBotTranscriptionMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["bot-transcription"] = "bot-transcription"
+    data: RTVITextMessageData
+
+
 class RTVIBotLLMTextMessage(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
     type: Literal["bot-llm-text"] = "bot-llm-text"
@@ -291,20 +314,10 @@ class RTVIAudioMessageData(BaseModel):
     num_channels: int
 
 
-class RTVIBotAudioMessage(BaseModel):
+class RTVIBotTTSAudioMessage(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
-    type: Literal["bot-audio"] = "bot-audio"
+    type: Literal["bot-tts-audio"] = "bot-tts-audio"
     data: RTVIAudioMessageData
-
-
-class RTVIBotTranscriptionMessageData(BaseModel):
-    text: str
-
-
-class RTVIBotTranscriptionMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
-    type: Literal["bot-transcription"] = "bot-transcription"
-    data: RTVIBotTranscriptionMessageData
 
 
 class RTVIUserTranscriptionMessageData(BaseModel):
@@ -318,6 +331,12 @@ class RTVIUserTranscriptionMessage(BaseModel):
     label: Literal["rtvi-ai"] = "rtvi-ai"
     type: Literal["user-transcription"] = "user-transcription"
     data: RTVIUserTranscriptionMessageData
+
+
+class RTVIUserLLMTextMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["user-llm-text"] = "user-llm-text"
+    data: RTVITextMessageData
 
 
 class RTVIUserStartedSpeakingMessage(BaseModel):
@@ -340,8 +359,10 @@ class RTVIBotStoppedSpeakingMessage(BaseModel):
     type: Literal["bot-stopped-speaking"] = "bot-stopped-speaking"
 
 
-class RTVIProcessorParams(BaseModel):
-    send_bot_ready: bool = True
+class RTVIMetricsMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["metrics"] = "metrics"
+    data: Mapping[str, Any]
 
 
 class RTVIFrameProcessor(FrameProcessor):
@@ -349,10 +370,8 @@ class RTVIFrameProcessor(FrameProcessor):
         super().__init__(**kwargs)
         self._direction = direction
 
-    async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        frame = TransportMessageFrame(
-            message=model.model_dump(exclude_none=exclude_none), urgent=True
-        )
+    async def _push_transport_message_urgent(self, model: BaseModel, exclude_none: bool = True):
+        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
         await self.push_frame(frame, self._direction)
 
 
@@ -378,7 +397,7 @@ class RTVISpeakingProcessor(RTVIFrameProcessor):
             message = RTVIUserStoppedSpeakingMessage()
 
         if message:
-            await self._push_transport_message(message)
+            await self._push_transport_message_urgent(message)
 
     async def _handle_bot_speaking(self, frame: Frame):
         message = None
@@ -388,7 +407,7 @@ class RTVISpeakingProcessor(RTVIFrameProcessor):
             message = RTVIBotStoppedSpeakingMessage()
 
         if message:
-            await self._push_transport_message(message)
+            await self._push_transport_message_urgent(message)
 
 
 class RTVIUserTranscriptionProcessor(RTVIFrameProcessor):
@@ -419,7 +438,57 @@ class RTVIUserTranscriptionProcessor(RTVIFrameProcessor):
             )
 
         if message:
-            await self._push_transport_message(message)
+            await self._push_transport_message_urgent(message)
+
+
+class RTVIUserLLMTextProcessor(RTVIFrameProcessor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        await self.push_frame(frame, direction)
+
+        if isinstance(frame, OpenAILLMContextFrame):
+            await self._handle_context(frame)
+
+    async def _handle_context(self, frame: OpenAILLMContextFrame):
+        messages = frame.context.messages
+        if len(messages) > 0:
+            message = messages[-1]
+            if message["role"] == "user":
+                content = message["content"]
+                if isinstance(content, list):
+                    text = " ".join(item["text"] for item in content if "text" in item)
+                else:
+                    text = content
+                rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
+                await self._push_transport_message_urgent(rtvi_message)
+
+
+class RTVIBotTranscriptionProcessor(RTVIFrameProcessor):
+    def __init__(self):
+        super().__init__()
+        self._aggregation = ""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        await self.push_frame(frame, direction)
+
+        if isinstance(frame, UserStartedSpeakingFrame):
+            await self._push_aggregation()
+        elif isinstance(frame, TextFrame):
+            self._aggregation += frame.text
+            if match_endofsentence(self._aggregation):
+                await self._push_aggregation()
+
+    async def _push_aggregation(self):
+        if len(self._aggregation) > 0:
+            message = RTVIBotTranscriptionMessage(data=RTVITextMessageData(text=self._aggregation))
+            await self._push_transport_message_urgent(message)
+            self._aggregation = ""
 
 
 class RTVIBotLLMProcessor(RTVIFrameProcessor):
@@ -432,9 +501,12 @@ class RTVIBotLLMProcessor(RTVIFrameProcessor):
         await self.push_frame(frame, direction)
 
         if isinstance(frame, LLMFullResponseStartFrame):
-            await self._push_transport_message(RTVIBotLLMStartedMessage())
+            await self._push_transport_message_urgent(RTVIBotLLMStartedMessage())
         elif isinstance(frame, LLMFullResponseEndFrame):
-            await self._push_transport_message(RTVIBotLLMStoppedMessage())
+            await self._push_transport_message_urgent(RTVIBotLLMStoppedMessage())
+        elif type(frame) is TextFrame:
+            message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
+            await self._push_transport_message_urgent(message)
 
 
 class RTVIBotTTSProcessor(RTVIFrameProcessor):
@@ -447,12 +519,15 @@ class RTVIBotTTSProcessor(RTVIFrameProcessor):
         await self.push_frame(frame, direction)
 
         if isinstance(frame, TTSStartedFrame):
-            await self._push_transport_message(RTVIBotTTSStartedMessage())
+            await self._push_transport_message_urgent(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame):
-            await self._push_transport_message(RTVIBotTTSStoppedMessage())
+            await self._push_transport_message_urgent(RTVIBotTTSStoppedMessage())
+        elif type(frame) is TextFrame:
+            message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
+            await self._push_transport_message_urgent(message)
 
 
-class RTVIBotLLMTextProcessor(RTVIFrameProcessor):
+class RTVIMetricsProcessor(RTVIFrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -461,51 +536,31 @@ class RTVIBotLLMTextProcessor(RTVIFrameProcessor):
 
         await self.push_frame(frame, direction)
 
-        if isinstance(frame, TextFrame):
-            await self._handle_text(frame)
+        if isinstance(frame, MetricsFrame):
+            await self._handle_metrics(frame)
 
-    async def _handle_text(self, frame: TextFrame):
-        message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self._push_transport_message(message)
+    async def _handle_metrics(self, frame: MetricsFrame):
+        metrics = {}
+        for d in frame.data:
+            if isinstance(d, TTFBMetricsData):
+                if "ttfb" not in metrics:
+                    metrics["ttfb"] = []
+                metrics["ttfb"].append(d.model_dump(exclude_none=True))
+            elif isinstance(d, ProcessingMetricsData):
+                if "processing" not in metrics:
+                    metrics["processing"] = []
+                metrics["processing"].append(d.model_dump(exclude_none=True))
+            elif isinstance(d, LLMUsageMetricsData):
+                if "tokens" not in metrics:
+                    metrics["tokens"] = []
+                metrics["tokens"].append(d.value.model_dump(exclude_none=True))
+            elif isinstance(d, TTSUsageMetricsData):
+                if "characters" not in metrics:
+                    metrics["characters"] = []
+                metrics["characters"].append(d.model_dump(exclude_none=True))
 
-
-class RTVIBotTTSTextProcessor(RTVIFrameProcessor):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        await self.push_frame(frame, direction)
-
-        if isinstance(frame, TextFrame):
-            await self._handle_text(frame)
-
-    async def _handle_text(self, frame: TextFrame):
-        message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self._push_transport_message(message)
-
-
-class RTVIBotAudioProcessor(RTVIFrameProcessor):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        await self.push_frame(frame, direction)
-
-        if isinstance(frame, OutputAudioRawFrame):
-            await self._handle_audio(frame)
-
-    async def _handle_audio(self, frame: OutputAudioRawFrame):
-        encoded = base64.b64encode(frame.audio).decode("utf-8")
-        message = RTVIBotAudioMessage(
-            data=RTVIAudioMessageData(
-                audio=encoded, sample_rate=frame.sample_rate, num_channels=frame.num_channels
-            )
-        )
-        await self._push_transport_message(message)
+        message = RTVIMetricsMessage(data=metrics)
+        await self._push_transport_message_urgent(message)
 
 
 class RTVIProcessor(FrameProcessor):
@@ -513,16 +568,14 @@ class RTVIProcessor(FrameProcessor):
         self,
         *,
         config: RTVIConfig = RTVIConfig(config=[]),
-        params: RTVIProcessorParams = RTVIProcessorParams(),
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._config = config
-        self._params = params
 
         self._pipeline: FrameProcessor | None = None
-        self._pipeline_started = False
 
+        self._bot_ready = False
         self._client_ready = False
         self._client_ready_id = ""
 
@@ -530,14 +583,15 @@ class RTVIProcessor(FrameProcessor):
         self._registered_services: Dict[str, RTVIService] = {}
 
         # A task to process incoming action frames.
-        self._action_task = self.get_event_loop().create_task(self._action_task_handler())
         self._action_queue = asyncio.Queue()
+        self._action_task = self.get_event_loop().create_task(self._action_task_handler())
 
         # A task to process incoming transport messages.
-        self._message_task = self.get_event_loop().create_task(self._message_task_handler())
         self._message_queue = asyncio.Queue()
+        self._message_task = self.get_event_loop().create_task(self._message_task_handler())
 
-        self._register_event_handler("on_bot_ready")
+        self._register_event_handler("on_bot_started")
+        self._register_event_handler("on_client_ready")
 
     def register_action(self, action: RTVIAction):
         id = self._action_id(action.service, action.action)
@@ -546,17 +600,21 @@ class RTVIProcessor(FrameProcessor):
     def register_service(self, service: RTVIService):
         self._registered_services[service.name] = service
 
+    async def set_client_ready(self):
+        self._client_ready = True
+        await self._call_event_handler("on_client_ready")
+
+    async def set_bot_ready(self):
+        self._bot_ready = True
+        await self._update_config(self._config, False)
+        await self._send_bot_ready()
+
     async def interrupt_bot(self):
         await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
 
     async def send_error(self, error: str):
         message = RTVIError(data=RTVIErrorData(error=error, fatal=False))
         await self._push_transport_message(message)
-
-    async def set_client_ready(self):
-        if not self._client_ready:
-            self._client_ready = True
-            await self._maybe_send_bot_ready()
 
     async def handle_message(self, message: RTVIMessage):
         await self._message_queue.put(message)
@@ -598,6 +656,8 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, ErrorFrame):
             await self._send_error_frame(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, TransportMessageUrgentFrame):
+            await self._handle_transport_message(frame)
         # All other system frames
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
@@ -608,8 +668,6 @@ class RTVIProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             await self._stop(frame)
         # Data frames
-        elif isinstance(frame, TransportMessageFrame):
-            await self._handle_transport_message(frame)
         elif isinstance(frame, RTVIActionFrame):
             await self._action_queue.put(frame)
         # Other frames
@@ -617,25 +675,20 @@ class RTVIProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def cleanup(self):
+        await super().cleanup()
         if self._pipeline:
             await self._pipeline.cleanup()
 
     async def _start(self, frame: StartFrame):
-        self._pipeline_started = True
-        await self._maybe_send_bot_ready()
+        await self._call_event_handler("on_bot_started")
 
     async def _stop(self, frame: EndFrame):
-        if self._action_task:
-            self._action_task.cancel()
-            await self._action_task
-            self._action_task = None
-
-        if self._message_task:
-            self._message_task.cancel()
-            await self._message_task
-            self._message_task = None
+        await self._cancel_tasks()
 
     async def _cancel(self, frame: CancelFrame):
+        await self._cancel_tasks()
+
+    async def _cancel_tasks(self):
         if self._action_task:
             self._action_task.cancel()
             await self._action_task
@@ -647,9 +700,7 @@ class RTVIProcessor(FrameProcessor):
             self._message_task = None
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        frame = TransportMessageFrame(
-            message=model.model_dump(exclude_none=exclude_none), urgent=True
-        )
+        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
         await self.push_frame(frame)
 
     async def _action_task_handler(self):
@@ -670,7 +721,7 @@ class RTVIProcessor(FrameProcessor):
             except asyncio.CancelledError:
                 break
 
-    async def _handle_transport_message(self, frame: TransportMessageFrame):
+    async def _handle_transport_message(self, frame: TransportMessageUrgentFrame):
         try:
             message = RTVIMessage.model_validate(frame.message)
             await self._message_queue.put(message)
@@ -692,6 +743,8 @@ class RTVIProcessor(FrameProcessor):
                 case "update-config":
                     update_config = RTVIUpdateConfig.model_validate(message.data)
                     await self._handle_update_config(message.id, update_config)
+                case "disconnect-bot":
+                    await self.push_frame(EndFrame())
                 case "action":
                     action = RTVIActionRun.model_validate(message.data)
                     action_frame = RTVIActionFrame(message_id=message.id, rtvi_action_run=action)
@@ -711,9 +764,8 @@ class RTVIProcessor(FrameProcessor):
             logger.warning(f"Exception processing message: {e}")
 
     async def _handle_client_ready(self, request_id: str):
-        self._client_ready = True
         self._client_ready_id = request_id
-        await self._maybe_send_bot_ready()
+        await self.set_client_ready()
 
     async def _handle_describe_config(self, request_id: str):
         services = list(self._registered_services.values())
@@ -783,16 +835,7 @@ class RTVIProcessor(FrameProcessor):
             message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
             await self._push_transport_message(message)
 
-    async def _maybe_send_bot_ready(self):
-        if self._pipeline_started and self._client_ready:
-            await self._update_config(self._config, False)
-            await self._send_bot_ready()
-            await self._call_event_handler("on_bot_ready")
-
     async def _send_bot_ready(self):
-        if not self._params.send_bot_ready:
-            return
-
         message = RTVIBotReady(
             id=self._client_ready_id,
             data=RTVIBotReadyData(version=RTVI_PROTOCOL_VERSION, config=self._config.config),

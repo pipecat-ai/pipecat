@@ -34,6 +34,6 @@ Note: you can do this manually via the fly.io dashboard under the "secrets" sub-
 
 Send a post request to your running fly.io instance:
 
-`curl --location --request POST 'https://YOUR_FLY_APP_NAME/start_bot'`
+`curl --location --request POST 'https://YOUR_FLY_APP_NAME/'`
 
 This request will wait until the machine enters into a `starting` state, before returning the a room URL and token to join.

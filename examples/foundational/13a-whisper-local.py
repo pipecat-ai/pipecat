@@ -1,11 +1,14 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
 import sys
+
+from dotenv import load_dotenv
+from loguru import logger
 
 from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -15,10 +18,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.whisper import WhisperSTTService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.local.audio import LocalAudioTransport
-
-from loguru import logger
-
-from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
