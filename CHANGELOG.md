@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+<<<<<<< Updated upstream
 - Added a new `WebsocketService` based class for TTS services, containing
   base functions and retry logic.
 
@@ -21,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `run_llm`: Controls whether to trigger LLM completion
   - `on_context_updated`: Optional callback triggered after context update
 
+=======
+- Added `DeepSeekLLMService` for DeepSeek integration with an OpenAI-compatible
+  interface. Added foundational example `14l-function-calling-deepseek.py`.
+
+>>>>>>> Stashed changes
 - Added a new foundational example `07e-interruptible-playht-http.py` for easy
   testing of `PlayHTHttpTTSService`.
 
