@@ -130,6 +130,7 @@ class PlayHTTTSService(TTSService):
         self._websocket = None
         self._receive_task = None
         self._request_id = None
+        self._processing_request_id = None
 
         self._settings = {
             "sample_rate": sample_rate,
@@ -243,9 +244,12 @@ class PlayHTTTSService(TTSService):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
         self._request_id = None
+        self._processing_request_id = None
 
     async def _receive_messages(self):
         async for message in self._get_websocket():
+            if self._processing_request_id and self._request_id != self._processing_request_id:
+                continue
             if isinstance(message, bytes):
                 # Skip the WAV header message
                 if message.startswith(b"RIFF"):
@@ -259,12 +263,14 @@ class PlayHTTTSService(TTSService):
                     msg = json.loads(message)
                     if msg.get("type") == "start":
                         # Handle start of stream
-                        logger.debug(f"Started processing request: {msg.get('request_id')}")
+                        self._processing_request_id = msg.get("request_id")
+                        logger.debug(f"Started processing request: {self._processing_request_id}")
                     elif msg.get("type") == "end":
                         # Handle end of stream
                         if "request_id" in msg and msg["request_id"] == self._request_id:
                             await self.push_frame(TTSStoppedFrame())
                             self._request_id = None
+                            self._processing_request_id = None
                     elif "error" in msg:
                         logger.error(f"{self} error: {msg}")
                         await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
