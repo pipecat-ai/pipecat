@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,13 +11,11 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, 
 
 from loguru import logger
 from pydantic import BaseModel, model_validator
-from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
-    ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
     StartFrame,
@@ -29,6 +27,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import WordTTSService
+from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for ElevenLabs configuration needed
@@ -133,7 +132,7 @@ def calculate_word_times(
     return word_times
 
 
-class ElevenLabsTTSService(WordTTSService):
+class ElevenLabsTTSService(WordTTSService, WebsocketService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         optimize_streaming_latency: Optional[str] = None
@@ -178,7 +177,8 @@ class ElevenLabsTTSService(WordTTSService):
         # Finally, ElevenLabs doesn't provide information on when the bot stops
         # speaking for a while, so we want the parent class to send TTSStopFrame
         # after a short period not receiving any audio.
-        super().__init__(
+        WordTTSService.__init__(
+            self,
             aggregate_sentences=True,
             push_text_frames=False,
             push_stop_frames=True,
@@ -186,6 +186,7 @@ class ElevenLabsTTSService(WordTTSService):
             sample_rate=sample_rate_from_output_format(output_format),
             **kwargs,
         )
+        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._url = url
@@ -206,8 +207,6 @@ class ElevenLabsTTSService(WordTTSService):
         self.set_voice(voice_id)
         self._voice_settings = self._set_voice_settings()
 
-        # Websocket connection to ElevenLabs.
-        self._websocket = None
         # Indicates if we have sent TTSStartedFrame. It will reset to False when
         # there's an interruption or TTSStoppedFrame.
         self._started = False
@@ -297,7 +296,9 @@ class ElevenLabsTTSService(WordTTSService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+        self._receive_task = self.get_event_loop().create_task(
+            self._receive_task_handler(self.push_error)
+        )
         self._keepalive_task = self.get_event_loop().create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
@@ -376,30 +377,6 @@ class ElevenLabsTTSService(WordTTSService):
                 word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
                 await self.add_word_timestamps(word_times)
                 self._cumulative_time = word_times[-1][1]
-
-    async def _reconnect_websocket(self, retry_state: RetryCallState):
-        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
-        await self._disconnect_websocket()
-        await self._connect_websocket()
-
-    async def _receive_task_handler(self):
-        while True:
-            try:
-                async for attempt in AsyncRetrying(
-                    stop=stop_after_attempt(3),
-                    wait=wait_exponential(multiplier=1, min=4, max=10),
-                    before_sleep=self._reconnect_websocket,
-                    reraise=True,
-                ):
-                    with attempt:
-                        await self._receive_messages()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                message = f"{self} error receiving messages: {e}"
-                logger.error(message)
-                await self.push_error(ErrorFrame(message, fatal=True))
-                break
 
     async def _keepalive_task_handler(self):
         while True:

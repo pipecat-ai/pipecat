@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -121,6 +121,7 @@ class PollyTTSService(TTSService):
         *,
         api_key: Optional[str] = None,
         aws_access_key_id: Optional[str] = None,
+        aws_session_token: Optional[str] = None,
         region: Optional[str] = None,
         voice_id: str = "Joanna",
         sample_rate: int = 24000,
@@ -133,6 +134,7 @@ class PollyTTSService(TTSService):
             "polly",
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=api_key,
+            aws_session_token=aws_session_token,
             region_name=region,
         )
         self._settings = {

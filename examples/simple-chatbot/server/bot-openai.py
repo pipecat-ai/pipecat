@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -33,7 +33,6 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     EndFrame,
     Frame,
-    LLMMessagesFrame,
     OutputImageRawFrame,
     SpriteFrame,
 )
@@ -240,7 +239,7 @@ async def main():
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):

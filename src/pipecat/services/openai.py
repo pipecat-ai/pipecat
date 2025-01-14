@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -549,6 +550,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             return
 
         run_llm = False
+        properties: Optional[FunctionCallResultProperties] = None
 
         aggregation = self._aggregation
         self._reset()
@@ -556,6 +558,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         try:
             if self._function_call_result:
                 frame = self._function_call_result
+                properties = frame.properties
                 self._function_call_result = None
                 if frame.result:
                     self._context.add_message(
@@ -580,8 +583,13 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                             "tool_call_id": frame.tool_call_id,
                         }
                     )
-                    # Only run the LLM if there are no more function calls in progress.
-                    run_llm = not bool(self._function_calls_in_progress)
+                    if properties and properties.run_llm is not None:
+                        # If the tool call result has a run_llm property, use it
+                        run_llm = properties.run_llm
+                    else:
+                        # Default behavior is to run the LLM if there are no function calls in progress
+                        run_llm = not bool(self._function_calls_in_progress)
+
             else:
                 self._context.add_message({"role": "assistant", "content": aggregation})
 
@@ -598,6 +606,10 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
+
+            # Emit the on_context_updated callback once the function call result is added to the context
+            if properties and properties.on_context_updated is not None:
+                await properties.on_context_updated()
 
             # Push context frame
             frame = OpenAILLMContextFrame(self._context)

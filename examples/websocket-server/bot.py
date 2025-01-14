@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import BotInterruptionFrame, EndFrame, LLMMessagesFrame
+from pipecat.frames.frames import BotInterruptionFrame, EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -44,9 +44,7 @@ class SessionTimeoutHandler:
         self.background_tasks = set()
 
     async def handle_timeout(self, client_address):
-        """
-        Handles the timeout event for a session.
-        """
+        """Handles the timeout event for a session."""
         try:
             logger.info(f"Connection timeout for {client_address}")
 
@@ -66,9 +64,7 @@ class SessionTimeoutHandler:
             logger.error(f"Error during session timeout handling: {e}")
 
     async def _end_call(self):
-        """
-        Completes the session termination process after the TTS message.
-        """
+        """Completes the session termination process after the TTS message."""
         try:
             # Wait for a duration to ensure TTS has completed
             await asyncio.sleep(15)
@@ -132,7 +128,7 @@ async def main():
     async def on_client_connected(transport, client):
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([LLMMessagesFrame(messages)])
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_session_timeout")
     async def on_session_timeout(transport, client):
