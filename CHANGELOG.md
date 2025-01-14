@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `DeepSeekLLMService` for DeepSeek integration with an OpenAI-compatible
-  interface. Added foundational example `14l-function-calling-deepseek.py`.
+- Added `OpenRouter` for OpenRouter integration with an OpenAI-compatible
+  interface. Added foundational example `14m-function-calling-openrouter.py`.
   
 - Added a new `WebsocketService` based class for TTS services, containing
   base functions and retry logic.
