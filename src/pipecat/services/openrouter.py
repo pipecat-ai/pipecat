@@ -17,7 +17,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use OpenRouter, you need to `pip install pipecat-ai[openai]`. Also, set `OPENROUTER_API_KEY` environment variable."
+        "In order to use OpenRouter, you need to `pip install pipecat-ai[openrouter]`. Also, set `OPENROUTER_API_KEY` environment variable."
     )
     raise Exception(f"Missing module: {e}")
 
