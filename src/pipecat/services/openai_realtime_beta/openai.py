@@ -24,11 +24,11 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
-    TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -458,7 +458,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     async def _handle_evt_audio_transcript_delta(self, evt):
         if evt.delta:
-            await self.push_frame(TextFrame(evt.delta))
+            await self.push_frame(LLMTextFrame(evt.delta))
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
