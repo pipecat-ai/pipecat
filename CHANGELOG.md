@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new `WebsocketService` based class for TTS services, containing
+  base functions and retry logic.
+
 - Added `DeepSeekLLMService` for DeepSeek integration with an OpenAI-compatible
   interface. Added foundational example `14l-function-calling-deepseek.py`.
 
@@ -60,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modalities.
 
 ### Fixed
+
+- Fixed an issue where websocket based TTS services could incorrectly terminate
+  their connection due to a retry counter not resetting.
 
 - Fixed a `PipelineTask` issue that would cause a dangling task after stopping
   the pipeline with an `EndFrame`.
