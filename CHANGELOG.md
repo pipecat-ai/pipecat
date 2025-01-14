@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `DeepSeekLLMService` for DeepSeek integration with an OpenAI-compatible
+  interface. Added foundational example `14l-function-calling-deepseek.py`.
+
 - Added `FunctionCallResultProperties` dataclass to provide a structured way to
   control function call behavior, including:
 
