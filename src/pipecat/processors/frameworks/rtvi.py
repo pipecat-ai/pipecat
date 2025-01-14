@@ -34,14 +34,15 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMTextFrame,
     MetricsFrame,
     StartFrame,
     SystemFrame,
-    TextFrame,
     TranscriptionFrame,
     TransportMessageUrgentFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -479,7 +480,7 @@ class RTVIBotTranscriptionProcessor(RTVIFrameProcessor):
 
         if isinstance(frame, UserStartedSpeakingFrame):
             await self._push_aggregation()
-        elif isinstance(frame, TextFrame):
+        elif isinstance(frame, LLMTextFrame):
             self._aggregation += frame.text
             if match_endofsentence(self._aggregation):
                 await self._push_aggregation()
@@ -504,7 +505,7 @@ class RTVIBotLLMProcessor(RTVIFrameProcessor):
             await self._push_transport_message_urgent(RTVIBotLLMStartedMessage())
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self._push_transport_message_urgent(RTVIBotLLMStoppedMessage())
-        elif type(frame) is TextFrame:
+        elif isinstance(frame, LLMTextFrame):
             message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
             await self._push_transport_message_urgent(message)
 
@@ -522,7 +523,7 @@ class RTVIBotTTSProcessor(RTVIFrameProcessor):
             await self._push_transport_message_urgent(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame):
             await self._push_transport_message_urgent(RTVIBotTTSStoppedMessage())
-        elif type(frame) is TextFrame:
+        elif isinstance(frame, TTSTextFrame):
             message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
             await self._push_transport_message_urgent(message)
 
