@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2025, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -23,6 +23,18 @@ except ModuleNotFoundError as e:
 
 
 class OpenRouterLLMService(OpenAILLMService):
+    """A service for interacting with OpenRouter's API using the OpenAI-compatible interface.
+
+    This service extends OpenAILLMService to connect to OpenRouter's API endpoint while
+    maintaining full compatibility with OpenAI's interface and functionality.
+
+    Args:
+        api_key (str): The API key for accessing OpenRouter's API
+        base_url (str, optional): The base URL for OpenRouter API. Defaults to "https://openrouter.ai/api/v1"
+        model (str, optional): The model identifier to use. Defaults to "openai/gpt-4o-2024-11-20"
+        **kwargs: Additional keyword arguments passed to OpenAILLMService
+    """
+
     def __init__(
         self,
         *,
@@ -41,22 +53,3 @@ class OpenRouterLLMService(OpenAILLMService):
     def create_client(self, api_key=None, base_url=None, **kwargs):
         logger.debug(f"Creating OpenRouter client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
-
-    async def get_chat_completions(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> AsyncStream[ChatCompletionChunk]:
-        params = {
-            "model": self.model_name,
-            "stream": True,
-            "messages": messages,
-            "temperature": self._settings["temperature"],
-            "top_p": self._settings["top_p"],
-            "max_tokens": self._settings["max_tokens"],
-            "frequency_penalty": self._settings["frequency_penalty"],
-            "presence_penalty": self._settings["presence_penalty"],
-        }
-
-        params.update(self._settings["extra"])
-
-        chunks = await self._client.chat.completions.create(**params)
-        return chunks
