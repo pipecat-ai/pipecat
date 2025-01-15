@@ -109,10 +109,15 @@ class Observer(BaseObserver):
         self._observers = observers
 
     async def on_push_frame(
-        self, src: FrameProcessor, dst: FrameProcessor, frame: Frame, direction: FrameDirection
+        self,
+        src: FrameProcessor,
+        dst: FrameProcessor,
+        frame: Frame,
+        direction: FrameDirection,
+        timestamp: int,
     ):
         for observer in self._observers:
-            await observer.on_push_frame(src, dst, frame, direction)
+            await observer.on_push_frame(src, dst, frame, direction, timestamp)
 
 
 class PipelineTask:

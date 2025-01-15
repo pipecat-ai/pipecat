@@ -579,7 +579,12 @@ class RTVIObserver(BaseObserver):
         self._frames_seen = set()
 
     async def on_push_frame(
-        self, src: FrameProcessor, dst: FrameProcessor, frame: Frame, direction: FrameDirection
+        self,
+        src: FrameProcessor,
+        dst: FrameProcessor,
+        frame: Frame,
+        direction: FrameDirection,
+        timestamp: int,
     ):
         # If we have already seen this frame, let's skip it.
         if frame.id in self._frames_seen:
