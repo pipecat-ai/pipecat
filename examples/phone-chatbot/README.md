@@ -4,7 +4,7 @@
 
 # Dialin example
 
-Example project that demonstrates how to add phone number dialin to your Pipecat bots. We include examples for both Daily (`bot_daily.py`) and Twilio (`bot_twilio.py`), depending on who you want to use as a phone vendor.
+Example project that demonstrates how to add phone funtionality to your Pipecat bots. We include examples for Daily (`bot_daily.py`) dial-in and dial-out, and Twilio (`bot_twilio.py`) dial-in, depending on who you want to use as a phone vendor.
 
 - 🔁 Transport: Daily WebRTC
 - 💬 Speech-to-Text: Deepgram via Daily transport
@@ -35,11 +35,23 @@ Run `bot_runner.py` to handle incoming HTTP requests:
 
 `python bot_runner.py --host localhost`
 
-Then target the following URL:
+Install [ngrok](https://ngrok.com/) so your local server can receive requests from Daily's servers. Start ngrok running in a terminal window with a command like `ngrok http --domain yourdomain.ngrok.app 8000`.
 
-`POST /daily_start_bot`
+Both dial-in and dial-out are handled by the same API endpoint: `POST /daily_start_bot`.
 
-For more configuration options, please consult Daily's API documentation.
+For dial-in, Daily's servers will POST to that endpoint to start a bot session when someone calls. Follow [this guide](https://docs.daily.co/guides/products/dial-in-dial-out/dialin-pinless#provisioning-sip-interconnect-and-pinless-dialin-workflow) to enable dial-in for your domain. For the `room_creation_api` property, point at your ngrok hostname: `"room_creation_api": "https://yourdomain.ngrok.app/daily_start_bot"`.
+
+For dial-out, you'll make a POST request to `/daily_start_bot`, and include the dial-out phone number in the body of the request as `dialoutNumber`. For example:
+
+```
+url -X "POST" "http://localhost:7860/daily_start_bot" \
+     -H 'Content-Type: application/json; charset=utf-8' \
+     -d $'{
+  "dialoutNumber": "+12125551234"
+}'
+```
+
+For more configuration options, please consult [Daily's API documentation](https://docs.daily.co).
 
 
 ## Using Twilio numbers
