@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/pipecat/services/gemini_multimodal_live/gemini.py` to support different
   modalities.
 
+- Changed `DeepgramSTTService` to send `finalize` event whenever VAD detects
+  `UserStoppedSpeakingFrame`. This helps in faster transcriptions and clearing
+  the `Deepgram` audio buffer.
+
 ### Fixed
 
 - Fixed an issue where websocket based TTS services could incorrectly terminate
