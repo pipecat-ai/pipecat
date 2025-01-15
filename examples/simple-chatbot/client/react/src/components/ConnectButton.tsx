@@ -1,4 +1,7 @@
-import { useRTVIClient, useRTVIClientTransportState } from 'realtime-ai-react';
+import {
+  useRTVIClient,
+  useRTVIClientTransportState,
+} from '@pipecat-ai/client-react';
 
 export function ConnectButton() {
   const client = useRTVIClient();

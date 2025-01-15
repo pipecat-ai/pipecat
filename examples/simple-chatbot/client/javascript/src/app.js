@@ -16,8 +16,8 @@
  * - Browser with WebRTC support
  */
 
-import { RTVIClient, RTVIEvent } from 'realtime-ai';
-import { DailyTransport } from '@daily-co/realtime-ai-daily';
+import { RTVIClient, RTVIEvent } from '@pipecat-ai/client-js';
+import { DailyTransport } from '@pipecat-ai/daily-transport';
 
 /**
  * ChatbotClient handles the connection and media management for a real-time

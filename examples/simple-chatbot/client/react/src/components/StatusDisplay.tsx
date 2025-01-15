@@ -1,4 +1,4 @@
-import { useRTVIClientTransportState } from 'realtime-ai-react';
+import { useRTVIClientTransportState } from '@pipecat-ai/client-react';
 
 export function StatusDisplay() {
   const transportState = useRTVIClientTransportState();
