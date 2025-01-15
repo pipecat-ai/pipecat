@@ -2,7 +2,7 @@ import {
   RTVIClientAudio,
   RTVIClientVideo,
   useRTVIClientTransportState,
-} from 'realtime-ai-react';
+} from '@pipecat-ai/client-react';
 import { RTVIProvider } from './providers/RTVIProvider';
 import { ConnectButton } from './components/ConnectButton';
 import { StatusDisplay } from './components/StatusDisplay';
