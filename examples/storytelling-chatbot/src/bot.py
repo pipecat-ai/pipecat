@@ -16,14 +16,21 @@ from processors import StoryImageProcessor, StoryProcessor
 from prompts import CUE_USER_TURN, LLM_BASE_PROMPT, LLM_INTRO_PROMPT
 from utils.helpers import load_images, load_sounds
 
-from pipecat.frames.frames import EndFrame, LLMMessagesFrame, StopTaskFrame
+from pipecat.frames.frames import EndFrame, StopTaskFrame
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContextFrame,
+)
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.fal import FalImageGenService
+from pipecat.processors.logger import FrameLogger
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
+from pipecat.services.fal import FalImageGenService
+from pipecat.services.google import GoogleLLMService
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,
@@ -53,6 +60,7 @@ async def main(room_url, token=None):
                 camera_out_width=768,
                 camera_out_height=768,
                 transcription_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
                 vad_enabled=True,
             ),
         )
@@ -61,11 +69,12 @@ async def main(room_url, token=None):
 
         # -------------- Services --------------- #
 
-        llm_service = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm_service = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+        # llm_service = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
-        tts_service = ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"),
-            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        tts_service = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
         )
 
         fal_service_params = FalImageGenService.InputParams(
@@ -81,7 +90,7 @@ async def main(room_url, token=None):
 
         # --------------- Setup ----------------- #
 
-        message_history = [LLM_BASE_PROMPT]
+        message_history = [LLM_BASE_PROMPT, LLM_INTRO_PROMPT]
         story_pages = []
 
         # We need aggregators to keep track of user and LLM responses
@@ -99,7 +108,8 @@ async def main(room_url, token=None):
 
         # The intro pipeline is used to start
         # the story (as per LLM_INTRO_PROMPT)
-        intro_pipeline = Pipeline([llm_service, tts_service, transport.output()])
+        fl2 = FrameLogger("intro pipeline")
+        intro_pipeline = Pipeline([llm_service, tts_service, fl2, transport.output()])
 
         intro_task = PipelineTask(intro_pipeline)
 
@@ -112,7 +122,7 @@ async def main(room_url, token=None):
             await intro_task.queue_frames(
                 [
                     images["book1"],
-                    LLMMessagesFrame([LLM_INTRO_PROMPT]),
+                    context_aggregator.user().get_context_frame(),
                     DailyTransportMessageFrame(CUE_USER_TURN),
                     sounds["listening"],
                     images["book2"],
@@ -126,11 +136,15 @@ async def main(room_url, token=None):
 
         # The main story pipeline is used to continue the story based on user
         # input.
+        fl = FrameLogger("after llm")
+        fl3 = FrameLogger("after input", "red")
         main_pipeline = Pipeline(
             [
                 transport.input(),
+                fl3,
                 context_aggregator.user(),
                 llm_service,
+                fl,
                 story_processor,
                 image_processor,
                 tts_service,

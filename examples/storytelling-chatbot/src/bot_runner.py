@@ -107,14 +107,16 @@ async def start_bot(request: Request) -> JSONResponse:
 
     # Launch a new VM, or run as a shell process (not recommended)
     if os.getenv("RUN_AS_VM", False):
+        print(f"Starting virtualized bot")
         try:
             await virtualize_bot(room.url, token)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to spawn VM: {e}")
     else:
+        print(f"Starting bot with command: python -m bot -u {room.url} -t {token}")
         try:
             subprocess.Popen(
-                [f"python3 -m bot -u {room.url} -t {token}"],
+                [f"python -m bot -u {room.url} -t {token}"],
                 shell=True,
                 bufsize=1,
                 cwd=os.path.dirname(os.path.abspath(__file__)),
@@ -175,7 +177,7 @@ async def virtualize_bot(room_url: str, token: str):
             image = data[0]["config"]["image"]
 
         # Machine configuration
-        cmd = f"python3 src/bot.py -u {room_url} -t {token}"
+        cmd = f"python src/bot.py -u {room_url} -t {token}"
         cmd = cmd.split()
         worker_props = {
             "config": {
