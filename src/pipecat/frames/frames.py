@@ -5,7 +5,7 @@
 #
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, List, Literal, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Literal, Mapping, Optional, Tuple
 
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.clocks.base_clock import BaseClock
@@ -13,6 +13,9 @@ from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
+
+if TYPE_CHECKING:
+    from pipecat.observers.base_observer import BaseObserver
 
 
 def format_pts(pts: int | None):
@@ -386,6 +389,7 @@ class StartFrame(SystemFrame):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     report_only_initial_ttfb: bool = False
+    observer: Optional["BaseObserver"] = None
 
 
 @dataclass
