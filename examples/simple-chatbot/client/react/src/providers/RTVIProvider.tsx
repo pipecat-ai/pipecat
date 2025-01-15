@@ -1,7 +1,7 @@
 import { type PropsWithChildren } from 'react';
-import { RTVIClient } from 'realtime-ai';
-import { DailyTransport } from '@daily-co/realtime-ai-daily';
-import { RTVIClientProvider } from 'realtime-ai-react';
+import { RTVIClient } from '@pipecat-ai/client-js';
+import { DailyTransport } from '@pipecat-ai/daily-transport';
+import { RTVIClientProvider } from '@pipecat-ai/client-react';
 
 const transport = new DailyTransport();
 
