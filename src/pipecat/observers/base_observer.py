@@ -20,7 +20,12 @@ class BaseObserver(ABC):
 
     @abstractmethod
     async def on_push_frame(
-        self, src: FrameProcessor, dst: FrameProcessor, frame: Frame, direction: FrameDirection
+        self,
+        src: FrameProcessor,
+        dst: FrameProcessor,
+        frame: Frame,
+        direction: FrameDirection,
+        timestamp: int,
     ):
         """Abstract method to handle the event when a frame is pushed from one
         processor to another.
@@ -30,6 +35,7 @@ class BaseObserver(ABC):
             dst (FrameProcessor): The destination frame processor that will receive the frame.
             frame (Frame): The frame being transferred between processors.
             direction (FrameDirection): The direction of the frame transfer.
+            timestamp (int): The timestamp when the frame was pushed (based on the pipeline clock).
 
         This method should be implemented by subclasses to define specific behavior
         when a frame is pushed.
