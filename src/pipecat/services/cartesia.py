@@ -273,7 +273,7 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
                 logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
 
