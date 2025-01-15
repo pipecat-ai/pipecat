@@ -1,5 +1,5 @@
 import SwiftUI
-import RTVIClientIOS
+import PipecatClientIOS
 
 struct SettingsView: View {
     
