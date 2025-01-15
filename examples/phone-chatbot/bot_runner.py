@@ -100,7 +100,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, dialoutNumber=No
         # Check passed room URL exist (we assume that it already has a sip set up!)
         try:
             room: DailyRoomObject = await daily_helpers["rest"].get_room_from_url(room_url)
-        except Exception as e:
+        except Exception:
             raise HTTPException(status_code=500, detail=f"Room not found: {room_url}")
 
     print(f"Daily room: {room.url} {room.config.sip_endpoint}")

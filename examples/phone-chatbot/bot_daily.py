@@ -78,7 +78,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str, dialout_
     task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
     if dialout_number:
-        print("dialout number detected; doing dialout")
+        logger.debug("dialout number detected; doing dialout")
         # Configure some handlers for dialing out
         @transport.event_handler("on_joined")
         async def on_joined(transport, data):
@@ -102,7 +102,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str, dialout_
             # bot will then greet the user.
 
     else:
-        print("no dialout number; assuming dialin")
+        logger.debug("no dialout number; assuming dialin")
         # Different handlers for dialin
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
