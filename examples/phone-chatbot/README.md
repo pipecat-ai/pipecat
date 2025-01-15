@@ -2,7 +2,7 @@
  <img alt="pipecat" width="300px" height="auto" src="image.png">
 </div>
 
-# Dialin example
+# Phone Chatbot
 
 Example project that demonstrates how to add phone funtionality to your Pipecat bots. We include examples for Daily (`bot_daily.py`) dial-in and dial-out, and Twilio (`bot_twilio.py`) dial-in, depending on who you want to use as a phone vendor.
 
