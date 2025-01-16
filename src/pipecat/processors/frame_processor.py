@@ -58,6 +58,7 @@ class FrameProcessor:
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
+        self._observer = None
 
         # Cancellation is done through CancelFrame (a system frame). This could
         # cause other events being triggered (e.g. closing a transport) which
@@ -194,6 +195,7 @@ class FrameProcessor:
             self._enable_metrics = frame.enable_metrics
             self._enable_usage_metrics = frame.enable_usage_metrics
             self._report_only_initial_ttfb = frame.report_only_initial_ttfb
+            self._observer = frame.observer
         elif isinstance(frame, StartInterruptionFrame):
             await self._start_interruption()
             await self.stop_all_metrics()
@@ -256,11 +258,20 @@ class FrameProcessor:
 
     async def __internal_push_frame(self, frame: Frame, direction: FrameDirection):
         try:
+            timestamp = self._clock.get_time()
             if direction == FrameDirection.DOWNSTREAM and self._next:
                 logger.trace(f"Pushing {frame} from {self} to {self._next}")
+                if self._observer:
+                    await self._observer.on_push_frame(
+                        self, self._next, frame, direction, timestamp
+                    )
                 await self._next.queue_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
                 logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
+                if self._observer:
+                    await self._observer.on_push_frame(
+                        self, self._prev, frame, direction, timestamp
+                    )
                 await self._prev.queue_frame(frame, direction)
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
