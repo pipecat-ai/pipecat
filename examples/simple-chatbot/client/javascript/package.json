@@ -11,11 +11,11 @@
   "author": "",
   "license": "ISC",
   "description": "",
-  "dependencies": {
-    "@daily-co/realtime-ai-daily": "^0.2.1",
-    "realtime-ai": "^0.2.1"
-  },
   "devDependencies": {
     "vite": "^6.0.2"
+  },
+  "dependencies": {
+    "@pipecat-ai/client-js": "^0.3.2",
+    "@pipecat-ai/daily-transport": "^0.3.4"
   }
 }

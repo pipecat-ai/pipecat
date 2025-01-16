@@ -5,8 +5,8 @@ import {
   TransportState,
   TranscriptData,
   BotLLMTextData,
-} from 'realtime-ai';
-import { useRTVIClient, useRTVIClientEvent } from 'realtime-ai-react';
+} from '@pipecat-ai/client-js';
+import { useRTVIClient, useRTVIClientEvent } from '@pipecat-ai/client-react';
 import './DebugDisplay.css';
 
 export function DebugDisplay() {

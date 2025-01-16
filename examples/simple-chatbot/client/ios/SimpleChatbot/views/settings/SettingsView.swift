@@ -1,5 +1,5 @@
 import SwiftUI
-import RTVIClientIOS
+import PipecatClientIOS
 
 struct SettingsView: View {
     
@@ -7,23 +7,21 @@ struct SettingsView: View {
     
     @Binding var showingSettings: Bool
     
-    @State private var selectedMic: MediaDeviceId? = nil
     @State private var isMicEnabled: Bool = true
     @State private var backendURL: String = ""
     
     var body: some View {
-        let microphones = self.model.rtviClientIOS?.getAllMics() ?? []
         NavigationView {
             Form {
                 Section(header: Text("Audio Settings")) {
-                    List(microphones, id: \.self.id.id) { mic in
+                    List(model.availableMics, id: \.self.id.id) { mic in
                         Button(action: {
-                            self.selectMic(mic.id)
+                            model.selectMic(mic.id)
                         }) {
                             HStack {
                                 Text(mic.name)
                                 Spacer()
-                                if mic.id == self.selectedMic {
+                                if mic.id == model.selectedMic {
                                     Image(systemName: "checkmark")
                                 }
                             }
@@ -53,14 +51,9 @@ struct SettingsView: View {
         }
     }
     
-    private func selectMic(_ mic: MediaDeviceId) {
-        self.selectedMic = mic
-        self.model.rtviClientIOS?.updateMic(micId: mic, completion: nil)
-    }
-    
     private func saveSettings() {
         let newSettings = SettingsPreference(
-            selectedMic: selectedMic?.id,
+            selectedMic: model.selectedMic?.id,
             enableMic: isMicEnabled,
             backendURL: backendURL
         )
@@ -69,11 +62,6 @@ struct SettingsView: View {
     
     private func loadSettings() {
         let savedSettings = SettingsManager.getSettings()
-        if let selectedMic = savedSettings.selectedMic {
-            self.selectedMic = MediaDeviceId(id: selectedMic)
-        } else {
-            self.selectedMic = nil
-        }
         self.isMicEnabled = savedSettings.enableMic
         self.backendURL = savedSettings.backendURL
     }

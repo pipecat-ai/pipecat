@@ -1,7 +1,7 @@
 import SwiftUI
 
-import RTVIClientIOSDaily
-import RTVIClientIOS
+import PipecatClientIOSDaily
+import PipecatClientIOS
 
 class CallContainerModel: ObservableObject {
     
@@ -24,9 +24,19 @@ class CallContainerModel: ObservableObject {
     
     var rtviClientIOS: RTVIClient?
     
+    @Published var selectedMic: MediaDeviceId? = nil {
+        didSet {
+            guard let selectedMic else { return } // don't store nil
+            var settings = SettingsManager.getSettings()
+            settings.selectedMic = selectedMic.id
+            SettingsManager.updateSettings(settings: settings)
+        }
+    }
+    @Published var availableMics: [MediaDeviceInfo] = []
+    
     init() {
         // Changing the log level
-        RTVIClientIOS.setLogLevel(.warn)
+        PipecatClientIOS.setLogLevel(.warn)
     }
     
     @MainActor
@@ -52,14 +62,18 @@ class CallContainerModel: ObservableObject {
         )
         self.rtviClientIOS?.delegate = self
         self.rtviClientIOS?.start() { result in
-            if case .failure(let error) = result {
+            switch result {
+            case .failure(let error):
                 self.showError(message: error.localizedDescription)
                 self.rtviClientIOS = nil
+            case .success():
+                // Apply initial mic preference
+                if let selectedMic = currentSettings.selectedMic {
+                    self.selectMic(MediaDeviceId(id: selectedMic))
+                }
+                // Populate available devices list
+                self.availableMics = self.rtviClientIOS?.getAllMics() ?? []
             }
-        }
-        // Selecting the mic based on the preferences
-        if let selectedMic = currentSettings.selectedMic {
-            self.rtviClientIOS?.updateMic(micId: MediaDeviceId(id:selectedMic), completion: nil)
         }
         self.saveCredentials(backendURL: baseUrl)
     }
@@ -114,6 +128,11 @@ class CallContainerModel: ObservableObject {
         SettingsManager.updateSettings(settings: currentSettings)
     }
     
+    @MainActor
+    func selectMic(_ mic: MediaDeviceId) {
+        self.selectedMic = mic
+        self.rtviClientIOS?.updateMic(micId: mic, completion: nil)
+    }
 }
 
 extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
@@ -196,4 +215,15 @@ extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
         }
     }
     
+    func onAvailableMicsUpdated(mics: [MediaDeviceInfo]) {
+        Task { @MainActor in
+            self.availableMics = mics
+        }
+    }
+    
+    func onMicUpdated(mic: MediaDeviceInfo?) {
+        Task { @MainActor in
+            self.selectedMic = mic?.id
+        }
+    }
 }

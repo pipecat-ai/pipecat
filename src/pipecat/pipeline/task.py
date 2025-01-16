@@ -5,10 +5,10 @@
 #
 
 import asyncio
-from typing import AsyncIterable, Iterable
+from typing import AsyncIterable, Iterable, List
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
@@ -24,20 +24,31 @@ from pipecat.frames.frames import (
     StopTaskFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
+from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
 
 
 class PipelineParams(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     allow_interruptions: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     send_initial_empty_metrics: bool = True
     report_only_initial_ttfb: bool = False
+    observers: List[BaseObserver] = []
 
 
 class Source(FrameProcessor):
+    """This is the source processor that is linked at the beginning of the
+    pipeline given to the pipeline task. It allows us to easily push frames
+    downstream to the pipeline and also receive upstream frames coming from the
+    pipeline.
+
+    """
+
     def __init__(self, up_queue: asyncio.Queue):
         super().__init__()
         self._up_queue = up_queue
@@ -68,6 +79,12 @@ class Source(FrameProcessor):
 
 
 class Sink(FrameProcessor):
+    """This is the sink processor that is linked at the end of the pipeline
+    given to the pipeline task. It allows us to receive downstream frames and
+    act on them, for example, waiting to receive an EndFrame.
+
+    """
+
     def __init__(self, down_queue: asyncio.Queue):
         super().__init__()
         self._down_queue = down_queue
@@ -78,6 +95,29 @@ class Sink(FrameProcessor):
         # We really just want to know when the EndFrame reached the sink.
         if isinstance(frame, EndFrame):
             await self._down_queue.put(frame)
+
+
+class Observer(BaseObserver):
+    """This is a pipeline frame observer that is used as a proxy to the user
+    provided observers. That is, this is the only observer passed to the frame
+    processors. Then, every time a frame is pushed this observer will call all
+    the observers registered to the pipeline task.
+
+    """
+
+    def __init__(self, observers: List[BaseObserver] = []):
+        self._observers = observers
+
+    async def on_push_frame(
+        self,
+        src: FrameProcessor,
+        dst: FrameProcessor,
+        frame: Frame,
+        direction: FrameDirection,
+        timestamp: int,
+    ):
+        for observer in self._observers:
+            await observer.on_push_frame(src, dst, frame, direction, timestamp)
 
 
 class PipelineTask:
@@ -104,6 +144,8 @@ class PipelineTask:
 
         self._sink = Sink(self._down_queue)
         pipeline.link(self._sink)
+
+        self._observer = Observer(params.observers)
 
     def has_finished(self):
         return self._finished
@@ -156,6 +198,7 @@ class PipelineTask:
             enable_metrics=self._params.enable_metrics,
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
+            observer=self._observer,
             clock=self._clock,
         )
         await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
@@ -180,6 +223,7 @@ class PipelineTask:
         if should_cleanup:
             await self._source.cleanup()
             await self._pipeline.cleanup()
+            await self._sink.cleanup()
         # We just enqueue None to terminate the task gracefully.
         self._process_up_task.cancel()
         await self._process_up_task

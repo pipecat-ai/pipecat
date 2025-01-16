@@ -47,9 +47,7 @@ class MetricsLogger(FrameProcessor):
                 elif isinstance(d, LLMUsageMetricsData):
                     tokens = d.value
                     print(
-                        f"!!! MetricsFrame: {frame}, tokens: {
-                            tokens.prompt_tokens}, characters: {
-                            tokens.completion_tokens}"
+                        f"!!! MetricsFrame: {frame}, tokens: {tokens.prompt_tokens}, characters: {tokens.completion_tokens}"
                     )
                 elif isinstance(d, TTSUsageMetricsData):
                     print(f"!!! MetricsFrame: {frame}, characters: {d.value}")

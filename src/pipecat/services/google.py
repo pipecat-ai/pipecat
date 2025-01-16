@@ -23,9 +23,9 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
+    LLMTextFrame,
     LLMUpdateSettingsFrame,
     OpenAILLMContextAssistantTimestampFrame,
-    TextFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -698,7 +698,7 @@ class GoogleLLMService(LLMService):
                 try:
                     for c in chunk.parts:
                         if c.text:
-                            await self.push_frame(TextFrame(c.text))
+                            await self.push_frame(LLMTextFrame(c.text))
                         elif c.function_call:
                             logger.debug(f"!!! Function call: {c.function_call}")
                             args = type(c.function_call).to_dict(c.function_call).get("args", {})

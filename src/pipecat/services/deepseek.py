@@ -1,8 +1,9 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
 
 from typing import List
 
@@ -19,21 +20,21 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Cerebras, you need to `pip install pipecat-ai[cerebras]`. Also, set `CEREBRAS_API_KEY` environment variable."
+        "In order to use DeepSeek, you need to `pip install pipecat-ai[deepseek]`. Also, set `DEEPSEEK_API_KEY` environment variable."
     )
     raise Exception(f"Missing module: {e}")
 
 
-class CerebrasLLMService(OpenAILLMService):
-    """A service for interacting with Cerebras's API using the OpenAI-compatible interface.
+class DeepSeekLLMService(OpenAILLMService):
+    """A service for interacting with DeepSeek's API using the OpenAI-compatible interface.
 
-    This service extends OpenAILLMService to connect to Cerebras's API endpoint while
+    This service extends OpenAILLMService to connect to DeepSeek's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
 
     Args:
-        api_key (str): The API key for accessing Cerebras's API
-        base_url (str, optional): The base URL for Cerebras API. Defaults to "https://api.cerebras.ai/v1"
-        model (str, optional): The model identifier to use. Defaults to "llama-3.3-70b"
+        api_key (str): The API key for accessing DeepSeek's API
+        base_url (str, optional): The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1"
+        model (str, optional): The model identifier to use. Defaults to "deepseek-chat"
         **kwargs: Additional keyword arguments passed to OpenAILLMService
     """
 
@@ -41,15 +42,15 @@ class CerebrasLLMService(OpenAILLMService):
         self,
         *,
         api_key: str,
-        base_url: str = "https://api.cerebras.ai/v1",
-        model: str = "llama-3.3-70b",
+        base_url: str = "https://api.deepseek.com/v1",
+        model: str = "deepseek-chat",
         **kwargs,
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
-        """Create OpenAI-compatible client for Cerebras API endpoint."""
-        logger.debug(f"Creating Cerebras client with api {base_url}")
+        """Create OpenAI-compatible client for DeepSeek API endpoint."""
+        logger.debug(f"Creating DeepSeek client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
     async def get_chat_completions(
@@ -73,10 +74,12 @@ class CerebrasLLMService(OpenAILLMService):
             "messages": messages,
             "tools": context.tools,
             "tool_choice": context.tool_choice,
-            "seed": self._settings["seed"],
+            "stream_options": {"include_usage": True},
+            "frequency_penalty": self._settings["frequency_penalty"],
+            "presence_penalty": self._settings["presence_penalty"],
             "temperature": self._settings["temperature"],
             "top_p": self._settings["top_p"],
-            "max_completion_tokens": self._settings["max_completion_tokens"],
+            "max_tokens": self._settings["max_tokens"],
         }
 
         params.update(self._settings["extra"])
