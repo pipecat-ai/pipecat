@@ -51,6 +51,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `examples/foundational/26d-gemini-multimodal-live-text.py` which is
   using Gemini as TEXT modality and using another TTS provider for TTS process.
 
+- Added `text_chunker` as utils and using it in `ElevenLabsTTSService` to
+  support chunked text as per their doc which recommends sending text word by
+  word, also Possible fix of #983. 
+
 ### Changed
 
 - Modified `OpenAIAssistantContextAggregator` to support controlled completions

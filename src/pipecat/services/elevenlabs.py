@@ -29,6 +29,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import WordTTSService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.string import text_chunker
 
 # See .env.example for ElevenLabs configuration needed
 try:
@@ -407,7 +408,9 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
                     self._started = True
                     self._cumulative_time = 0
 
-                await self._send_text(text)
+                for text_chunk in text_chunker(text):
+                    # Ref: https://elevenlabs.io/docs/developer-guides/reducing-latency#3-use-the-input-streaming-websocket
+                    await self._send_text(text_chunk)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")

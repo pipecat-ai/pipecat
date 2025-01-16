@@ -5,6 +5,7 @@
 #
 
 import re
+import typing
 
 ENDOFSENTENCE_PATTERN_STR = r"""
     (?<![A-Z])       # Negative lookbehind: not preceded by an uppercase letter (e.g., "U.S.A.")
@@ -23,3 +24,21 @@ ENDOFSENTENCE_PATTERN = re.compile(ENDOFSENTENCE_PATTERN_STR, re.VERBOSE)
 def match_endofsentence(text: str) -> int:
     match = ENDOFSENTENCE_PATTERN.search(text.rstrip())
     return match.end() if match else 0
+
+
+def text_chunker(chunks: str) -> str:
+    """Used during input streaming to chunk text blocks and set last char to space"""
+    splitters = (".", ",", "?", "!", ";", ":", "—", "-", "(", ")", "[", "]", "}", " ")
+    buffer = ""
+    for text in chunks:
+        if buffer.endswith(splitters):
+            yield buffer if buffer.endswith(" ") else buffer + " "
+            buffer = text
+        elif text.startswith(splitters):
+            output = buffer + text[0]
+            yield output if output.endswith(" ") else output + " "
+            buffer = text[1:]
+        else:
+            buffer += text
+    if buffer != "":
+        yield buffer + " "
