@@ -13,7 +13,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section(header: Text("Audio Settings")) {
+                Section {
                     List(model.availableMics, id: \.self.id.id) { mic in
                         Button(action: {
                             model.selectMic(mic.id)
@@ -26,6 +26,11 @@ struct SettingsView: View {
                                 }
                             }
                         }
+                    }
+                } header: {
+                    VStack(alignment: .leading) {
+                        Text("Audio Settings")
+                        Text("(No selection = system default)")
                     }
                 }
                 Section(header: Text("Start options")) {
