@@ -89,13 +89,19 @@ class ChatbotClient {
     });
     this.dailyCallObject.on("track-started", (evt) => {
       if (evt.track.kind === "audio" && evt.participant.local === false) {
+        this.log("Audio track started.")
         this.setupAudioTrack(evt.track);
+        this.log("Will send the audio message to play the audio")
+        this.dailyCallObject.sendAppMessage("playable")
       }
     });
     this.dailyCallObject.on("track-stopped", this.handleEventToConsole.bind(this));
     this.dailyCallObject.on("participant-joined", this.handleEventToConsole.bind(this));
     this.dailyCallObject.on("participant-updated", this.handleEventToConsole.bind(this));
-    this.dailyCallObject.on("participant-left", this.handleEventToConsole.bind(this));
+    this.dailyCallObject.on("participant-left", () => {
+      // When the bot leaves, we are also disconnecting from the call
+      this.disconnect()
+    });
     this.dailyCallObject.on("left-meeting", () => {
       this.updateStatus('Disconnected');
       this.connectBtn.disabled = false;
@@ -185,6 +191,7 @@ class ChatbotClient {
       try {
         // Disconnect the RTVI client
         await this.dailyCallObject.leave();
+        await this.dailyCallObject.destroy();
         this.dailyCallObject = null;
 
         // Clean up audio

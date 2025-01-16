@@ -47,7 +47,7 @@ async def main():
         @transport.event_handler("on_app_message")
         async def on_app_message(transport, message, sender):
             logger.debug(f"Received app message: {message} - {sender}")
-            if "message" not in message:
+            if "playable" not in message:
                 return
             await task.queue_frames(
                 [TTSSpeakFrame(f"Hello there, how are you doing today ?"), EndFrame()]
