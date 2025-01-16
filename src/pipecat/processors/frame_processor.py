@@ -181,9 +181,11 @@ class FrameProcessor:
             await self.__input_queue.put((frame, direction, callback))
 
     async def pause_processing_frames(self):
+        logger.trace(f"{self}: pausing frame processing")
         self.__should_block_frames = True
 
     async def resume_processing_frames(self):
+        logger.trace("f{self}: resuming frame processing")
         self.__input_event.set()
         self.__should_block_frames = False
 
@@ -284,8 +286,10 @@ class FrameProcessor:
         while running:
             try:
                 if self.__should_block_frames:
+                    logger.trace(f"{self}: frame processing paused")
                     await self.__input_event.wait()
                     self.__input_event.clear()
+                    logger.trace(f"{self}: frame processing resumed")
 
                 (frame, direction, callback) = await self.__input_queue.get()
 
@@ -300,10 +304,10 @@ class FrameProcessor:
 
                 self.__input_queue.task_done()
             except asyncio.CancelledError:
-                logger.trace(f"Cancelled input task in {self}")
+                logger.trace(f"{self}: cancelled input task")
                 break
             except Exception as e:
-                logger.exception(f"Uncaught exception in {self}: {e}")
+                logger.exception(f"{self}: Uncaught exception {e}")
                 await self.push_error(ErrorFrame(str(e)))
 
     def __create_push_task(self):
@@ -323,10 +327,10 @@ class FrameProcessor:
                 running = not isinstance(frame, EndFrame)
                 self.__push_queue.task_done()
             except asyncio.CancelledError:
-                logger.trace(f"Cancelled push task in {self}")
+                logger.trace(f"{self}: cancelled push task")
                 break
             except Exception as e:
-                logger.exception(f"Uncaught exception in {self}: {e}")
+                logger.exception(f"{self}: Uncaught exception {e}")
                 await self.push_error(ErrorFrame(str(e)))
 
     async def _call_event_handler(self, event_name: str, *args, **kwargs):
