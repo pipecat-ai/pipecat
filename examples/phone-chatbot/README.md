@@ -94,4 +94,4 @@ If you're using Twilio as a number vendor:
 
 ## Need to do something more advanced?
 
-This demo covers the basics of bot telephony. If you want to know more about working with PSTN / SIP, please ping us on [Discord](https://discord.gg/pipecat).
+This demo covers the basics of bot telephony. If you want to know more about working with PSTN / SIP, please ping us on [Discord](https://discord.gg/pipecat)!

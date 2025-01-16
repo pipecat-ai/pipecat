@@ -79,12 +79,13 @@ async def main(room_url: str, token: str, callId: str, callDomain: str, dialout_
 
     if dialout_number:
         logger.debug("dialout number detected; doing dialout")
+
         # Configure some handlers for dialing out
         @transport.event_handler("on_joined")
         async def on_joined(transport, data):
             logger.debug(f"Joined; starting dialout to: {dialout_number}")
             await transport.start_dialout({"phoneNumber": dialout_number})
-        
+
         @transport.event_handler("on_dialout_connected")
         async def on_dialout_connected(transport, data):
             logger.debug(f"Dial-out connected: {data}")
@@ -92,7 +93,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str, dialout_
         @transport.event_handler("on_dialout_answered")
         async def on_dialout_answered(transport, data):
             logger.debug(f"Dial-out answered: {data}")
-            
+
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
@@ -103,6 +104,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str, dialout_
 
     else:
         logger.debug("no dialout number; assuming dialin")
+
         # Different handlers for dialin
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

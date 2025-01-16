@@ -78,10 +78,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, dialoutNumber=No
         # Create base properties with SIP settings
         properties = DailyRoomProperties(
             sip=DailyRoomSipParams(
-                display_name="dialin-user", 
-                video=False, 
-                sip_mode="dial-in", 
-                num_endpoints=1
+                display_name="dialin-user", video=False, sip_mode="dial-in", num_endpoints=1
             )
         )
 
@@ -89,9 +86,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, dialoutNumber=No
         if dialoutNumber:
             properties.enable_dialout = True
 
-        params = DailyRoomParams(
-            properties=properties
-        )
+        params = DailyRoomParams(properties=properties)
 
         print(f"Creating new room...")
         room: DailyRoomObject = await daily_helpers["rest"].create_room(params=params)
@@ -171,6 +166,7 @@ async def twilio_start_bot(request: Request):
     )
     return str(resp)
 
+
 @app.post("/daily_start_bot")
 async def daily_start_bot(request: Request) -> JSONResponse:
     # The /daily_start_bot is invoked when a call is received on Daily's SIP URI
@@ -190,9 +186,13 @@ async def daily_start_bot(request: Request) -> JSONResponse:
         callDomain = data.get("callDomain", None)
         dialoutNumber = data.get("dialoutNumber", None)
     except Exception:
-        raise HTTPException(status_code=500, detail="Missing properties 'callId', 'callDomain', or 'dialoutNumber'")
+        raise HTTPException(
+            status_code=500, detail="Missing properties 'callId', 'callDomain', or 'dialoutNumber'"
+        )
 
-    room: DailyRoomObject = await _create_daily_room(room_url, callId, callDomain, dialoutNumber, "daily")
+    room: DailyRoomObject = await _create_daily_room(
+        room_url, callId, callDomain, dialoutNumber, "daily"
+    )
 
     # Grab a token for the user to join with
     return JSONResponse({"room_url": room.url, "sipUri": room.config.sip_endpoint})
