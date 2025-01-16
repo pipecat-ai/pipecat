@@ -13,7 +13,7 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from processors import StoryImageProcessor, StoryProcessor
-from prompts import CUE_USER_TURN, LLM_BASE_PROMPT, LLM_INTRO_PROMPT
+from prompts import CUE_USER_TURN, LLM_BASE_PROMPT
 from utils.helpers import load_images, load_sounds
 
 from pipecat.frames.frames import EndFrame, StopTaskFrame
@@ -90,7 +90,7 @@ async def main(room_url, token=None):
 
         # --------------- Setup ----------------- #
 
-        message_history = [LLM_BASE_PROMPT, LLM_INTRO_PROMPT]
+        message_history = [LLM_BASE_PROMPT]
         story_pages = []
 
         # We need aggregators to keep track of user and LLM responses
@@ -109,34 +109,17 @@ async def main(room_url, token=None):
         # The intro pipeline is used to start
         # the story (as per LLM_INTRO_PROMPT)
         fl2 = FrameLogger("intro pipeline")
-        intro_pipeline = Pipeline([llm_service, tts_service, fl2, transport.output()])
-
-        intro_task = PipelineTask(intro_pipeline)
 
         logger.debug("Waiting for participant...")
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            logger.debug("Participant joined, storytime commence!")
-            await transport.capture_participant_transcription(participant["id"])
-            await intro_task.queue_frames(
-                [
-                    images["book1"],
-                    context_aggregator.user().get_context_frame(),
-                    DailyTransportMessageFrame(CUE_USER_TURN),
-                    sounds["listening"],
-                    images["book2"],
-                    StopTaskFrame(),
-                ]
-            )
+
 
         # We run the intro pipeline. This will start the transport. The intro
         # task will exit after StopTaskFrame is processed.
-        await runner.run(intro_task)
 
         # The main story pipeline is used to continue the story based on user
         # input.
-        fl = FrameLogger("after llm")
+        fl = FrameLogger("after image processor", "green")
         fl3 = FrameLogger("after input", "red")
         main_pipeline = Pipeline(
             [
@@ -144,9 +127,9 @@ async def main(room_url, token=None):
                 fl3,
                 context_aggregator.user(),
                 llm_service,
-                fl,
                 story_processor,
                 image_processor,
+                fl,
                 tts_service,
                 transport.output(),
                 context_aggregator.assistant(),
@@ -155,9 +138,22 @@ async def main(room_url, token=None):
 
         main_task = PipelineTask(main_pipeline)
 
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            logger.debug("Participant joined, storytime commence!")
+            await transport.capture_participant_transcription(participant["id"])
+            await main_task.queue_frames(
+                [
+                    images["book1"],
+                    context_aggregator.user().get_context_frame(),
+                    DailyTransportMessageFrame(CUE_USER_TURN),
+                    # sounds["listening"],
+                    images["book2"],
+                ]
+            )
+
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await intro_task.queue_frame(EndFrame())
             await main_task.queue_frame(EndFrame())
 
         @transport.event_handler("on_call_state_updated")
