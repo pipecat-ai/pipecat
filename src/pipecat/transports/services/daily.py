@@ -202,7 +202,9 @@ class DailyTransportClient(EventHandler):
         self._joined = False
         self._leave_counter = 0
 
-        self._executor = ThreadPoolExecutor(max_workers=5)
+        # We use the executor to cleanup the client. We just do it from one
+        # place, so only one thread is really needed.
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
         self._client: CallClient = CallClient(event_handler=self)
 
@@ -466,9 +468,11 @@ class DailyTransportClient(EventHandler):
         return await asyncio.wait_for(future, timeout=10)
 
     async def cleanup(self):
-        await self._loop.run_in_executor(self._executor, self._cleanup)
         self._callback_task.cancel()
         await self._callback_task
+        # Make sure we don't block the event loop in case `client.release()`
+        # takes extra time.
+        await self._loop.run_in_executor(self._executor, self._cleanup)
 
     def _cleanup(self):
         if self._client:
