@@ -238,7 +238,7 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
     async def flush_audio(self):
         if not self._context_id or not self._websocket:
             return
-        logger.trace("Flushing audio")
+        logger.trace(f"{self}: flushing audio")
         msg = self._build_msg(text="", continue_transcript=False)
         await self._websocket.send(msg)
 

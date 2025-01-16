@@ -138,17 +138,19 @@ class BaseInputTransport(FrameProcessor):
     # Audio input
     #
 
-    async def _vad_analyze(self, audio_frames: bytes) -> VADState:
+    async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
         state = VADState.QUIET
         vad_analyzer = self.vad_analyzer()
         if vad_analyzer:
+            logger.trace(f"{self}: analyzing VAD on {audio_frame}")
             state = await self.get_event_loop().run_in_executor(
-                self._executor, vad_analyzer.analyze_audio, audio_frames
+                self._executor, vad_analyzer.analyze_audio, audio_frame.audio
             )
+            logger.trace(f"{self}: done analyzing VAD on {audio_frame}")
         return state
 
-    async def _handle_vad(self, audio_frames: bytes, vad_state: VADState):
-        new_vad_state = await self._vad_analyze(audio_frames)
+    async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState):
+        new_vad_state = await self._vad_analyze(audio_frame)
         if (
             new_vad_state != vad_state
             and new_vad_state != VADState.STARTING
@@ -181,7 +183,7 @@ class BaseInputTransport(FrameProcessor):
                 # Check VAD and push event if necessary. We just care about
                 # changes from QUIET to SPEAKING and vice versa.
                 if self._params.vad_enabled:
-                    vad_state = await self._handle_vad(frame.audio, vad_state)
+                    vad_state = await self._handle_vad(frame, vad_state)
                     audio_passthrough = self._params.vad_audio_passthrough
 
                 # Push audio downstream if passthrough.
