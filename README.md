@@ -160,14 +160,23 @@ From the root of this repo, run the following:
 
 ```shell
 pip install -r dev-requirements.txt
-python -m build
 ```
 
-This builds the package. To use the package locally (e.g. to run sample files), run
+This will install the necessary development dependencies. Also, make sure you install the git pre-commit hooks:
+
+```shell
+pre-commit install
+```
+
+The hooks will just save you time when you submit a PR by making sure your code follows the project rules.
+
+To use the package locally (e.g. to run sample files), run:
 
 ```shell
 pip install --editable ".[option,...]"
 ```
+
+The `--editable` option makes sure you don't have to run `pip install` again and you can just edit the project files locally.
 
 If you want to use this package from another directory, you can run:
 
