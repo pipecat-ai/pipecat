@@ -127,7 +127,7 @@ class ChatbotClient {
   }
 
   async fetchRoomInfo() {
-    let connectUrl = 'http://0.0.0.0:7860/connect'
+    let connectUrl = '/connect'
     let res = await fetch(connectUrl, {
       method: "POST",
       mode: "cors",
