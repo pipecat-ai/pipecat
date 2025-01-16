@@ -70,7 +70,7 @@ class AudioTranscriber:
 
             history = ""
             for msg in previous_messages:
-                content = msg.get("content")
+                content = msg.get("content", [])
                 if isinstance(content, str):
                     history += f"{msg.get('role')}: {content}\n"
                 else:
