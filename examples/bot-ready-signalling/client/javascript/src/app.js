@@ -110,6 +110,20 @@ class ChatbotClient {
     this.botAudio.srcObject = new MediaStream([track]);
   }
 
+  async fetchRoomInfo() {
+    let connectUrl = 'http://0.0.0.0:7860/connect'
+    let res = await fetch(connectUrl, {
+      method: "POST",
+      mode: "cors",
+      headers: new Headers({
+        "Content-Type": "application/json"
+      }),
+    })
+    if (res.ok) {
+      return res.json();
+    }
+  }
+
   /**
    * Initialize and connect to the bot
    * This sets up the RTVI client, initializes devices, and establishes the connection
@@ -124,13 +138,15 @@ class ChatbotClient {
       // Set up listeners for media track events
       this.setupTrackListeners();
 
+      this.log('Creating the bot...');
+      let roomInfo = await this.fetchRoomInfo()
+
       // Connect to the bot
       this.log('Connecting to bot...');
       // Only for making debugger easier
       window.callObject = this.dailyCallObject;
       await this.dailyCallObject.join({
-        //TODO fixme, use the URL that we are going to receive from bot
-        url: "https://filipi.daily.co/public",
+        url: roomInfo.room_url,
       });
 
       this.log('Connection complete');
