@@ -91,8 +91,6 @@ class ChatbotClient {
       if (evt.track.kind === "audio" && evt.participant.local === false) {
         this.log("Audio track started.")
         this.setupAudioTrack(evt.track);
-        this.log("Will send the audio message to play the audio")
-        this.dailyCallObject.sendAppMessage("playable")
       }
     });
     this.dailyCallObject.on("track-stopped", this.handleEventToConsole.bind(this));
@@ -116,7 +114,8 @@ class ChatbotClient {
    * Handles both initial setup and track updates
    */
   setupAudioTrack(track) {
-    this.log('Setting up audio track');
+    this.log(`Setting up audio track, track state: ${track.readyState}, muted: ${track.muted}`);
+
     // Check if we're already playing this track
     if (this.botAudio.srcObject) {
       const oldTrack = this.botAudio.srcObject.getAudioTracks()[0];
@@ -124,6 +123,11 @@ class ChatbotClient {
     }
     // Create a new MediaStream with the track and set it as the audio source
     this.botAudio.srcObject = new MediaStream([track]);
+    this.botAudio.onplaying = async (event) => {
+      this.log("onplaying")
+      this.log("Will send the audio message to play the audio at the next tick")
+      this.dailyCallObject.sendAppMessage("playable")
+    }
   }
 
   async fetchRoomInfo() {
