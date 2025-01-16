@@ -71,7 +71,7 @@ class ChatbotClient {
   }
 
   handleEventToConsole (evt) {
-    console.log("Received event: ", evt);
+    this.log(`Received event: ${evt.action}`);
   };
 
   /**
@@ -81,18 +81,28 @@ class ChatbotClient {
   setupTrackListeners() {
     if (!this.dailyCallObject) return;
 
-    this.dailyCallObject.on("joined-meeting", this.handleEventToConsole);
+    this.dailyCallObject.on("joined-meeting", () => {
+      this.updateStatus('Connected');
+      this.connectBtn.disabled = true;
+      this.disconnectBtn.disabled = false;
+      this.log('Client connected');
+    });
     this.dailyCallObject.on("track-started", (evt) => {
       if (evt.track.kind === "audio" && evt.participant.local === false) {
         this.setupAudioTrack(evt.track);
       }
     });
-    this.dailyCallObject.on("track-stopped", this.handleEventToConsole);
-    this.dailyCallObject.on("participant-joined", this.handleEventToConsole);
-    this.dailyCallObject.on("participant-updated", this.handleEventToConsole);
-    this.dailyCallObject.on("participant-left", this.handleEventToConsole);
-    this.dailyCallObject.on("left-meeting", this.handleEventToConsole);
-    this.dailyCallObject.on("error", this.handleEventToConsole);
+    this.dailyCallObject.on("track-stopped", this.handleEventToConsole.bind(this));
+    this.dailyCallObject.on("participant-joined", this.handleEventToConsole.bind(this));
+    this.dailyCallObject.on("participant-updated", this.handleEventToConsole.bind(this));
+    this.dailyCallObject.on("participant-left", this.handleEventToConsole.bind(this));
+    this.dailyCallObject.on("left-meeting", () => {
+      this.updateStatus('Disconnected');
+      this.connectBtn.disabled = false;
+      this.disconnectBtn.disabled = true;
+      this.log('Client disconnected');
+    });
+    this.dailyCallObject.on("error", this.handleEventToConsole.bind(this));
   }
 
   /**
