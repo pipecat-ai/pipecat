@@ -253,4 +253,4 @@ class DeepgramSTTService(STTService):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
             await self._connection.finalize()
-            logger.trace(f"Triggering finalize event on: {frame.name=}, {direction=}")
+            logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
