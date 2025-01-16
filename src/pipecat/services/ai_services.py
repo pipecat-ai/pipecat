@@ -354,6 +354,10 @@ class TTSService(AIService):
         if self._text_filter:
             self._text_filter.reset_interruption()
             text = self._text_filter.filter(text)
+            # Check again after running the filter
+            text = text.strip()
+            if not text:
+                return
         await self.process_generator(self.run_tts(text))
         await self.stop_processing_metrics()
         if self._push_text_frames:
