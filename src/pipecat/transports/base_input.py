@@ -35,7 +35,9 @@ class BaseInputTransport(FrameProcessor):
 
         self._params = params
 
-        self._executor = ThreadPoolExecutor(max_workers=5)
+        # We read audio from a single queue one at a time and we then run VAD in
+        # a thread. Therefore, only one thread should be necessary.
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
         # Task to process incoming audio (VAD) and push audio frames downstream
         # if passthrough is enabled.
