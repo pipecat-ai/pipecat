@@ -106,15 +106,15 @@ class StoryProcessor(FrameProcessor):
             # Looking for: < [image prompt] > in the LLM response
             # We prompted our LLM to add an image prompt in the response
             # so we use regex matching to find it and yield a StoryImageFrame
+            print(f"self text: {self._text}")
             if re.search(r"<.*?>", self._text):
-                if not re.search(r"<.*?>.*?>", self._text):
-                    # Pass any frames until we have a closing bracket
-                    # otherwise the image prompt will be passed to TTS
-                    pass
+                print("!!! found the first regex")
                 # Extract the image prompt from the text using regex
                 image_prompt = re.search(r"<(.*?)>", self._text).group(1)
+                print(f"!!! image prompt: {image_prompt}")
                 # Remove the image prompt from the text
                 self._text = re.sub(r"<.*?>", "", self._text, count=1)
+                print(f"!!! self._text is now: {self._text}")
                 # Process the image prompt frame
                 await self.push_frame(StoryImageFrame(image_prompt))
 
@@ -123,18 +123,20 @@ class StoryProcessor(FrameProcessor):
             # We prompted our LLM to add a [break] after each sentence
             # so we use regex matching to find it in the LLM response
             if re.search(r".*\[[bB]reak\].*", self._text):
-                # Remove the [break] token from the text
-                # so it isn't spoken out loud by the TTS
-                self._text = re.sub(r"\[[bB]reak\]", "", self._text, flags=re.IGNORECASE)
-                self._text = self._text.replace("\n", " ")
-                if len(self._text) > 2:
+                print("@@@ found the break regex")
+                # Split the text at [break]
+                parts = re.split(r"\[[bB]reak\]", self._text, flags=re.IGNORECASE, maxsplit=1)
+                before_break = parts[0].replace("\n", " ").strip()
+                
+                if len(before_break) > 2:
                     # Append the sentence to the story
-                    self._story.append(self._text)
-                    await self.push_frame(StoryPageFrame(self._text))
+                    self._story.append(before_break)
+                    await self.push_frame(StoryPageFrame(before_break))
                     # Assert that it's the LLMs turn, until we're finished
                     await self.push_frame(DailyTransportMessageFrame(CUE_ASSISTANT_TURN))
-                # Clear the buffer
-                self._text = ""
+                
+                # Keep the remainder (if any) in the buffer
+                self._text = parts[1].strip() if len(parts) > 1 else ""
 
         # End of a full LLM response
         # Driven by the prompt, the LLM should have asked the user for input
