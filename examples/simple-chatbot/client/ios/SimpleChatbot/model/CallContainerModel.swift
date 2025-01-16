@@ -136,7 +136,7 @@ class CallContainerModel: ObservableObject {
     }
 }
 
-extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
+extension CallContainerModel:RTVIClientDelegate {
     
     private func handleEvent(eventName: String, eventValue: Any? = nil) {
         if let value = eventValue {
