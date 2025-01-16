@@ -269,7 +269,7 @@ class PlayHTTTSService(TTSService, WebsocketService):
                             self._request_id = None
                     elif "error" in msg:
                         logger.error(f"{self} error: {msg}")
-                        await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                        await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 

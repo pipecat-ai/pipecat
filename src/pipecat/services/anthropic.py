@@ -26,10 +26,10 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
+    LLMTextFrame,
     LLMUpdateSettingsFrame,
     OpenAILLMContextAssistantTimestampFrame,
     StartInterruptionFrame,
-    TextFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
     VisionImageRawFrame,
@@ -191,7 +191,7 @@ class AnthropicLLMService(LLMService):
 
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
-                        await self.push_frame(TextFrame(event.delta.text))
+                        await self.push_frame(LLMTextFrame(event.delta.text))
                         completion_tokens_estimate += self._estimate_tokens(event.delta.text)
                     elif hasattr(event.delta, "partial_json") and tool_use_block:
                         json_accumulator += event.delta.partial_json

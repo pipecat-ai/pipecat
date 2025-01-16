@@ -186,10 +186,10 @@ class LmntTTSService(TTSService, WebsocketService):
                 try:
                     msg = json.loads(message)
                     if "error" in msg:
-                        logger.error(f'{self} error: {msg["error"]}')
+                        logger.error(f"{self} error: {msg['error']}")
                         await self.push_frame(TTSStoppedFrame())
                         await self.stop_all_metrics()
-                        await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                        await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
                         return
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")

@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
     TTSUpdateSettingsFrame,
     UserImageRequestFrame,
     VisionImageRawFrame,
@@ -358,7 +359,7 @@ class TTSService(AIService):
         if self._push_text_frames:
             # We send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
-            await self.push_frame(TextFrame(text))
+            await self.push_frame(TTSTextFrame(text))
 
     async def _stop_frame_handler(self):
         try:
@@ -437,7 +438,7 @@ class WordTTSService(TTSService):
                     frame = TTSStoppedFrame()
                     frame.pts = last_pts
                 else:
-                    frame = TextFrame(word)
+                    frame = TTSTextFrame(word)
                     frame.pts = self._initial_word_timestamp + timestamp
                 if frame:
                     last_pts = frame.pts

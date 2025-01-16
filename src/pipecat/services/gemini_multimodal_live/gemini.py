@@ -28,10 +28,10 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
-    TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -295,7 +295,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # definitely feels like a hack. Need to revisit when the API evolves.
         # context.add_message({"role": "assistant", "content": [{"type": "text", "text": text}]})
         await self.push_frame(LLMFullResponseStartFrame())
-        await self.push_frame(TextFrame(text=text))
+        await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(LLMFullResponseEndFrame())
 
     async def _transcribe_audio(self, audio, context):
@@ -628,7 +628,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self.push_frame(LLMFullResponseStartFrame())
 
             self._bot_text_buffer += text
-            await self.push_frame(TextFrame(text=text))
+            await self.push_frame(LLMTextFrame(text=text))
 
         inline_data = part.inlineData
         if not inline_data:
