@@ -19,13 +19,14 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
-    LLMTextFrame,
     StartFrame,
     StartInterruptionFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
     TextFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
@@ -291,7 +292,11 @@ class TTSService(AIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if isinstance(frame, LLMTextFrame):
+        if (
+            isinstance(frame, TextFrame)
+            and not isinstance(frame, InterimTranscriptionFrame)
+            and not isinstance(frame, TranscriptionFrame)
+        ):
             await self._process_text_frame(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame, direction)
