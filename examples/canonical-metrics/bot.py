@@ -97,7 +97,7 @@ async def main():
         call completion, CanonicalMetrics will send the audio buffer to Canonical for
         analysis. Visit https://voice.canonical.chat to learn more.
         """
-        audio_buffer_processor = AudioBufferProcessor()
+        audio_buffer_processor = AudioBufferProcessor(num_channels=2)
         canonical = CanonicalMetricsService(
             audio_buffer_processor=audio_buffer_processor,
             aiohttp_session=session,
@@ -105,6 +105,7 @@ async def main():
             call_id=str(uuid.uuid4()),
             assistant="pipecat-chatbot",
             assistant_speaks_first=True,
+            context=context,
         )
         pipeline = Pipeline(
             [
