@@ -14,10 +14,12 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
+    EndFrame,
     Frame,
     LLMMessagesFrame,
-    TextFrame,
+    TranscriptionFrame,
     TranscriptionMessage,
     TranscriptionUpdateFrame,
 )
@@ -28,12 +30,12 @@ from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregato
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.transcript_processor import TranscriptProcessor
-from pipecat.services.azure import AzureSTTService, AzureTTSService
+from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,
-    DailyTransportMessageFrame,
 )
 
 load_dotenv(override=True)
@@ -61,7 +63,7 @@ class TranslationProcessor(FrameProcessor):
             out_language (str): The language to translate the text into.
         """
         super().__init__()
-        self._language = out_language
+        self._out_language = out_language
         self._in_language = in_language
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -73,12 +75,12 @@ class TranslationProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TextFrame):
-            logger.debug(f"Translating {self._in_language}: {frame.text} to {self._language}")
+        if isinstance(frame, TranscriptionFrame):
+            logger.debug(f"Translating {self._in_language}: {frame.text} to {self._out_language}")
             context = [
                 {
                     "role": "system",
-                    "content": f"You will be provided with a sentence in {self._in_language}, and your task is to only translate it into {self._language}.",
+                    "content": f"You will be provided with a sentence in {self._in_language}, and your task is to only translate it into {self._out_language}.",
                 },
                 {"role": "user", "content": frame.text},
             ]
@@ -121,7 +123,6 @@ class TranscriptHandler:
                 "language": self.out_language if msg.role == "assistant" else self.in_language,
                 "text": msg.content,
             }
-            await processor.push_frame(DailyTransportMessageFrame(message))
             logger.info(f"{timestamp}{msg.role}: {msg.content}")
 
 
@@ -137,33 +138,30 @@ async def main():
             DailyParams(
                 audio_out_enabled=True,
                 vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True,
             ),
         )
 
-        stt = AzureSTTService(
-            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-            region=os.getenv("AZURE_SPEECH_REGION"),
-            language="en-US",
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+
+        tts = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="34dbb662-8e98-413c-a1ef-1a3407675fe7",  # Spanish Narrator Man
+            model="sonic-multilingual",
         )
 
-        tts = AzureTTSService(
-            api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-            region=os.getenv("AZURE_SPEECH_REGION"),
-            # Use Spanish voice from Azure,
-            # https://docs.microsoft.com/en-us/azure/cognitive-services/speech-service/language-support#text-to-speech
-            voice="es-ES-AlvaroNeural",
-        )
+        in_language = "English"
+        out_language = "Spanish"
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
         context = OpenAILLMContext()
         context_aggregator = llm.create_context_aggregator(context)
 
-        tp = TranslationProcessor(in_language="English", out_language="Spanish")
-        lfra = LLMFullResponseAggregator()
+        tp = TranslationProcessor(in_language=in_language, out_language=out_language)
 
         transcript = TranscriptProcessor()
-        transcript_handler = TranscriptHandler(in_language="English", out_language="Spanish")
+        transcript_handler = TranscriptHandler(in_language=in_language, out_language=out_language)
 
         # Register event handler for transcript updates
         @transcript.event_handler("on_transcript_update")
@@ -177,11 +175,10 @@ async def main():
                 transcript.user(),  # User transcripts
                 tp,
                 llm,
-                lfra,
                 tts,
+                transport.output(),
                 context_aggregator.assistant(),
                 transcript.assistant(),  # Assistant transcripts
-                transport.output(),
             ]
         )
 
@@ -190,6 +187,10 @@ async def main():
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             logger.info("First participant joined")
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
 
         runner = PipelineRunner()
 
