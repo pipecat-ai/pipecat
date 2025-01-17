@@ -89,6 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UserStoppedSpeakingFrame`. This helps in faster transcriptions and clearing
   the `Deepgram` audio buffer.
 
+- Changed `DeepgramSTTService` to generate metrics using pipeline VAD.
+
 ### Fixed
 
 - Fixed `UserIdleProcessor` not properly propagating `EndFrame`s through the
