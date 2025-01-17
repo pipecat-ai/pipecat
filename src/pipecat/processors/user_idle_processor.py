@@ -141,6 +141,7 @@ class UserIdleProcessor(FrameProcessor):
         if self._conversation_started:
             # We shouldn't call the idle callback if the user or the bot are speaking
             if isinstance(frame, UserStartedSpeakingFrame):
+                self._retry_count = 0
                 self._interrupted = True
                 self._idle_event.set()
             elif isinstance(frame, UserStoppedSpeakingFrame):
