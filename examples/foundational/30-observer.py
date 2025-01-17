@@ -19,6 +19,9 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     EndFrame,
     Frame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     StartInterruptionFrame,
 )
 from pipecat.observers.base_observer import BaseObserver
@@ -69,6 +72,38 @@ class DebugObserver(BaseObserver):
             logger.info(f"🤖 BOT START SPEAKING: {src} {arrow} {dst} at {time_sec:.2f}s")
         elif isinstance(frame, BotStoppedSpeakingFrame):
             logger.info(f"🤖 BOT STOP SPEAKING: {src} {arrow} {dst} at {time_sec:.2f}s")
+
+
+class LLMLogObserver(BaseObserver):
+    """Observer to log LLM activity to the console.
+
+    Logs all frame instances of:
+    - LLMFullResponseStartFrame (only from LLM service)
+    - LLMTextFrame
+    - LLMFullResponseEndFrame (only from LLM service)
+
+    This allows you to track when the LLM starts responding, what it generates, and when it finishes.
+    Log format: [LLM EVENT]: [details] at [timestamp]s
+    """
+
+    async def on_push_frame(
+        self,
+        src: FrameProcessor,
+        dst: FrameProcessor,
+        frame: Frame,
+        direction: FrameDirection,
+        timestamp: int,
+    ):
+        time_sec = timestamp / 1_000_000_000
+
+        # Only log start/end frames from OpenAILLMService
+        if isinstance(frame, (LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
+            if isinstance(src, OpenAILLMService):
+                event = "START" if isinstance(frame, LLMFullResponseStartFrame) else "END"
+                logger.info(f"🧠 LLM {event} RESPONSE at {time_sec:.2f}s")
+        # Log all LLMTextFrames
+        elif isinstance(frame, LLMTextFrame):
+            logger.info(f"🧠 LLM GENERATING: {frame.text!r} at {time_sec:.2f}s")
 
 
 async def main():
@@ -122,7 +157,7 @@ async def main():
                 enable_metrics=True,
                 enable_usage_metrics=True,
                 report_only_initial_ttfb=True,
-                observers=[DebugObserver()],
+                observers=[DebugObserver(), LLMLogObserver()],
             ),
         )
 
