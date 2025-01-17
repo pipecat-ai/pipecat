@@ -6,11 +6,9 @@
 
 import asyncio
 import base64
-import io
 import json
 from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, Tuple
 
-import aiohttp
 from loguru import logger
 from pydantic import BaseModel, model_validator
 
@@ -18,6 +16,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
     StartFrame,
@@ -28,14 +27,14 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import WordTTSService
+from pipecat.services.ai_services import TTSService, WordTTSService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for ElevenLabs configuration needed
 try:
     import websockets
-    from elevenlabs import Voice, VoiceSettings
+    from elevenlabs import VoiceSettings
     from elevenlabs.client import ElevenLabs
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -424,7 +423,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             logger.error(f"{self} exception: {e}")
 
 
-class ElevenLabsHttpTTSService(WordTTSService):
+class ElevenLabsHttpTTSService(TTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         optimize_streaming_latency: Optional[str] = None
@@ -479,6 +478,9 @@ class ElevenLabsHttpTTSService(WordTTSService):
             "pcm_44100": 44100,
         }[output_format]
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
 
@@ -490,7 +492,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         def read_audio_stream(**kwargs):
-            # Run the streaming in a separate thread
             audio_chunks = []
             stream = self._client.text_to_speech.convert_as_stream(**kwargs)
             for chunk in stream:
@@ -498,8 +499,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
                     audio_chunks.append(chunk)
             return b"".join(audio_chunks)
 
+        logger.debug(f"Generating TTS: [{text}]")
+
         try:
-            yield TTSStartedFrame()
+            # Start TTFB metrics before any processing
+            await self.start_ttfb_metrics()
 
             # Prepare parameters
             params = {
@@ -508,7 +512,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
                 "model_id": self._model,
                 "output_format": self._output_format,
                 "voice_settings": self._voice_settings,
-                "optimize_streaming_latency": 4,  # Maximum optimization + disabled text normalizer
+                "optimize_streaming_latency": 4,
             }
 
             # Get audio data in a separate thread
@@ -519,11 +523,19 @@ class ElevenLabsHttpTTSService(WordTTSService):
                 yield None
                 return
 
+            # Start usage metrics before sending any frames
+            await self.start_tts_usage_metrics(text)
+
+            yield TTSStartedFrame()
+
             # Stream the audio data in chunks
-            chunk_size = 4096  # Adjust this value as needed
+            chunk_size = 4096
             for i in range(0, len(audio_data), chunk_size):
                 chunk = audio_data[i : i + chunk_size]
                 if len(chunk) > 0:
+                    # Stop TTFB metrics on first chunk
+                    await self.stop_ttfb_metrics()
+
                     yield TTSAudioRawFrame(
                         chunk, self._sample_rate_from_output_format(self._output_format), 1
                     )
@@ -532,4 +544,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
         except Exception as e:
             logger.error(f"Error in run_tts: {e}")
+            yield ErrorFrame(error=str(e))
+
+        finally:
             yield TTSStoppedFrame()
