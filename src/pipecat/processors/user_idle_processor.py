@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     Frame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -36,7 +37,6 @@ class UserIdleProcessor(FrameProcessor):
         self._callback = callback
         self._timeout = timeout
         self._interrupted = False
-        self._create_idle_task()
 
     async def _stop(self):
         self._idle_task.cancel()
@@ -46,7 +46,9 @@ class UserIdleProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         # Check for end frames before processing
-        if isinstance(frame, (EndFrame, CancelFrame)):
+        if isinstance(frame, StartFrame):
+            self._create_idle_task()
+        elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
 
         await self.push_frame(frame, direction)
