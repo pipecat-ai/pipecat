@@ -26,10 +26,10 @@ daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
 async def main(room_url: str, token: str, callId: str, callDomain: str, dialout_number: str | None):
-    # diallin_settings are only needed if Daily's SIP URI is used
+    # dialin_settings are only needed if Daily's SIP URI is used
     # If you are handling this via Twilio, Telnyx, set this to None
     # and handle call-forwarding when on_dialin_ready fires.
-    diallin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
+    dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
     transport = DailyTransport(
         room_url,
         token,
@@ -37,7 +37,7 @@ async def main(room_url: str, token: str, callId: str, callDomain: str, dialout_
         DailyParams(
             api_url=daily_api_url,
             api_key=daily_api_key,
-            dialin_settings=diallin_settings,
+            dialin_settings=dialin_settings,
             audio_in_enabled=True,
             audio_out_enabled=True,
             camera_out_enabled=False,
