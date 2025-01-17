@@ -6,9 +6,11 @@
 
 import asyncio
 import base64
+import io
 import json
 from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, Tuple
 
+import aiohttp
 from loguru import logger
 from pydantic import BaseModel, model_validator
 
@@ -33,6 +35,8 @@ from pipecat.transcriptions.language import Language
 # See .env.example for ElevenLabs configuration needed
 try:
     import websockets
+    from elevenlabs import Voice, VoiceSettings
+    from elevenlabs.client import ElevenLabs
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -418,3 +422,114 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+
+
+class ElevenLabsHttpTTSService(WordTTSService):
+    class InputParams(BaseModel):
+        language: Optional[Language] = Language.EN
+        optimize_streaming_latency: Optional[str] = None
+        stability: Optional[float] = None
+        similarity_boost: Optional[float] = None
+        style: Optional[float] = None
+        use_speaker_boost: Optional[bool] = None
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        voice_id: str,
+        model: str = "eleven_flash_v2_5",
+        output_format: ElevenLabsOutputFormat = "pcm_24000",
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
+        sample_rate = self._sample_rate_from_output_format(output_format)
+        super().__init__(
+            aggregate_sentences=True,
+            push_text_frames=False,
+            push_stop_frames=True,
+            stop_frame_timeout_s=2.0,
+            sample_rate=sample_rate,
+            **kwargs,
+        )
+
+        self._client = ElevenLabs(api_key=api_key)
+        self._voice_id = voice_id
+        self._model = model
+        self._output_format = output_format
+
+        # Create voice settings if provided
+        self._voice_settings = None
+        if params.stability is not None and params.similarity_boost is not None:
+            self._voice_settings = VoiceSettings(
+                stability=params.stability,
+                similarity_boost=params.similarity_boost,
+                style=params.style or 0.0,
+                use_speaker_boost=params.use_speaker_boost or False,
+            )
+
+        logger.debug(f"Initialized with sample rate: {sample_rate}")
+
+    @staticmethod
+    def _sample_rate_from_output_format(output_format: str) -> int:
+        return {
+            "pcm_16000": 16000,
+            "pcm_22050": 22050,
+            "pcm_24000": 24000,
+            "pcm_44100": 44100,
+        }[output_format]
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        def read_audio_stream(**kwargs):
+            # Run the streaming in a separate thread
+            audio_chunks = []
+            stream = self._client.text_to_speech.convert_as_stream(**kwargs)
+            for chunk in stream:
+                if chunk:
+                    audio_chunks.append(chunk)
+            return b"".join(audio_chunks)
+
+        try:
+            yield TTSStartedFrame()
+
+            # Prepare parameters
+            params = {
+                "text": text,
+                "voice_id": self._voice_id,
+                "model_id": self._model,
+                "output_format": self._output_format,
+                "voice_settings": self._voice_settings,
+                "optimize_streaming_latency": 4,  # Maximum optimization + disabled text normalizer
+            }
+
+            # Get audio data in a separate thread
+            audio_data = await asyncio.to_thread(read_audio_stream, **params)
+
+            if not audio_data:
+                logger.error(f"{self} No audio data returned")
+                yield None
+                return
+
+            # Stream the audio data in chunks
+            chunk_size = 4096  # Adjust this value as needed
+            for i in range(0, len(audio_data), chunk_size):
+                chunk = audio_data[i : i + chunk_size]
+                if len(chunk) > 0:
+                    yield TTSAudioRawFrame(
+                        chunk, self._sample_rate_from_output_format(self._output_format), 1
+                    )
+
+            yield TTSStoppedFrame()
+
+        except Exception as e:
+            logger.error(f"Error in run_tts: {e}")
+            yield TTSStoppedFrame()
