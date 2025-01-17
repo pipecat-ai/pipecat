@@ -338,7 +338,10 @@ class PipelineTask:
         """
         while True:
             try:
-                await self.queue_frame(HeartbeatFrame(timestamp=self._clock.get_time()))
+                # Don't use `queue_frame()` because if an EndFrame is queued the
+                # task will just stop waiting for the pipeline to finish not
+                # allowing more frames to be pushed.
+                await self._source.queue_frame(HeartbeatFrame(timestamp=self._clock.get_time()))
                 await asyncio.sleep(HEARTBEAT_SECONDS)
             except asyncio.CancelledError:
                 break
