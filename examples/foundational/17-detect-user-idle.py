@@ -32,9 +32,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        # (room_url, token) = await configure(session)
-        room_url = 'https://bdom.daily.co/support'
-        token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvIjp0cnVlLCJkIjoiOTdkYTBiMGMtNmIwMy00ZmMzLWJiNTgtNDJiMjdlODY0Y2ViIiwiaWF0IjoxNzMxOTg5Mjg0fQ.1G6Uo1RJxXbKZaRdhgeWKQKj-f2z2VC-1gFeztxIflY'
+        (room_url, token) = await configure(session)
 
         transport = DailyTransport(
             room_url,
@@ -74,6 +72,7 @@ async def main():
                     }
                 )
                 await user_idle.push_frame(LLMMessagesFrame(messages))
+
             else:
                 messages.append(
                     {
