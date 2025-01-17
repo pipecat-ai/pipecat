@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added foundational example `31-user-idle.py` demonstrating how to use
+  `UserIdleProcessor` for handling user inactivity.
+
 - Introduced pipeline frame observers. Observers can view all the frames that go
   through the pipeline without the need to inject processors in the
   pipeline. This can be useful, for example, to implement frame loggers or
@@ -56,6 +59,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Enhanced `UserIdleProcessor` with retry counting functionality. Callbacks now
+  support an optional `retry_count` parameter to implement escalating responses
+  to user inactivity.
+
+- Modified `UserIdleProcessor` to start monitoring only after first
+  conversation activity (`UserStartedSpeakingFrame` or
+  `BotStartedSpeakingFrame`) instead of immediately.
+
 - Modified `OpenAIAssistantContextAggregator` to support controlled completions
   and to emit context update callbacks via `FunctionCallResultProperties`.
 
@@ -78,6 +89,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the `Deepgram` audio buffer.
 
 ### Fixed
+
+- Fixed `UserIdleProcessor` not properly propagating `EndFrame`s through the
+  pipeline.
 
 - Fixed an issue where websocket based TTS services could incorrectly terminate
   their connection due to a retry counter not resetting.
