@@ -14,7 +14,7 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame
+from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -37,7 +37,7 @@ async def handle_user_idle(processor: UserIdleProcessor, retry_count: int) -> bo
         messages.append(
             {
                 "role": "system",
-                "content": "The user has been quiet for a while. Politely ask if they're still there.",
+                "content": "The user has been quiet for a while. Politely and concisely ask if they're still there.",
             }
         )
         await task.queue_frames([context_aggregator.user().get_context_frame()])
@@ -47,20 +47,17 @@ async def handle_user_idle(processor: UserIdleProcessor, retry_count: int) -> bo
         messages.append(
             {
                 "role": "system",
-                "content": "The user is still inactive. Ask if they would like to continue the conversation.",
+                "content": "The user is still inactive. Concisely ask if they would like to continue the conversation.",
             }
         )
         await task.queue_frames([context_aggregator.user().get_context_frame()])
         return True
     else:
         # Third attempt: End the conversation
-        messages.append(
-            {
-                "role": "system",
-                "content": "The user has been inactive for too long. Politely end the conversation.",
-            }
+        await task.queue_frames(
+            [TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")]
         )
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await asyncio.sleep(3)
         await task.queue_frame(EndFrame())
         return False
 

@@ -82,10 +82,10 @@ class UserIdleProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         # Check for end frames before processing
-        if isinstance(frame, StartFrame):
-            self._create_idle_task()
-        elif isinstance(frame, (EndFrame, CancelFrame)):
-            await self._stop()
+        if isinstance(frame, (EndFrame, CancelFrame)):
+            await self.push_frame(frame, direction)  # Push the frame down the pipeline
+            await self._stop()  # Then stop the idle task
+            return  # Return early since we're ending
 
         await self.push_frame(frame, direction)
 
