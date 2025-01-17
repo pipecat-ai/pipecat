@@ -44,7 +44,7 @@ from pipecat.transports.services.daily import DailyParams, DailyTransport
 load_dotenv(override=True)
 
 logger.remove(0)
-logger.add(sys.stderr, level="INFO")
+logger.add(sys.stderr, level="DEBUG")
 
 
 class DebugProcessor(FrameProcessor):
@@ -75,6 +75,13 @@ class StartHoldMusicFrame(ControlFrame):
     pass
 
 
+@dataclass
+class StopHoldMusicFrame(ControlFrame):
+    """Stops hold music."""
+
+    pass
+
+
 class HoldMusicProcessor(FrameProcessor):
     """A processor to play hold music."""
 
@@ -87,6 +94,9 @@ class HoldMusicProcessor(FrameProcessor):
 
         if isinstance(frame, StartHoldMusicFrame):
             self._play_hold_music = True
+
+        if isinstance(frame, StartHoldMusicFrame):
+            self._play_hold_music = False
 
         if isinstance(frame, BotStoppedSpeakingFrame) and self._play_hold_music:
             await self.push_frame(
@@ -176,6 +186,12 @@ async def main():
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([context_aggregator.user().get_context_frame()])
             await task.queue_frame(TextFrame("I'm going to play some hold music."))
+            await task.queue_frame(StartHoldMusicFrame())
+            await asyncio.sleep(3)
+            await task.queue_frame(StopHoldMusicFrame())
+            await task.queue_frame(TextFrame("I just stopped the hold music."))
+            await task.queue_frame(TextFrame("Waiting 2 seconds to play hold music again."))
+            await asyncio.sleep(3)
             await task.queue_frame(StartHoldMusicFrame())
 
         runner = PipelineRunner()
