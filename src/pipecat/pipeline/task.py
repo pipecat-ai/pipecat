@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
+from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -84,29 +85,6 @@ class Sink(FrameProcessor):
         await self._down_queue.put(frame)
 
 
-class Observer(BaseObserver):
-    """This is a pipeline frame observer that is used as a proxy to the user
-    provided observers. That is, this is the only observer passed to the frame
-    processors. Then, every time a frame is pushed this observer will call all
-    the observers registered to the pipeline task.
-
-    """
-
-    def __init__(self, observers: List[BaseObserver] = []):
-        self._observers = observers
-
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
-        for observer in self._observers:
-            await observer.on_push_frame(src, dst, frame, direction, timestamp)
-
-
 class PipelineTask:
     def __init__(
         self,
@@ -141,7 +119,7 @@ class PipelineTask:
         self._sink = Sink(self._down_queue)
         pipeline.link(self._sink)
 
-        self._observer = Observer(params.observers)
+        self._observer = TaskObserver(params.observers)
 
     def has_finished(self):
         """Indicates whether the tasks has finished. That is, all processors
@@ -221,6 +199,8 @@ class PipelineTask:
 
         self._process_down_task.cancel()
         await self._process_down_task
+
+        await self._observer.stop()
 
     async def _maybe_cancel_heartbeat_tasks(self):
         if self._params.enable_heartbeats:
