@@ -12,17 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Introduced pipeline frame observers. Observers can view all the frames that go
   through the pipeline without the need to inject processors in the
   pipeline. This can be useful, for example, to implement frame loggers or
-  debuggers among other things.
+  debuggers among other things. The example
+  `examples/foundational/30-observer.py` shows how to add an observer to a
+  pipeline for debugging.
 
 - Introduced heartbeat frames. The pipeline task can now push periodic
   heartbeats down the pipeline when `enable_heartbeats=True`. Heartbeats are
   system frames that are supposed to make it all the way to the end of the
-  pipeline. When a heartbeat frame is received the traversing time (i.e. the time
-  it took to go through the whole pipeline) will be displayed (with TRACE
-  logging) otherwise a warning will be shown.
-
-- Added `30-observer.py` to show how to add an Observer to a pipeline for
-  debugging.
+  pipeline. When a heartbeat frame is received the traversing time (i.e. the
+  time it took to go through the whole pipeline) will be displayed (with TRACE
+  logging) otherwise a warning will be shown. The example
+  `examples/foundational/31-heartbeats.py` shows how to enable heartbeats and
+  forces warnings to be displayed.
 
 - Added `OpenRouter` for OpenRouter integration with an OpenAI-compatible
   interface. Added foundational example `14m-function-calling-openrouter.py`.
