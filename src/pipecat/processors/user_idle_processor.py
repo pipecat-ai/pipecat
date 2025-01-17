@@ -5,7 +5,8 @@
 #
 
 import asyncio
-from typing import Awaitable, Callable
+from functools import wraps
+from typing import Awaitable, Callable, Union
 
 from pipecat.frames.frames import (
     BotSpeakingFrame,
@@ -20,23 +21,58 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class UserIdleProcessor(FrameProcessor):
-    """This class is useful to check if the user is interacting with the bot
-    within a given timeout. If the timeout is reached before any interaction
-    occurred the provided callback will be called.
+    """This class is useful to check if the user is interacting with the bot within a given timeout.
 
+    If the timeout is reached before any interaction occurred the provided callback will be called.
+
+    The callback can be either:
+    - async def callback(processor: UserIdleProcessor) -> None  # Legacy
+    - async def callback(processor: UserIdleProcessor, retry_count: int) -> bool  # New
+
+    The new style callback receives the current retry count and should return True
+    to continue monitoring or False to stop.
     """
 
     def __init__(
         self,
         *,
-        callback: Callable[["UserIdleProcessor"], Awaitable[None]],
+        callback: Union[
+            Callable[["UserIdleProcessor"], Awaitable[None]],  # Old signature
+            Callable[["UserIdleProcessor", int], Awaitable[bool]],  # New signature
+        ],
         timeout: float,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._callback = callback
+        self._callback = self._wrap_callback(callback)
         self._timeout = timeout
+        self._retry_count = 0
         self._interrupted = False
+
+    def _wrap_callback(
+        self,
+        callback: Union[
+            Callable[["UserIdleProcessor"], Awaitable[None]],
+            Callable[["UserIdleProcessor", int], Awaitable[bool]],
+        ],
+    ) -> Callable[["UserIdleProcessor", int], Awaitable[bool]]:
+        @wraps(callback)
+        async def wrapper(processor: "UserIdleProcessor", retry_count: int) -> bool:
+            # Check callback signature
+            import inspect
+
+            sig = inspect.signature(callback)
+            param_count = len(sig.parameters)
+
+            if param_count == 1:
+                # Old callback
+                await callback(processor)  # type: ignore
+                return True  # Always continue for backwards compatibility
+            else:
+                # New callback
+                return await callback(processor, retry_count)  # type: ignore
+
+        return wrapper
 
     async def _stop(self):
         self._idle_task.cancel()
@@ -76,7 +112,11 @@ class UserIdleProcessor(FrameProcessor):
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 if not self._interrupted:
-                    await self._callback(self)
+                    self._retry_count += 1
+                    should_continue = await self._callback(self, self._retry_count)
+                    if not should_continue:
+                        await self._stop()
+                        break
             except asyncio.CancelledError:
                 break
             finally:
