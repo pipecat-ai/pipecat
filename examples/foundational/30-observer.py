@@ -14,7 +14,13 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, Frame, StartInterruptionFrame
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    EndFrame,
+    Frame,
+    StartInterruptionFrame,
+)
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -31,7 +37,18 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-class InterruptionDebugObserver(BaseObserver):
+class DebugObserver(BaseObserver):
+    """Observer to log interruptions and bot speaking events to the console.
+
+    Logs all frame instances of:
+    - StartInterruptionFrame
+    - BotStartedSpeakingFrame
+    - BotStoppedSpeakingFrame
+
+    This allows you to see the frame flow from processor to processor through the pipeline for these frames.
+    Log format: [EVENT TYPE]: [source processor] → [destination processor] at [timestamp]s
+    """
+
     async def on_push_frame(
         self,
         src: FrameProcessor,
@@ -40,14 +57,18 @@ class InterruptionDebugObserver(BaseObserver):
         direction: FrameDirection,
         timestamp: int,
     ):
-        if isinstance(frame, (StartInterruptionFrame)):
-            # Convert timestamp to seconds for readability
-            time_sec = timestamp / 1_000_000_000
+        # Convert timestamp to seconds for readability
+        time_sec = timestamp / 1_000_000_000
 
-            # Create direction arrow
-            arrow = "→" if direction == FrameDirection.DOWNSTREAM else "←"
+        # Create direction arrow
+        arrow = "→" if direction == FrameDirection.DOWNSTREAM else "←"
 
-            logger.info(f"INTERRUPTION START: {src} {arrow} {dst} at {time_sec:.2f}s")
+        if isinstance(frame, StartInterruptionFrame):
+            logger.info(f"⚡ INTERRUPTION START: {src} {arrow} {dst} at {time_sec:.2f}s")
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            logger.info(f"🤖 BOT START SPEAKING: {src} {arrow} {dst} at {time_sec:.2f}s")
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            logger.info(f"🤖 BOT STOP SPEAKING: {src} {arrow} {dst} at {time_sec:.2f}s")
 
 
 async def main():
@@ -101,7 +122,7 @@ async def main():
                 enable_metrics=True,
                 enable_usage_metrics=True,
                 report_only_initial_ttfb=True,
-                observers=[InterruptionDebugObserver()],
+                observers=[DebugObserver()],
             ),
         )
 
