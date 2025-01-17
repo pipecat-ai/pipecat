@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pipeline. This can be useful, for example, to implement frame loggers or
   debuggers among other things.
 
+- Added `30-observer.py` to show how to add an Observer to a pipeline for
+  debugging.
+
 - Added `OpenRouter` for OpenRouter integration with an OpenAI-compatible
   interface. Added foundational example `14m-function-calling-openrouter.py`.
 
