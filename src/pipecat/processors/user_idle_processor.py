@@ -106,7 +106,10 @@ class UserIdleProcessor(FrameProcessor):
         """Stops and cleans up the idle monitoring task."""
         if self._idle_task is not None:
             self._idle_task.cancel()
-            await self._idle_task
+            try:
+                await self._idle_task
+            except asyncio.CancelledError:
+                pass  # Expected when task is cancelled
             self._idle_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
