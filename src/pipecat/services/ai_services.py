@@ -232,11 +232,9 @@ class TTSService(AIService):
     def sample_rate(self) -> int:
         return self._sample_rate
 
-    @abstractmethod
     async def set_model(self, model: str):
         self.set_model_name(model)
 
-    @abstractmethod
     def set_voice(self, voice: str):
         self._voice_id = voice
 
