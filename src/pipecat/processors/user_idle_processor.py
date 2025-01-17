@@ -30,12 +30,14 @@ class UserIdleProcessor(FrameProcessor):
         *,
         callback: Callable[["UserIdleProcessor"], Awaitable[None]],
         timeout: float,
+        retry_count: int = 3,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._callback = callback
         self._timeout = timeout
         self._interrupted = False
+        self._retry_count = retry_count
         self._create_idle_task()
 
     async def _stop(self):
@@ -73,7 +75,9 @@ class UserIdleProcessor(FrameProcessor):
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
-                if not self._interrupted:
+                if not self._interrupted and self._retry_count >= 0:
+                    print(f"+++ User idle +++ ${self._retry_count}")
+                    self._retry_count -= 1
                     await self._callback(self)
             except asyncio.CancelledError:
                 break

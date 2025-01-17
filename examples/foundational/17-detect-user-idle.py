@@ -14,7 +14,7 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -32,7 +32,9 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
+        # (room_url, token) = await configure(session)
+        room_url = 'https://bdom.daily.co/support'
+        token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvIjp0cnVlLCJkIjoiOTdkYTBiMGMtNmIwMy00ZmMzLWJiNTgtNDJiMjdlODY0Y2ViIiwiaWF0IjoxNzMxOTg5Mjg0fQ.1G6Uo1RJxXbKZaRdhgeWKQKj-f2z2VC-1gFeztxIflY'
 
         transport = DailyTransport(
             room_url,
@@ -64,15 +66,23 @@ async def main():
         context_aggregator = llm.create_context_aggregator(context)
 
         async def user_idle_callback(user_idle: UserIdleProcessor):
-            messages.append(
-                {
-                    "role": "system",
-                    "content": "Ask the user if they are still there and try to prompt for some input, but be short.",
-                }
-            )
-            await user_idle.push_frame(LLMMessagesFrame(messages))
+            if user_idle._retry_count == 0:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": "User has been idle for too long. End the conversation.",
+                    }
+                )
+                await user_idle.push_frame(LLMMessagesFrame(messages))
+            else:
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": "Ask the user if they are still there and try to prompt for some input, but be short.",
+                    })
+                await user_idle.push_frame(LLMMessagesFrame(messages))
 
-        user_idle = UserIdleProcessor(callback=user_idle_callback, timeout=5.0)
+        user_idle = UserIdleProcessor(callback=user_idle_callback, retry_count=2, timeout=10.0)
 
         pipeline = Pipeline(
             [
