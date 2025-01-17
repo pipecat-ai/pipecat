@@ -38,6 +38,7 @@ class UserIdleProcessor(FrameProcessor):
         self._timeout = timeout
         self._interrupted = False
         self._retry_count = retry_count
+        self._initial_retry_count = retry_count
         self._create_idle_task()
 
     async def _stop(self):
@@ -56,6 +57,7 @@ class UserIdleProcessor(FrameProcessor):
         # We shouldn't call the idle callback if the user or the bot are speaking
         if isinstance(frame, UserStartedSpeakingFrame):
             self._interrupted = True
+            self.retry_count = self._initial_retry_count
             self._idle_event.set()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._interrupted = False
