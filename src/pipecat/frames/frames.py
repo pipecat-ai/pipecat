@@ -393,6 +393,13 @@ class TransportMessageFrame(DataFrame):
         return f"{self.name}(message: {self.message})"
 
 
+@dataclass
+class InputDTMFFrame(DataFrame):
+    """A DTMF button input"""
+
+    button: KeypadEntry
+
+
 #
 # System frames
 #
@@ -631,13 +638,6 @@ class VisionImageRawFrame(InputImageRawFrame):
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, text: [{self.text}], size: {self.size}, format: {self.format})"
-
-
-@dataclass
-class InputDTMFFrame(Frame):
-    """A DTMF button input"""
-
-    button: KeypadEntry
 
 
 #
