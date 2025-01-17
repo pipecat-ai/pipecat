@@ -31,6 +31,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
 
 HEARTBEAT_SECONDS = 1.0
+HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 5
 
 
 class PipelineParams(BaseModel):
@@ -353,7 +354,7 @@ class PipelineTask:
         takes for the heartbeat frame to traverse all the pipeline.
 
         """
-        wait_time = HEARTBEAT_SECONDS * 5
+        wait_time = HEARTBEAT_MONITOR_SECONDS
         while True:
             try:
                 frame = await asyncio.wait_for(self._heartbeat_queue.get(), timeout=wait_time)
