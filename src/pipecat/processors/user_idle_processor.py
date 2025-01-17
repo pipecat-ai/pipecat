@@ -76,7 +76,6 @@ class UserIdleProcessor(FrameProcessor):
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 if not self._interrupted and self._retry_count >= 0:
-                    print(f"+++ User idle +++ ${self._retry_count}")
                     self._retry_count -= 1
                     await self._callback(self)
             except asyncio.CancelledError:
