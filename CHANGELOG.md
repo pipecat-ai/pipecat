@@ -95,6 +95,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue where setting the voice and model for `RimeHttpTTSService`
   wasn't working.
 
+- Fixed an issue where `IdleFrameProcessor` and `UserIdleProcessor` were getting
+  initialized before the start of the pipeline.
+
 ## [0.0.52] - 2024-12-24
 
 ### Added
