@@ -6,7 +6,7 @@
 
 import asyncio
 from functools import wraps
-from typing import Awaitable, Callable, Union
+from typing import Awaitable, Callable, Union, cast
 
 from pipecat.frames.frames import (
     BotSpeakingFrame,
@@ -20,20 +20,29 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class UserIdleProcessor(FrameProcessor):
-    """This class is useful to check if the user is interacting with the bot within a given timeout.
+    """Monitors user inactivity and triggers callbacks after timeout periods.
 
-    If the timeout is reached before any interaction occurred the provided callback will be called.
+    Starts monitoring only after the first conversation activity (UserStartedSpeaking
+    or BotSpeaking). Supports both legacy and new-style callbacks for handling idle events.
 
-    The callback can be either:
-    - async def callback(processor: UserIdleProcessor) -> None  # Old
-    - async def callback(processor: UserIdleProcessor, retry_count: int) -> bool  # New
+    Args:
+        callback: Function to call when user is idle. Can be either:
+            - Legacy: async def(processor) -> None
+            - New: async def(processor, retry_count: int) -> bool
+        timeout: Seconds to wait before considering user idle
+        **kwargs: Additional arguments passed to FrameProcessor
 
-    The new style callback receives the current retry count and should return True
-    to continue monitoring or False to stop.
+    Example:
+    async def handle_idle(processor, retry_count: int) -> bool:
+        if retry_count <= 3:
+            await send_reminder()
+            return True
+        return False
 
-    The processor starts monitoring for idle time only after receiving the first
-    UserStartedSpeakingFrame or BotSpeakingFrame, ensuring that idle detection
-    begins when the actual conversation starts.
+    processor = UserIdleProcessor(
+        callback=handle_idle,
+        timeout=5.0
+    )
     """
 
     def __init__(
@@ -62,7 +71,15 @@ class UserIdleProcessor(FrameProcessor):
             Callable[["UserIdleProcessor", int], Awaitable[bool]],
         ],
     ) -> Callable[["UserIdleProcessor", int], Awaitable[bool]]:
-        @wraps(callback)
+        """Wraps callback to support both old and new-style signatures.
+
+        Returns:
+            Wrapped callback that returns bool to indicate whether to continue monitoring
+        """
+        # Cast the callback to the new-style signature for wraps
+        wrapped_cb = cast(Callable[["UserIdleProcessor", int], Awaitable[bool]], callback)
+
+        @wraps(wrapped_cb)
         async def wrapper(processor: "UserIdleProcessor", retry_count: int) -> bool:
             # Check callback signature
             import inspect
@@ -86,13 +103,19 @@ class UserIdleProcessor(FrameProcessor):
             self._idle_task = self.get_event_loop().create_task(self._idle_task_handler())
 
     async def _stop(self):
-        """Stop the idle task if it exists"""
+        """Stops and cleans up the idle monitoring task."""
         if self._idle_task is not None:
             self._idle_task.cancel()
             await self._idle_task
             self._idle_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Processes incoming frames and manages idle monitoring state.
+
+        Args:
+            frame: The frame to process
+            direction: Direction of the frame flow
+        """
         await super().process_frame(frame, direction)
 
         # Check for end frames before processing
@@ -124,10 +147,15 @@ class UserIdleProcessor(FrameProcessor):
                 self._idle_event.set()
 
     async def cleanup(self):
+        """Cleans up resources when processor is shutting down."""
         if self._idle_task:  # Only stop if task exists
             await self._stop()
 
     async def _idle_task_handler(self):
+        """Monitors for idle timeout and triggers callbacks.
+
+        Runs in a loop until cancelled or callback indicates completion.
+        """
         while True:
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
