@@ -350,7 +350,7 @@ class PipelineTask:
         takes for the heartbeat frame to traverse all the pipeline.
 
         """
-        wait_time = HEARTBEAT_SECONDS * 2
+        wait_time = HEARTBEAT_SECONDS * 5
         while True:
             try:
                 frame = await asyncio.wait_for(self._heartbeat_queue.get(), timeout=wait_time)
