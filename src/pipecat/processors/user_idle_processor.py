@@ -12,9 +12,9 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
-    StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
