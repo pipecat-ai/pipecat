@@ -56,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Modified `UserIdleProcessor` to start monitoring only after first
+  conversation activity (`UserStartedSpeakingFrame` or
+  `BotStartedSpeakingFrame`) instead of immediately.
+
 - Modified `OpenAIAssistantContextAggregator` to support controlled completions
   and to emit context update callbacks via `FunctionCallResultProperties`.
 
@@ -78,6 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the `Deepgram` audio buffer.
 
 ### Fixed
+
+- Fixed `UserIdleProcessor` not properly propagating `EndFrame`s through the
+  pipeline.
 
 - Fixed an issue where websocket based TTS services could incorrectly terminate
   their connection due to a retry counter not resetting.
