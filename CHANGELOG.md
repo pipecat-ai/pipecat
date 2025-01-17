@@ -9,9 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added foundational example `31-user-idle.py` demonstrating how to use
-  `UserIdleProcessor` for handling user inactivity.
-
 - Introduced pipeline frame observers. Observers can view all the frames that go
   through the pipeline without the need to inject processors in the
   pipeline. This can be useful, for example, to implement frame loggers or
@@ -58,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   using Gemini as TEXT modality and using another TTS provider for TTS process.
 
 ### Changed
+
+- Updated the `17-detect-user-idle.py` to show how to use the `retry_count`.
 
 - Enhanced `UserIdleProcessor` with retry counting functionality. Callbacks now
   support an optional `retry_count` parameter to implement escalating responses
