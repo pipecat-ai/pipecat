@@ -201,15 +201,16 @@ class PipelineTask:
 
         tasks = [self._process_up_task, self._process_down_task, self._process_push_task]
 
+        return tasks
+
+    def _maybe_start_heartbeat_tasks(self):
         if self._params.enable_heartbeats:
             self._heartbeat_push_task = asyncio.create_task(self._heartbeat_push_handler())
             self._heartbeat_monitor_task = asyncio.create_task(self._heartbeat_monitor_handler())
-            tasks.append(self._heartbeat_push_task)
-            tasks.append(self._heartbeat_monitor_task)
-
-        return tasks
 
     async def _cancel_tasks(self, cancel_push: bool):
+        await self._maybe_cancel_heartbeat_tasks()
+
         if cancel_push:
             self._process_push_task.cancel()
             await self._process_push_task
@@ -220,6 +221,7 @@ class PipelineTask:
         self._process_down_task.cancel()
         await self._process_down_task
 
+    async def _maybe_cancel_heartbeat_tasks(self):
         if self._params.enable_heartbeats:
             self._heartbeat_push_task.cancel()
             await self._heartbeat_push_task
@@ -245,6 +247,8 @@ class PipelineTask:
 
         """
         self._clock.start()
+
+        self._maybe_start_heartbeat_tasks()
 
         start_frame = StartFrame(
             allow_interruptions=self._params.allow_interruptions,
