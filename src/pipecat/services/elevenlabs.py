@@ -35,8 +35,6 @@ from pipecat.transcriptions.language import Language
 # See .env.example for ElevenLabs configuration needed
 try:
     import websockets
-    from elevenlabs import VoiceSettings
-    from elevenlabs.client import ElevenLabs
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
