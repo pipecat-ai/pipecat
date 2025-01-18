@@ -430,6 +430,7 @@ class ElevenLabsHttpTTSService(TTSService):
     Args:
         api_key: ElevenLabs API key
         voice_id: ID of the voice to use
+        aiohttp_session: aiohttp ClientSession
         model: Model ID (default: "eleven_flash_v2_5" for low latency)
         base_url: API base URL
         output_format: Audio output format (PCM)
@@ -449,20 +450,20 @@ class ElevenLabsHttpTTSService(TTSService):
         *,
         api_key: str,
         voice_id: str,
+        aiohttp_session: aiohttp.ClientSession,
         model: str = "eleven_flash_v2_5",
         base_url: str = "https://api.elevenlabs.io",
         output_format: ElevenLabsOutputFormat = "pcm_24000",
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        sample_rate = sample_rate_from_output_format(output_format)
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(sample_rate=sample_rate_from_output_format(output_format), **kwargs)
 
         self._api_key = api_key
         self._base_url = base_url
         self._output_format = output_format
         self._params = params
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session = aiohttp_session
 
         self._settings = {
             "sample_rate": sample_rate_from_output_format(output_format),
@@ -484,6 +485,11 @@ class ElevenLabsHttpTTSService(TTSService):
         return True
 
     def _set_voice_settings(self) -> Optional[Dict[str, Union[float, bool]]]:
+        """Configure voice settings if stability and similarity_boost are provided.
+
+        Returns:
+            Dictionary of voice settings or None if required parameters are missing.
+        """
         voice_settings: Dict[str, Union[float, bool]] = {}
         if (
             self._settings["stability"] is not None
@@ -507,27 +513,16 @@ class ElevenLabsHttpTTSService(TTSService):
 
         return voice_settings or None
 
-    async def start(self, frame: StartFrame):
-        await super().start(frame)
-        self._session = aiohttp.ClientSession()
-
-    async def stop(self, frame: EndFrame):
-        await super().stop(frame)
-        if self._session:
-            await self._session.close()
-            self._session = None
-
-    async def cancel(self, frame: CancelFrame):
-        await super().cancel(frame)
-        if self._session:
-            await self._session.close()
-            self._session = None
-
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        """Generate speech from text using ElevenLabs streaming API.
 
-        if not self._session:
-            self._session = aiohttp.ClientSession()
+        Args:
+            text: The text to convert to speech
+
+        Yields:
+            Frames containing audio data and status information
+        """
+        logger.debug(f"Generating TTS: [{text}]")
 
         url = f"{self._base_url}/v1/text-to-speech/{self._voice_id}/stream"
 
