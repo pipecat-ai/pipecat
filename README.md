@@ -53,6 +53,12 @@ To keep things lightweight, only the core framework is included by default. If y
 pip install "pipecat-ai[option,...]"
 ```
 
+Or you can install all of them with:
+
+```shell
+pip install "pipecat-ai[all]"
+```
+
 Available options include:
 
 | Category            | Services                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Install Command Example                 |
