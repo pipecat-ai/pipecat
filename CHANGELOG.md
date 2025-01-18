@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.53] - 2025-01-18
 
 ### Added
 
@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   logging) otherwise a warning will be shown. The example
   `examples/foundational/31-heartbeats.py` shows how to enable heartbeats and
   forces warnings to be displayed.
+
+- Added `LLMTextFrame` and `TTSTextFrame` which should be pushed by LLM and TTS
+  services respectively instead of `TextFrame`s.
 
 - Added `OpenRouter` for OpenRouter integration with an OpenAI-compatible
   interface. Added foundational example `14m-function-calling-openrouter.py`.
@@ -92,9 +95,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UserStoppedSpeakingFrame`. This helps in faster transcriptions and clearing
   the `Deepgram` audio buffer.
 
-- Changed `DeepgramSTTService` to generate metrics using pipeline VAD.
-
 ### Fixed
+
+- Fixed an issue where `DeepgramSTTService` was not generating metrics using
+  pipeline's VAD.
 
 - Fixed `UserIdleProcessor` not properly propagating `EndFrame`s through the
   pipeline.
