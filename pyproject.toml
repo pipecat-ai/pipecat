@@ -32,8 +32,7 @@ dependencies = [
     "protobuf~=5.29.3",
     "pydantic~=2.10.5",
     "pyloudnorm~=0.1.1",
-    "resampy~=0.4.3",
-    "tenacity~=9.0.0"
+    "resampy~=0.4.3"
 ]
 
 [project.urls]
@@ -63,7 +62,7 @@ fireworks = [ "openai~=1.59.6" ]
 krisp = [ "pipecat-ai-krisp~=0.3.0" ]
 koala = [ "pvkoala~=2.0.3" ]
 langchain = [ "langchain~=0.3.14", "langchain-community~=0.3.14", "langchain-openai~=0.3.0" ]
-livekit = [ "livekit~=0.19.1", "livekit-api~=0.8.1" ]
+livekit = [ "livekit~=0.19.1", "livekit-api~=0.8.1", "tenacity~=9.0.0" ]
 lmnt = [ "websockets~=13.1" ]
 local = [ "pyaudio~=0.2.14" ]
 moondream = [ "einops~=0.8.0", "timm~=1.0.13", "transformers~=4.48.0" ]
