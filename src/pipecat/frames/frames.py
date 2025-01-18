@@ -5,6 +5,7 @@
 #
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Literal, Mapping, Optional, Tuple
 
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -16,6 +17,23 @@ from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
     from pipecat.observers.base_observer import BaseObserver
+
+
+class KeypadEntry(str, Enum):
+    """DTMF entries."""
+
+    ONE = "1"
+    TWO = "2"
+    THREE = "3"
+    FOUR = "4"
+    FIVE = "5"
+    SIX = "6"
+    SEVEN = "7"
+    EIGHT = "8"
+    NINE = "9"
+    ZERO = "0"
+    POUND = "#"
+    STAR = "*"
 
 
 def format_pts(pts: int | None):
@@ -373,6 +391,13 @@ class TransportMessageFrame(DataFrame):
 
     def __str__(self):
         return f"{self.name}(message: {self.message})"
+
+
+@dataclass
+class InputDTMFFrame(DataFrame):
+    """A DTMF button input"""
+
+    button: KeypadEntry
 
 
 #
