@@ -15,7 +15,7 @@ from pipecat.frames.frames import (
 from pipecat.services.ai_services import TTSService
 from pipecat.transcriptions.language import Language
 
-class HailuoTTSService(TTSService):
+class HailuoHttpTTSService(TTSService):
     class InputParams(BaseModel):
         speed: Optional[float] = 1.0
         volume: Optional[float] = 1.0
