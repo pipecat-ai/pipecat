@@ -10,7 +10,14 @@ import json
 from pydantic import BaseModel
 
 from pipecat.audio.utils import pcm_to_ulaw, ulaw_to_pcm
-from pipecat.frames.frames import AudioRawFrame, Frame, InputAudioRawFrame, StartInterruptionFrame
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    Frame,
+    InputAudioRawFrame,
+    InputDTMFFrame,
+    KeypadEntry,
+    StartInterruptionFrame,
+)
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
 
@@ -48,9 +55,7 @@ class TwilioFrameSerializer(FrameSerializer):
     def deserialize(self, data: str | bytes) -> Frame | None:
         message = json.loads(data)
 
-        if message["event"] != "media":
-            return None
-        else:
+        if message["event"] == "media":
             payload_base64 = message["media"]["payload"]
             payload = base64.b64decode(payload_base64)
 
@@ -61,3 +66,13 @@ class TwilioFrameSerializer(FrameSerializer):
                 audio=deserialized_data, num_channels=1, sample_rate=self._params.sample_rate
             )
             return audio_frame
+        elif message["event"] == "dtmf":
+            digit = message.get("dtmf", {}).get("digit")
+
+            try:
+                return InputDTMFFrame(KeypadEntry(digit))
+            except ValueError as e:
+                # Handle case where string doesn't match any enum value
+                return None
+        else:
+            return None
