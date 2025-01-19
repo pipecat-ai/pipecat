@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `ElevenLabsHttpTTSService` and the
-  `07d-interruptible-elevenlabs-http.py` foundational example.
+- Added `ElevenLabsHttpTTSService` which uses EleveLabs' HTTP API instead of the
+  websocket one.
 
 - Introduced pipeline frame observers. Observers can view all the frames that go
   through the pipeline without the need to inject processors in the
