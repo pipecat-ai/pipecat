@@ -61,7 +61,7 @@
 
 .micIconActive{
     @apply bg-teal-950 border-teal-500 outline-teal-500/20;
-    animation: pulse 2s infinite ease-in-out;
+    /* animation: pulse 2s infinite ease-in-out; */
 }
 
 .micIconActive svg{

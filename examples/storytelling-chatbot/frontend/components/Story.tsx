@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   useDaily,
   useParticipantIds,
@@ -33,11 +33,16 @@ const Story: React.FC<StoryProps> = ({ handleLeave }) => {
         setTimeout(() => daily.setLocalAudio(true), 500);
         setStoryState("user");
       } else {
-        daily.setLocalAudio(false);
+        // daily.setLocalAudio(false);
         setStoryState("assistant");
       }
     },
   });
+
+  useEffect(() => {
+    console.log('Story state changed:', storyState);
+  }, [storyState]);
+
 
   return (
     <div className="w-full flex flex-col flex-1 self-stretch">
@@ -58,7 +63,7 @@ const Story: React.FC<StoryProps> = ({ handleLeave }) => {
         {participantIds.length >= 1 ? (
           <VideoTile
             sessionId={participantIds[0]}
-            inactive={storyState === "user"}
+            inactive={false}
           />
         ) : (
           <span className="p-3 rounded-full bg-gray-900/60 animate-pulse">
@@ -71,7 +76,7 @@ const Story: React.FC<StoryProps> = ({ handleLeave }) => {
         )}
         <DailyAudio />
       </div>
-      <UserInputIndicator active={storyState === "user"} />
+      <UserInputIndicator active={true} />
     </div>
   );
 };
