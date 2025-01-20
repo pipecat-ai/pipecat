@@ -109,6 +109,7 @@ class StoryProcessor(FrameProcessor):
             self._text = ""
             await self.push_frame(frame)
             # Send an app message to the UI
+            print(f"!!! sending a cue user turn")
             await self.push_frame(DailyTransportMessageFrame(CUE_USER_TURN))
             await self.push_frame(sounds["listening"])
 
