@@ -81,6 +81,7 @@ class CallContainerModel: ObservableObject {
     @MainActor
     func disconnect() {
         self.rtviClientIOS?.disconnect(completion: nil)
+        self.rtviClientIOS?.release()
     }
     
     func showError(message: String) {
@@ -135,7 +136,7 @@ class CallContainerModel: ObservableObject {
     }
 }
 
-extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
+extension CallContainerModel:RTVIClientDelegate {
     
     private func handleEvent(eventName: String, eventValue: Any? = nil) {
         if let value = eventValue {

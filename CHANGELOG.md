@@ -5,14 +5,31 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.53] - 2025-01-18
 
 ### Added
+
+- Added `ElevenLabsHttpTTSService` which uses EleveLabs' HTTP API instead of the
+  websocket one.
 
 - Introduced pipeline frame observers. Observers can view all the frames that go
   through the pipeline without the need to inject processors in the
   pipeline. This can be useful, for example, to implement frame loggers or
-  debuggers among other things.
+  debuggers among other things. The example
+  `examples/foundational/30-observer.py` shows how to add an observer to a
+  pipeline for debugging.
+
+- Introduced heartbeat frames. The pipeline task can now push periodic
+  heartbeats down the pipeline when `enable_heartbeats=True`. Heartbeats are
+  system frames that are supposed to make it all the way to the end of the
+  pipeline. When a heartbeat frame is received the traversing time (i.e. the
+  time it took to go through the whole pipeline) will be displayed (with TRACE
+  logging) otherwise a warning will be shown. The example
+  `examples/foundational/31-heartbeats.py` shows how to enable heartbeats and
+  forces warnings to be displayed.
+
+- Added `LLMTextFrame` and `TTSTextFrame` which should be pushed by LLM and TTS
+  services respectively instead of `TextFrame`s.
 
 - Added `OpenRouter` for OpenRouter integration with an OpenAI-compatible
   interface. Added foundational example `14m-function-calling-openrouter.py`.
@@ -53,6 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Modified `UserIdleProcessor` to start monitoring only after first
+  conversation activity (`UserStartedSpeakingFrame` or
+  `BotStartedSpeakingFrame`) instead of immediately.
+
 - Modified `OpenAIAssistantContextAggregator` to support controlled completions
   and to emit context update callbacks via `FunctionCallResultProperties`.
 
@@ -76,6 +97,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where `DeepgramSTTService` was not generating metrics using
+  pipeline's VAD.
+
+- Fixed `UserIdleProcessor` not properly propagating `EndFrame`s through the
+  pipeline.
+
 - Fixed an issue where websocket based TTS services could incorrectly terminate
   their connection due to a retry counter not resetting.
 
@@ -91,6 +118,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where setting the voice and model for `RimeHttpTTSService`
   wasn't working.
+
+- Fixed an issue where `IdleFrameProcessor` and `UserIdleProcessor` were getting
+  initialized before the start of the pipeline.
 
 ## [0.0.52] - 2024-12-24
 

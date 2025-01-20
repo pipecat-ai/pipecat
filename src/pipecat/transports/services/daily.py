@@ -27,6 +27,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
@@ -202,7 +203,9 @@ class DailyTransportClient(EventHandler):
         self._joined = False
         self._leave_counter = 0
 
-        self._executor = ThreadPoolExecutor(max_workers=5)
+        # We use the executor to cleanup the client. We just do it from one
+        # place, so only one thread is really needed.
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
         self._client: CallClient = CallClient(event_handler=self)
 
@@ -466,9 +469,11 @@ class DailyTransportClient(EventHandler):
         return await asyncio.wait_for(future, timeout=10)
 
     async def cleanup(self):
-        await self._loop.run_in_executor(self._executor, self._cleanup)
         self._callback_task.cancel()
         await self._callback_task
+        # Make sure we don't block the event loop in case `client.release()`
+        # takes extra time.
+        await self._loop.run_in_executor(self._executor, self._cleanup)
 
     def _cleanup(self):
         if self._client:
@@ -917,6 +922,7 @@ class DailyTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
+        self._register_event_handler("on_error")
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_call_state_updated")
         self._register_event_handler("on_dialin_connected")
@@ -1031,9 +1037,17 @@ class DailyTransport(BaseTransport):
         await self._call_event_handler("on_left")
 
     async def _on_error(self, error):
-        # TODO(aleix): Report error to input/output transports. The one managing
-        # the client should report the error.
-        pass
+        await self._call_event_handler("on_error", error)
+        # Push error frame to notify the pipeline
+        error_frame = ErrorFrame(error)
+
+        if self._input:
+            await self._input.push_error(error_frame)
+        elif self._output:
+            await self._output.push_error(error_frame)
+        else:
+            logger.error("Both input and output are None while trying to push error")
+            raise RuntimeError("No valid input or output channel to push error")
 
     async def _on_app_message(self, message: Any, sender: str):
         if self._input:
