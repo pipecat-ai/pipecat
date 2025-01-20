@@ -269,6 +269,6 @@ class DeepgramSTTService(STTService):
             await self.start_metrics()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
-            if not self.vad_enabled:
-                await self._connection.finalize()
-                logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
+            # if not self.vad_enabled:
+            await self._connection.finalize()
+            logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")

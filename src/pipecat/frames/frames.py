@@ -596,36 +596,6 @@ class TransportMessageUrgentFrame(SystemFrame):
 
 
 @dataclass
-class TranscriptionFrame(SystemFrame):
-    """A text frame with transcription-specific data. Will be placed in the
-    transport's receive queue when a participant speaks.
-
-    """
-
-    text: str
-    user_id: str
-    timestamp: str
-    language: Language | None = None
-
-    def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
-
-
-@dataclass
-class InterimTranscriptionFrame(SystemFrame):
-    """A text frame with interim transcription-specific data. Will be placed in
-    the transport's receive queue when a participant speaks."""
-
-    text: str
-    user_id: str
-    timestamp: str
-    language: Language | None = None
-
-    def __str__(self):
-        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
-
-
-@dataclass
 class CustomUserTranscriptionFrame(Frame):
     """A frame with user transcription-specific data. Will be placed in the
     transport's receive queue when a participant speaks.
