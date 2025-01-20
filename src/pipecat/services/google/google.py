@@ -38,6 +38,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService, TTSService
+from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.openai import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
@@ -639,6 +640,9 @@ class GoogleLLMService(LLMService):
         completion_tokens = 0
         total_tokens = 0
 
+        grounding_metadata = None
+        search_result = ""
+
         try:
             logger.debug(
                 # f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
@@ -698,6 +702,7 @@ class GoogleLLMService(LLMService):
                 try:
                     for c in chunk.parts:
                         if c.text:
+                            search_result += c.text
                             await self.push_frame(LLMTextFrame(c.text))
                         elif c.function_call:
                             logger.debug(f"!!! Function call: {c.function_call}")
@@ -707,6 +712,63 @@ class GoogleLLMService(LLMService):
                                 tool_call_id="what_should_this_be",
                                 function_name=c.function_call.name,
                                 arguments=args,
+                            )
+                    # Handle grounding metadata
+                    # It seems only the last chunk that we receive may contain this information
+                    # If the response doesn't include groundingMetadata, this means the response wasn't grounded.
+                    if chunk.candidates:
+                        for candidate in chunk.candidates:
+                            # logger.debug(f"candidate received: {candidate}")
+                            # Extract grounding metadata
+                            grounding_metadata = (
+                                {
+                                    "rendered_content": getattr(
+                                        getattr(candidate, "grounding_metadata", None),
+                                        "search_entry_point",
+                                        None,
+                                    ).rendered_content
+                                    if hasattr(
+                                        getattr(candidate, "grounding_metadata", None),
+                                        "search_entry_point",
+                                    )
+                                    else None,
+                                    "origins": [
+                                        {
+                                            "site_uri": getattr(grounding_chunk.web, "uri", None),
+                                            "site_title": getattr(
+                                                grounding_chunk.web, "title", None
+                                            ),
+                                            "results": [
+                                                {
+                                                    "text": getattr(
+                                                        grounding_support.segment, "text", ""
+                                                    ),
+                                                    "confidence": getattr(
+                                                        grounding_support, "confidence_scores", None
+                                                    ),
+                                                }
+                                                for grounding_support in getattr(
+                                                    getattr(candidate, "grounding_metadata", None),
+                                                    "grounding_supports",
+                                                    [],
+                                                )
+                                                if index
+                                                in getattr(
+                                                    grounding_support, "grounding_chunk_indices", []
+                                                )
+                                            ],
+                                        }
+                                        for index, grounding_chunk in enumerate(
+                                            getattr(
+                                                getattr(candidate, "grounding_metadata", None),
+                                                "grounding_chunks",
+                                                [],
+                                            )
+                                        )
+                                    ],
+                                }
+                                if getattr(candidate, "grounding_metadata", None)
+                                else None
                             )
                 except Exception as e:
                     # Google LLMs seem to flag safety issues a lot!
@@ -720,6 +782,14 @@ class GoogleLLMService(LLMService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
+            if grounding_metadata is not None and isinstance(grounding_metadata, dict):
+                llm_search_frame = LLMSearchResponseFrame(
+                    search_result=search_result,
+                    origins=grounding_metadata["origins"],
+                    rendered_content=grounding_metadata["rendered_content"],
+                )
+                await self.push_frame(llm_search_frame)
+
             await self.start_llm_usage_metrics(
                 LLMTokenUsage(
                     prompt_tokens=prompt_tokens,
