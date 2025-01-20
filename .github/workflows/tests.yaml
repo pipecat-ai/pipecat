@@ -30,9 +30,9 @@ jobs:
       - name: Cache virtual environment
         uses: actions/cache@v3
         with:
-          # We are hashing dev-requirements.txt and test-requirements.txt which
-          # contain all dependencies needed to run the tests.
-          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version}}-${{ hashFiles('dev-requirements.txt') }}-${{ hashFiles('test-requirements.txt') }}
+          # We are hashing dev-requirements.txt and pyproject.toml which contain
+          # all dependencies needed to run the tests.
+          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version}}-${{ hashFiles('dev-requirements.txt') }}-${{ hashFiles('pyproject.toml') }}
           path: .venv
       - name: Install system packages
         id: install_system_packages
@@ -45,7 +45,8 @@ jobs:
         run: |
           source .venv/bin/activate
           python -m pip install --upgrade pip
-          pip install -r dev-requirements.txt -r test-requirements.txt
+          pip install -r dev-requirements.txt
+          pip install ".[all]"
       - name: Test with pytest
         run: |
           source .venv/bin/activate
