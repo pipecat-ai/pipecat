@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -8,6 +8,7 @@ import asyncio
 import base64
 import json
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 import websockets
@@ -27,10 +28,10 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
-    TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -132,6 +133,11 @@ class GeminiMultimodalLiveContextAggregatorPair:
         return self._assistant
 
 
+class GeminiMultimodalModalities(Enum):
+    TEXT = "TEXT"
+    AUDIO = "AUDIO"
+
+
 class InputParams(BaseModel):
     frequency_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=4096, ge=1)
@@ -139,6 +145,9 @@ class InputParams(BaseModel):
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     top_k: Optional[int] = Field(default=None, ge=0)
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    modalities: Optional[GeminiMultimodalModalities] = Field(
+        default=GeminiMultimodalModalities.AUDIO
+    )
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -188,6 +197,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_is_speaking = False
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
+        self._bot_text_buffer = ""
 
         self._settings = {
             "frequency_penalty": params.frequency_penalty,
@@ -196,6 +206,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "temperature": params.temperature,
             "top_k": params.top_k,
             "top_p": params.top_p,
+            "modalities": params.modalities,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -207,6 +218,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     def set_video_input_paused(self, paused: bool):
         self._video_input_paused = paused
+
+    def set_model_modalities(self, modalities: GeminiMultimodalModalities):
+        self._settings["modalities"] = modalities
 
     async def set_context(self, context: OpenAILLMContext):
         """Set the context explicitly from outside the pipeline.
@@ -281,7 +295,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # definitely feels like a hack. Need to revisit when the API evolves.
         # context.add_message({"role": "assistant", "content": [{"type": "text", "text": text}]})
         await self.push_frame(LLMFullResponseStartFrame())
-        await self.push_frame(TextFrame(text=text))
+        await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(LLMFullResponseEndFrame())
 
     async def _transcribe_audio(self, audio, context):
@@ -322,6 +336,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
             #   2. The last message is a tool call result
             if not self._context:
                 self._context = context
+                if frame.context.tools:
+                    self._tools = frame.context.tools
                 await self._create_initial_response()
             elif context.messages and context.messages[-1].get("role") == "tool":
                 # Support just one tool call per context frame for now
@@ -383,7 +399,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                             "temperature": self._settings["temperature"],
                             "top_k": self._settings["top_k"],
                             "top_p": self._settings["top_p"],
-                            "response_modalities": ["AUDIO"],
+                            "response_modalities": self._settings["modalities"].value,
                             "speech_config": {
                                 "voice_config": {
                                     "prebuilt_voice_config": {"voice_name": self._voice_id}
@@ -403,6 +419,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     parts=[events.ContentPart(text=system_instruction)]
                 )
             if self._tools:
+                logger.debug(f"Gemini is configuring to use tools{self._tools}")
                 config.setup.tools = self._tools
             await self.send_client_event(config)
 
@@ -604,6 +621,15 @@ class GeminiMultimodalLiveLLMService(LLMService):
         part = evt.serverContent.modelTurn.parts[0]
         if not part:
             return
+
+        text = part.text
+        if text:
+            if not self._bot_text_buffer:
+                await self.push_frame(LLMFullResponseStartFrame())
+
+            self._bot_text_buffer += text
+            await self.push_frame(LLMTextFrame(text=text))
+
         inline_data = part.inlineData
         if not inline_data:
             return
@@ -644,9 +670,15 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def _handle_evt_turn_complete(self, evt):
         self._bot_is_speaking = False
         audio = self._bot_audio_buffer
+        text = self._bot_text_buffer
         self._bot_audio_buffer = bytearray()
+        self._bot_text_buffer = ""
+
         if audio and self._transcribe_model_audio and self._context:
             asyncio.create_task(self._handle_transcribe_model_audio(audio, self._context))
+        elif text:
+            await self.push_frame(LLMFullResponseEndFrame())
+
         await self.push_frame(TTSStoppedFrame())
 
     def create_context_aggregator(

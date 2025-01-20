@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -9,7 +9,7 @@ import copy
 import io
 import json
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, List
+from typing import Any, Awaitable, Callable, List, Optional
 
 from loguru import logger
 from PIL import Image
@@ -218,23 +218,22 @@ class OpenAILLMContext:
         await llm.push_frame(progress_frame_upstream, FrameDirection.UPSTREAM)
 
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
-        async def function_call_result_callback(result):
+        async def function_call_result_callback(result, *, properties=None):
             result_frame_downstream = FunctionCallResultFrame(
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
                 result=result,
-                run_llm=run_llm,
+                properties=properties,
             )
             result_frame_upstream = FunctionCallResultFrame(
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 arguments=arguments,
                 result=result,
-                run_llm=run_llm,
+                properties=properties,
             )
 
-            # Push frame both downstream and upstream
             await llm.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
             await llm.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
 

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,10 +15,9 @@ import aiohttp
 from loguru import logger
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame
-from pipecat.processors.audio import audio_buffer_processor
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AIService
 
 try:
     import aiofiles
@@ -43,7 +42,6 @@ class CanonicalMetricsService(AIService):
     uploads it to Canonical Voice API for audio processing.
 
     Args:
-
         call_id (str): Your unique identifier for the call. This is used to match the call in the Canonical Voice system to the call in your system.
         assistant (str): Identifier for the AI assistant. This can be whatever you want, it's intended for you convenience so you can distinguish
         between different assistants and a grouping mechanism for calls.
@@ -70,6 +68,7 @@ class CanonicalMetricsService(AIService):
         api_url: str = "https://voiceapp.canonical.chat/api/v1",
         assistant_speaks_first: bool = True,
         output_dir: str = "recordings",
+        context: OpenAILLMContext | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -81,6 +80,7 @@ class CanonicalMetricsService(AIService):
         self._assistant = assistant
         self._assistant_speaks_first = assistant_speaks_first
         self._output_dir = output_dir
+        self._context = context
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -191,6 +191,9 @@ class CanonicalMetricsService(AIService):
             "callId": self._call_id,
             "assistant": {"id": self._assistant, "speaksFirst": self._assistant_speaks_first},
         }
+        if self._context is not None:
+            params["transcript"] = self._context.messages
+
         logger.debug(f"Completing upload for {params['filename']}")
         logger.debug(f"Slug: {params['slug']}")
         response = await self._aiohttp_session.post(

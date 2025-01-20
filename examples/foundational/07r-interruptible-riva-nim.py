@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,7 +14,7 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -81,7 +81,11 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
 
         runner = PipelineRunner()
 

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,8 +11,7 @@ _ID = itertools.count()
 
 
 def obj_id() -> int:
-    """
-    Generate a unique id for an object.
+    """Generate a unique id for an object.
 
     >>> obj_id()
     0

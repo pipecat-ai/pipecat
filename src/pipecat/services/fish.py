@@ -1,16 +1,14 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import uuid
 from typing import AsyncGenerator, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel
-from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -28,6 +26,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService
+from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -44,7 +43,7 @@ except ModuleNotFoundError as e:
 FishAudioOutputFormat = Literal["opus", "mp3", "pcm", "wav"]
 
 
-class FishAudioTTSService(TTSService):
+class FishAudioTTSService(TTSService, WebsocketService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         latency: Optional[str] = "normal"  # "normal" or "balanced"
@@ -105,7 +104,9 @@ class FishAudioTTSService(TTSService):
 
     async def _connect(self):
         await self._connect_websocket()
-        self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+        self._receive_task = self.get_event_loop().create_task(
+            self._receive_task_handler(self.push_error)
+        )
 
     async def _disconnect(self):
         await self._disconnect_websocket()
@@ -168,30 +169,6 @@ class FishAudioTTSService(TTSService):
 
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
-
-    async def _reconnect_websocket(self, retry_state: RetryCallState):
-        logger.warning(f"Fish Audio reconnecting (attempt: {retry_state.attempt_number})")
-        await self._disconnect_websocket()
-        await self._connect_websocket()
-
-    async def _receive_task_handler(self):
-        while True:
-            try:
-                async for attempt in AsyncRetrying(
-                    stop=stop_after_attempt(3),
-                    wait=wait_exponential(multiplier=1, min=4, max=10),
-                    before_sleep=self._reconnect_websocket,
-                    reraise=True,
-                ):
-                    with attempt:
-                        await self._receive_messages()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                message = f"Fish Audio error receiving messages: {e}"
-                logger.error(message)
-                await self.push_error(ErrorFrame(message, fatal=True))
-                break
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

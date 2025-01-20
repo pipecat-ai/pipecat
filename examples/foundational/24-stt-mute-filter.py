@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,7 +15,6 @@ from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -132,7 +131,7 @@ async def main():
                     "content": "Ask the user what city they'd like to know the weather for.",
                 }
             )
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
 

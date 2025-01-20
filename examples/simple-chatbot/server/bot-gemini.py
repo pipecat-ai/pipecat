@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -41,17 +41,8 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import (
-    RTVIBotTranscriptionProcessor,
-    RTVIConfig,
-    RTVIMetricsProcessor,
-    RTVIProcessor,
-    RTVISpeakingProcessor,
-    RTVIUserTranscriptionProcessor,
-)
-from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
-from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -168,20 +159,6 @@ async def main():
         #
         # RTVI events for Pipecat client UI
         #
-
-        # This will send `user-*-speaking` and `bot-*-speaking` messages.
-        rtvi_speaking = RTVISpeakingProcessor()
-
-        # This will emit UserTranscript events.
-        rtvi_user_transcription = RTVIUserTranscriptionProcessor()
-
-        # This will emit BotTranscript events.
-        rtvi_bot_transcription = RTVIBotTranscriptionProcessor()
-
-        # This will send `metrics` messages.
-        rtvi_metrics = RTVIMetricsProcessor()
-
-        # Handles RTVI messages from the client
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
         pipeline = Pipeline(
@@ -190,11 +167,7 @@ async def main():
                 rtvi,
                 context_aggregator.user(),
                 llm,
-                rtvi_speaking,
-                rtvi_user_transcription,
-                rtvi_bot_transcription,
                 ta,
-                rtvi_metrics,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
@@ -206,6 +179,7 @@ async def main():
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
+                observers=[rtvi.observer()],
             ),
         )
         await task.queue_frame(quiet_frame)

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,8 +15,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class WakeCheckFilter(FrameProcessor):
-    """
-    This filter looks for wake phrases in the transcription frames and only passes through frames
+    """This filter looks for wake phrases in the transcription frames and only passes through frames
     after a wake phrase has been detected. It also has a keepalive timeout to allow for a brief
     period of continued conversation after a wake phrase has been detected.
     """

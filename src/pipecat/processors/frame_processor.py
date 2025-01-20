@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -58,6 +58,7 @@ class FrameProcessor:
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
+        self._observer = None
 
         # Cancellation is done through CancelFrame (a system frame). This could
         # cause other events being triggered (e.g. closing a transport) which
@@ -181,9 +182,11 @@ class FrameProcessor:
             await self.__input_queue.put((frame, direction, callback))
 
     async def pause_processing_frames(self):
+        logger.trace(f"{self}: pausing frame processing")
         self.__should_block_frames = True
 
     async def resume_processing_frames(self):
+        logger.trace("f{self}: resuming frame processing")
         self.__input_event.set()
         self.__should_block_frames = False
 
@@ -194,6 +197,7 @@ class FrameProcessor:
             self._enable_metrics = frame.enable_metrics
             self._enable_usage_metrics = frame.enable_usage_metrics
             self._report_only_initial_ttfb = frame.report_only_initial_ttfb
+            self._observer = frame.observer
         elif isinstance(frame, StartInterruptionFrame):
             await self._start_interruption()
             await self.stop_all_metrics()
@@ -256,11 +260,20 @@ class FrameProcessor:
 
     async def __internal_push_frame(self, frame: Frame, direction: FrameDirection):
         try:
+            timestamp = self._clock.get_time() if self._clock else 0
             if direction == FrameDirection.DOWNSTREAM and self._next:
                 logger.trace(f"Pushing {frame} from {self} to {self._next}")
+                if self._observer:
+                    await self._observer.on_push_frame(
+                        self, self._next, frame, direction, timestamp
+                    )
                 await self._next.queue_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
                 logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
+                if self._observer:
+                    await self._observer.on_push_frame(
+                        self, self._prev, frame, direction, timestamp
+                    )
                 await self._prev.queue_frame(frame, direction)
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
@@ -284,8 +297,10 @@ class FrameProcessor:
         while running:
             try:
                 if self.__should_block_frames:
+                    logger.trace(f"{self}: frame processing paused")
                     await self.__input_event.wait()
                     self.__input_event.clear()
+                    logger.trace(f"{self}: frame processing resumed")
 
                 (frame, direction, callback) = await self.__input_queue.get()
 
@@ -300,10 +315,10 @@ class FrameProcessor:
 
                 self.__input_queue.task_done()
             except asyncio.CancelledError:
-                logger.trace(f"Cancelled input task in {self}")
+                logger.trace(f"{self}: cancelled input task")
                 break
             except Exception as e:
-                logger.exception(f"Uncaught exception in {self}: {e}")
+                logger.exception(f"{self}: Uncaught exception {e}")
                 await self.push_error(ErrorFrame(str(e)))
 
     def __create_push_task(self):
@@ -323,10 +338,10 @@ class FrameProcessor:
                 running = not isinstance(frame, EndFrame)
                 self.__push_queue.task_done()
             except asyncio.CancelledError:
-                logger.trace(f"Cancelled push task in {self}")
+                logger.trace(f"{self}: cancelled push task")
                 break
             except Exception as e:
-                logger.exception(f"Uncaught exception in {self}: {e}")
+                logger.exception(f"{self}: Uncaught exception {e}")
                 await self.push_error(ErrorFrame(str(e)))
 
     async def _call_event_handler(self, event_name: str, *args, **kwargs):

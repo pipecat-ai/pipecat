@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -16,7 +16,7 @@ from runner import configure_with_args
 
 from pipecat.audio.mixers.soundfile_mixer import SoundfileMixer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame, MixerEnableFrame, MixerUpdateSettingsFrame
+from pipecat.frames.frames import MixerEnableFrame, MixerUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -108,7 +108,7 @@ async def main():
             await asyncio.sleep(5.0)
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
 

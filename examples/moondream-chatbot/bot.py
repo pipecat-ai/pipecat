@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -20,7 +20,6 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     Frame,
     ImageRawFrame,
-    LLMMessagesFrame,
     OutputImageRawFrame,
     SpriteFrame,
     TextFrame,
@@ -68,8 +67,7 @@ talking_frame = SpriteFrame(images=sprites)
 
 
 class TalkingAnimation(FrameProcessor):
-    """
-    This class starts a talking animation when it receives an first AudioFrame,
+    """This class starts a talking animation when it receives an first AudioFrame,
     and then returns to a "quiet" sprite when it sees a TTSStoppedFrame.
     """
 
@@ -204,7 +202,7 @@ async def main():
             await transport.capture_participant_transcription(participant["id"])
             await transport.capture_participant_video(participant["id"], framerate=0)
             ir.set_participant_id(participant["id"])
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
 

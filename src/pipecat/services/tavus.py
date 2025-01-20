@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -35,7 +35,7 @@ class TavusVideoService(AIService):
         *,
         api_key: str,
         replica_id: str,
-        persona_id: str = "pipecat0",
+        persona_id: str = "pipecat0",  # Use `pipecat0` so that your TTS voice is used in place of the Tavus persona
         session: aiohttp.ClientSession,
         **kwargs,
     ) -> None:
@@ -88,7 +88,7 @@ class TavusVideoService(AIService):
         if not done:
             audio = resample_audio(audio, original_sample_rate, 16000)
         audio_base64 = base64.b64encode(audio).decode("utf-8")
-        logger.trace(f"TavusVideoService sending {len(audio)} bytes")
+        logger.trace(f"{self}: sending {len(audio)} bytes")
         await self._send_audio_message(audio_base64, done=done)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,7 +7,7 @@
 import asyncio
 from typing import Awaitable, Callable, List
 
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -31,10 +31,11 @@ class IdleFrameProcessor(FrameProcessor):
         self._timeout = timeout
         self._types = types
 
-        self._create_idle_task()
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame):
+            self._create_idle_task()
 
         await self.push_frame(frame, direction)
 

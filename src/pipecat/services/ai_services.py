@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -19,16 +19,19 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     STTMuteFrame,
     STTUpdateSettingsFrame,
     TextFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
     TTSUpdateSettingsFrame,
     UserImageRequestFrame,
     VisionImageRawFrame,
@@ -230,11 +233,9 @@ class TTSService(AIService):
     def sample_rate(self) -> int:
         return self._sample_rate
 
-    @abstractmethod
     async def set_model(self, model: str):
         self.set_model_name(model)
 
-    @abstractmethod
     def set_voice(self, voice: str):
         self._voice_id = voice
 
@@ -290,8 +291,11 @@ class TTSService(AIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-
-        if isinstance(frame, TextFrame):
+        if (
+            isinstance(frame, TextFrame)
+            and not isinstance(frame, InterimTranscriptionFrame)
+            and not isinstance(frame, TranscriptionFrame)
+        ):
             await self._process_text_frame(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame, direction)
@@ -363,7 +367,7 @@ class TTSService(AIService):
         if self._push_text_frames:
             # We send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
-            await self.push_frame(TextFrame(text))
+            await self.push_frame(TTSTextFrame(text))
 
     async def _stop_frame_handler(self):
         try:
@@ -442,7 +446,7 @@ class WordTTSService(TTSService):
                     frame = TTSStoppedFrame()
                     frame.pts = last_pts
                 else:
-                    frame = TextFrame(word)
+                    frame = TTSTextFrame(word)
                     frame.pts = self._initial_word_timestamp + timestamp
                 if frame:
                     last_pts = frame.pts

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -42,11 +42,13 @@ except ModuleNotFoundError as e:
 class FastAPIWebsocketParams(TransportParams):
     add_wav_header: bool = False
     serializer: FrameSerializer
+    session_timeout: int | None = None
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
     on_client_connected: Callable[[WebSocket], Awaitable[None]]
     on_client_disconnected: Callable[[WebSocket], Awaitable[None]]
+    on_session_timeout: Callable[[WebSocket], Awaitable[None]]
 
 
 class FastAPIWebsocketInputTransport(BaseInputTransport):
@@ -65,6 +67,10 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        if self._params.session_timeout:
+            self._monitor_websocket_task = self.get_event_loop().create_task(
+                self._monitor_websocket()
+            )
         await self._callbacks.on_client_connected(self._websocket)
         self._receive_task = self.get_event_loop().create_task(self._receive_messages())
 
@@ -87,6 +93,14 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                 await self.push_frame(frame)
 
         await self._callbacks.on_client_disconnected(self._websocket)
+
+    async def _monitor_websocket(self):
+        """Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event."""
+        try:
+            await asyncio.sleep(self._params.session_timeout)
+            await self._callbacks.on_session_timeout(self._websocket)
+        except asyncio.CancelledError:
+            logger.info(f"Monitoring task cancelled for: {self._websocket}")
 
 
 class FastAPIWebsocketOutputTransport(BaseOutputTransport):
@@ -176,6 +190,7 @@ class FastAPIWebsocketTransport(BaseTransport):
         self._callbacks = FastAPIWebsocketCallbacks(
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
+            on_session_timeout=self._on_session_timeout,
         )
 
         self._input = FastAPIWebsocketInputTransport(
@@ -189,6 +204,7 @@ class FastAPIWebsocketTransport(BaseTransport):
         # these handlers.
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
+        self._register_event_handler("on_session_timeout")
 
     def input(self) -> FastAPIWebsocketInputTransport:
         return self._input
@@ -201,3 +217,6 @@ class FastAPIWebsocketTransport(BaseTransport):
 
     async def _on_client_disconnected(self, websocket):
         await self._call_event_handler("on_client_disconnected", websocket)
+
+    async def _on_session_timeout(self, websocket):
+        await self._call_event_handler("on_session_timeout", websocket)

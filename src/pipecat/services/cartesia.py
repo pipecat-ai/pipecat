@@ -1,10 +1,9 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import base64
 import json
 import uuid
@@ -12,7 +11,6 @@ from typing import AsyncGenerator, List, Optional, Union
 
 from loguru import logger
 from pydantic import BaseModel
-from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -30,6 +28,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService, WordTTSService
+from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for Cartesia configuration needed
@@ -76,7 +75,7 @@ def language_to_cartesia_language(language: Language) -> str | None:
     return result
 
 
-class CartesiaTTSService(WordTTSService):
+class CartesiaTTSService(WordTTSService, WebsocketService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
@@ -106,12 +105,14 @@ class CartesiaTTSService(WordTTSService):
         # if we're interrupted. Cartesia gives us word-by-word timestamps. We
         # can use those to generate text frames ourselves aligned with the
         # playout timing of the audio!
-        super().__init__(
+        WordTTSService.__init__(
+            self,
             aggregate_sentences=True,
             push_text_frames=False,
             sample_rate=sample_rate,
             **kwargs,
         )
+        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._cartesia_version = cartesia_version
@@ -131,7 +132,6 @@ class CartesiaTTSService(WordTTSService):
         self.set_model_name(model)
         self.set_voice(voice_id)
 
-        self._websocket = None
         self._context_id = None
         self._receive_task = None
 
@@ -187,7 +187,9 @@ class CartesiaTTSService(WordTTSService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+        self._receive_task = self.get_event_loop().create_task(
+            self._receive_task_handler(self.push_error)
+        )
 
     async def _disconnect(self):
         await self._disconnect_websocket()
@@ -236,7 +238,7 @@ class CartesiaTTSService(WordTTSService):
     async def flush_audio(self):
         if not self._context_id or not self._websocket:
             return
-        logger.trace("Flushing audio")
+        logger.trace(f"{self}: flushing audio")
         msg = self._build_msg(text="", continue_transcript=False)
         await self._websocket.send(msg)
 
@@ -271,33 +273,9 @@ class CartesiaTTSService(WordTTSService):
                 logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
-
-    async def _reconnect_websocket(self, retry_state: RetryCallState):
-        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
-        await self._disconnect_websocket()
-        await self._connect_websocket()
-
-    async def _receive_task_handler(self):
-        while True:
-            try:
-                async for attempt in AsyncRetrying(
-                    stop=stop_after_attempt(3),
-                    wait=wait_exponential(multiplier=1, min=4, max=10),
-                    before_sleep=self._reconnect_websocket,
-                    reraise=True,
-                ):
-                    with attempt:
-                        await self._receive_messages()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                message = f"{self} error receiving messages: {e}"
-                logger.error(message)
-                await self.push_error(ErrorFrame(message, fatal=True))
-                break
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

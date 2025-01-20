@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -77,7 +77,9 @@ class TkOutputTransport(BaseOutputTransport):
     def __init__(self, tk_root: tk.Tk, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
 
-        self._executor = ThreadPoolExecutor(max_workers=5)
+        # We only write audio frames from a single task, so only one thread
+        # should be necessary.
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
         self._out_stream = py_audio.open(
             format=py_audio.get_format_from_width(2),

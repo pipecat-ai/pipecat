@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,7 +15,7 @@ from PIL import Image
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, OutputImageRawFrame, SystemFrame, TextFrame
+from pipecat.frames.frames import EndFrame, Frame, OutputImageRawFrame, SystemFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -125,6 +125,10 @@ async def main():
             participant_name = participant.get("info", {}).get("userName", "")
             await transport.capture_participant_transcription(participant["id"])
             await task.queue_frames([TextFrame(f"Hi there {participant_name}!")])
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.queue_frame(EndFrame())
 
         runner = PipelineRunner()
 

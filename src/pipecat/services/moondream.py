@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -23,9 +23,7 @@ except ModuleNotFoundError as e:
 
 
 def detect_device():
-    """
-    Detects the appropriate device to run on, and return the device and dtype.
-    """
+    """Detects the appropriate device to run on, and return the device and dtype."""
     try:
         import intel_extension_for_pytorch
 

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -61,7 +61,8 @@ class WhisperSTTService(SegmentedSTTService):
 
     def _load(self):
         """Loads the Whisper model. Note that if this is the first time
-        this model is being run, it will take time to download."""
+        this model is being run, it will take time to download.
+        """
         logger.debug("Loading Whisper model...")
         self._model = WhisperModel(
             self.model_name, device=self._device, compute_type=self._compute_type

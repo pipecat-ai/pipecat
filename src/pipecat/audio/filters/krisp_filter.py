@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -24,8 +24,7 @@ class KrispFilter(BaseAudioFilter):
     def __init__(
         self, sample_type: str = "PCM_16", channels: int = 1, model_path: str = None
     ) -> None:
-        """
-        Initializes the KrispAudioProcessor with customizable audio processing settings.
+        """Initializes the KrispAudioProcessor with customizable audio processing settings.
 
         :param sample_type: The type of audio sample, default is 'PCM_16'.
         :param channels: Number of audio channels, default is 1.

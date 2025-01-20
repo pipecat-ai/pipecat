@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -525,7 +525,7 @@ async def main():
                     "content": "Start by just saying \"Hello I'm ready.\" Don't say anything else.",
                 }
             )
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_app_message")
         async def on_app_message(transport, message, sender):

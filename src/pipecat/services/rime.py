@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -43,14 +43,14 @@ class RimeHttpTTSService(TTSService):
         self._api_key = api_key
         self._base_url = "https://users.rime.ai/v1/rime-tts"
         self._settings = {
-            "speaker": voice_id,
-            "modelId": model,
             "samplingRate": sample_rate,
             "speedAlpha": params.speed_alpha,
             "reduceLatency": params.reduce_latency,
             "pauseBetweenBrackets": params.pause_between_brackets,
             "phonemizeBetweenBrackets": params.phonemize_between_brackets,
         }
+        self.set_voice(voice_id)
+        self.set_model_name(model)
 
         if params.inline_speed_alpha:
             self._settings["inlineSpeedAlpha"] = params.inline_speed_alpha
@@ -69,6 +69,8 @@ class RimeHttpTTSService(TTSService):
 
         payload = self._settings.copy()
         payload["text"] = text
+        payload["speaker"] = self._voice_id
+        payload["modelId"] = self._model_name
 
         try:
             await self.start_ttfb_metrics()

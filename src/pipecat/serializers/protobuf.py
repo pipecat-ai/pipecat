@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -58,7 +58,9 @@ class ProtobufFrameSerializer(FrameSerializer):
         return proto_frame.SerializeToString()
 
     def deserialize(self, data: str | bytes) -> Frame | None:
-        """Returns a Frame object from a Frame protobuf. Used to convert frames
+        """Returns a Frame object from a Frame protobuf.
+
+        Used to convert frames
         passed over the wire as protobufs to Frame objects used in pipelines
         and frame processors.
 
@@ -75,7 +77,6 @@ class ProtobufFrameSerializer(FrameSerializer):
         ...     text="Hello there!", participantId="123", timestamp="2021-01-01")))
         TranscriptionFrame(text='Hello there!', participantId='123', timestamp='2021-01-01')
         """
-
         proto = frame_protos.Frame.FromString(data)
         which = proto.WhichOneof("frame")
         if which not in self.DESERIALIZABLE_FIELDS:

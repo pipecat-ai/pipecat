@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,7 +15,7 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, LLMMessagesFrame
+from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -97,7 +97,7 @@ async def main():
         call completion, CanonicalMetrics will send the audio buffer to Canonical for
         analysis. Visit https://voice.canonical.chat to learn more.
         """
-        audio_buffer_processor = AudioBufferProcessor()
+        audio_buffer_processor = AudioBufferProcessor(num_channels=2)
         canonical = CanonicalMetricsService(
             audio_buffer_processor=audio_buffer_processor,
             aiohttp_session=session,
@@ -105,6 +105,7 @@ async def main():
             call_id=str(uuid.uuid4()),
             assistant="pipecat-chatbot",
             assistant_speaks_first=True,
+            context=context,
         )
         pipeline = Pipeline(
             [
@@ -124,7 +125,7 @@ async def main():
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):

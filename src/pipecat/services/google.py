@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -19,12 +19,13 @@ from pipecat.frames.frames import (
     AudioRawFrame,
     ErrorFrame,
     Frame,
+    FunctionCallResultProperties,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
+    LLMTextFrame,
     LLMUpdateSettingsFrame,
     OpenAILLMContextAssistantTimestampFrame,
-    TextFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -245,6 +246,7 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
             return
 
         run_llm = False
+        properties: Optional[FunctionCallResultProperties] = None
 
         aggregation = self._aggregation
         self._reset()
@@ -252,6 +254,7 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
         try:
             if self._function_call_result:
                 frame = self._function_call_result
+                properties = frame.properties
                 self._function_call_result = None
                 if frame.result:
                     logger.debug(f"FunctionCallResultFrame result: {frame.arguments}")
@@ -282,7 +285,12 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
                             ],
                         )
                     )
-                    run_llm = not bool(self._function_calls_in_progress)
+                    if properties and properties.run_llm is not None:
+                        # If the tool call result has a run_llm property, use it
+                        run_llm = properties.run_llm
+                    else:
+                        # Default behavior is to run the LLM if there are no function calls in progress
+                        run_llm = not bool(self._function_calls_in_progress)
             else:
                 if aggregation.strip():
                     self._context.add_message(
@@ -302,6 +310,10 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
+
+            # Emit the on_context_updated callback once the function call result is added to the context
+            if properties and properties.on_context_updated is not None:
+                await properties.on_context_updated()
 
             # Push context frame
             frame = OpenAILLMContextFrame(self._context)
@@ -686,7 +698,7 @@ class GoogleLLMService(LLMService):
                 try:
                     for c in chunk.parts:
                         if c.text:
-                            await self.push_frame(TextFrame(c.text))
+                            await self.push_frame(LLMTextFrame(c.text))
                         elif c.function_call:
                             logger.debug(f"!!! Function call: {c.function_call}")
                             args = type(c.function_call).to_dict(c.function_call).get("args", {})
@@ -865,8 +877,15 @@ class GoogleTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
-            ssml = self._construct_ssml(text)
-            synthesis_input = texttospeech_v1.SynthesisInput(ssml=ssml)
+            is_journey_voice = "journey" in self._voice_id.lower()
+
+            # Create synthesis input based on voice_id
+            if is_journey_voice:
+                synthesis_input = texttospeech_v1.SynthesisInput(text=text)
+            else:
+                ssml = self._construct_ssml(text)
+                synthesis_input = texttospeech_v1.SynthesisInput(ssml=ssml)
+
             voice = texttospeech_v1.VoiceSelectionParams(
                 language_code=self._settings["language"], name=self._voice_id
             )
