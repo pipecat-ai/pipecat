@@ -530,7 +530,7 @@ class ElevenLabsHttpTTSService(TTSService):
         }
 
         if self._voice_settings:
-            payload["voice_settings"] = json.dumps(self._voice_settings)
+            payload["voice_settings"] = self._voice_settings
 
         if self._settings["language"]:
             payload["language_code"] = self._settings["language"]
