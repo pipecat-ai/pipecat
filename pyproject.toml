@@ -40,6 +40,50 @@ Source = "https://github.com/pipecat-ai/pipecat"
 Website = "https://pipecat.ai"
 
 [project.optional-dependencies]
+# Update this list if you add a new service.
+all = [
+    "pipecat-ai[anthropic]",
+    "pipecat-ai[assemblyai]",
+    "pipecat-ai[aws]",
+    "pipecat-ai[azure]",
+    "pipecat-ai[canonical]",
+    "pipecat-ai[cartesia]",
+    "pipecat-ai[cerebras]",
+    "pipecat-ai[deepseek]",
+    "pipecat-ai[daily]",
+    "pipecat-ai[deepgram]",
+    "pipecat-ai[elevenlabs]",
+    "pipecat-ai[fal]",
+    "pipecat-ai[fish]",
+    "pipecat-ai[gladia]",
+    "pipecat-ai[google]",
+    "pipecat-ai[grok]",
+    "pipecat-ai[groq]",
+    # GStreamer might require system libraries, so we leave that to the user.
+    # "pipecat-ai[gstreamer]",
+    "pipecat-ai[fireworks]",
+    # Krisp requires an external SDK, so we leave that to the user.
+    # "pipecat-ai[krisp]",
+    "pipecat-ai[koala]",
+    "pipecat-ai[langchain]",
+    "pipecat-ai[livekit]",
+    "pipecat-ai[local]",
+    "pipecat-ai[lmnt]",
+    "pipecat-ai[moondream]",
+    "pipecat-ai[nim]",
+    "pipecat-ai[noisereduce]",
+    "pipecat-ai[openai]",
+    "pipecat-ai[openpipe]",
+    "pipecat-ai[openrouter]",
+    "pipecat-ai[playht]",
+    "pipecat-ai[riva]",
+    "pipecat-ai[silero]",
+    "pipecat-ai[simli]",
+    "pipecat-ai[soundfile]",
+    "pipecat-ai[together]",
+    "pipecat-ai[websocket]",
+    "pipecat-ai[whisper]"
+]
 anthropic = [ "anthropic~=0.39.0" ]
 assemblyai = [ "assemblyai~=0.36.0" ]
 aws = [ "boto3~=1.35.99" ]
@@ -70,6 +114,7 @@ nim = [ "openai~=1.59.6" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 openai = [ "openai~=1.59.6", "websockets~=13.1", "python-deepcompare~=2.1.0" ]
 openpipe = [ "openpipe~=4.43.0" ]
+openrouter = [ "openai~=1.59.6" ]
 playht = [ "pyht~=0.1.6", "websockets~=13.1" ]
 riva = [ "nvidia-riva-client~=2.18.0" ]
 silero = [ "onnxruntime~=1.20.1" ]
@@ -78,7 +123,6 @@ soundfile = [ "soundfile~=0.13.0" ]
 together = [ "openai~=1.59.6" ]
 websocket = [ "websockets~=13.1", "fastapi~=0.115.6" ]
 whisper = [ "faster-whisper~=1.1.1" ]
-openrouter = [ "openai~=1.59.6" ]
 
 [tool.setuptools.packages.find]
 # All the following settings are optional:
