@@ -524,13 +524,13 @@ class ElevenLabsHttpTTSService(TTSService):
 
         url = f"{self._base_url}/v1/text-to-speech/{self._voice_id}/stream"
 
-        payload = {
+        payload: Dict[str, Union[str, Dict[str, Union[float, bool]]]] = {
             "text": text,
             "model_id": self._model_name,
         }
 
         if self._voice_settings:
-            payload["voice_settings"] = json.dumps(self._voice_settings)
+            payload["voice_settings"] = self._voice_settings
 
         if self._settings["language"]:
             payload["language_code"] = self._settings["language"]
