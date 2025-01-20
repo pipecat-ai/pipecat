@@ -216,9 +216,9 @@ class DeepgramSTTService(STTService):
         await self.start_processing_metrics()
 
     async def _on_speech_started(self, *args, **kwargs):
-        # if self.vad_enabled:
-        #     logger.debug("=========== Deepgram =========== Speech started")
-        #     await self.push_frame(UserStartedSpeakingFrame())
+        if self.vad_enabled:
+            logger.debug("=========== Deepgram =========== Speech started")
+            await self.push_frame(UserStartedSpeakingFrame())
         await self.start_metrics()
         await self._call_event_handler("on_speech_started", *args, **kwargs)
 
@@ -269,6 +269,6 @@ class DeepgramSTTService(STTService):
             await self.start_metrics()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
-            # if not self.vad_enabled:
-            await self._connection.finalize()
-            logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
+            if not self.vad_enabled:
+                await self._connection.finalize()
+                logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
