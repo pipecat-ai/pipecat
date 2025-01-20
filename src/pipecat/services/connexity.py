@@ -25,12 +25,11 @@ from twilio.rest import Client
 
 
 class ConnexityInterface(AIService):
-    # TODO guess how to provide api_url
     def __init__(self,
                  call_id: str,
                  assistant_id: str,
                  api_key: str,
-                 api_url: str = "https://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/",
+                 api_url: str,
                  assistant_speaks_first: bool = True,
                  **kwargs,
                  ):
@@ -95,7 +94,7 @@ class ConnexityLocalMetricsService(ConnexityInterface):
         call_id: str,
         assistant_id: str,
         api_key: str,
-        api_url: str = "",
+        api_url: str = "https://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/file",
         assistant_speaks_first: bool = True,
         **kwargs,
     ):
@@ -208,7 +207,7 @@ class ConnexityTwilioMetricsService(ConnexityInterface):
         sid: str,
         assistant_id: str,
         api_key: str,
-        api_url: str = "",
+        api_url: str = "https://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/links",
         assistant_speaks_first: bool = True,
         twilio_account_id: Optional[str] = None,
         twilio_auth_token: Optional[str] = None,
@@ -265,7 +264,7 @@ class ConnexityDailyMetricsService(ConnexityInterface):
         call_id: str,
         assistant_id: str,
         api_key: str,
-        api_url: str = "",
+        api_url: str = "https://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/links",
         assistant_speaks_first: bool = True,
         daily_api_key: Optional[str] = None,
         room_url: str,
