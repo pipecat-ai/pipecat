@@ -16,21 +16,21 @@ from processors import StoryImageProcessor, StoryProcessor
 from prompts import CUE_USER_TURN, LLM_BASE_PROMPT
 from utils.helpers import load_images, load_sounds
 
-from pipecat.frames.frames import EndFrame, StopTaskFrame
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContextFrame,
-)
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-
+from pipecat.frames.frames import EndFrame, StopTaskFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.logger import FrameLogger
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.openai import OpenAILLMService
+from pipecat.services.cartesia import CartesiaHttpTTSService, CartesiaTTSService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.services.google import GoogleLLMService
+from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,
@@ -72,9 +72,12 @@ async def main(room_url, token=None):
         llm_service = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
         # llm_service = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
-        tts_service = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+        # tts_service = CartesiaTTSService(
+        #     api_key=os.getenv("CARTESIA_API_KEY"),
+        #     voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+        # )
+        tts_service = ElevenLabsTTSService(
+            api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID")
         )
 
         fal_service_params = FalImageGenService.InputParams(
@@ -83,7 +86,8 @@ async def main(room_url, token=None):
 
         fal_service = FalImageGenService(
             aiohttp_session=session,
-            model="fal-ai/fast-lightning-sdxl",
+            # model="fal-ai/fast-lightning-sdxl",
+            model="fal-ai/stable-diffusion-v35-medium",
             params=fal_service_params,
             key=os.getenv("FAL_KEY"),
         )
@@ -112,26 +116,28 @@ async def main(room_url, token=None):
 
         logger.debug("Waiting for participant...")
 
-
-
         # We run the intro pipeline. This will start the transport. The intro
         # task will exit after StopTaskFrame is processed.
 
         # The main story pipeline is used to continue the story based on user
         # input.
         fl = FrameLogger("after image processor", "green")
-        fl3 = FrameLogger("after input", "red")
+        fl2 = FrameLogger("after story processor", "red")
+        fl3 = FrameLogger("After transport output", "cyan")
+        fl4 = FrameLogger("Before transport output", "magenta")
         main_pipeline = Pipeline(
             [
                 transport.input(),
-                fl3,
                 context_aggregator.user(),
                 llm_service,
                 story_processor,
+                fl2,
                 image_processor,
                 fl,
                 tts_service,
+                fl4,
                 transport.output(),
+                fl3,
                 context_aggregator.assistant(),
             ]
         )
