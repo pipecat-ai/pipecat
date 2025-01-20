@@ -44,10 +44,11 @@ except ModuleNotFoundError as e:
 
 ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
 
-ELEVENLABS_MULTILINGUAL_MODELS = {
+# NOTE: Only Turbo models require language code
+# Requests will error out if language_code is provided in other models
+# Ref: https://elevenlabs.io/docs/api-reference/text-to-speech/convert-as-stream
+ELEVENLABS_LANG_ENFORCE_MODELS = {
     "eleven_turbo_v2_5",
-    "eleven_multilingual_v2",
-    "eleven_flash_v2_5",
 }
 
 
@@ -328,13 +329,13 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             if self._settings["optimize_streaming_latency"]:
                 url += f"&optimize_streaming_latency={self._settings['optimize_streaming_latency']}"
 
-            # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
+            # Language can only be used with the ELEVENLABS_LANG_ENFORCE_MODELS
             language = self._settings["language"]
-            if model in ELEVENLABS_MULTILINGUAL_MODELS:
+            if model in ELEVENLABS_LANG_ENFORCE_MODELS:
                 url += f"&language_code={language}"
             else:
                 logger.warning(
-                    f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
+                    f"Language code [{language}] not applied. Language codes can only be used with Turbo v2.5 model: {', '.join(sorted(ELEVENLABS_LANG_ENFORCE_MODELS))}"
                 )
 
             self._websocket = await websockets.connect(url)
@@ -533,7 +534,14 @@ class ElevenLabsHttpTTSService(TTSService):
             payload["voice_settings"] = self._voice_settings
 
         if self._settings["language"]:
-            payload["language_code"] = self._settings["language"]
+            language = self._settings["language"]
+            # Language can only be used with the ELEVENLABS_LANG_ENFORCE_MODELS
+            if self._model_name in ELEVENLABS_LANG_ENFORCE_MODELS:
+                payload["language_code"] = language
+            else:
+                logger.warning(
+                    f"Language code [{language}] not applied. Language codes can only be used with Turbo v2.5 model: {', '.join(sorted(ELEVENLABS_LANG_ENFORCE_MODELS))}"
+                )
 
         headers = {
             "xi-api-key": self._api_key,
