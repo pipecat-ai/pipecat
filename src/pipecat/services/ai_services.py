@@ -350,8 +350,7 @@ class TTSService(AIService):
     async def _push_tts_frames(self, text: str):
         # Don't send only whitespace. This causes problems for some TTS models. But also don't
         # strip all whitespace, as whitespace can influence prosody.
-        text = text.strip()
-        if not text:
+        if not text.strip():
             return
 
         await self.start_processing_metrics()
@@ -359,8 +358,7 @@ class TTSService(AIService):
             self._text_filter.reset_interruption()
             text = self._text_filter.filter(text)
             # Check again after running the filter
-            text = text.strip()
-            if not text:
+            if not text.strip():
                 return
         await self.process_generator(self.run_tts(text))
         await self.stop_processing_metrics()
