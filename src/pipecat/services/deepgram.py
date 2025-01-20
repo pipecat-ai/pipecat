@@ -216,8 +216,9 @@ class DeepgramSTTService(STTService):
         await self.start_processing_metrics()
 
     async def _on_speech_started(self, *args, **kwargs):
-        if self.vad_enabled:
-            await self.push_frame(UserStartedSpeakingFrame())
+        # if self.vad_enabled:
+        #     logger.debug("=========== Deepgram =========== Speech started")
+        #     await self.push_frame(UserStartedSpeakingFrame())
         await self.start_metrics()
         await self._call_event_handler("on_speech_started", *args, **kwargs)
 
@@ -240,7 +241,9 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
+                logger.debug(f">> Deepgram: {transcript}")
                 if self.vad_enabled:
+                    logger.debug("~~~~~~~~~~~ Deepgram ~~~~~~~~~~~ Speech stopped")
                     await self.push_frame(UserStoppedSpeakingFrame())
                     # Below line is really important; do not remove this as this is necessary to keep the conversation flow
                     # while using deepgram as a vad we need to make sure that we correctly trigger UserStartedSpeakingFrame
@@ -250,6 +253,7 @@ class DeepgramSTTService(STTService):
                     # Current Transcription/InterimTranscription Frames
                     # Another UserStoppedSpeakingFrame
                     # However the flow should be: Prev Stop; Curr Start -> Curr Transcription -> Curr Stop; Next Start and so on...
+                    logger.debug("=========== Deepgram =========== Forced Speech started")
                     await self.push_frame(UserStartedSpeakingFrame())
                 await self.stop_processing_metrics()
             else:
@@ -265,5 +269,6 @@ class DeepgramSTTService(STTService):
             await self.start_metrics()
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # https://developers.deepgram.com/docs/finalize
-            await self._connection.finalize()
-            logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
+            if not self.vad_enabled:
+                await self._connection.finalize()
+                logger.trace(f"Triggered finalize event on: {frame.name=}, {direction=}")
