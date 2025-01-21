@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
+from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
@@ -86,7 +87,7 @@ class Sink(FrameProcessor):
         await self._down_queue.put(frame)
 
 
-class PipelineTask:
+class PipelineTask(BaseTask):
     def __init__(
         self,
         pipeline: BasePipeline,
@@ -122,7 +123,7 @@ class PipelineTask:
 
         self._observer = TaskObserver(params.observers)
 
-    def has_finished(self):
+    def has_finished(self) -> bool:
         """Indicates whether the tasks has finished. That is, all processors
         have stopped.
 
