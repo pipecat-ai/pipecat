@@ -4,8 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 from loguru import logger
 
@@ -20,6 +19,7 @@ from pipecat.frames.frames import (
     TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.time import time_now_iso8601
 
 
 class BaseTranscriptProcessor(FrameProcessor):
@@ -86,22 +86,18 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """Initialize processor with aggregation state."""
         super().__init__(**kwargs)
         self._current_text_parts: List[str] = []
-        self._aggregation_start_time: datetime | None = None
+        self._aggregation_start_time: Optional[str] | None = None
 
     async def _emit_aggregated_text(self):
         """Emit aggregated text as a transcript message."""
         if self._current_text_parts and self._aggregation_start_time:
             content = " ".join(self._current_text_parts).strip()
             if content:
-                # Format timestamp with 3 decimal places
-                formatted_timestamp = (
-                    self._aggregation_start_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "+00:00"
-                )
                 logger.debug(f"Emitting aggregated assistant message: {content}")
                 message = TranscriptionMessage(
                     role="assistant",
                     content=content,
-                    timestamp=formatted_timestamp,
+                    timestamp=self._aggregation_start_time,
                 )
                 await self._emit_update([message])
             else:
@@ -129,16 +125,12 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         if isinstance(frame, TTSTextFrame):
             # Start timestamp on first text part
             if not self._aggregation_start_time:
-                self._aggregation_start_time = datetime.now(timezone.utc)
+                self._aggregation_start_time = time_now_iso8601()
 
             self._current_text_parts.append(frame.text)
 
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            # Emit accumulated text when bot finishes speaking
-            await self._emit_aggregated_text()
-
-        elif isinstance(frame, StartInterruptionFrame):
-            # Emit any pending text when interrupted
+        elif isinstance(frame, (BotStoppedSpeakingFrame, StartInterruptionFrame)):
+            # Emit accumulated text when bot finishes speaking or is interrupted
             await self._emit_aggregated_text()
 
         elif isinstance(frame, EndFrame):
