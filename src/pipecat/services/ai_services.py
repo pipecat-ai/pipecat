@@ -48,6 +48,8 @@ from pipecat.utils.time import seconds_to_nanoseconds
 class AIService(FrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._require_api_key: bool = True
+        self._api_key: str = ""
         self._model_name: str = ""
         self._settings: Dict[str, Any] = {}
         self._session_properties: Dict[str, Any] = {}
@@ -61,7 +63,10 @@ class AIService(FrameProcessor):
         self.set_core_metrics_data(MetricsData(processor=self.name, model=self._model_name))
 
     async def start(self, frame: StartFrame):
-        pass
+        if self._require_api_key and not self._api_key:
+            raise Exception(f"{self}: Error: No api_key value found.")
+        else:
+            pass
 
     async def stop(self, frame: EndFrame):
         pass

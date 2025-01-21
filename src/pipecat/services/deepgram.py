@@ -59,6 +59,7 @@ class DeepgramTTSService(TTSService):
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
+        self._api_key = api_key
         self._settings = {
             "sample_rate": sample_rate,
             "encoding": encoding,
@@ -148,6 +149,7 @@ class DeepgramSTTService(STTService):
         ):
             merged_options.language = merged_options.language.value
 
+        self._api_key = api_key
         self._settings = merged_options.to_dict()
 
         self._client = DeepgramClient(

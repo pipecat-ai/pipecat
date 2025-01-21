@@ -129,6 +129,7 @@ class PollyTTSService(TTSService):
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+        self._api_key = api_key
 
         self._polly_client = boto3.client(
             "polly",

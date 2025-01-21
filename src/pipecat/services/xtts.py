@@ -80,6 +80,7 @@ class XTTSService(TTSService):
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+        self._require_api_key = False
 
         self._settings = {
             "language": self.language_to_service_language(language),

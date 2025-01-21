@@ -81,9 +81,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     ):
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
-        self.api_key = api_key
         self.base_url = full_url
 
+        self._api_key = api_key
         self._session_properties: events.SessionProperties = session_properties
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
@@ -262,7 +262,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             self._websocket = await websockets.connect(
                 uri=self.base_url,
                 extra_headers={
-                    "Authorization": f"Bearer {self.api_key}",
+                    "Authorization": f"Bearer {self._api_key}",
                     "OpenAI-Beta": "realtime=v1",
                 },
             )

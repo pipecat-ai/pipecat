@@ -120,6 +120,7 @@ class BaseOpenAILLMService(LLMService):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self._api_key = api_key
         self._settings = {
             "frequency_penalty": params.frequency_penalty,
             "presence_penalty": params.presence_penalty,
@@ -416,6 +417,7 @@ class OpenAITTSService(TTSService):
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+        self._api_key = api_key
 
         self._settings = {
             "sample_rate": sample_rate,
