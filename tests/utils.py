@@ -6,20 +6,44 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Sequence, Tuple
+from typing import Awaitable, Callable, Sequence, Tuple
 
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     ControlFrame,
     Frame,
+    HeartbeatFrame,
     StartFrame,
 )
+from pipecat.observers.base_observer import BaseObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 @dataclass
 class EndTestFrame(ControlFrame):
     pass
+
+
+class HeartbeatsObserver(BaseObserver):
+    def __init__(
+        self,
+        *,
+        target: FrameProcessor,
+        heartbeat_callback: Callable[[FrameProcessor, HeartbeatFrame], Awaitable[None]],
+    ):
+        self._target = target
+        self._callback = heartbeat_callback
+
+    async def on_push_frame(
+        self,
+        src: FrameProcessor,
+        dst: FrameProcessor,
+        frame: Frame,
+        direction: FrameDirection,
+        timestamp: int,
+    ):
+        if src == self._target and isinstance(frame, HeartbeatFrame):
+            await self._callback(self._target, frame)
 
 
 class QueuedFrameProcessor(FrameProcessor):
