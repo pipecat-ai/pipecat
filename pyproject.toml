@@ -89,6 +89,9 @@ addopts = "--verbose"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore:'audioop' is deprecated:DeprecationWarning",
+]
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
