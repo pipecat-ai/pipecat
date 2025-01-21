@@ -186,7 +186,7 @@ class FrameProcessor:
         self.__should_block_frames = True
 
     async def resume_processing_frames(self):
-        logger.trace("f{self}: resuming frame processing")
+        logger.trace(f"{self}: resuming frame processing")
         self.__input_event.set()
         self.__should_block_frames = False
 
