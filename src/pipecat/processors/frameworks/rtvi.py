@@ -62,6 +62,9 @@ from pipecat.utils.string import match_endofsentence
 
 RTVI_PROTOCOL_VERSION = "0.3.0"
 
+RTVI_MESSAGE_LABEL = "rtvi-ai"
+RTVIMessageLiteral = Literal["rtvi-ai"]
+
 ActionResult = Union[bool, int, float, str, list, dict]
 
 
@@ -154,7 +157,7 @@ class RTVIActionFrame(DataFrame):
 
 
 class RTVIMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: str
     id: str
     data: Optional[Dict[str, Any]] = None
@@ -170,7 +173,7 @@ class RTVIErrorResponseData(BaseModel):
 
 
 class RTVIErrorResponse(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["error-response"] = "error-response"
     id: str
     data: RTVIErrorResponseData
@@ -182,7 +185,7 @@ class RTVIErrorData(BaseModel):
 
 
 class RTVIError(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["error"] = "error"
     data: RTVIErrorData
 
@@ -192,7 +195,7 @@ class RTVIDescribeConfigData(BaseModel):
 
 
 class RTVIDescribeConfig(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["config-available"] = "config-available"
     id: str
     data: RTVIDescribeConfigData
@@ -203,14 +206,14 @@ class RTVIDescribeActionsData(BaseModel):
 
 
 class RTVIDescribeActions(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["actions-available"] = "actions-available"
     id: str
     data: RTVIDescribeActionsData
 
 
 class RTVIConfigResponse(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["config"] = "config"
     id: str
     data: RTVIConfig
@@ -221,7 +224,7 @@ class RTVIActionResponseData(BaseModel):
 
 
 class RTVIActionResponse(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["action-response"] = "action-response"
     id: str
     data: RTVIActionResponseData
@@ -233,7 +236,7 @@ class RTVIBotReadyData(BaseModel):
 
 
 class RTVIBotReady(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-ready"] = "bot-ready"
     id: str
     data: RTVIBotReadyData
@@ -246,7 +249,7 @@ class RTVILLMFunctionCallMessageData(BaseModel):
 
 
 class RTVILLMFunctionCallMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["llm-function-call"] = "llm-function-call"
     data: RTVILLMFunctionCallMessageData
 
@@ -256,7 +259,7 @@ class RTVILLMFunctionCallStartMessageData(BaseModel):
 
 
 class RTVILLMFunctionCallStartMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["llm-function-call-start"] = "llm-function-call-start"
     data: RTVILLMFunctionCallStartMessageData
 
@@ -269,22 +272,22 @@ class RTVILLMFunctionCallResultData(BaseModel):
 
 
 class RTVIBotLLMStartedMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-llm-started"] = "bot-llm-started"
 
 
 class RTVIBotLLMStoppedMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-llm-stopped"] = "bot-llm-stopped"
 
 
 class RTVIBotTTSStartedMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-tts-started"] = "bot-tts-started"
 
 
 class RTVIBotTTSStoppedMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-tts-stopped"] = "bot-tts-stopped"
 
 
@@ -293,19 +296,19 @@ class RTVITextMessageData(BaseModel):
 
 
 class RTVIBotTranscriptionMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-transcription"] = "bot-transcription"
     data: RTVITextMessageData
 
 
 class RTVIBotLLMTextMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-llm-text"] = "bot-llm-text"
     data: RTVITextMessageData
 
 
 class RTVIBotTTSTextMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-tts-text"] = "bot-tts-text"
     data: RTVITextMessageData
 
@@ -317,7 +320,7 @@ class RTVIAudioMessageData(BaseModel):
 
 
 class RTVIBotTTSAudioMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-tts-audio"] = "bot-tts-audio"
     data: RTVIAudioMessageData
 
@@ -330,39 +333,39 @@ class RTVIUserTranscriptionMessageData(BaseModel):
 
 
 class RTVIUserTranscriptionMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["user-transcription"] = "user-transcription"
     data: RTVIUserTranscriptionMessageData
 
 
 class RTVIUserLLMTextMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["user-llm-text"] = "user-llm-text"
     data: RTVITextMessageData
 
 
 class RTVIUserStartedSpeakingMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["user-started-speaking"] = "user-started-speaking"
 
 
 class RTVIUserStoppedSpeakingMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["user-stopped-speaking"] = "user-stopped-speaking"
 
 
 class RTVIBotStartedSpeakingMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-started-speaking"] = "bot-started-speaking"
 
 
 class RTVIBotStoppedSpeakingMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-stopped-speaking"] = "bot-stopped-speaking"
 
 
 class RTVIMetricsMessage(BaseModel):
-    label: Literal["rtvi-ai"] = "rtvi-ai"
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["metrics"] = "metrics"
     data: Mapping[str, Any]
 
@@ -875,7 +878,11 @@ class RTVIProcessor(FrameProcessor):
 
     async def _handle_transport_message(self, frame: TransportMessageUrgentFrame):
         try:
-            message = RTVIMessage.model_validate(frame.message)
+            transport_message = frame.message
+            if transport_message.get("label") != RTVI_MESSAGE_LABEL:
+                logger.warning(f"Ignoring not RTVI message: {transport_message}")
+                return
+            message = RTVIMessage.model_validate(transport_message)
             await self._message_queue.put(message)
         except ValidationError as e:
             await self.send_error(f"Invalid RTVI transport message: {e}")
