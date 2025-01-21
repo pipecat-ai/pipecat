@@ -32,7 +32,7 @@ dependencies = [
     "protobuf~=5.29.3",
     "pydantic~=2.10.5",
     "pyloudnorm~=0.1.1",
-    "resampy~=0.4.3"
+    "soxr~=0.5.0"
 ]
 
 [project.urls]
