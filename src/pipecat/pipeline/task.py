@@ -45,6 +45,7 @@ class PipelineParams(BaseModel):
     send_initial_empty_metrics: bool = True
     report_only_initial_ttfb: bool = False
     observers: List[BaseObserver] = []
+    heartbeats_period_secs: float = HEARTBEAT_SECONDS
 
 
 class Source(FrameProcessor):
@@ -315,7 +316,7 @@ class PipelineTask:
 
     async def _heartbeat_push_handler(self):
         """
-        This tasks pushes a heartbeat frame every HEARTBEAT_SECONDS.
+        This tasks pushes a heartbeat frame every heartbeat period.
         """
         while True:
             try:
@@ -323,7 +324,7 @@ class PipelineTask:
                 # task will just stop waiting for the pipeline to finish not
                 # allowing more frames to be pushed.
                 await self._source.queue_frame(HeartbeatFrame(timestamp=self._clock.get_time()))
-                await asyncio.sleep(HEARTBEAT_SECONDS)
+                await asyncio.sleep(self._params.heartbeats_period_secs)
             except asyncio.CancelledError:
                 break
 
