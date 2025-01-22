@@ -97,7 +97,6 @@ class StoryProcessor(FrameProcessor):
         elif isinstance(frame, TextFrame):
             # Add new text to the buffer
             self._text += frame.text
-            print(f"!!! self._text: {self._text}")
             # Process any complete patterns in the order they appear
             await self.process_text_content()
 
@@ -109,7 +108,6 @@ class StoryProcessor(FrameProcessor):
             self._text = ""
             await self.push_frame(frame)
             # Send an app message to the UI
-            print(f"!!! sending a cue user turn")
             await self.push_frame(DailyTransportMessageFrame(CUE_USER_TURN))
             await self.push_frame(sounds["listening"])
 
@@ -137,9 +135,6 @@ class StoryProcessor(FrameProcessor):
                 image_prompt = image_match.group(1)
                 # Remove the image prompt from the text
                 self._text = self._text[: image_match.start()] + self._text[image_match.end() :]
-                print(
-                    f"@@@ processing image prompt: {image_prompt}, self._text is now: {self._text}"
-                )
                 await self.push_frame(StoryImageFrame(image_prompt))
             else:
                 # Process story break first
@@ -154,6 +149,3 @@ class StoryProcessor(FrameProcessor):
 
                 # Keep the remainder (if any) in the buffer
                 self._text = parts[1].strip() if len(parts) > 1 else ""
-                print(
-                    f"### processing story break: {before_break}, remaining self._text: {self._text}"
-                )

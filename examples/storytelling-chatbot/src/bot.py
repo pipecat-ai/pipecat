@@ -70,12 +70,7 @@ async def main(room_url, token=None):
         # -------------- Services --------------- #
 
         llm_service = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
-        # llm_service = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
-        # tts_service = CartesiaTTSService(
-        #     api_key=os.getenv("CARTESIA_API_KEY"),
-        #     voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
-        # )
         tts_service = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID")
         )
@@ -86,7 +81,6 @@ async def main(room_url, token=None):
 
         fal_service = FalImageGenService(
             aiohttp_session=session,
-            # model="fal-ai/fast-lightning-sdxl",
             model="fal-ai/stable-diffusion-v35-medium",
             params=fal_service_params,
             key=os.getenv("FAL_KEY"),
@@ -110,18 +104,8 @@ async def main(room_url, token=None):
 
         runner = PipelineRunner()
 
-        # The intro pipeline is used to start
-        # the story (as per LLM_INTRO_PROMPT)
-        fl2 = FrameLogger("intro pipeline")
-
         logger.debug("Waiting for participant...")
 
-        # We run the intro pipeline. This will start the transport. The intro
-        # task will exit after StopTaskFrame is processed.
-
-        # The main story pipeline is used to continue the story based on user
-        # input.
-        ifl = FrameLogger("Image Processor output", "red")
         main_pipeline = Pipeline(
             [
                 transport.input(),
@@ -129,7 +113,6 @@ async def main(room_url, token=None):
                 llm_service,
                 story_processor,
                 image_processor,
-                ifl,
                 tts_service,
                 transport.output(),
                 context_aggregator.assistant(),

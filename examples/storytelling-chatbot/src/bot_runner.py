@@ -107,13 +107,11 @@ async def start_bot(request: Request) -> JSONResponse:
 
     # Launch a new VM, or run as a shell process (not recommended)
     if os.getenv("RUN_AS_VM", False):
-        print(f"Starting virtualized bot")
         try:
             await virtualize_bot(room.url, token)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to spawn VM: {e}")
     else:
-        print(f"Starting bot with command: python -m bot -u {room.url} -t {token}")
         try:
             subprocess.Popen(
                 [f"python -m bot -u {room.url} -t {token}"],
