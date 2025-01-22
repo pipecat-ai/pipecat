@@ -934,7 +934,6 @@ class GoogleTTSService(TTSService):
 class GoogleImageGenService(ImageGenService):
     class InputParams(BaseModel):
         num_images: int = Field(default=1, ge=1, le=8)
-        size: str = Field(default="1024x1024")
         model: str = Field(default="imagen-3.0-generate-002")
         negative_prompt: str = Field(default="")
 
@@ -963,9 +962,8 @@ class GoogleImageGenService(ImageGenService):
         logger.debug(f"Generating image from prompt: {prompt}")
 
         try:
-            # TODO-CB: not async?
-            response = await asyncio.to_thread(
-                self._client.models.generate_image,
+            # TODO: Support all config properties on init and generate?
+            response = await self._client.aio.models.generate_image(
                 model=self._params.model,
                 prompt=prompt,
                 config=types.GenerateImageConfig(
@@ -980,7 +978,6 @@ class GoogleImageGenService(ImageGenService):
                 return
 
             for img_response in response.generated_images:
-                print(f"!!! img_response is {type(img_response)} ")
                 # Google returns the image data directly
                 image_bytes = img_response.image.image_bytes
                 image = Image.open(io.BytesIO(image_bytes))
