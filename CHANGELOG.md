@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - It is now possible to specify the period of the `PipelineTask` heartbeat
   frames with `heartbeats_period_secs`.
 
+- Additional DTMF frames
+
 ### Fixed
 
 - Fixed a type error when using `voice_settings` in `ElevenLabsHttpTTSService`.
