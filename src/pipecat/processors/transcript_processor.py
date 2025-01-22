@@ -10,6 +10,7 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
+    CancelFrame,
     EndFrame,
     Frame,
     StartInterruptionFrame,
@@ -115,6 +116,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         - BotStoppedSpeakingFrame: Completes current utterance
         - StartInterruptionFrame: Completes current utterance due to interruption
         - EndFrame: Completes current utterance at pipeline end
+        - CancelFrame: Completes current utterance due to cancellation
 
         Args:
             frame: Input frame to process
@@ -129,7 +131,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
 
             self._current_text_parts.append(frame.text)
 
-        elif isinstance(frame, (BotStoppedSpeakingFrame, StartInterruptionFrame)):
+        elif isinstance(frame, (BotStoppedSpeakingFrame, StartInterruptionFrame, CancelFrame)):
             # Emit accumulated text when bot finishes speaking or is interrupted
             await self._emit_aggregated_text()
 
