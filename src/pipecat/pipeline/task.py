@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
+from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.utils import obj_count, obj_id
@@ -45,6 +46,7 @@ class PipelineParams(BaseModel):
     send_initial_empty_metrics: bool = True
     report_only_initial_ttfb: bool = False
     observers: List[BaseObserver] = []
+    heartbeats_period_secs: float = HEARTBEAT_SECONDS
 
 
 class Source(FrameProcessor):
@@ -85,7 +87,7 @@ class Sink(FrameProcessor):
         await self._down_queue.put(frame)
 
 
-class PipelineTask:
+class PipelineTask(BaseTask):
     def __init__(
         self,
         pipeline: BasePipeline,
@@ -121,7 +123,7 @@ class PipelineTask:
 
         self._observer = TaskObserver(params.observers)
 
-    def has_finished(self):
+    def has_finished(self) -> bool:
         """Indicates whether the tasks has finished. That is, all processors
         have stopped.
 
@@ -315,7 +317,7 @@ class PipelineTask:
 
     async def _heartbeat_push_handler(self):
         """
-        This tasks pushes a heartbeat frame every HEARTBEAT_SECONDS.
+        This tasks pushes a heartbeat frame every heartbeat period.
         """
         while True:
             try:
@@ -323,7 +325,7 @@ class PipelineTask:
                 # task will just stop waiting for the pipeline to finish not
                 # allowing more frames to be pushed.
                 await self._source.queue_frame(HeartbeatFrame(timestamp=self._clock.get_time()))
-                await asyncio.sleep(HEARTBEAT_SECONDS)
+                await asyncio.sleep(self._params.heartbeats_period_secs)
             except asyncio.CancelledError:
                 break
 

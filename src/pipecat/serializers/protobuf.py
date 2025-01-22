@@ -93,11 +93,11 @@ class ProtobufFrameSerializer(FrameSerializer):
         id = getattr(args, "id", None)
         name = getattr(args, "name", None)
         pts = getattr(args, "pts", None)
-        if not id and "id" in args_dict:
+        if "id" in args_dict:
             del args_dict["id"]
-        if not name and "name" in args_dict:
+        if "name" in args_dict:
             del args_dict["name"]
-        if not pts and "pts" in args_dict:
+        if "pts" in args_dict:
             del args_dict["pts"]
 
         # Create the instance
@@ -105,10 +105,10 @@ class ProtobufFrameSerializer(FrameSerializer):
 
         # Set special fields
         if id:
-            setattr(instance, "id", getattr(args, "id", None))
+            setattr(instance, "id", id)
         if name:
-            setattr(instance, "name", getattr(args, "name", None))
+            setattr(instance, "name", name)
         if pts:
-            setattr(instance, "pts", getattr(args, "pts", None))
+            setattr(instance, "pts", pts)
 
         return instance
