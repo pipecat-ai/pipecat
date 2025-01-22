@@ -33,6 +33,8 @@ const Story: React.FC<StoryProps> = ({ handleLeave }) => {
         setTimeout(() => daily.setLocalAudio(true), 500);
         setStoryState("user");
       } else {
+        // Uncomment the next line to mute the mic while the 
+        // assistant it talking. Leave it commented to allow for interruptions
         // daily.setLocalAudio(false);
         setStoryState("assistant");
       }
