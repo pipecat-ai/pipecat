@@ -253,8 +253,8 @@ class DeepgramSTTService(STTService):
                     # Current Transcription/InterimTranscription Frames
                     # Another UserStoppedSpeakingFrame
                     # However the flow should be: Prev Stop; Curr Start -> Curr Transcription -> Curr Stop; Next Start and so on...
-                    logger.debug("=========== Deepgram =========== Forced Speech started")
-                    await self.push_frame(UserStartedSpeakingFrame())
+                    # logger.debug("=========== Deepgram =========== Forced Speech started")
+                    # await self.push_frame(UserStartedSpeakingFrame())
                 await self.stop_processing_metrics()
             else:
                 await self.push_frame(
