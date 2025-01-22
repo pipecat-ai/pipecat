@@ -98,14 +98,15 @@ class ConnexityLocalMetricsService(ConnexityInterface):
         assistant_speaks_first: bool = True,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(call_id=call_id,
+                         assistant_id=assistant_id,
+                         api_key=api_key,
+                         api_url=api_url,
+                         assistant_speaks_first=assistant_speaks_first,
+                         **kwargs)
         self._audio_buffer_processor = audio_buffer_processor
         self._audio_memory_buffer = io.BytesIO()
-        self._api_key = api_key
         self._api_url = api_url
-        self._call_id = call_id
-        self._assistant_id = assistant_id
-        self._assistant_speaks_first = assistant_speaks_first
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -204,22 +205,23 @@ class ConnexityTwilioMetricsService(ConnexityInterface):
     def __init__(
         self,
         *,
-        sid: str,
+        call_id: str,
         assistant_id: str,
         api_key: str,
         api_url: str = "https://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/links",
         assistant_speaks_first: bool = True,
-        twilio_account_id: Optional[str] = None,
-        twilio_auth_token: Optional[str] = None,
+        twilio_account_id: str,
+        twilio_auth_token: str,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(call_id=call_id,
+                         assistant_id=assistant_id,
+                         api_key=api_key,
+                         api_url=api_url,
+                         assistant_speaks_first=assistant_speaks_first,
+                         **kwargs)
         self._audio_buffer_processor = audio_buffer_processor
-        self._api_key = api_key
         self._api_url = api_url
-        self.sid = sid
-        self._assistant = assistant_id
-        self._assistant_speaks_first = assistant_speaks_first
         self.twilio_account_id = twilio_account_id
         self.twilio_auth_token = twilio_auth_token
 
@@ -227,13 +229,13 @@ class ConnexityTwilioMetricsService(ConnexityInterface):
         await super().stop(frame)
         await self.send_audio_url_to_connexity(self._get_twilio_recording())
 
-    def _get_twilio_recording(self):
+    async def _get_twilio_recording(self):
         client = Client(
             self.twilio_account_id, self.twilio_auth_token
         )
-
-        recording = client.recordings.get(sid=self.sid)
-        return recording
+        await sleep(3)
+        recording = client.recordings.get(sid=self._call_id)
+        return recording._uri
 
 
 class ConnexityDailyMetricsService(ConnexityInterface):
@@ -266,17 +268,18 @@ class ConnexityDailyMetricsService(ConnexityInterface):
         api_key: str,
         api_url: str = "https://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/links",
         assistant_speaks_first: bool = True,
-        daily_api_key: Optional[str] = None,
+        daily_api_key: str,
         room_url: str,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(call_id=call_id,
+                         assistant_id=assistant_id,
+                         api_key=api_key,
+                         api_url=api_url,
+                         assistant_speaks_first=assistant_speaks_first,
+                         **kwargs)
         self._audio_buffer_processor = audio_buffer_processor
-        self._api_key = api_key
         self._api_url = api_url
-        self._call_id = call_id
-        self._assistant = assistant_id
-        self._assistant_speaks_first = assistant_speaks_first
         self.daily_api_key = daily_api_key
         self._room_url = room_url
 
