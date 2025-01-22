@@ -57,8 +57,8 @@ async def main(room_url, token=None):
             DailyParams(
                 audio_out_enabled=True,
                 camera_out_enabled=True,
-                camera_out_width=768,
-                camera_out_height=768,
+                camera_out_width=1024,
+                camera_out_height=1024,
                 transcription_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_enabled=True,
@@ -86,11 +86,11 @@ async def main(room_url, token=None):
         #     key=os.getenv("FAL_KEY"),
         # )
 
-        image_gen_params = GoogleImageGenService.InputParams(num_images=1)
-
-        image_gen = GoogleImageGenService(
-            params=image_gen_params, api_key=os.getenv("GOOGLE_API_KEY")
+        image_gen_params = GoogleImageGenService.InputParams(
+            negative_prompt="scary, evil, frightening"
         )
+
+        image_gen = GoogleImageGenService(api_key=os.getenv("GOOGLE_API_KEY"))
 
         # --------------- Setup ----------------- #
 

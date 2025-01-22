@@ -215,11 +215,10 @@ async def virtualize_bot(room_url: str, token: str):
 if __name__ == "__main__":
     # Check environment variables
     required_env_vars = [
-        "OPENAI_API_KEY",
         "DAILY_API_KEY",
-        "FAL_KEY",
         "ELEVENLABS_VOICE_ID",
         "ELEVENLABS_API_KEY",
+        "GOOGLE_API_KEY",
     ]
     for env_var in required_env_vars:
         if env_var not in os.environ:

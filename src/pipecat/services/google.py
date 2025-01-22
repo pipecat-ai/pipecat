@@ -936,6 +936,7 @@ class GoogleImageGenService(ImageGenService):
         num_images: int = Field(default=1, ge=1, le=8)
         size: str = Field(default="1024x1024")
         model: str = Field(default="imagen-3.0-generate-002")
+        negative_prompt: str = Field(default="")
 
     def __init__(
         self,
@@ -963,10 +964,14 @@ class GoogleImageGenService(ImageGenService):
 
         try:
             # TODO-CB: not async?
-            response = self._client.models.generate_image(
+            response = await asyncio.to_thread(
+                self._client.models.generate_image,
                 model=self._params.model,
                 prompt=prompt,
-                config=types.GenerateContentConfig(),
+                config=types.GenerateImageConfig(
+                    number_of_images=self._params.num_images,
+                    negative_prompt=self._params.negative_prompt,
+                ),
             )
 
             if not response or not response.generated_images:
@@ -975,7 +980,7 @@ class GoogleImageGenService(ImageGenService):
                 return
 
             for img_response in response.generated_images:
-                # print(f"!!! img_response is {img_response} -- {type(img_response)} ")
+                print(f"!!! img_response is {type(img_response)} ")
                 # Google returns the image data directly
                 image_bytes = img_response.image.image_bytes
                 image = Image.open(io.BytesIO(image_bytes))

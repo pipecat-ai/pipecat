@@ -48,6 +48,8 @@ async def main():
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await task.queue_frame(TextFrame("a cat in the style of picasso"))
+            await task.queue_frame(TextFrame("a dog in the style of picasso"))
+            await task.queue_frame(TextFrame("a fish in the style of picasso"))
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):

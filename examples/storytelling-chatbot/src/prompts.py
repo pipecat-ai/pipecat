@@ -32,7 +32,7 @@ LLM_BASE_PROMPT = {
 }
 
 
-IMAGE_GEN_PROMPT = "illustrative art of %s. In the style of Studio Ghibli. colorful, whimsical, painterly, concept art."
+IMAGE_GEN_PROMPT = "illustrative art of %s. colorful, whimsical, painterly, concept art."
 
 CUE_USER_TURN = {"cue": "user_turn"}
 CUE_ASSISTANT_TURN = {"cue": "assistant_turn"}
