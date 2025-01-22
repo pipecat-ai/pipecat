@@ -18,6 +18,7 @@ from pipecat.frames.frames import CancelFrame, EndFrame, Frame
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import AIService
 
 try:
     import aiofiles
