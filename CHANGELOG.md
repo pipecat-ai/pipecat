@@ -18,7 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- Replaced audio resampling library `resampy` with `soxr`.
+- Replaced audio resampling library `resampy` with `soxr`. Resampling a 2:21s
+  audio file from 24KHz to 16KHz took 1.41s with `resampy` and 0.031s with
+  `soxr` with similar audio quality.
+
+### Other
+
+- Added initial unit test infrastructure.
 
 ## [0.0.53] - 2025-01-18
 
