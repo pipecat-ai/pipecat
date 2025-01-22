@@ -221,7 +221,7 @@ class BaseOpenAILLMService(LLMService):
                 )
                 await self.start_llm_usage_metrics(tokens)
 
-            if len(chunk.choices) == 0:
+            if chunk.choices is None or len(chunk.choices) == 0:
                 continue
 
             await self.stop_ttfb_metrics()
