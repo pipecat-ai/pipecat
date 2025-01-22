@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed a type error when using `voice_settings` in `ElevenLabsHttpTTSService`.
 
+- Fixed an issue where `OpenAIRealtimeBetaLLMService` function calling resulted
+  in an error.
+
 ### Performance
 
 - Replaced audio resampling library `resampy` with `soxr`. Resampling a 2:21s
