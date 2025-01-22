@@ -211,7 +211,9 @@ class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator)
                 await self._user_context_aggregator.push_frame(
                     RealtimeFunctionCallResultFrame(result_frame=frame)
                 )
-                run_llm = frame.run_llm
+
+                if frame.properties and frame.properties.run_llm is not None:
+                    run_llm = frame.properties.run_llm
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
