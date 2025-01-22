@@ -16,8 +16,7 @@ from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
-    EndFrame,
-    StartInterruptionFrame,
+    CancelFrame,
     TranscriptionMessage,
     TranscriptionUpdateFrame,
 )
@@ -180,10 +179,8 @@ async def main():
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            # Interrupt the TTS to stop the TTS generation
-            await task.queue_frame(StartInterruptionFrame())
-            # Stop the gracefully stop the pipeline
-            await task.queue_frame(EndFrame())
+            # Stop the pipeline immediately when the participant leaves
+            await task.queue_frame(CancelFrame())
 
         runner = PipelineRunner()
 
