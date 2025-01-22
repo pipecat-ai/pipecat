@@ -121,23 +121,17 @@ async def main(room_url, token=None):
 
         # The main story pipeline is used to continue the story based on user
         # input.
-        fl = FrameLogger("after image processor", "green")
-        fl2 = FrameLogger("after story processor", "red")
-        fl3 = FrameLogger("After transport output", "cyan")
-        fl4 = FrameLogger("Before transport output", "magenta")
+        ifl = FrameLogger("Image Processor output", "red")
         main_pipeline = Pipeline(
             [
                 transport.input(),
                 context_aggregator.user(),
                 llm_service,
                 story_processor,
-                fl2,
                 image_processor,
-                fl,
+                ifl,
                 tts_service,
-                fl4,
                 transport.output(),
-                fl3,
                 context_aggregator.assistant(),
             ]
         )
