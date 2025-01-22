@@ -41,11 +41,6 @@ const Story: React.FC<StoryProps> = ({ handleLeave }) => {
     },
   });
 
-  useEffect(() => {
-    console.log('Story state changed:', storyState);
-  }, [storyState]);
-
-
   return (
     <div className="w-full flex flex-col flex-1 self-stretch">
       {/* Absolute elements */}
