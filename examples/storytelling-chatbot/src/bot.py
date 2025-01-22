@@ -29,7 +29,7 @@ from pipecat.processors.logger import FrameLogger
 from pipecat.services.cartesia import CartesiaHttpTTSService, CartesiaTTSService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
-from pipecat.services.google import GoogleLLMService
+from pipecat.services.google import GoogleImageGenService, GoogleLLMService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import (
     DailyParams,
@@ -75,15 +75,21 @@ async def main(room_url, token=None):
             api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID")
         )
 
-        fal_service_params = FalImageGenService.InputParams(
-            image_size={"width": 768, "height": 768}
-        )
+        # fal_service_params = FalImageGenService.InputParams(
+        #     image_size={"width": 768, "height": 768}
+        # )
 
-        fal_service = FalImageGenService(
-            aiohttp_session=session,
-            model="fal-ai/stable-diffusion-v35-medium",
-            params=fal_service_params,
-            key=os.getenv("FAL_KEY"),
+        # fal_service = FalImageGenService(
+        #     aiohttp_session=session,
+        #     model="fal-ai/stable-diffusion-v35-medium",
+        #     params=fal_service_params,
+        #     key=os.getenv("FAL_KEY"),
+        # )
+
+        image_gen_params = GoogleImageGenService.InputParams(num_images=1)
+
+        image_gen = GoogleImageGenService(
+            params=image_gen_params, api_key=os.getenv("GOOGLE_API_KEY")
         )
 
         # --------------- Setup ----------------- #
@@ -98,7 +104,7 @@ async def main(room_url, token=None):
         # -------------- Processors ------------- #
 
         story_processor = StoryProcessor(message_history, story_pages)
-        image_processor = StoryImageProcessor(fal_service)
+        image_processor = StoryImageProcessor(image_gen)
 
         # -------------- Story Loop ------------- #
 
