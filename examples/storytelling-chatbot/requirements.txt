@@ -3,3 +3,4 @@ fastapi
 uvicorn
 python-dotenv
 -e ".[daily,openai,fal,google,cartesia]"
+
