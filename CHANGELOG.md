@@ -12,6 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - It is now possible to specify the period of the `PipelineTask` heartbeat
   frames with `heartbeats_period_secs`.
 
+### Changed
+
+- Modified `TranscriptProcessor` to use TTS text frames for more accurate assistant
+  transcripts. Assistant messages are now aggregated based on bot speaking boundaries
+  rather than LLM context, providing better handling of interruptions and partial
+  utterances.
+
+- Updated foundational examples `28a-transcription-processor-openai.py`,
+  `28b-transcript-processor-anthropic.py`, and
+  `28c-transcription-processor-gemini.py` to use the updated
+  `TranscriptProcessor`.
+
 ### Fixed
 
 - Fixed a type error when using `voice_settings` in `ElevenLabsHttpTTSService`.
