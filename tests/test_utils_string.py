@@ -1,28 +1,15 @@
+#
+# Copyright (c) 2024-2025 Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import unittest
-from typing import AsyncGenerator
 
-from pipecat.frames.frames import EndFrame, Frame, TextFrame
-from pipecat.services.ai_services import AIService, match_endofsentence
+from pipecat.utils.string import match_endofsentence
 
 
-class SimpleAIService(AIService):
-    async def process_frame(self, frame: Frame) -> AsyncGenerator[Frame, None]:
-        yield frame
-
-
-class TestBaseAIService(unittest.IsolatedAsyncioTestCase):
-    async def test_simple_processing(self):
-        service = SimpleAIService()
-
-        input_frames = [TextFrame("hello"), EndFrame()]
-
-        output_frames = []
-        for input_frame in input_frames:
-            async for output_frame in service.process_frame(input_frame):
-                output_frames.append(output_frame)
-
-        self.assertEqual(input_frames, output_frames)
-
+class TestUtilsString(unittest.IsolatedAsyncioTestCase):
     async def test_endofsentence(self):
         assert match_endofsentence("This is a sentence.")
         assert match_endofsentence("This is a sentence! ")
@@ -51,7 +38,3 @@ class TestBaseAIService(unittest.IsolatedAsyncioTestCase):
         for i in chinese_sentences:
             assert match_endofsentence(i)
         assert not match_endofsentence("你好，")
-
-
-if __name__ == "__main__":
-    unittest.main()

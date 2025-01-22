@@ -93,7 +93,3 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         # This next one would fail with:
         # AssertionError: ' H e l l o   d e a r   h u m a n' != 'Hello dear human'
         # self.assertEqual(tma_out.messages[-1]["content"], self.expected_response)
-
-
-if __name__ == "__main__":
-    unittest.main()
