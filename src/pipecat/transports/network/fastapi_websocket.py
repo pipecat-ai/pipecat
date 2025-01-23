@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
-    StartInterruptionFrame
+    StartInterruptionFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializerType, AsyncFrameSerializer

@@ -55,22 +55,20 @@ class TwilioFrameSerializer(AsyncFrameSerializer):
                 mark_event = {
                     "event": "mark",
                     "streamSid": self._stream_sid,
-                    "mark": {
-                        "name": mark_name
-                    }
+                    "mark": {"name": mark_name},
                 }
                 self.submitted_mark_events.append(mark_name)
                 if self.output_transport:
                     await self.output_transport._bot_started_speaking()
                 return [json.dumps(answer), json.dumps(mark_event)]
-            
+
             return json.dumps(answer)
 
         if isinstance(frame, StartInterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
 
-    async def deserialize(self, data: str | bytes) -> Frame  | None:
+    async def deserialize(self, data: str | bytes) -> Frame | None:
         message = json.loads(data)
 
         if message["event"] == "media":
