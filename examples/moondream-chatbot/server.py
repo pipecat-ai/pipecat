@@ -1,4 +1,4 @@
-#
+#  # noqa: D100
 # Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
@@ -10,12 +10,13 @@ import subprocess
 from contextlib import asynccontextmanager
 
 import aiohttp
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomParams
-from dotenv import load_dotenv
+
 load_dotenv(override=True)
 MAX_BOTS_PER_ROOM = 1
 
@@ -25,7 +26,7 @@ bot_procs = {}
 daily_helpers = {}
 
 
-def cleanup():
+def cleanup():  # noqa: D103
     # Clean up function, just to be extra safe
     for entry in bot_procs.values():
         proc = entry[0]
@@ -34,7 +35,7 @@ def cleanup():
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):  # noqa: D103
     aiohttp_session = aiohttp.ClientSession()
     daily_helpers["rest"] = DailyRESTHelper(
         daily_api_key=os.getenv("DAILY_API_KEY", ""),
