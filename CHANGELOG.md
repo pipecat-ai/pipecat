@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue where `OpenAIRealtimeBetaLLMService` function calling resulted
   in an error.
 
+- Fixed an issue in `AudioBufferProcessor` where the last audio buffer was not
+  being processed, in cases where the `_user_audio_buffer` was smaller than the
+  buffer size.
+
 ### Performance
 
 - Replaced audio resampling library `resampy` with `soxr`. Resampling a 2:21s

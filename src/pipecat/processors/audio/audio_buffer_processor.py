@@ -6,6 +6,7 @@
 
 from pipecat.audio.utils import interleave_stereo_audio, mix_audio, resample_audio
 from pipecat.frames.frames import (
+    EndFrame,
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
@@ -84,6 +85,9 @@ class AudioBufferProcessor(FrameProcessor):
             self._bot_audio_buffer.extend(resampled)
 
         if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
+            await self._call_on_audio_data_handler()
+
+        if isinstance(frame, EndFrame):
             await self._call_on_audio_data_handler()
 
         await self.push_frame(frame, direction)
