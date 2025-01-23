@@ -135,7 +135,6 @@ Provide a concise summary in 3-5 sentences. Highlight any  important details or 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         await transport.capture_participant_transcription(participant["id"])
-        logger.info(participant)
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_participant_left")
