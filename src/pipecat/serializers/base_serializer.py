@@ -21,7 +21,7 @@ class FrameSerializerType(Enum):
 class FrameSerializer(ABC):
 
     input_transport: Optional[BaseInputTransport] = None
-    output_transport: Optional[BaseInputTransport] = None
+    output_transport: Optional[BaseOutputTransport] = None
 
     def set_input_output_transports(self, input_transport: BaseInputTransport, output_transport: BaseOutputTransport):
         self.input_transport = input_transport
@@ -39,6 +39,7 @@ class FrameSerializer(ABC):
     @abstractmethod
     def deserialize(self, data: str | bytes) -> Frame | List[Frame] | None:
         pass
+
 
 class AsyncFrameSerializer(FrameSerializer):
     @abstractmethod

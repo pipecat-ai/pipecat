@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
     KeypadEntry,
     StartInterruptionFrame,
 )
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializerType, AsyncFrameSerializer
 
 
 class TwilioFrameSerializer(AsyncFrameSerializer):
