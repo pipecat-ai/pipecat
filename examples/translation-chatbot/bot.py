@@ -30,10 +30,9 @@ from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregato
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.transcript_processor import TranscriptProcessor
+from pipecat.services.azure import AzureSTTService, AzureTTSService
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.azure import AzureSTTService
-from pipecat.services.azure import AzureTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import (
     DailyParams,
@@ -161,7 +160,6 @@ async def main():
         #                     region = os.getenv("AZURE_SPEECH_REGION"),
         #                     language = "zh"
         #                       )
-
 
         in_language = "English"
         out_language = "Spanish"
