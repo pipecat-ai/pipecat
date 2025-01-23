@@ -9,6 +9,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
+    EndFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -84,6 +85,9 @@ class AudioBufferProcessor(FrameProcessor):
             self._bot_audio_buffer.extend(resampled)
 
         if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
+            await self._call_on_audio_data_handler()
+
+        if isinstance(frame, EndFrame):
             await self._call_on_audio_data_handler()
 
         await self.push_frame(frame, direction)
