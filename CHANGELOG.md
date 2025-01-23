@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - It is now possible to specify the period of the `PipelineTask` heartbeat
   frames with `heartbeats_period_secs`.
+- Added `DailyMeetingTokenProperties` and `DailyMeetingTokenParams` Pydantic models for meeting token creation.
+- Added `get_token_v2` method to `DailyTransport` to create meeting tokens with `DailyMeetingTokenParams`.
 
 ### Changed
 
