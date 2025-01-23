@@ -14,7 +14,7 @@ from typing import Literal, Optional
 from urllib.parse import urlparse
 
 import aiohttp
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, constr
 
 
 class DailyRoomSipParams(BaseModel):
@@ -111,6 +111,75 @@ class DailyRoomObject(BaseModel):
     config: DailyRoomProperties
 
 
+class DailyMeetingTokenProperties(BaseModel):
+    # https://docs.daily.co/reference/rest-api/meeting-tokens/create-meeting-token#properties
+
+    room_name: Optional[str] = Field(
+        default=None,
+        description="The name of the room this token is for. If not provided, the token can be used for any room.",
+    )
+
+    eject_at_token_exp: Optional[bool] = Field(
+        default=None,
+        description="If `true`, the user will be ejected from the room when the token expires. Defaults to `false`.",
+    )
+    eject_after_elapsed: Optional[int] = Field(
+        default=None,
+        description="The number of seconds after which the user will be ejected from the room. If not provided, the user will not be ejected based on elapsed time.",
+    )
+
+    nfb: Optional[int] = Field(
+        default=None,
+        description="Not before. This is a unix timestamp (seconds since the epoch.) Users cannot join a meeting in with this token before this time.",
+    )
+
+    exp: Optional[int] = Field(
+        default=60 * 60,
+        description="Expiration time for the token in seconds since the epoch. If not provided, the token will not expire.",
+    )
+    is_owner: Optional[bool] = Field(
+        default=True,
+        description="If `true`, the token will grant owner privileges in the room. Defaults to `false`.",
+    )
+    user_name: Optional[str] = Field(
+        default=None,
+        description="The name of the user. This will be added to the token payload.",
+    )
+    user_id: Optional[str] = Field(
+        default=None,
+        description="A unique identifier for the user. This will be added to the token payload.",
+    )
+    enable_screenshare: Optional[bool] = Field(
+        default=True,
+        description="If `true`, the user will be able to share their screen. Defaults to `true`.",
+    )
+    start_video_off: Optional[bool] = Field(
+        default=None,
+        description="If `true`, the user's video will be turned off when they join the room. Defaults to `false`.",
+    )
+    start_audio_off: Optional[bool] = Field(
+        default=None,
+        description="If `true`, the user's audio will be turned off when they join the room. Defaults to `false`.",
+    )
+    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = Field(
+        default=None,
+        description="Recording settings for the token. Must be one of `cloud`, `local`, `raw-tracks` or `none`.",
+    )
+    enable_prejoin_ui: Optional[bool] = Field(
+        default=None,
+        description="If `true`, the user will see the prejoin UI before joining the room.",
+    )
+    start_cloud_recording: Optional[bool] = Field(
+        default=None,
+        description="Start cloud recording when the user joins the room. This can be used to always record and archive meetings, for example in a customer support context.",
+    )
+
+
+class DailyMeetingTokenParams(BaseModel):
+    # https://docs.daily.co/reference/rest-api/meeting-tokens/create-meeting-token#body-params
+    properties: DailyMeetingTokenProperties = Field(default_factory=DailyMeetingTokenProperties)
+
+
 class DailyRESTHelper:
     """Helper class for interacting with Daily's REST API.
 
@@ -169,7 +238,7 @@ class DailyRESTHelper:
             Exception: If room creation fails or response is invalid
         """
         headers = {"Authorization": f"Bearer {self.daily_api_key}"}
-        json = {**params.model_dump(exclude_none=True)}
+        json = params.model_dump(exclude_none=True)
         async with self.aiohttp_session.post(
             f"{self.daily_api_url}/rooms", headers=headers, json=json
         ) as r:
@@ -213,6 +282,50 @@ class DailyRESTHelper:
 
         headers = {"Authorization": f"Bearer {self.daily_api_key}"}
         json = {"properties": {"room_name": room_name, "is_owner": owner, "exp": expiration}}
+        async with self.aiohttp_session.post(
+            f"{self.daily_api_url}/meeting-tokens", headers=headers, json=json
+        ) as r:
+            if r.status != 200:
+                text = await r.text()
+                raise Exception(f"Failed to create meeting token (status: {r.status}): {text}")
+
+            data = await r.json()
+
+        return data["token"]
+
+    async def get_token_v2(
+        self,
+        room_url: str,
+        params: DailyMeetingTokenParams,
+        expiry_time: float = 60 * 60,
+    ) -> str:
+        """Generate a meeting token for user to join a Daily room.
+
+        Args:
+            room_url: Daily room URL
+            params: Meeting token properties
+            expiry_time: Token expiry time in seconds (default: 1 hour)
+
+        Returns:
+            str: Meeting token
+
+        Raises:
+            Exception: If token generation fails or room URL is missing
+        """
+        if not room_url:
+            raise Exception(
+                "No Daily room specified. You must specify a Daily room in order a token to be generated."
+            )
+
+        expiration: int = int(time.time() + expiry_time)
+
+        room_name = self.get_name_from_url(room_url)
+
+        params.properties.room_name = room_name
+        params.properties.exp = expiration
+
+        headers = {"Authorization": f"Bearer {self.daily_api_key}"}
+        json = params.model_dump(exclude_none=True)
         async with self.aiohttp_session.post(
             f"{self.daily_api_url}/meeting-tokens", headers=headers, json=json
         ) as r:
