@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType, AsyncFrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -41,7 +41,6 @@ except ModuleNotFoundError as e:
 
 class FastAPIWebsocketParams(TransportParams):
     add_wav_header: bool = False
-    serializer: FrameSerializer
     session_timeout: int | None = None
 
 
@@ -82,15 +81,22 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def _receive_messages(self):
         async for message in self._iter_data():
-            frame = self._params.serializer.deserialize(message)
+            if isinstance(self._params.serializer, AsyncFrameSerializer):
+                payload = await self._params.serializer.deserialize(message)
+            else:
+                payload = self._params.serializer.deserialize(message)
 
-            if not frame:
+            if not payload:
                 continue
 
-            if isinstance(frame, InputAudioRawFrame):
-                await self.push_audio_frame(frame)
-            else:
-                await self.push_frame(frame)
+            if not isinstance(payload, list):
+                payload = [payload]
+
+            for frame in payload:
+                if isinstance(frame, InputAudioRawFrame):
+                    await self.push_audio_frame(frame)
+                else:
+                    await self.push_frame(frame)
 
         await self._callbacks.on_client_disconnected(self._websocket)
 
@@ -154,9 +160,16 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         await self._write_audio_sleep()
 
     async def _write_frame(self, frame: Frame):
-        payload = self._params.serializer.serialize(frame)
+        if isinstance(self._params.serializer, AsyncFrameSerializer):
+            payload = await self._params.serializer.serialize(frame)
+        else:
+            payload = self._params.serializer.serialize(frame)
+
         if payload and self._websocket.client_state == WebSocketState.CONNECTED:
-            await self._send_data(payload)
+            if not isinstance(payload, list):
+                payload = [payload]
+            for packet in payload:
+                await self._send_data(packet)
 
     def _send_data(self, data: str | bytes):
         if self._params.serializer.type == FrameSerializerType.BINARY:
@@ -199,6 +212,8 @@ class FastAPIWebsocketTransport(BaseTransport):
         self._output = FastAPIWebsocketOutputTransport(
             websocket, self._params, name=self._output_name
         )
+
+        self._params.serializer.set_input_output_transports(self._input, self.output)
 
         # Register supported handlers. The user will only be able to register
         # these handlers.

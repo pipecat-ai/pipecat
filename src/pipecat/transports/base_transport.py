@@ -41,6 +41,7 @@ class TransportParams(BaseModel):
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
     vad_analyzer: VADAnalyzer | None = None
+    custom_bot_speaking_trigger: bool = False
 
 
 class BaseTransport(ABC):

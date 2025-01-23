@@ -276,35 +276,39 @@ class BaseOutputTransport(FrameProcessor):
     def _next_frame(self) -> AsyncGenerator[Frame, None]:
         async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
             while True:
-                try:
-                    frame = await asyncio.wait_for(self._sink_queue.get(), timeout=vad_stop_secs)
+                if self._params.custom_bot_speaking_trigger:
+                    frame = self._sink_queue.get()
                     yield frame
-                except asyncio.TimeoutError:
-                    # Notify the bot stopped speaking upstream if necessary.
-                    await self._bot_stopped_speaking()
+                else:
+                    try:
+                        frame = await asyncio.wait_for(self._sink_queue.get(), timeout=vad_stop_secs)
+                        yield frame
+                    except asyncio.TimeoutError:
+                        # Notify the bot stopped speaking upstream if necessary.
+                        await self._bot_stopped_speaking()
 
         async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
             last_frame_time = 0
             silence = b"\x00" * self._audio_chunk_size
             while True:
-                try:
-                    frame = self._sink_queue.get_nowait()
-                    if isinstance(frame, OutputAudioRawFrame):
-                        frame.audio = await self._params.audio_out_mixer.mix(frame.audio)
-                    last_frame_time = time.time()
-                    yield frame
-                except asyncio.QueueEmpty:
-                    # Notify the bot stopped speaking upstream if necessary.
-                    diff_time = time.time() - last_frame_time
-                    if diff_time > vad_stop_secs:
-                        await self._bot_stopped_speaking()
-                    # Generate an audio frame with only the mixer's part.
-                    frame = OutputAudioRawFrame(
-                        audio=await self._params.audio_out_mixer.mix(silence),
-                        sample_rate=self._params.audio_out_sample_rate,
-                        num_channels=self._params.audio_out_channels,
-                    )
-                    yield frame
+                    try:
+                        frame = self._sink_queue.get_nowait()
+                        if isinstance(frame, OutputAudioRawFrame):
+                            frame.audio = await self._params.audio_out_mixer.mix(frame.audio)
+                        last_frame_time = time.time()
+                        yield frame
+                    except asyncio.QueueEmpty:
+                        # Notify the bot stopped speaking upstream if necessary.
+                        diff_time = time.time() - last_frame_time
+                        if diff_time > vad_stop_secs and not self._params.custom_bot_speaking_trigger:
+                            await self._bot_stopped_speaking()
+                        # Generate an audio frame with only the mixer's part.
+                        frame = OutputAudioRawFrame(
+                            audio=await self._params.audio_out_mixer.mix(silence),
+                            sample_rate=self._params.audio_out_sample_rate,
+                            num_channels=self._params.audio_out_channels,
+                        )
+                        yield frame
 
         vad_stop_secs = (
             self._params.vad_analyzer.params.stop_secs
