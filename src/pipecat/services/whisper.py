@@ -48,8 +48,7 @@ class WhisperSTTService(SegmentedSTTService):
         no_speech_prob: float = 0.4,
         **kwargs,
     ):
-        super().__init__(**kwargs)
-        self._require_api_key = False
+        super().__init__(require_api_key=False, **kwargs)
         self._device: str = device
         self._compute_type = compute_type
         self.set_model_name(model if isinstance(model, str) else model.value)

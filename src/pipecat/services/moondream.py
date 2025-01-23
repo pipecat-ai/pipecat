@@ -43,8 +43,7 @@ class MoondreamService(VisionService):
     def __init__(
         self, *, model="vikhyatk/moondream2", revision="2024-08-26", use_cpu=False, **kwargs
     ):
-        super().__init__(**kwargs)
-        self._require_api_key = False
+        super().__init__(require_api_key=False, **kwargs)
 
         self.set_model_name(model)
 
