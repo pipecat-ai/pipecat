@@ -30,9 +30,10 @@ async def websocket_endpoint(websocket: WebSocket):
     await start_data.__anext__()
     call_data = json.loads(await start_data.__anext__())
     print(call_data, flush=True)
-    stream_sid = call_data["stream_id"]
+    stream_id = call_data["stream_id"]
+    encoding = call_data["start"]["media_format"]["encoding"]
     print("WebSocket connection accepted")
-    await run_bot(websocket, stream_sid)
+    await run_bot(websocket, stream_id, encoding)
 
 
 if __name__ == "__main__":
