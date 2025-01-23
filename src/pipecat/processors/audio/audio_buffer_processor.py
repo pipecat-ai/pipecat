@@ -6,10 +6,10 @@
 
 from pipecat.audio.utils import interleave_stereo_audio, mix_audio, resample_audio
 from pipecat.frames.frames import (
+    EndFrame,
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
-    EndFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
