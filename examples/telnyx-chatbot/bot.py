@@ -16,7 +16,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.serializers.twilio import TwilioFrameSerializer
+
+from pipecat.serializers.telnyx import TelnyxFrameSerializer
+
 from pipecat.services.elevenlabs import ElevenLabsTTSService, Language
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
@@ -25,13 +27,14 @@ from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketTransport,
 )
 
+
 load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def run_bot(websocket_client, stream_sid):
+async def run_bot(websocket_client, stream_id, encoding):
     transport = FastAPIWebsocketTransport(
         websocket=websocket_client,
         params=FastAPIWebsocketParams(
@@ -40,7 +43,7 @@ async def run_bot(websocket_client, stream_sid):
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            serializer=TwilioFrameSerializer(stream_sid),
+            serializer=TelnyxFrameSerializer(stream_id, encoding),
         ),
     )
 
