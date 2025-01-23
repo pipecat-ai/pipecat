@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.serializers.base_serializer import FrameSerializerType, AsyncFrameSerializer
+from pipecat.serializers.base_serializer import AsyncFrameSerializer, FrameSerializerType
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
