@@ -13,7 +13,7 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame
+from pipecat.frames.frames import EndFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -103,6 +103,22 @@ Provide a concise summary in 3-5 sentences. Highlight any  important details or 
     context = OpenAILLMContext(messages, tools)
     context_aggregator = llm.create_context_aggregator(context)
 
+    async def default_transfer_call(
+        function_name, tool_call_id, args, llm: LLMService, context, result_callback
+    ):
+        logger.debug(f"default_transfer_call: {function_name} {tool_call_id} {args}")
+        await result_callback(
+            {
+                "transfer_call": False,
+                "reason": "To transfer call calls, please dial in to the room using a phone or a SIP client.",
+            }
+        )
+
+    llm.register_function(
+        function_name="transfer_call",
+        callback=default_transfer_call,
+    )
+
     pipeline = Pipeline(
         [
             transport.input(),
@@ -119,6 +135,7 @@ Provide a concise summary in 3-5 sentences. Highlight any  important details or 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         await transport.capture_participant_transcription(participant["id"])
+        logger.info(participant)
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_participant_left")

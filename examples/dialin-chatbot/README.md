@@ -37,7 +37,16 @@ Run `bot_runner.py` to handle incoming HTTP requests:
 
 Then target the following URL:
 
-`POST /daily_start_bot`
+```bash
+curl -X POST 'http://localhost:7860/daily_start_bot' \
+  -H 'Content-Type: application/json' \
+  -d '{
+      "callId": "callId-from-call",
+      "callDomain": "callDomain-from-call"
+  }'
+```
+
+Use [this guide](https://docs.pipecat.ai/guides/telephony/daily-webrtc) to connect a phone number purchased from Daily to the bot.
 
 For more configuration options, please consult Daily's API documentation.
 
