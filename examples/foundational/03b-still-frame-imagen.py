@@ -16,7 +16,7 @@ from runner import configure
 from pipecat.frames.frames import EndFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.services.google import GoogleImageGenService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -43,7 +43,9 @@ async def main():
 
         runner = PipelineRunner()
 
-        task = PipelineTask(Pipeline([imagegen, transport.output()]))
+        task = PipelineTask(
+            Pipeline([imagegen, transport.output()]), PipelineParams(enable_metrics=True)
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

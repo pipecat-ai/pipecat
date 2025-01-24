@@ -935,7 +935,6 @@ class GoogleImageGenService(ImageGenService):
     class InputParams(BaseModel):
         num_images: int = Field(default=1, ge=1, le=8)
         model: str = Field(default="imagen-3.0-generate-002")
-        negative_prompt: str = Field(default="")
 
     def __init__(
         self,
@@ -950,6 +949,9 @@ class GoogleImageGenService(ImageGenService):
         self._params = params
         self._client = genai.Client(api_key=api_key)
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         """Generate images from a text prompt using Google's Imagen model.
 
@@ -960,17 +962,18 @@ class GoogleImageGenService(ImageGenService):
             Frame: Generated image frames or error frames.
         """
         logger.debug(f"Generating image from prompt: {prompt}")
+        await self.start_ttfb_metrics()
 
         try:
             # TODO: Support all config properties on init and generate?
-            response = await self._client.aio.models.generate_image(
+            response = await self._client.aio.models.generate_images(
                 model=self._params.model,
                 prompt=prompt,
-                config=types.GenerateImageConfig(
+                config=types.GenerateImagesConfig(
                     number_of_images=self._params.num_images,
-                    negative_prompt=self._params.negative_prompt,
                 ),
             )
+            await self.stop_ttfb_metrics()
 
             if not response or not response.generated_images:
                 logger.error(f"{self} error: image generation failed")

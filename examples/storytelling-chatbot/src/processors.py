@@ -44,23 +44,31 @@ class StoryImageProcessor(FrameProcessor):
     The processed frames are then yielded back.
 
     Attributes:
-        _fal_service (FALService): The FAL service, generates the images (fast fast!).
+        _image_gen_service: The FAL service, generates the images (fast fast!).
     """
 
-    def __init__(self, fal_service):
+    def __init__(self, image_gen_service):
         super().__init__()
-        self._fal_service = fal_service
+        self._image_gen_service = image_gen_service
+
+    def can_generate_metrics(self) -> bool:
+        return True
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StoryImageFrame):
+            await self.start_ttfb_metrics()
             try:
-                async with timeout(7):
-                    async for i in self._fal_service.run_image_gen(IMAGE_GEN_PROMPT % frame.text):
+                async with timeout(15):
+                    async for i in self._image_gen_service.run_image_gen(
+                        IMAGE_GEN_PROMPT % frame.text
+                    ):
                         await self.push_frame(i)
             except TimeoutError:
+                print("!!! Image gen timeout")
                 pass
+            await self.stop_ttfb_metrics()
             pass
         else:
             await self.push_frame(frame)

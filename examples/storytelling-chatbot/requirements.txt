@@ -2,5 +2,6 @@ async_timeout
 fastapi
 uvicorn
 python-dotenv
--e ".[daily,openai,fal,google,cartesia]"
+-e "../../../python-genai"
+-e "../..[daily,openai,fal,cartesia]"
 
