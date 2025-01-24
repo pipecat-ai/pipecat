@@ -185,7 +185,7 @@ class DailyMeetingTokenProperties(BaseModel):
     )
     enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = Field(
         default=None,
-        description="Recording settings for the token. Must be one of `cloud`, `local`, `raw-tracks` or `none`.",
+        description="Recording settings for the token. Must be one of `cloud`, `local` or `raw-tracks`.",
     )
     enable_prejoin_ui: Optional[bool] = Field(
         default=None,
