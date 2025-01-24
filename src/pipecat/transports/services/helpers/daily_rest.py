@@ -33,6 +33,14 @@ class DailyRoomSipParams(BaseModel):
     num_endpoints: int = 1
 
 
+class RecordingsBucketConfig(BaseModel):
+    # https://docs.daily.co/guides/products/live-streaming-recording/storing-recordings-in-a-custom-s3-bucket
+    bucket_name: str
+    bucket_region: str
+    assume_role_arn: str
+    allow_api_access: bool = False
+
+
 class DailyRoomProperties(BaseModel, extra="allow"):
     """Properties for configuring a Daily room.
 
@@ -62,6 +70,7 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
     geo: Optional[str] = None
     max_participants: Optional[int] = None
+    recordings_bucket: Optional[RecordingsBucketConfig] = None
     sip: Optional[DailyRoomSipParams] = None
     sip_uri: Optional[dict] = None
     start_video_off: bool = False

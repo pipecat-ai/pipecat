@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `enable_recording` and `geo` parameters to `DailyRoomProperties`.
 
+- Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings to a custom AWS bucket.
+
 ### Changed
 
 - Modified `TranscriptProcessor` to use TTS text frames for more accurate assistant
