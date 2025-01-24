@@ -13,7 +13,7 @@ from pipecat.frames.frames import DataFrame
 @dataclass
 class LLMSearchResult:
     text: str
-    confidence: Optional[float] = None
+    confidence: List[float] = field(default_factory=list)
 
 
 @dataclass

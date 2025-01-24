@@ -58,6 +58,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame
 from pipecat.utils.string import match_endofsentence
 
 RTVI_PROTOCOL_VERSION = "0.3.0"
@@ -295,6 +296,12 @@ class RTVITextMessageData(BaseModel):
     text: str
 
 
+class RTVISearchResponseMessageData(BaseModel):
+    search_result: Optional[str]
+    rendered_content: Optional[str]
+    origins: List[LLMSearchOrigin]
+
+
 class RTVIBotTranscriptionMessage(BaseModel):
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-transcription"] = "bot-transcription"
@@ -305,6 +312,12 @@ class RTVIBotLLMTextMessage(BaseModel):
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-llm-text"] = "bot-llm-text"
     data: RTVITextMessageData
+
+
+class RTVIBotLLMSearchResponseMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["bot-llm-search-response"] = "bot-llm-search-response"
+    data: RTVISearchResponseMessageData
 
 
 class RTVIBotTTSTextMessage(BaseModel):
@@ -610,6 +623,8 @@ class RTVIObserver(BaseObserver):
             await self._push_transport_message_urgent(RTVIBotLLMStoppedMessage())
         elif isinstance(frame, LLMTextFrame):
             await self._handle_llm_text_frame(frame)
+        elif isinstance(frame, LLMSearchResponseFrame):
+            await self._handle_llm_search_response_frame(frame)
         elif isinstance(frame, TTSStartedFrame):
             await self._push_transport_message_urgent(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame):
@@ -660,6 +675,16 @@ class RTVIObserver(BaseObserver):
         if match_endofsentence(self._bot_transcription):
             await self._push_bot_transcription()
 
+    async def _handle_llm_search_response_frame(self, frame: LLMSearchResponseFrame):
+        message = RTVIBotLLMSearchResponseMessage(
+            data=RTVISearchResponseMessageData(
+                search_result=frame.search_result,
+                origins=frame.origins,
+                rendered_content=frame.rendered_content,
+            )
+        )
+        await self._push_transport_message_urgent(message)
+
     async def _handle_user_transcriptions(self, frame: Frame):
         message = None
         if isinstance(frame, TranscriptionFrame):
@@ -679,17 +704,20 @@ class RTVIObserver(BaseObserver):
             await self._push_transport_message_urgent(message)
 
     async def _handle_context(self, frame: OpenAILLMContextFrame):
-        messages = frame.context.messages
-        if len(messages) > 0:
-            message = messages[-1]
-            if message["role"] == "user":
-                content = message["content"]
-                if isinstance(content, list):
-                    text = " ".join(item["text"] for item in content if "text" in item)
-                else:
-                    text = content
-                rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
-                await self._push_transport_message_urgent(rtvi_message)
+        try:
+            messages = frame.context.messages
+            if len(messages) > 0:
+                message = messages[-1]
+                if message["role"] == "user":
+                    content = message["content"]
+                    if isinstance(content, list):
+                        text = " ".join(item["text"] for item in content if "text" in item)
+                    else:
+                        text = content
+                    rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
+                    await self._push_transport_message_urgent(rtvi_message)
+        except TypeError as e:
+            logger.warning(f"Caught an error while trying to handle context: {e}")
 
     async def _handle_metrics(self, frame: MetricsFrame):
         metrics = {}
