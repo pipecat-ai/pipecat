@@ -139,6 +139,7 @@ class GrokLLMService(OpenAILLMService):
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
         # Initialize counters for token usage metrics
+        self._api_key = api_key
         self._prompt_tokens = 0
         self._completion_tokens = 0
         self._total_tokens = 0

@@ -170,9 +170,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
-        self.api_key = api_key
         self.base_url = base_url
         self.set_model_name(model)
+        self._api_key = api_key
         self._voice_id = voice_id
 
         self._system_instruction = system_instruction
@@ -388,7 +388,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # handle disconnections in the send/recv code paths.
                 return
 
-            uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self.api_key}"
+            uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self._api_key}"
             logger.info(f"Connecting to {uri}")
             self._websocket = await websockets.connect(uri=uri)
             self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())

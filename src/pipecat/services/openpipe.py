@@ -44,6 +44,7 @@ class OpenPipeLLMService(OpenAILLMService):
             **kwargs,
         )
         self._tags = tags
+        self._api_key = api_key
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         openpipe_api_key = kwargs.get("openpipe_api_key") or ""

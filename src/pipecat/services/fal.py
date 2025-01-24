@@ -51,6 +51,7 @@ class FalImageGenService(ImageGenService):
         self._aiohttp_session = aiohttp_session
         if key:
             os.environ["FAL_KEY"] = key
+            self._api_key = key
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating image from prompt: {prompt}")

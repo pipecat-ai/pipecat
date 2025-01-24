@@ -419,6 +419,7 @@ class AzureLLMService(OpenAILLMService):
     ):
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
+        self._api_key = api_key
         self._endpoint = endpoint
         self._api_version = api_version
         super().__init__(api_key=api_key, model=model, **kwargs)

@@ -47,6 +47,7 @@ class DeepSeekLLMService(OpenAILLMService):
         **kwargs,
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+        self._api_key = api_key
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for DeepSeek API endpoint."""
