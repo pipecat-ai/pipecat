@@ -104,7 +104,7 @@ async def main(room_url, token=None):
         # -------------- Processors ------------- #
 
         story_processor = StoryProcessor(message_history, story_pages)
-        image_processor = StoryImageProcessor(image_gen)
+        image_processor = StoryImageProcessor(image_gen, llm_service)
 
         # -------------- Story Loop ------------- #
 

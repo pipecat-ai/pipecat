@@ -677,7 +677,7 @@ class GoogleLLMService(LLMService):
             tool_config = None
             if self._tool_config:
                 tool_config = self._tool_config
-
+            print(f"!!! about to generate. messages is {messages}, {type(messages)}")
             response = await self._client.generate_content_async(
                 contents=messages,
                 tools=tools,

@@ -1,16 +1,25 @@
 import re
 
+import google.ai.generativelanguage as glm
 from async_timeout import timeout
-from prompts import CUE_ASSISTANT_TURN, CUE_USER_TURN, IMAGE_GEN_PROMPT
+from prompts import (
+    CUE_ASSISTANT_TURN,
+    CUE_USER_TURN,
+    FIRST_IMAGE_PROMPT,
+    IMAGE_GEN_PROMPT,
+    NEXT_IMAGE_PROMPT,
+)
 from utils.helpers import load_sounds
 
 from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
+    LLMMessagesFrame,
     TextFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.google import GoogleLLMContext, GoogleLLMService
 from pipecat.transports.services.daily import DailyTransportMessageFrame
 
 sounds = load_sounds(["talking.wav", "listening.wav", "ding.wav"])
@@ -47,9 +56,12 @@ class StoryImageProcessor(FrameProcessor):
         _image_gen_service: The FAL service, generates the images (fast fast!).
     """
 
-    def __init__(self, image_gen_service):
+    def __init__(self, image_gen_service, llm_service):
         super().__init__()
         self._image_gen_service = image_gen_service
+        self._llm_service = llm_service
+        self.pages = []
+        self.image_descriptions = []
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -57,12 +69,32 @@ class StoryImageProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StoryImageFrame):
+        if isinstance(frame, StoryPageFrame):
+            # Special syntax for the first page
+            if self.pages == []:
+                prompt = FIRST_IMAGE_PROMPT % frame.text
+            else:
+                prompt = NEXT_IMAGE_PROMPT % (
+                    " ".join(self.pages),
+                    "; ".join(self.image_descriptions),
+                    frame.text,
+                )
+
             await self.start_ttfb_metrics()
+            # TODO: This is coupled to google implementation now
+            txt = glm.Content(role="user", parts=[glm.Part(text=prompt)])
+            print(f"!!! txt is {txt}")
+            llm_response = await self._llm_service._client.generate_content_async(
+                contents=[txt], stream=False
+            )
+            image_description = llm_response.text
+            self.pages.append(frame.text)
+            self.image_descriptions.append(image_description)
+            print(f"!!! response is {llm_response}")
             try:
                 async with timeout(15):
                     async for i in self._image_gen_service.run_image_gen(
-                        IMAGE_GEN_PROMPT % frame.text
+                        IMAGE_GEN_PROMPT % image_description
                     ):
                         await self.push_frame(i)
             except TimeoutError:
