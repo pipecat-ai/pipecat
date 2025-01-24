@@ -25,11 +25,12 @@ class TelnyxFrameSerializer(FrameSerializer):
     class InputParams(BaseModel):
         telnyx_sample_rate: int = 8000
         sample_rate: int = 16000
-        encoding: str = "PCMU"
+        inbound_encoding: str = "PCMU"
+        outbound_encoding: str = "PCMU"
 
     def __init__(self, stream_id: str, encoding: str, params: InputParams = InputParams()):
         self._stream_id = stream_id
-        params.encoding = encoding
+        params.inbound_encoding = encoding
         self._params = params
 
     @property
@@ -40,9 +41,9 @@ class TelnyxFrameSerializer(FrameSerializer):
         if isinstance(frame, AudioRawFrame):
             data = frame.audio
             
-            if self._params.encoding == "PCMU":
+            if self._params.outbound_encoding == "PCMU":
                 serialized_data = pcm_to_ulaw(data, frame.sample_rate, self._params.telnyx_sample_rate)
-            elif self._params.encoding == "PCMA":
+            elif self._params.outbound_encoding == "PCMA":
                 serialized_data = pcm_to_alaw(data, frame.sample_rate, self._params.telnyx_sample_rate)
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.encoding}")
@@ -62,18 +63,15 @@ class TelnyxFrameSerializer(FrameSerializer):
     def deserialize(self, data: str | bytes) -> Frame | None:
         message = json.loads(data)
         
-        if message["event"] == "start":
-            print(f"Start received encoding:{message['start']['media_format']['encoding']}")
-            self._params.encoding = message["start"]["media_format"]["encoding"]
         if message["event"] == "media":
             payload_base64 = message["media"]["payload"]
             payload = base64.b64decode(payload_base64)
 
-            if self._params.encoding == "PCMU":
+            if self._params.inbound_encoding == "PCMU":
                 deserialized_data = ulaw_to_pcm(
                     payload, self._params.telnyx_sample_rate, self._params.sample_rate
                 )
-            elif self._params.encoding == "PCMA":
+            elif self._params.inbound_encoding == "PCMA":
                 deserialized_data = alaw_to_pcm(
                     payload, self._params.telnyx_sample_rate, self._params.sample_rate
                 )
