@@ -309,7 +309,7 @@ class DailyRESTHelper:
                 "No Daily room specified. You must specify a Daily room in order a token to be generated."
             )
 
-        expiration: float = time.time() + expiry_time
+        expiration: int = int(time.time() + expiry_time)
 
         room_name = self.get_name_from_url(room_url)
 
