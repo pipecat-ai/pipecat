@@ -9,7 +9,7 @@ This project is a FastAPI-based chatbot that integrates with Telnyx to handle We
   - [Features](#features)
   - [Requirements](#requirements)
   - [Installation](#installation)
-  - [Configure Telnyx URLs](#configure-telnyx-urls)
+  - [Configure Telnyx TeXML application](#configure-telnyx-texml-application)
   - [Running the Application](#running-the-application)
     - [Using Python (Option 1)](#using-python-option-1)
     - [Using Docker (Option 2)](#using-docker-option-2)
@@ -54,7 +54,7 @@ This project is a FastAPI-based chatbot that integrates with Telnyx to handle We
 4. **Install ngrok**:
    Follow the instructions on the [ngrok website](https://ngrok.com/download) to download and install ngrok.
 
-## Configure Telnyx URLs
+## Configure Telnyx TeXML application
 
 1. **Start ngrok**:
    In a new terminal, start ngrok to tunnel the local server:
@@ -76,6 +76,8 @@ This project is a FastAPI-based chatbot that integrates with Telnyx to handle We
      ```
    - In `templates/streams.xml`, replace `<your server url>` with your ngrok URL (without `https://`)
    - The final URL should look like: `wss://abc123.ngrok.io/ws`
+   - The encoding (`bidirectionalCodec`) should be `PCMU` or `PCMA` depending on your needs. Based on selected encoding, set the outbound_encoding in the `TelnyxFrameSerializer` in `src/pipecat/serializers/telnyx.py`
+   - The inbound encoding can be controlled from the application configuration for inbound calls and dial/transfer commands for outbound calls.
 
 ## Running the Application
 
