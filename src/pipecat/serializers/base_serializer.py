@@ -44,7 +44,7 @@ class FrameSerializer(ABC):
 
 class AsyncFrameSerializer(FrameSerializer):
     @abstractmethod
-    async def serialize(self, frame: Frame) -> str | bytes | None:
+    async def serialize(self, frame: Frame) -> str | bytes | None | List[str] | List[bytes]:
         pass
 
     @abstractmethod
