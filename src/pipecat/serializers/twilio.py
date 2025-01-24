@@ -7,9 +7,9 @@
 import base64
 import json
 import uuid
+from typing import List
 
 from pydantic import BaseModel
-from typing import List
 
 from pipecat.audio.utils import pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
