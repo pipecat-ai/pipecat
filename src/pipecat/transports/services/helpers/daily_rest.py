@@ -317,7 +317,13 @@ class DailyRESTHelper:
 
         if params is None:
             params = DailyMeetingTokenParams(
-                **{"properties": {"room_name": room_name, "is_owner": owner, "exp": expiration}}
+                **{
+                    "properties": {
+                        "room_name": room_name,
+                        "is_owner": owner,
+                        "exp": int(expiration),
+                    }
+                }
             )
         else:
             params.properties.room_name = room_name
