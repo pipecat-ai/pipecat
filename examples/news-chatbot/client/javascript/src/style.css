@@ -1,0 +1,134 @@
+body {
+  margin: 0;
+  padding: 20px;
+  font-family: Arial, sans-serif;
+  background-color: #f0f0f0;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background-color: #fff;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.controls button {
+  padding: 8px 16px;
+  margin-left: 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#connect-btn {
+  background-color: #4caf50;
+  color: white;
+}
+
+#disconnect-btn {
+  background-color: #f44336;
+  color: white;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.main-content {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.bot-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#search-result-container {
+  background-color: #e0e0e0;
+  padding: 20px;
+  width: calc(100% - 40px);
+  height: 450px;
+  overflow: auto;
+}
+
+/* Container for all content */
+.content-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px; /* Space between elements */
+    font-family: Arial, sans-serif;
+}
+
+/* Styles for the search result */
+.search-result {
+    font-size: 16px;
+    line-height: 1.5;
+    color: #333;
+}
+
+/* Styles for the sources container */
+.sources {
+    display: flex;
+    flex-direction: column;
+    gap: 8px; /* Space between source links */
+}
+
+.sources-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #444;
+}
+
+/* Styles for source links */
+.source-link {
+    text-decoration: none;
+    color: #1a73e8;
+}
+
+.source-link:hover {
+    text-decoration: underline;
+}
+
+/* Styles for the iframe container */
+.iframe-container {
+    flex: none;
+    width: 100%;
+    height: 400px; /* Adjust height as needed */
+    border: none;
+}
+
+.debug-panel {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.debug-panel h3 {
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+#debug-log {
+  height: 200px;
+  overflow-y: auto;
+  background-color: #f8f8f8;
+  padding: 10px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
