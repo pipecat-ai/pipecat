@@ -277,7 +277,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                     "OpenAI-Beta": "realtime=v1",
                 },
             )
-            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+            self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -291,11 +291,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._websocket.close()
                 self._websocket = None
             if self._receive_task:
-                self._receive_task.cancel()
-                try:
-                    await asyncio.wait_for(self._receive_task, timeout=1.0)
-                except asyncio.TimeoutError:
-                    logger.warning("Timed out waiting for receive task to finish")
+                await self.cancel_task(self._receive_task, timeout=1.0)
                 self._receive_task = None
             self._disconnecting = False
         except Exception as e:
@@ -332,40 +328,32 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     #
 
     async def _receive_task_handler(self):
-        try:
-            async for message in self._websocket:
-                evt = events.parse_server_event(message)
-                if evt.type == "session.created":
-                    await self._handle_evt_session_created(evt)
-                elif evt.type == "session.updated":
-                    await self._handle_evt_session_updated(evt)
-                elif evt.type == "response.audio.delta":
-                    await self._handle_evt_audio_delta(evt)
-                elif evt.type == "response.audio.done":
-                    await self._handle_evt_audio_done(evt)
-                elif evt.type == "conversation.item.created":
-                    await self._handle_evt_conversation_item_created(evt)
-                elif evt.type == "conversation.item.input_audio_transcription.completed":
-                    await self.handle_evt_input_audio_transcription_completed(evt)
-                elif evt.type == "response.done":
-                    await self._handle_evt_response_done(evt)
-                elif evt.type == "input_audio_buffer.speech_started":
-                    await self._handle_evt_speech_started(evt)
-                elif evt.type == "input_audio_buffer.speech_stopped":
-                    await self._handle_evt_speech_stopped(evt)
-                elif evt.type == "response.audio_transcript.delta":
-                    await self._handle_evt_audio_transcript_delta(evt)
-                elif evt.type == "error":
-                    await self._handle_evt_error(evt)
-                    # errors are fatal, so exit the receive loop
-                    return
-
-                else:
-                    pass
-        except asyncio.CancelledError:
-            logger.debug("websocket receive task cancelled")
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
+        async for message in self._websocket:
+            evt = events.parse_server_event(message)
+            if evt.type == "session.created":
+                await self._handle_evt_session_created(evt)
+            elif evt.type == "session.updated":
+                await self._handle_evt_session_updated(evt)
+            elif evt.type == "response.audio.delta":
+                await self._handle_evt_audio_delta(evt)
+            elif evt.type == "response.audio.done":
+                await self._handle_evt_audio_done(evt)
+            elif evt.type == "conversation.item.created":
+                await self._handle_evt_conversation_item_created(evt)
+            elif evt.type == "conversation.item.input_audio_transcription.completed":
+                await self.handle_evt_input_audio_transcription_completed(evt)
+            elif evt.type == "response.done":
+                await self._handle_evt_response_done(evt)
+            elif evt.type == "input_audio_buffer.speech_started":
+                await self._handle_evt_speech_started(evt)
+            elif evt.type == "input_audio_buffer.speech_stopped":
+                await self._handle_evt_speech_stopped(evt)
+            elif evt.type == "response.audio_transcript.delta":
+                await self._handle_evt_audio_transcript_delta(evt)
+            elif evt.type == "error":
+                await self._handle_evt_error(evt)
+                # errors are fatal, so exit the receive loop
+                return
 
     async def _handle_evt_session_created(self, evt):
         # session.created is received right after connecting. Send a message

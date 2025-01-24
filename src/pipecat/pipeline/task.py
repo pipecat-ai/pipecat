@@ -30,7 +30,7 @@ from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.utils import obj_count, obj_id
+from pipecat.utils.utils import cancel_task, create_task, obj_count, obj_id
 
 HEARTBEAT_SECONDS = 1.0
 HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 5
@@ -49,7 +49,7 @@ class PipelineParams(BaseModel):
     heartbeats_period_secs: float = HEARTBEAT_SECONDS
 
 
-class Source(FrameProcessor):
+class PipelineTaskSource(FrameProcessor):
     """This is the source processor that is linked at the beginning of the
     pipeline given to the pipeline task. It allows us to easily push frames
     downstream to the pipeline and also receive upstream frames coming from the
@@ -57,8 +57,8 @@ class Source(FrameProcessor):
 
     """
 
-    def __init__(self, up_queue: asyncio.Queue):
-        super().__init__()
+    def __init__(self, up_queue: asyncio.Queue, **kwargs):
+        super().__init__(**kwargs)
         self._up_queue = up_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -71,15 +71,15 @@ class Source(FrameProcessor):
                 await self.push_frame(frame, direction)
 
 
-class Sink(FrameProcessor):
+class PipelineTaskSink(FrameProcessor):
     """This is the sink processor that is linked at the end of the pipeline
     given to the pipeline task. It allows us to receive downstream frames and
     act on them, for example, waiting to receive an EndFrame.
 
     """
 
-    def __init__(self, down_queue: asyncio.Queue):
-        super().__init__()
+    def __init__(self, down_queue: asyncio.Queue, **kwargs):
+        super().__init__(**kwargs)
         self._down_queue = down_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -115,10 +115,10 @@ class PipelineTask(BaseTask):
         # down queue.
         self._endframe_event = asyncio.Event()
 
-        self._source = Source(self._up_queue)
+        self._source = PipelineTaskSource(self._up_queue)
         self._source.link(pipeline)
 
-        self._sink = Sink(self._down_queue)
+        self._sink = PipelineTaskSink(self._down_queue)
         pipeline.link(self._sink)
 
         self._observer = TaskObserver(params.observers)
@@ -148,13 +148,22 @@ class PipelineTask(BaseTask):
         # we want to cancel right away.
         await self._source.push_frame(CancelFrame())
         await self._cancel_tasks(True)
+        await self._cleanup()
 
     async def run(self):
         """
         Starts running the given pipeline.
         """
-        tasks = self._create_tasks()
-        await asyncio.gather(*tasks)
+        try:
+            push_task = self._create_tasks()
+            await asyncio.gather(push_task)
+        except asyncio.CancelledError:
+            # We are awaiting on the push task and it might be cancelled
+            # (e.g. Ctrl-C). This means we will get a CancelledError here as
+            # well, because you get a CancelledError in every place you are
+            # awaiting a task.
+            pass
+        await self._cancel_tasks(False)
         self._finished = True
 
     async def queue_frame(self, frame: Frame):
@@ -175,41 +184,44 @@ class PipelineTask(BaseTask):
                 await self.queue_frame(frame)
 
     def _create_tasks(self):
-        tasks = []
-        self._process_up_task = asyncio.create_task(self._process_up_queue())
-        self._process_down_task = asyncio.create_task(self._process_down_queue())
-        self._process_push_task = asyncio.create_task(self._process_push_queue())
+        loop = asyncio.get_running_loop()
+        self._process_up_task = create_task(
+            loop, self._process_up_queue(), f"{self}::_process_up_queue"
+        )
+        self._process_down_task = create_task(
+            loop, self._process_down_queue(), f"{self}::_process_down_queue"
+        )
+        self._process_push_task = create_task(
+            loop, self._process_push_queue(), f"{self}::_process_push_queue"
+        )
 
-        tasks = [self._process_up_task, self._process_down_task, self._process_push_task]
-
-        return tasks
+        return self._process_push_task
 
     def _maybe_start_heartbeat_tasks(self):
         if self._params.enable_heartbeats:
-            self._heartbeat_push_task = asyncio.create_task(self._heartbeat_push_handler())
-            self._heartbeat_monitor_task = asyncio.create_task(self._heartbeat_monitor_handler())
+            loop = asyncio.get_running_loop()
+            self._heartbeat_push_task = create_task(
+                loop, self._heartbeat_push_handler(), f"{self}::_heartbeat_push_handler"
+            )
+            self._heartbeat_monitor_task = create_task(
+                loop, self._heartbeat_monitor_handler(), f"{self}::_heartbeat_monitor_handler"
+            )
 
     async def _cancel_tasks(self, cancel_push: bool):
         await self._maybe_cancel_heartbeat_tasks()
 
         if cancel_push:
-            self._process_push_task.cancel()
-            await self._process_push_task
+            await cancel_task(self._process_push_task)
 
-        self._process_up_task.cancel()
-        await self._process_up_task
-
-        self._process_down_task.cancel()
-        await self._process_down_task
+        await cancel_task(self._process_up_task)
+        await cancel_task(self._process_down_task)
 
         await self._observer.stop()
 
     async def _maybe_cancel_heartbeat_tasks(self):
         if self._params.enable_heartbeats:
-            self._heartbeat_push_task.cancel()
-            await self._heartbeat_push_task
-            self._heartbeat_monitor_task.cancel()
-            await self._heartbeat_monitor_task
+            await cancel_task(self._heartbeat_push_task)
+            await cancel_task(self._heartbeat_monitor_task)
 
     def _initial_metrics_frame(self) -> MetricsFrame:
         processors = self._pipeline.processors_with_metrics()
@@ -222,6 +234,11 @@ class PipelineTask(BaseTask):
     async def _wait_for_endframe(self):
         await self._endframe_event.wait()
         self._endframe_event.clear()
+
+    async def _cleanup(self):
+        await self._source.cleanup()
+        await self._pipeline.cleanup()
+        await self._sink.cleanup()
 
     async def _process_push_queue(self):
         """This is the task that runs the pipeline for the first time by sending
@@ -249,24 +266,16 @@ class PipelineTask(BaseTask):
         running = True
         should_cleanup = True
         while running:
-            try:
-                frame = await self._push_queue.get()
-                await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
-                if isinstance(frame, EndFrame):
-                    await self._wait_for_endframe()
-                running = not isinstance(frame, (StopTaskFrame, EndFrame))
-                should_cleanup = not isinstance(frame, StopTaskFrame)
-                self._push_queue.task_done()
-            except asyncio.CancelledError:
-                break
+            frame = await self._push_queue.get()
+            await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
+            if isinstance(frame, EndFrame):
+                await self._wait_for_endframe()
+            running = not isinstance(frame, (StopTaskFrame, EndFrame))
+            should_cleanup = not isinstance(frame, StopTaskFrame)
+            self._push_queue.task_done()
         # Cleanup only if we need to.
         if should_cleanup:
-            await self._source.cleanup()
-            await self._pipeline.cleanup()
-            await self._sink.cleanup()
-        # Finally, cancel internal tasks. We don't cancel the push tasks because
-        # that's us.
-        await self._cancel_tasks(False)
+            await self._cleanup()
 
     async def _process_up_queue(self):
         """This is the task that processes frames coming upstream from the
@@ -276,26 +285,23 @@ class PipelineTask(BaseTask):
 
         """
         while True:
-            try:
-                frame = await self._up_queue.get()
-                if isinstance(frame, EndTaskFrame):
-                    # Tell the task we should end nicely.
-                    await self.queue_frame(EndFrame())
-                elif isinstance(frame, CancelTaskFrame):
-                    # Tell the task we should end right away.
+            frame = await self._up_queue.get()
+            if isinstance(frame, EndTaskFrame):
+                # Tell the task we should end nicely.
+                await self.queue_frame(EndFrame())
+            elif isinstance(frame, CancelTaskFrame):
+                # Tell the task we should end right away.
+                await self.queue_frame(CancelFrame())
+            elif isinstance(frame, StopTaskFrame):
+                await self.queue_frame(StopTaskFrame())
+            elif isinstance(frame, ErrorFrame):
+                logger.error(f"Error running app: {frame}")
+                if frame.fatal:
+                    # Cancel all tasks downstream.
                     await self.queue_frame(CancelFrame())
-                elif isinstance(frame, StopTaskFrame):
+                    # Tell the task we should stop.
                     await self.queue_frame(StopTaskFrame())
-                elif isinstance(frame, ErrorFrame):
-                    logger.error(f"Error running app: {frame}")
-                    if frame.fatal:
-                        # Cancel all tasks downstream.
-                        await self.queue_frame(CancelFrame())
-                        # Tell the task we should stop.
-                        await self.queue_frame(StopTaskFrame())
-                self._up_queue.task_done()
-            except asyncio.CancelledError:
-                break
+            self._up_queue.task_done()
 
     async def _process_down_queue(self):
         """This tasks process frames coming downstream from the pipeline. For
@@ -305,29 +311,23 @@ class PipelineTask(BaseTask):
 
         """
         while True:
-            try:
-                frame = await self._down_queue.get()
-                if isinstance(frame, EndFrame):
-                    self._endframe_event.set()
-                elif isinstance(frame, HeartbeatFrame):
-                    await self._heartbeat_queue.put(frame)
-                self._down_queue.task_done()
-            except asyncio.CancelledError:
-                break
+            frame = await self._down_queue.get()
+            if isinstance(frame, EndFrame):
+                self._endframe_event.set()
+            elif isinstance(frame, HeartbeatFrame):
+                await self._heartbeat_queue.put(frame)
+            self._down_queue.task_done()
 
     async def _heartbeat_push_handler(self):
         """
         This tasks pushes a heartbeat frame every heartbeat period.
         """
         while True:
-            try:
-                # Don't use `queue_frame()` because if an EndFrame is queued the
-                # task will just stop waiting for the pipeline to finish not
-                # allowing more frames to be pushed.
-                await self._source.queue_frame(HeartbeatFrame(timestamp=self._clock.get_time()))
-                await asyncio.sleep(self._params.heartbeats_period_secs)
-            except asyncio.CancelledError:
-                break
+            # Don't use `queue_frame()` because if an EndFrame is queued the
+            # task will just stop waiting for the pipeline to finish not
+            # allowing more frames to be pushed.
+            await self._source.queue_frame(HeartbeatFrame(timestamp=self._clock.get_time()))
+            await asyncio.sleep(self._params.heartbeats_period_secs)
 
     async def _heartbeat_monitor_handler(self):
         """This tasks monitors heartbeat frames. If a heartbeat frame has not
@@ -347,8 +347,6 @@ class PipelineTask(BaseTask):
                 logger.warning(
                     f"{self}: heartbeat frame not received for more than {wait_time} seconds"
                 )
-            except asyncio.CancelledError:
-                break
 
     def __str__(self):
         return self.name

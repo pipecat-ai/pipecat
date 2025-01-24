@@ -49,45 +49,33 @@ class SimliVideoService(FrameProcessor):
     async def _start_connection(self):
         await self._simli_client.Initialize()
         # Create task to consume and process audio and video
-        self._audio_task = asyncio.create_task(self._consume_and_process_audio())
-        self._video_task = asyncio.create_task(self._consume_and_process_video())
+        self._audio_task = self.create_task(self._consume_and_process_audio())
+        self._video_task = self.create_task(self._consume_and_process_video())
 
     async def _consume_and_process_audio(self):
-        try:
-            await self._pipecat_resampler_event.wait()
-            async for audio_frame in self._simli_client.getAudioStreamIterator():
-                resampled_frames = self._pipecat_resampler.resample(audio_frame)
-                for resampled_frame in resampled_frames:
-                    await self.push_frame(
-                        TTSAudioRawFrame(
-                            audio=resampled_frame.to_ndarray().tobytes(),
-                            sample_rate=self._pipecat_resampler.rate,
-                            num_channels=1,
-                        ),
-                    )
-        except Exception as e:
-            logger.exception(f"{self} exception: {e}")
-        except asyncio.CancelledError:
-            pass
+        await self._pipecat_resampler_event.wait()
+        async for audio_frame in self._simli_client.getAudioStreamIterator():
+            resampled_frames = self._pipecat_resampler.resample(audio_frame)
+            for resampled_frame in resampled_frames:
+                await self.push_frame(
+                    TTSAudioRawFrame(
+                        audio=resampled_frame.to_ndarray().tobytes(),
+                        sample_rate=self._pipecat_resampler.rate,
+                        num_channels=1,
+                    ),
+                )
 
     async def _consume_and_process_video(self):
-        try:
-            await self._pipecat_resampler_event.wait()
-            async for video_frame in self._simli_client.getVideoStreamIterator(
-                targetFormat="rgb24"
-            ):
-                # Process the video frame
-                convertedFrame: OutputImageRawFrame = OutputImageRawFrame(
-                    image=video_frame.to_rgb().to_image().tobytes(),
-                    size=(video_frame.width, video_frame.height),
-                    format="RGB",
-                )
-                convertedFrame.pts = video_frame.pts
-                await self.push_frame(convertedFrame)
-        except Exception as e:
-            logger.exception(f"{self} exception: {e}")
-        except asyncio.CancelledError:
-            pass
+        await self._pipecat_resampler_event.wait()
+        async for video_frame in self._simli_client.getVideoStreamIterator(targetFormat="rgb24"):
+            # Process the video frame
+            convertedFrame: OutputImageRawFrame = OutputImageRawFrame(
+                image=video_frame.to_rgb().to_image().tobytes(),
+                size=(video_frame.width, video_frame.height),
+                format="RGB",
+            )
+            convertedFrame.pts = video_frame.pts
+            await self.push_frame(convertedFrame)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -128,8 +116,6 @@ class SimliVideoService(FrameProcessor):
     async def _stop(self):
         await self._simli_client.stop()
         if self._audio_task:
-            self._audio_task.cancel()
-            await self._audio_task
+            await self.cancel_task(self._audio_task)
         if self._video_task:
-            self._video_task.cancel()
-            await self._video_task
+            await self.cancel_task(self._video_task)

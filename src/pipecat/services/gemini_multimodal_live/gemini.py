@@ -275,7 +275,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             )
             await self.send_client_event(evt)
         if self._transcribe_user_audio and self._context:
-            asyncio.create_task(self._handle_transcribe_user_audio(audio, self._context))
+            self.create_task(self._handle_transcribe_user_audio(audio, self._context))
 
     async def _handle_transcribe_user_audio(self, audio, context):
         text = await self._transcribe_audio(audio, context)
@@ -391,7 +391,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self.api_key}"
             logger.info(f"Connecting to {uri}")
             self._websocket = await websockets.connect(uri=uri)
-            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+            self._receive_task = self.create_task(self._receive_task_handler())
             config = events.Config.model_validate(
                 {
                     "setup": {
@@ -441,11 +441,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._websocket.close()
                 self._websocket = None
             if self._receive_task:
-                self._receive_task.cancel()
-                try:
-                    await asyncio.wait_for(self._receive_task, timeout=1.0)
-                except asyncio.TimeoutError:
-                    logger.warning("Timed out waiting for receive task to finish")
+                await self.cancel_task(self._receive_task, timeout=1.0)
                 self._receive_task = None
             self._disconnecting = False
         except Exception as e:
@@ -497,6 +493,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     pass
         except asyncio.CancelledError:
             logger.debug("websocket receive task cancelled")
+            raise
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
@@ -679,7 +676,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_text_buffer = ""
 
         if audio and self._transcribe_model_audio and self._context:
-            asyncio.create_task(self._handle_transcribe_model_audio(audio, self._context))
+            self.create_task(self._handle_transcribe_model_audio(audio, self._context))
         elif text:
             await self.push_frame(LLMFullResponseEndFrame())
 

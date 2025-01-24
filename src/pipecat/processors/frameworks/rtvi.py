@@ -764,11 +764,11 @@ class RTVIProcessor(FrameProcessor):
 
         # A task to process incoming action frames.
         self._action_queue = asyncio.Queue()
-        self._action_task = self.get_event_loop().create_task(self._action_task_handler())
+        self._action_task = self.create_task(self._action_task_handler())
 
         # A task to process incoming transport messages.
         self._message_queue = asyncio.Queue()
-        self._message_task = self.get_event_loop().create_task(self._message_task_handler())
+        self._message_task = self.create_task(self._message_task_handler())
 
         self._register_event_handler("on_bot_started")
         self._register_event_handler("on_client_ready")
@@ -873,13 +873,11 @@ class RTVIProcessor(FrameProcessor):
 
     async def _cancel_tasks(self):
         if self._action_task:
-            self._action_task.cancel()
-            await self._action_task
+            await self.cancel_task(self._action_task)
             self._action_task = None
 
         if self._message_task:
-            self._message_task.cancel()
-            await self._message_task
+            await self.cancel_task(self._message_task)
             self._message_task = None
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
@@ -888,21 +886,15 @@ class RTVIProcessor(FrameProcessor):
 
     async def _action_task_handler(self):
         while True:
-            try:
-                frame = await self._action_queue.get()
-                await self._handle_action(frame.message_id, frame.rtvi_action_run)
-                self._action_queue.task_done()
-            except asyncio.CancelledError:
-                break
+            frame = await self._action_queue.get()
+            await self._handle_action(frame.message_id, frame.rtvi_action_run)
+            self._action_queue.task_done()
 
     async def _message_task_handler(self):
         while True:
-            try:
-                message = await self._message_queue.get()
-                await self._handle_message(message)
-                self._message_queue.task_done()
-            except asyncio.CancelledError:
-                break
+            message = await self._message_queue.get()
+            await self._handle_message(message)
+            self._message_queue.task_done()
 
     async def _handle_transport_message(self, frame: TransportMessageUrgentFrame):
         try:

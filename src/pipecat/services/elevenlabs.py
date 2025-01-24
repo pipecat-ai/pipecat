@@ -299,20 +299,16 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.get_event_loop().create_task(
-            self._receive_task_handler(self.push_error)
-        )
-        self._keepalive_task = self.get_event_loop().create_task(self._keepalive_task_handler())
+        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+        self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
         if self._receive_task:
-            self._receive_task.cancel()
-            await self._receive_task
+            await self.cancel_task(self._receive_task)
             self._receive_task = None
 
         if self._keepalive_task:
-            self._keepalive_task.cancel()
-            await self._keepalive_task
+            await self.cancel_task(self._keepalive_task)
             self._keepalive_task = None
 
         await self._disconnect_websocket()
@@ -383,13 +379,8 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
 
     async def _keepalive_task_handler(self):
         while True:
-            try:
-                await asyncio.sleep(10)
-                await self._send_text("")
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"{self} exception: {e}")
+            await asyncio.sleep(10)
+            await self._send_text("")
 
     async def _send_text(self, text: str):
         if self._websocket:
