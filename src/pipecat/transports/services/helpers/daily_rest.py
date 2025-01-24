@@ -225,9 +225,7 @@ class DailyRESTHelper:
         daily_api_url: str = "https://api.daily.co/v1",
         aiohttp_session: aiohttp.ClientSession,
     ):
-        """
-        Initialize the Daily REST helper.
-        """
+        """Initialize the Daily REST helper."""
         self.daily_api_key = daily_api_key
         self.daily_api_url = daily_api_url
         self.aiohttp_session = aiohttp_session
