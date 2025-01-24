@@ -288,7 +288,7 @@ class DailyRESTHelper:
         room_url: str,
         expiry_time: float = 60 * 60,
         owner: bool = True,
-        params: DailyMeetingTokenParams = None,
+        params: Optional[DailyMeetingTokenParams] = None,
     ) -> str:
         """Generate a meeting token for user to join a Daily room.
 
@@ -296,7 +296,7 @@ class DailyRESTHelper:
             room_url: Daily room URL
             expiry_time: Token validity duration in seconds (default: 1 hour)
             owner: Whether token has owner privileges
-            params:Parameters for creating a Daily meeting token
+            params: Parameters for creating a Daily meeting token
 
         Returns:
             str: Meeting token
