@@ -296,7 +296,9 @@ class DailyRESTHelper:
             room_url: Daily room URL
             expiry_time: Token validity duration in seconds (default: 1 hour)
             owner: Whether token has owner privileges
-            params: Parameters for creating a Daily meeting token
+            params: Optional additional token properties. Note that room_name,
+                exp, and is_owner will be set based on the other function
+                parameters regardless of values in params.
 
         Returns:
             str: Meeting token
@@ -309,7 +311,7 @@ class DailyRESTHelper:
                 "No Daily room specified. You must specify a Daily room in order a token to be generated."
             )
 
-        expiration: float = time.time() + expiry_time
+        expiration: int = int(time.time() + expiry_time)
 
         room_name = self.get_name_from_url(room_url)
 
@@ -327,7 +329,7 @@ class DailyRESTHelper:
             )
         else:
             params.properties.room_name = room_name
-            params.properties.exp = int(expiration)
+            params.properties.exp = expiration
             params.properties.is_owner = owner
 
         json = params.model_dump(exclude_none=True)
