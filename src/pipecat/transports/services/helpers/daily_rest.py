@@ -43,6 +43,8 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         enable_emoji_reactions: Whether emoji reactions are enabled
         eject_at_room_exp: Whether to remove participants when room expires
         enable_dialout: Whether SIP dial-out is enabled
+        enable_recording: Recording settings ('cloud', 'local', 'raw-tracks')
+        geo: Geographic region for room
         max_participants: Maximum number of participants allowed in the room
         sip: SIP configuration parameters
         sip_uri: SIP URI information returned by Daily
@@ -57,6 +59,8 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     enable_emoji_reactions: bool = False
     eject_at_room_exp: bool = True
     enable_dialout: Optional[bool] = None
+    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
+    geo: Optional[str] = None
     max_participants: Optional[int] = None
     sip: Optional[DailyRoomSipParams] = None
     sip_uri: Optional[dict] = None
