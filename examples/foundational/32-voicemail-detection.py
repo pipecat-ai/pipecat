@@ -41,6 +41,7 @@ async def start_terminate_call(
 async def terminate_call(
     function_name, tool_call_id, args, llm: LLMService, context, result_callback
 ):
+    """Function the bot can call to terminate the call upon completion of a voicemail message."""
     print("Terminating call", {"msg": function_name})
     await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
     await result_callback("Goodbye")
@@ -58,7 +59,7 @@ async def main():
         transport = DailyTransport(
             room_url,
             token,
-            "Respond bot",
+            "Voicemail detection bot",
             DailyParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
@@ -126,7 +127,7 @@ async def main():
         @transport.event_handler("on_call_state_updated")
         async def on_call_state_updated(transport, state):
             logger.info(f"Call state updated: {state}")
-            if state == "joined" and dialoutSettings and shouldDialout:
+            if state == "joined" and dialoutSettings and useDialout:
                 logger.info("Starting dialout")
                 await start_dialout(transport, dialoutSettings)
             if state == "left":
