@@ -150,22 +150,18 @@ class ParallelPipeline(BasePipeline):
 
     async def _stop(self):
         # The up task doesn't receive an EndFrame, so we just cancel it.
-        self._up_task.cancel()
-        await self._up_task
-        # The down tasks waits for the last EndFrame send by the internal
+        await self.cancel_task(self._up_task)
+        # The down tasks waits for the last EndFrame sent by the internal
         # pipelines.
         await self._down_task
 
     async def _cancel(self):
-        self._up_task.cancel()
-        await self._up_task
-        self._down_task.cancel()
-        await self._down_task
+        await self.cancel_task(self._up_task)
+        await self.cancel_task(self._down_task)
 
     async def _create_tasks(self):
-        loop = self.get_event_loop()
-        self._up_task = loop.create_task(self._process_up_queue())
-        self._down_task = loop.create_task(self._process_down_queue())
+        self._up_task = self.create_task(self._process_up_queue())
+        self._down_task = self.create_task(self._process_down_queue())
 
     async def _drain_queues(self):
         while not self._up_queue.empty:
@@ -185,32 +181,26 @@ class ParallelPipeline(BasePipeline):
 
     async def _process_up_queue(self):
         while True:
-            try:
-                frame = await self._up_queue.get()
-                await self._parallel_push_frame(frame, FrameDirection.UPSTREAM)
-                self._up_queue.task_done()
-            except asyncio.CancelledError:
-                break
+            frame = await self._up_queue.get()
+            await self._parallel_push_frame(frame, FrameDirection.UPSTREAM)
+            self._up_queue.task_done()
 
     async def _process_down_queue(self):
         running = True
         while running:
-            try:
-                frame = await self._down_queue.get()
+            frame = await self._down_queue.get()
 
-                endframe_counter = self._endframe_counter.get(frame.id, 0)
+            endframe_counter = self._endframe_counter.get(frame.id, 0)
 
-                # If we have a counter, decrement it.
-                if endframe_counter > 0:
-                    self._endframe_counter[frame.id] -= 1
-                    endframe_counter = self._endframe_counter[frame.id]
+            # If we have a counter, decrement it.
+            if endframe_counter > 0:
+                self._endframe_counter[frame.id] -= 1
+                endframe_counter = self._endframe_counter[frame.id]
 
-                # If we don't have a counter or we reached 0, push the frame.
-                if endframe_counter == 0:
-                    await self._parallel_push_frame(frame, FrameDirection.DOWNSTREAM)
+            # If we don't have a counter or we reached 0, push the frame.
+            if endframe_counter == 0:
+                await self._parallel_push_frame(frame, FrameDirection.DOWNSTREAM)
 
-                running = not (endframe_counter == 0 and isinstance(frame, EndFrame))
+            running = not (endframe_counter == 0 and isinstance(frame, EndFrame))
 
-                self._down_queue.task_done()
-            except asyncio.CancelledError:
-                break
+            self._down_queue.task_done()

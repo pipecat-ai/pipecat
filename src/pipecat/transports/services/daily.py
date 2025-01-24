@@ -46,6 +46,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.utils import cancel_task, create_task
 
 try:
     from daily import CallClient, Daily, EventHandler
@@ -218,7 +219,9 @@ class DailyTransportClient(EventHandler):
         # future) we will deadlock because completions use event handlers (which
         # are holding the GIL).
         self._callback_queue = asyncio.Queue()
-        self._callback_task = self._loop.create_task(self._callback_task_handler())
+        self._callback_task = create_task(
+            self._loop, self._callback_task_handler(), "DailyTransportClient::callback_task"
+        )
 
         self._camera: VirtualCameraDevice | None = None
         if self._params.camera_out_enabled:
@@ -469,8 +472,7 @@ class DailyTransportClient(EventHandler):
         return await asyncio.wait_for(future, timeout=10)
 
     async def cleanup(self):
-        self._callback_task.cancel()
-        await self._callback_task
+        await cancel_task(self._callback_task)
         # Make sure we don't block the event loop in case `client.release()`
         # takes extra time.
         await self._loop.run_in_executor(self._executor, self._cleanup)
@@ -687,11 +689,8 @@ class DailyTransportClient(EventHandler):
 
     async def _callback_task_handler(self):
         while True:
-            try:
-                (callback, *args) = await self._callback_queue.get()
-                await callback(*args)
-            except asyncio.CancelledError:
-                break
+            (callback, *args) = await self._callback_queue.get()
+            await callback(*args)
 
 
 class DailyInputTransport(BaseInputTransport):
@@ -721,7 +720,7 @@ class DailyInputTransport(BaseInputTransport):
         # Create audio task. It reads audio frames from Daily and push them
         # internally for VAD processing.
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_task = self.get_event_loop().create_task(self._audio_in_task_handler())
+            self._audio_in_task = self.create_task(self._audio_in_task_handler())
 
     async def stop(self, frame: EndFrame):
         # Parent stop.
@@ -730,8 +729,7 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.leave()
         # Stop audio thread.
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
-            self._audio_in_task.cancel()
-            await self._audio_in_task
+            await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
 
     async def cancel(self, frame: CancelFrame):
@@ -741,8 +739,7 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.leave()
         # Stop audio thread.
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
-            self._audio_in_task.cancel()
-            await self._audio_in_task
+            await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
 
     async def cleanup(self):
@@ -779,12 +776,9 @@ class DailyInputTransport(BaseInputTransport):
 
     async def _audio_in_task_handler(self):
         while True:
-            try:
-                frame = await self._client.read_next_audio_frame()
-                if frame:
-                    await self.push_audio_frame(frame)
-            except asyncio.CancelledError:
-                break
+            frame = await self._client.read_next_audio_frame()
+            if frame:
+                await self.push_audio_frame(frame)
 
     #
     # Camera in
