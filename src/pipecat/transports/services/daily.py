@@ -476,7 +476,9 @@ class DailyTransportClient(EventHandler):
         return await asyncio.wait_for(future, timeout=10)
 
     async def cleanup(self):
-        await cancel_task(self._callback_task)
+        if self._callback_task:
+            await cancel_task(self._callback_task)
+            self._callback_task = None
         # Make sure we don't block the event loop in case `client.release()`
         # takes extra time.
         await self._loop.run_in_executor(self._executor, self._cleanup)
