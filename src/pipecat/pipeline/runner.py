@@ -19,6 +19,7 @@ class PipelineRunner:
         self.name: str = name or f"{self.__class__.__name__}#{obj_count(self)}"
 
         self._tasks = {}
+        self._sig_task = None
 
         if handle_sigint:
             self._setup_sigint()
@@ -28,6 +29,10 @@ class PipelineRunner:
         self._tasks[task.name] = task
         await task.run()
         del self._tasks[task.name]
+        # If we are cancelling through a signal, make sure we wait for it so
+        # everything gets cleaned up nicely.
+        if self._sig_task:
+            await self._sig_task
         logger.debug(f"Runner {self} finished running {task}")
 
     async def stop_when_done(self):
@@ -40,14 +45,14 @@ class PipelineRunner:
 
     def _setup_sigint(self):
         loop = asyncio.get_running_loop()
-        loop.add_signal_handler(
-            signal.SIGINT, lambda *args: asyncio.create_task(self._sig_handler())
-        )
-        loop.add_signal_handler(
-            signal.SIGTERM, lambda *args: asyncio.create_task(self._sig_handler())
-        )
+        loop.add_signal_handler(signal.SIGINT, lambda *args: self._sig_handler())
+        loop.add_signal_handler(signal.SIGTERM, lambda *args: self._sig_handler())
 
-    async def _sig_handler(self):
+    def _sig_handler(self):
+        if not self._sig_task:
+            self._sig_task = asyncio.create_task(self._sig_cancel())
+
+    async def _sig_cancel(self):
         logger.warning(f"Interruption detected. Canceling runner {self}")
         await self.cancel()
 
