@@ -48,7 +48,7 @@ def create_task(loop: asyncio.AbstractEventLoop, coroutine: Coroutine, name: str
         try:
             await coroutine
         except asyncio.CancelledError:
-            logger.trace(f"{name}: cancelling task")
+            logger.trace(f"{name}: task cancelled")
             # Re-raise the exception to ensure the task is cancelled.
             raise
         except Exception as e:
@@ -61,6 +61,26 @@ def create_task(loop: asyncio.AbstractEventLoop, coroutine: Coroutine, name: str
     return task
 
 
+async def wait_for_task(task: asyncio.Task, timeout: Optional[float] = None):
+    name = task.get_name()
+    try:
+        if timeout:
+            await asyncio.wait_for(task, timeout=timeout)
+        else:
+            await task
+    except asyncio.TimeoutError:
+        logger.warning(f"{name}: timed out waiting for task to finish")
+    except asyncio.CancelledError:
+        logger.error(f"{name}: unexpected task cancellation")
+    except Exception as e:
+        logger.exception(f"{name}: unexpected exception while stopping task: {e}")
+    finally:
+        try:
+            _TASKS.remove(task)
+        except KeyError as e:
+            logger.error(f"{name}: error removing task (already removed?): {e}")
+
+
 async def cancel_task(task: asyncio.Task, timeout: Optional[float] = None):
     name = task.get_name()
     task.cancel()
@@ -70,16 +90,17 @@ async def cancel_task(task: asyncio.Task, timeout: Optional[float] = None):
         else:
             await task
     except asyncio.TimeoutError:
-        logger.warning(f"{name}: timed out waiting for task to finish")
+        logger.warning(f"{name}: timed out waiting for task to cancel")
     except asyncio.CancelledError:
         # Here are sure the task is cancelled properly.
-        logger.trace(f"{name}: task cancelled")
+        pass
+    except Exception as e:
+        logger.exception(f"{name}: unexpected exception while cancelling task: {e}")
+    finally:
         try:
             _TASKS.remove(task)
         except KeyError as e:
             logger.error(f"{name}: error removing task (already removed?): {e}")
-    except Exception as e:
-        logger.exception(f"{name}: unexpected exception while cancelling task: {e}")
 
 
 def current_tasks() -> Set[asyncio.Task]:
