@@ -181,6 +181,7 @@ class DailyTransportClient(EventHandler):
         params: DailyParams,
         callbacks: DailyCallbacks,
         loop: asyncio.AbstractEventLoop,
+        transport_name: str,
     ):
         super().__init__()
 
@@ -194,6 +195,7 @@ class DailyTransportClient(EventHandler):
         self._params: DailyParams = params
         self._callbacks = callbacks
         self._loop = loop
+        self._transport_name = transport_name
 
         self._participant_id: str = ""
         self._video_renderers = {}
@@ -220,7 +222,9 @@ class DailyTransportClient(EventHandler):
         # are holding the GIL).
         self._callback_queue = asyncio.Queue()
         self._callback_task = create_task(
-            self._loop, self._callback_task_handler(), "DailyTransportClient::callback_task"
+            self._loop,
+            self._callback_task_handler(),
+            f"{self._transport_name}::DailyTransportClient::callback_task",
         )
 
         self._camera: VirtualCameraDevice | None = None
@@ -907,7 +911,7 @@ class DailyTransport(BaseTransport):
         self._params = params
 
         self._client = DailyTransportClient(
-            room_url, token, bot_name, params, callbacks, self._loop
+            room_url, token, bot_name, params, callbacks, self._loop, self.name
         )
         self._input: DailyInputTransport | None = None
         self._output: DailyOutputTransport | None = None
