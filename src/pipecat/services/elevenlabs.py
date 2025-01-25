@@ -357,7 +357,6 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
 
             if self._websocket:
                 logger.debug("Disconnecting from ElevenLabs")
-                await self._websocket.send(json.dumps({"text": ""}))
                 await self._websocket.close()
                 self._websocket = None
 
