@@ -53,12 +53,20 @@ class BaseTransport(ABC):
         output_name: Optional[str] = None,
         loop: Optional[asyncio.AbstractEventLoop] = None,
     ):
-        self.id: int = obj_id()
-        self.name = name or f"{self.__class__.__name__}#{obj_count(self)}"
+        self._id: int = obj_id()
+        self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
         self._input_name = input_name
         self._output_name = output_name
         self._loop = loop or asyncio.get_running_loop()
         self._event_handlers: dict = {}
+
+    @property
+    def id(self) -> int:
+        return self._id
+
+    @property
+    def name(self) -> str:
+        return self._name
 
     @abstractmethod
     def input(self) -> FrameProcessor:

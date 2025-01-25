@@ -41,8 +41,8 @@ class FrameProcessor:
         loop: asyncio.AbstractEventLoop | None = None,
         **kwargs,
     ):
-        self.id: int = obj_id()
-        self.name = name or f"{self.__class__.__name__}#{obj_count(self)}"
+        self._id: int = obj_id()
+        self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
         self._parent: "FrameProcessor" | None = None
         self._prev: "FrameProcessor" | None = None
         self._next: "FrameProcessor" | None = None
@@ -82,6 +82,14 @@ class FrameProcessor:
         # task. This avoid problems like audio overlapping. System frames are
         # the exception to this rule. This create this task.
         self.__create_push_task()
+
+    @property
+    def id(self) -> int:
+        return self._id
+
+    @property
+    def name(self) -> str:
+        return self._name
 
     @property
     def interruptions_allowed(self):
