@@ -94,8 +94,8 @@ class PipelineTask(BaseTask):
         params: PipelineParams = PipelineParams(),
         clock: BaseClock = SystemClock(),
     ):
-        self.id: int = obj_id()
-        self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
+        self._id: int = obj_id()
+        self._name: str = f"{self.__class__.__name__}#{obj_count(self)}"
 
         self._pipeline = pipeline
         self._clock = clock
@@ -122,6 +122,14 @@ class PipelineTask(BaseTask):
         pipeline.link(self._sink)
 
         self._observer = TaskObserver(params.observers)
+
+    @property
+    def id(self) -> int:
+        return self._id
+
+    @property
+    def name(self) -> str:
+        return self._name
 
     def has_finished(self) -> bool:
         """Indicates whether the tasks has finished. That is, all processors
