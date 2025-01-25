@@ -44,6 +44,20 @@ def obj_count(obj) -> int:
 
 
 def create_task(loop: asyncio.AbstractEventLoop, coroutine: Coroutine, name: str) -> asyncio.Task:
+    """
+    Creates and schedules a new asyncio Task that runs the given coroutine.
+
+    The task is added to a global set of created tasks.
+
+    Args:
+        loop (asyncio.AbstractEventLoop): The event loop to use for creating the task.
+        coroutine (Coroutine): The coroutine to be executed within the task.
+        name (str): The name to assign to the task for identification.
+
+    Returns:
+        asyncio.Task: The created task object.
+    """
+
     async def run_coroutine():
         try:
             await coroutine
@@ -62,6 +76,18 @@ def create_task(loop: asyncio.AbstractEventLoop, coroutine: Coroutine, name: str
 
 
 async def wait_for_task(task: asyncio.Task, timeout: Optional[float] = None):
+    """Wait for an asyncio.Task to complete with optional timeout handling.
+
+    This function awaits the specified asyncio.Task and handles scenarios for
+    timeouts, cancellations, and other exceptions. It also ensures that the task
+    is removed from the set of registered tasks upon completion or failure.
+
+    Args:
+        task (asyncio.Task): The asyncio Task to wait for.
+        timeout (Optional[float], optional): The maximum number of seconds
+            to wait for the task to complete. If None, waits indefinitely.
+            Defaults to None.
+    """
     name = task.get_name()
     try:
         if timeout:
@@ -82,6 +108,17 @@ async def wait_for_task(task: asyncio.Task, timeout: Optional[float] = None):
 
 
 async def cancel_task(task: asyncio.Task, timeout: Optional[float] = None):
+    """Cancels the given asyncio Task and awaits its completion with an
+    optional timeout.
+
+    This function removes the task from the set of registered tasks upon
+    completion or failure.
+
+    Args:
+        task (asyncio.Task): The task to be cancelled.
+        timeout (Optional[float]): The optional timeout in seconds to wait for the task to cancel.
+
+    """
     name = task.get_name()
     task.cancel()
     try:
@@ -104,4 +141,5 @@ async def cancel_task(task: asyncio.Task, timeout: Optional[float] = None):
 
 
 def current_tasks() -> Set[asyncio.Task]:
+    """Returns the list of currently created/registered tasks."""
     return _TASKS
