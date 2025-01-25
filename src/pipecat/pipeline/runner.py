@@ -10,7 +10,7 @@ import signal
 from loguru import logger
 
 from pipecat.pipeline.task import PipelineTask
-from pipecat.utils.utils import obj_count, obj_id
+from pipecat.utils.utils import current_tasks, obj_count, obj_id
 
 
 class PipelineRunner:
@@ -33,6 +33,7 @@ class PipelineRunner:
         # everything gets cleaned up nicely.
         if self._sig_task:
             await self._sig_task
+        self._print_dangling_tasks()
         logger.debug(f"Runner {self} finished running {task}")
 
     async def stop_when_done(self):
@@ -55,6 +56,11 @@ class PipelineRunner:
     async def _sig_cancel(self):
         logger.warning(f"Interruption detected. Canceling runner {self}")
         await self.cancel()
+
+    def _print_dangling_tasks(self):
+        tasks = [t.get_name() for t in current_tasks()]
+        if tasks:
+            logger.warning(f"Dangling tasks detected: {tasks}")
 
     def __str__(self):
         return self.name
