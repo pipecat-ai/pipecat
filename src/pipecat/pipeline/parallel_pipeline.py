@@ -23,7 +23,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
-class Source(FrameProcessor):
+class ParallelPipelineSource(FrameProcessor):
     def __init__(
         self,
         upstream_queue: asyncio.Queue,
@@ -46,7 +46,7 @@ class Source(FrameProcessor):
                 await self.push_frame(frame, direction)
 
 
-class Sink(FrameProcessor):
+class ParallelPipelineSink(FrameProcessor):
     def __init__(
         self,
         downstream_queue: asyncio.Queue,
@@ -92,8 +92,8 @@ class ParallelPipeline(BasePipeline):
                 raise TypeError(f"ParallelPipeline argument {processors} is not a list")
 
             # We will add a source before the pipeline and a sink after.
-            source = Source(self._up_queue, self._parallel_push_frame)
-            sink = Sink(self._down_queue, self._parallel_push_frame)
+            source = ParallelPipelineSource(self._up_queue, self._parallel_push_frame)
+            sink = ParallelPipelineSink(self._down_queue, self._parallel_push_frame)
             self._sources.append(source)
             self._sinks.append(sink)
 
@@ -117,6 +117,7 @@ class ParallelPipeline(BasePipeline):
     #
 
     async def cleanup(self):
+        await super().cleanup()
         await asyncio.gather(*[s.cleanup() for s in self._sources])
         await asyncio.gather(*[p.cleanup() for p in self._pipelines])
         await asyncio.gather(*[s.cleanup() for s in self._sinks])
