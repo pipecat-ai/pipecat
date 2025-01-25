@@ -125,10 +125,12 @@ class PipelineTask(BaseTask):
 
     @property
     def id(self) -> int:
+        """Returns the unique indetifier for this task."""
         return self._id
 
     @property
     def name(self) -> str:
+        """Returns the name of this task."""
         return self._name
 
     def has_finished(self) -> bool:

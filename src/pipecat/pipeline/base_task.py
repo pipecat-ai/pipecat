@@ -11,6 +11,18 @@ from pipecat.frames.frames import Frame
 
 
 class BaseTask(ABC):
+    @property
+    @abstractmethod
+    def id(self) -> int:
+        """Returns the unique indetifier for this task."""
+        pass
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Returns the name of this task."""
+        pass
+
     @abstractmethod
     def has_finished(self) -> bool:
         """Indicates whether the tasks has finished. That is, all processors
