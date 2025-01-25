@@ -74,7 +74,10 @@ async def cancel_task(task: asyncio.Task, timeout: Optional[float] = None):
     except asyncio.CancelledError:
         # Here are sure the task is cancelled properly.
         logger.trace(f"{name}: task cancelled")
-        _TASKS.remove(task)
+        try:
+            _TASKS.remove(task)
+        except KeyError as e:
+            logger.error(f"{name}: error removing task (already removed?): {e}")
     except Exception as e:
         logger.exception(f"{name}: unexpected exception while cancelling task: {e}")
 
