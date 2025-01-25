@@ -73,6 +73,7 @@ class LiveKitTransportClient:
         params: LiveKitParams,
         callbacks: LiveKitCallbacks,
         loop: asyncio.AbstractEventLoop,
+        transport_name: str,
     ):
         self._url = url
         self._token = token
@@ -80,6 +81,7 @@ class LiveKitTransportClient:
         self._params = params
         self._callbacks = callbacks
         self._loop = loop
+        self._transport_name = transport_name
         self._room = rtc.Room(loop=loop)
         self._participant_id: str = ""
         self._connected = False
@@ -219,14 +221,14 @@ class LiveKitTransportClient:
         create_task(
             self._loop,
             self._async_on_participant_connected(participant),
-            "LiveKitTransportClient::_async_on_participant_connected",
+            f"{self._transport_name}::LiveKitTransportClient::_async_on_participant_connected",
         )
 
     def _on_participant_disconnected_wrapper(self, participant: rtc.RemoteParticipant):
         create_task(
             self._loop,
             self._async_on_participant_disconnected(participant),
-            "LiveKitTransportClient::_async_on_participant_disconnected",
+            f"{self._transport_name}::LiveKitTransportClient::_async_on_participant_disconnected",
         )
 
     def _on_track_subscribed_wrapper(
@@ -238,7 +240,7 @@ class LiveKitTransportClient:
         create_task(
             self._loop,
             self._async_on_track_subscribed(track, publication, participant),
-            "LiveKitTransportClient::_async_on_track_subscribed",
+            f"{self._transport_name}::LiveKitTransportClient::_async_on_track_subscribed",
         )
 
     def _on_track_unsubscribed_wrapper(
@@ -250,26 +252,28 @@ class LiveKitTransportClient:
         create_task(
             self._loop,
             self._async_on_track_unsubscribed(track, publication, participant),
-            "LiveKitTransportClient::_async_on_track_unsubscribed",
+            f"{self._transport_name}::LiveKitTransportClient::_async_on_track_unsubscribed",
         )
 
     def _on_data_received_wrapper(self, data: rtc.DataPacket):
         create_task(
             self._loop,
             self._async_on_data_received(data),
-            "LiveKitTransportClient::_async_on_data_received",
+            f"{self._transport_name}::LiveKitTransportClient::_async_on_data_received",
         )
 
     def _on_connected_wrapper(self):
         create_task(
-            self._loop, self._async_on_connected(), "LiveKitTransportClient::_async_on_connected"
+            self._loop,
+            self._async_on_connected(),
+            f"{self._transport_name}::LiveKitTransportClient::_async_on_connected",
         )
 
     def _on_disconnected_wrapper(self):
         create_task(
             self._loop,
             self._async_on_disconnected(),
-            "LiveKitTransportClient::_async_on_disconnected",
+            f"{self._transport_name}::LiveKitTransportClient::_async_on_disconnected",
         )
 
     # Async methods for event handling
@@ -299,7 +303,7 @@ class LiveKitTransportClient:
             create_task(
                 self._loop,
                 self._process_audio_stream(audio_stream, participant.sid),
-                "LiveKitTransportClient::_process_audio_stream",
+                f"{self._transport_name}::LiveKitTransportClient::_process_audio_stream",
             )
 
     async def _async_on_track_unsubscribed(
@@ -474,7 +478,7 @@ class LiveKitTransport(BaseTransport):
         self._params = params
 
         self._client = LiveKitTransportClient(
-            url, token, room_name, self._params, callbacks, self._loop
+            url, token, room_name, self._params, callbacks, self._loop, self.name
         )
         self._input: LiveKitInputTransport | None = None
         self._output: LiveKitOutputTransport | None = None

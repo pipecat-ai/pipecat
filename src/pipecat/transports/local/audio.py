@@ -98,6 +98,7 @@ class LocalAudioOutputTransport(BaseOutputTransport):
 
 class LocalAudioTransport(BaseTransport):
     def __init__(self, params: TransportParams):
+        super().__init__()
         self._params = params
         self._pyaudio = pyaudio.PyAudio()
 
