@@ -38,3 +38,14 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         for i in chinese_sentences:
             assert match_endofsentence(i)
         assert not match_endofsentence("你好，")
+
+    async def test_endofsentence_hi(self):
+        hindi_sentences = [
+            "हैलो।",
+            "हैलो！",
+            "आप खाये हैं？",
+            "सुरक्षा पहले।",
+        ]
+        for i in hindi_sentences:
+            assert match_endofsentence(i)
+        assert not match_endofsentence("हैलो，")
