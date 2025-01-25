@@ -12,11 +12,23 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import BotInterruptionFrame, EndFrame, Frame, TextFrame, TranscriptionFrame, BotStoppedSpeakingFrame, StartInterruptionFrame, StopInterruptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame, LLMFullResponseEndFrame
+from pipecat.frames.frames import (
+    BotInterruptionFrame,
+    EndFrame,
+    Frame,
+    TextFrame,
+    TranscriptionFrame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+    LLMFullResponseEndFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAIContextAggregatorPair, OpenAILLMService
@@ -25,7 +37,6 @@ from pipecat.transports.network.websocket_server import (
     WebsocketServerTransport,
     WebsocketServerOutputTransport,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 load_dotenv(override=True)
 
@@ -35,9 +46,10 @@ logger.add(sys.stderr, level="DEBUG")
 
 class SessionTimeoutHandler:
     """Handles actions to be performed when a session times out.
+    
     Inputs:
-    - task: Pipeline task (used to queue frames).
-    - tts: TTS service (used to generate speech output).
+        task: Pipeline task (used to queue frames)
+        tts: TTS service (used to generate speech output)
     """
 
     def __init__(self, task, tts):
@@ -92,7 +104,9 @@ class ChatWebsocketServerOutputTransport(WebsocketServerOutputTransport):
 class ChatWebsocketServerTransport(WebsocketServerTransport):
     def output(self) -> WebsocketServerOutputTransport:
         if not self._output:
-            self._output = ChatWebsocketServerOutputTransport(self._params, name=self._output_name)
+            self._output = ChatWebsocketServerOutputTransport(
+                self._params, name=self._output_name
+            )
         return self._output
 
 
@@ -107,7 +121,7 @@ class InputTextFrameProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
 
-        # In case we received a text sent as a transcription frame, we mock the stopped speakig frames so the agent knows it can reply
+        # In case we received a text sent as a transcription frame, we mock the stopped speaking frames so the agent knows it can reply
         if isinstance(frame, TranscriptionFrame):
             await self.push_frame(UserStoppedSpeakingFrame())
 
@@ -184,7 +198,6 @@ async def main():
     async def on_client_connected(transport, client):
         # Kick off the conversation.
         messages.append({"role": "system", "content": "You are a helpful assistant."})
-        # await task.queue_frames([context_aggregator.user().get_context_frame()])
         await tts.say("Hi, how can I help you?")
 
     @transport.event_handler("on_session_timeout")
@@ -192,11 +205,9 @@ async def main():
         logger.info(f"Entering in timeout for {client.remote_address}")
 
         timeout_handler = SessionTimeoutHandler(task, tts)
-
         await timeout_handler.handle_timeout(client)
 
     runner = PipelineRunner()
-
     await runner.run(task)
 
 
