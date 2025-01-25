@@ -97,14 +97,14 @@ async def wait_for_task(task: asyncio.Task, timeout: Optional[float] = None):
     except asyncio.TimeoutError:
         logger.warning(f"{name}: timed out waiting for task to finish")
     except asyncio.CancelledError:
-        logger.error(f"{name}: unexpected task cancellation")
+        logger.trace(f"{name}: unexpected task cancellation (maybe Ctrl-C?)")
     except Exception as e:
         logger.exception(f"{name}: unexpected exception while stopping task: {e}")
     finally:
         try:
             _TASKS.remove(task)
         except KeyError as e:
-            logger.error(f"{name}: error removing task (already removed?): {e}")
+            logger.trace(f"{name}: unable to remove task (already removed?): {e}")
 
 
 async def cancel_task(task: asyncio.Task, timeout: Optional[float] = None):
@@ -137,7 +137,7 @@ async def cancel_task(task: asyncio.Task, timeout: Optional[float] = None):
         try:
             _TASKS.remove(task)
         except KeyError as e:
-            logger.error(f"{name}: error removing task (already removed?): {e}")
+            logger.trace(f"{name}: unable to remove task (already removed?): {e}")
 
 
 def current_tasks() -> Set[asyncio.Task]:
