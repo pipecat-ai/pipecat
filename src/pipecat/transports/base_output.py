@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import nanoseconds_to_seconds
+from pipecat.utils.utils import wait_for_task
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -87,9 +88,9 @@ class BaseOutputTransport(FrameProcessor):
         # for these tasks before cancelling the camera and audio tasks below
         # because they might be still rendering.
         if self._sink_task:
-            await self._sink_task
+            await wait_for_task(self._sink_task)
         if self._sink_clock_task:
-            await self._sink_clock_task
+            await wait_for_task(self._sink_clock_task)
 
         # We can now cancel the camera task.
         await self._cancel_camera_task()
