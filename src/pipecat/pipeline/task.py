@@ -155,7 +155,8 @@ class PipelineTask(BaseTask):
         # out-of-band from the main streaming task which is what we want since
         # we want to cancel right away.
         await self._source.push_frame(CancelFrame())
-        await self._cancel_tasks(True)
+        # Only cancel the push task. Everything else will be cancelled in run().
+        await cancel_task(self._process_push_task)
         await self._cleanup()
 
     async def run(self):
@@ -171,7 +172,7 @@ class PipelineTask(BaseTask):
             # well, because you get a CancelledError in every place you are
             # awaiting a task.
             pass
-        await self._cancel_tasks(False)
+        await self._cancel_tasks()
         self._finished = True
 
     async def queue_frame(self, frame: Frame):
@@ -215,11 +216,8 @@ class PipelineTask(BaseTask):
                 loop, self._heartbeat_monitor_handler(), f"{self}::_heartbeat_monitor_handler"
             )
 
-    async def _cancel_tasks(self, cancel_push: bool):
+    async def _cancel_tasks(self):
         await self._maybe_cancel_heartbeat_tasks()
-
-        if cancel_push:
-            await cancel_task(self._process_push_task)
 
         await cancel_task(self._process_up_task)
         await cancel_task(self._process_down_task)
