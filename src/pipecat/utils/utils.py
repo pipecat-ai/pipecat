@@ -7,12 +7,13 @@
 import asyncio
 import collections
 import itertools
-from typing import Coroutine, Optional
+from typing import Coroutine, Optional, Set
 
 from loguru import logger
 
 _COUNTS = collections.defaultdict(itertools.count)
 _ID = itertools.count()
+_TASKS: Set[asyncio.Task] = set()
 
 
 def obj_id() -> int:
@@ -55,6 +56,7 @@ def create_task(loop: asyncio.AbstractEventLoop, coroutine: Coroutine, name: str
 
     task = loop.create_task(run_coroutine())
     task.set_name(name)
+    _TASKS.add(task)
     logger.trace(f"{name}: task created")
     return task
 
@@ -72,5 +74,10 @@ async def cancel_task(task: asyncio.Task, timeout: Optional[float] = None):
     except asyncio.CancelledError:
         # Here are sure the task is cancelled properly.
         logger.trace(f"{name}: task cancelled")
+        _TASKS.remove(task)
     except Exception as e:
         logger.exception(f"{name}: unexpected exception while cancelling task: {e}")
+
+
+def current_tasks() -> Set[asyncio.Task]:
+    return _TASKS
