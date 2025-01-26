@@ -32,7 +32,7 @@ dependencies = [
     "protobuf~=5.29.3",
     "pydantic~=2.10.5",
     "pyloudnorm~=0.1.1",
-    "resampy~=0.4.3"
+    "soxr~=0.5.0"
 ]
 
 [project.urls]
@@ -85,7 +85,13 @@ openrouter = [ "openai~=1.59.6" ]
 where = ["src"]
 
 [tool.pytest.ini_options]
+addopts = "--verbose"
+testpaths = ["tests"]
 pythonpath = ["src"]
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore:'audioop' is deprecated:DeprecationWarning",
+]
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"

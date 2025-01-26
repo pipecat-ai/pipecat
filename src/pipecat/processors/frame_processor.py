@@ -186,7 +186,7 @@ class FrameProcessor:
         self.__should_block_frames = True
 
     async def resume_processing_frames(self):
-        logger.trace("f{self}: resuming frame processing")
+        logger.trace(f"{self}: resuming frame processing")
         self.__input_event.set()
         self.__should_block_frames = False
 
@@ -293,8 +293,7 @@ class FrameProcessor:
         await self.__input_frame_task
 
     async def __input_frame_task_handler(self):
-        running = True
-        while running:
+        while True:
             try:
                 if self.__should_block_frames:
                     logger.trace(f"{self}: frame processing paused")
@@ -310,8 +309,6 @@ class FrameProcessor:
                 # If this frame has an associated callback, call it now.
                 if callback:
                     await callback(self, frame, direction)
-
-                running = not isinstance(frame, EndFrame)
 
                 self.__input_queue.task_done()
             except asyncio.CancelledError:
@@ -330,12 +327,10 @@ class FrameProcessor:
         await self.__push_frame_task
 
     async def __push_frame_task_handler(self):
-        running = True
-        while running:
+        while True:
             try:
                 (frame, direction) = await self.__push_queue.get()
                 await self.__internal_push_frame(frame, direction)
-                running = not isinstance(frame, EndFrame)
                 self.__push_queue.task_done()
             except asyncio.CancelledError:
                 logger.trace(f"{self}: cancelled push task")

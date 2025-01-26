@@ -7,9 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- It is now possible to specify the period of the `PipelineTask` heartbeat
+  frames with `heartbeats_period_secs`.
+
+- Added `DailyMeetingTokenProperties` and `DailyMeetingTokenParams` Pydantic models 
+  for meeting token creation in `get_token` method of `DailyRESTHelper`.
+
+- Added `enable_recording` and `geo` parameters to `DailyRoomProperties`.
+
+- Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings to a custom AWS bucket.
+
+### Changed
+
+- Modified `TranscriptProcessor` to use TTS text frames for more accurate assistant
+  transcripts. Assistant messages are now aggregated based on bot speaking boundaries
+  rather than LLM context, providing better handling of interruptions and partial
+  utterances.
+
+- Updated foundational examples `28a-transcription-processor-openai.py`,
+  `28b-transcript-processor-anthropic.py`, and
+  `28c-transcription-processor-gemini.py` to use the updated
+  `TranscriptProcessor`.
+
 ### Fixed
 
 - Fixed a type error when using `voice_settings` in `ElevenLabsHttpTTSService`.
+
+- Fixed an issue where `OpenAIRealtimeBetaLLMService` function calling resulted
+  in an error.
+
+- Fixed an issue in `AudioBufferProcessor` where the last audio buffer was not
+  being processed, in cases where the `_user_audio_buffer` was smaller than the
+  buffer size.
+
+### Performance
+
+- Replaced audio resampling library `resampy` with `soxr`. Resampling a 2:21s
+  audio file from 24KHz to 16KHz took 1.41s with `resampy` and 0.031s with
+  `soxr` with similar audio quality.
+
+### Other
+
+- Added initial unit test infrastructure.
 
 ## [0.0.53] - 2025-01-18
 

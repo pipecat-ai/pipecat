@@ -288,6 +288,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
 
     async def _handle_transcribe_model_audio(self, audio, context):
+        # Early return if modalities are not set to audio.
+        if self._settings["modalities"] != GeminiMultimodalModalities.AUDIO:
+            return
+
         text = await self._transcribe_audio(audio, context)
         logger.debug(f"[Transcription:model] {text}")
         # We add user messages directly to the context. We don't do that for assistant messages,

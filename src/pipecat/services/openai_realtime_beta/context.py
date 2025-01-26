@@ -6,10 +6,16 @@
 
 import copy
 import json
+from typing import Optional
 
 from loguru import logger
 
-from pipecat.frames.frames import Frame, LLMMessagesUpdateFrame, LLMSetToolsFrame
+from pipecat.frames.frames import (
+    Frame,
+    FunctionCallResultProperties,
+    LLMMessagesUpdateFrame,
+    LLMSetToolsFrame,
+)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -174,10 +180,13 @@ class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator)
         if not self._function_call_result:
             return
 
+        properties: Optional[FunctionCallResultProperties] = None
+
         self._reset()
         try:
             run_llm = True
             frame = self._function_call_result
+            properties = frame.properties
             self._function_call_result = None
             if frame.result:
                 # The "tool_call" message from the LLM that triggered the function call
@@ -211,10 +220,19 @@ class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator)
                 await self._user_context_aggregator.push_frame(
                     RealtimeFunctionCallResultFrame(result_frame=frame)
                 )
-                run_llm = frame.run_llm
+                if properties and properties.run_llm is not None:
+                    # If the tool call result has a run_llm property, use it
+                    run_llm = properties.run_llm
+                else:
+                    # Default behavior is to run the LLM if there are no function calls in progress
+                    run_llm = not bool(self._function_calls_in_progress)
 
             if run_llm:
                 await self._user_context_aggregator.push_context_frame()
+
+            # Emit the on_context_updated callback once the function call result is added to the context
+            if properties and properties.on_context_updated is not None:
+                await properties.on_context_updated()
 
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
