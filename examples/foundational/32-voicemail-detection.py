@@ -32,12 +32,6 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def start_terminate_call(
-    function_name: str, llm: LLMService, context: OpenAILLMContext
-) -> None:
-    print("Starting to terminate call", {"msg": function_name})
-
-
 async def terminate_call(
     function_name, tool_call_id, args, llm: LLMService, context, result_callback
 ):
@@ -75,7 +69,7 @@ async def main():
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
-        llm.register_function("terminate_call", terminate_call, start_callback=start_terminate_call)
+        llm.register_function("terminate_call", terminate_call)
         tools = [
             ChatCompletionToolParam(
                 type="function",
