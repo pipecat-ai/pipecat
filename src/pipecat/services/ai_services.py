@@ -8,7 +8,7 @@ import asyncio
 import io
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Tuple
 
 from loguru import logger
 
@@ -69,7 +69,7 @@ class AIService(FrameProcessor):
     async def cancel(self, frame: CancelFrame):
         pass
 
-    async def _update_settings(self, settings: Dict[str, Any]):
+    async def _update_settings(self, settings: Mapping[str, Any]):
         from pipecat.services.openai_realtime_beta.events import (
             SessionProperties,
         )
@@ -267,7 +267,7 @@ class TTSService(AIService):
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
 
-    async def _update_settings(self, settings: Dict[str, Any]):
+    async def _update_settings(self, settings: Mapping[str, Any]):
         for key, value in settings.items():
             if key in self._settings:
                 logger.info(f"Updating TTS setting {key} to: [{value}]")
@@ -468,7 +468,7 @@ class STTService(AIService):
         """Returns transcript as a string"""
         pass
 
-    async def _update_settings(self, settings: Dict[str, Any]):
+    async def _update_settings(self, settings: Mapping[str, Any]):
         logger.info(f"Updating STT settings: {self._settings}")
         for key, value in settings.items():
             if key in self._settings:
