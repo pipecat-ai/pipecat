@@ -44,10 +44,11 @@ except ModuleNotFoundError as e:
 
 ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
 
+# Models that support language codes
+# eleven_multilingual_v2 doesn't support language codes, so it's excluded
 ELEVENLABS_MULTILINGUAL_MODELS = {
-    "eleven_turbo_v2_5",
-    "eleven_multilingual_v2",
     "eleven_flash_v2_5",
+    "eleven_turbo_v2_5",
 }
 
 
