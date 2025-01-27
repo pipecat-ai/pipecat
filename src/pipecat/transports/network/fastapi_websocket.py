@@ -16,6 +16,8 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
@@ -27,6 +29,7 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.asyncio import cancel_task
 
 try:
     from fastapi import WebSocket
@@ -71,6 +74,14 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
             self._monitor_websocket_task = self.create_task(self._monitor_websocket())
         await self._callbacks.on_client_connected(self._websocket)
         self._receive_task = self.create_task(self._receive_messages())
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await cancel_task(self._receive_task)
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await cancel_task(self._receive_task)
 
     def _iter_data(self) -> typing.AsyncIterator[bytes | str]:
         if self._params.serializer.type == FrameSerializerType.BINARY:
