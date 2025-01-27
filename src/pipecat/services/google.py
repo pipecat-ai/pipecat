@@ -677,7 +677,6 @@ class GoogleLLMService(LLMService):
             tool_config = None
             if self._tool_config:
                 tool_config = self._tool_config
-            print(f"!!! about to generate. messages is {messages}, {type(messages)}")
             response = await self._client.generate_content_async(
                 contents=messages,
                 tools=tools,
@@ -703,7 +702,7 @@ class GoogleLLMService(LLMService):
                         if c.text:
                             await self.push_frame(LLMTextFrame(c.text))
                         elif c.function_call:
-                            logger.debug(f"!!! Function call: {c.function_call}")
+                            logger.debug(f"Function call: {c.function_call}")
                             args = type(c.function_call).to_dict(c.function_call).get("args", {})
                             await self.call_function(
                                 context=context,

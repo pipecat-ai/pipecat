@@ -3,6 +3,7 @@ import re
 
 import google.ai.generativelanguage as glm
 from async_timeout import timeout
+from loguru import logger
 from prompts import (
     CUE_ASSISTANT_TURN,
     CUE_USER_TURN,
@@ -86,14 +87,12 @@ class StoryImageProcessor(FrameProcessor):
             await self.start_ttfb_metrics()
             # TODO: This is coupled to google implementation now
             txt = glm.Content(role="user", parts=[glm.Part(text=prompt)])
-            print(f"!!! txt is {txt}")
             llm_response = await self._llm_service._client.generate_content_async(
                 contents=[txt], stream=False
             )
             image_description = llm_response.text
             self.pages.append(frame.text)
             self.image_descriptions.append(image_description)
-            print(f"!!! response is {llm_response}")
             try:
                 async with timeout(15):
                     async for i in self._image_gen_service.run_image_gen(
@@ -101,7 +100,7 @@ class StoryImageProcessor(FrameProcessor):
                     ):
                         await self.push_frame(i)
             except TimeoutError:
-                print("!!! Image gen timeout")
+                logger.debug("Image gen timeout")
                 pass
             await self.stop_ttfb_metrics()
             # Push the StoryPageFrame so it gets TTS

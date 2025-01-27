@@ -111,7 +111,6 @@ async def main(room_url, token=None):
         runner = PipelineRunner()
 
         logger.debug("Waiting for participant...")
-        fl = FrameLogger("Before transport output", "red")
         main_pipeline = Pipeline(
             [
                 transport.input(),
@@ -120,7 +119,6 @@ async def main(room_url, token=None):
                 story_processor,
                 image_processor,
                 tts_service,
-                fl,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
