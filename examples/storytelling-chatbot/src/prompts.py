@@ -45,7 +45,7 @@ Please use the following structure for your image prompts: characters, setting, 
 Image prompts should be less than 150-200 characters and start in lowercase.
 
 
-Here is the text of the text of the first page of the story:
+Here's the first page of the story:
 %s
 """
 
@@ -63,6 +63,6 @@ Please do not include any character names in the image prompts, just their descr
 Image prompts should focus on key visual attributes of all characters each time, for example <a brown fluffy dog and the tiny red cat ...>.
 Please use the following structure for your image prompts: characters, setting, action, and mood.
 Image prompts should be less than 150-200 characters and start in lowercase.
-Generate a prompt for this sentence of the story:
+Here's the next page of the story:
 %s
 """

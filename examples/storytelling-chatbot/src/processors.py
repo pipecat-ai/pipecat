@@ -1,3 +1,4 @@
+import os
 import re
 
 import google.ai.generativelanguage as glm
@@ -19,7 +20,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.google import GoogleLLMContext, GoogleLLMService
+from pipecat.services.google import GoogleImageGenService, GoogleLLMContext, GoogleLLMService
 from pipecat.transports.services.daily import DailyTransportMessageFrame
 
 sounds = load_sounds(["talking.wav", "listening.wav", "ding.wav"])
@@ -56,10 +57,12 @@ class StoryImageProcessor(FrameProcessor):
         _image_gen_service: The FAL service, generates the images (fast fast!).
     """
 
-    def __init__(self, image_gen_service, llm_service):
+    def __init__(self, image_gen_service):
         super().__init__()
         self._image_gen_service = image_gen_service
-        self._llm_service = llm_service
+        # Create a new LLM service to use a different system prompt, etc
+        self._llm_service = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+
         self.pages = []
         self.image_descriptions = []
 
@@ -101,7 +104,8 @@ class StoryImageProcessor(FrameProcessor):
                 print("!!! Image gen timeout")
                 pass
             await self.stop_ttfb_metrics()
-            pass
+            # Push the StoryPageFrame so it gets TTS
+            await self.push_frame(frame)
         else:
             await self.push_frame(frame)
 
