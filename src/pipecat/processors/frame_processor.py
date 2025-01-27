@@ -24,7 +24,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
-from pipecat.utils.utils import cancel_task, create_task, obj_count, obj_id
+from pipecat.utils.asyncio import cancel_task, create_task
+from pipecat.utils.utils import obj_count, obj_id
 
 
 class FrameDirection(Enum):

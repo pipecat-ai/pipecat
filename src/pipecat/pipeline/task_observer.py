@@ -12,7 +12,8 @@ from attr import dataclass
 from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.utils import cancel_task, create_task, obj_count, obj_id
+from pipecat.utils.asyncio import cancel_task, create_task
+from pipecat.utils.utils import obj_count, obj_id
 
 
 @dataclass

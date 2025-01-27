@@ -30,7 +30,8 @@ from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.utils import cancel_task, create_task, obj_count, obj_id, wait_for_task
+from pipecat.utils.asyncio import cancel_task, create_task, wait_for_task
+from pipecat.utils.utils import obj_count, obj_id
 
 HEARTBEAT_SECONDS = 1.0
 HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 5

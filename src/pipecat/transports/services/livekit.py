@@ -28,7 +28,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.utils import create_task
+from pipecat.utils.asyncio import create_task
 
 try:
     from livekit import rtc

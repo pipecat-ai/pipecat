@@ -46,7 +46,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.utils import cancel_task, create_task
+from pipecat.utils.asyncio import cancel_task, create_task
 
 try:
     from daily import CallClient, Daily, EventHandler
