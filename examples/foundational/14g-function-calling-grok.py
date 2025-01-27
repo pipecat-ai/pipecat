@@ -15,7 +15,7 @@ from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import TextFrame
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -32,7 +32,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def start_fetch_weather(function_name, llm, context):
     """Push a frame to the LLM; this is handy when the LLM response might take a while."""
-    await llm.push_frame(TextFrame("Let me check on that."))
+    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
     logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
 
 

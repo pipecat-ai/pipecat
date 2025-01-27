@@ -103,7 +103,7 @@ class UserIdleProcessor(FrameProcessor):
     def _create_idle_task(self) -> None:
         """Creates the idle task if it hasn't been created yet."""
         if self._idle_task is None:
-            self._idle_task = self.get_event_loop().create_task(self._idle_task_handler())
+            self._idle_task = self.create_task(self._idle_task_handler())
 
     @property
     def retry_count(self) -> int:
@@ -113,11 +113,7 @@ class UserIdleProcessor(FrameProcessor):
     async def _stop(self) -> None:
         """Stops and cleans up the idle monitoring task."""
         if self._idle_task is not None:
-            self._idle_task.cancel()
-            try:
-                await self._idle_task
-            except asyncio.CancelledError:
-                pass  # Expected when task is cancelled
+            await self.cancel_task(self._idle_task)
             self._idle_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -160,6 +156,7 @@ class UserIdleProcessor(FrameProcessor):
 
     async def cleanup(self) -> None:
         """Cleans up resources when processor is shutting down."""
+        await super().cleanup()
         if self._idle_task:  # Only stop if task exists
             await self._stop()
 
@@ -178,7 +175,5 @@ class UserIdleProcessor(FrameProcessor):
                     if not should_continue:
                         await self._stop()
                         break
-            except asyncio.CancelledError:
-                break
             finally:
                 self._idle_event.clear()

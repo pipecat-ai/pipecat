@@ -202,8 +202,8 @@ class ParakeetSTTService(STTService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        self._thread_task = self.get_event_loop().create_task(self._thread_task_handler())
-        self._response_task = self.get_event_loop().create_task(self._response_task_handler())
+        self._thread_task = self.create_task(self._thread_task_handler())
+        self._response_task = self.create_task(self._response_task_handler())
         self._response_queue = asyncio.Queue()
 
     async def stop(self, frame: EndFrame):
@@ -215,10 +215,8 @@ class ParakeetSTTService(STTService):
         await self._stop_tasks()
 
     async def _stop_tasks(self):
-        self._thread_task.cancel()
-        await self._thread_task
-        self._response_task.cancel()
-        await self._response_task
+        await self.cancel_task(self._thread_task)
+        await self.cancel_task(self._response_task)
 
     def _response_handler(self):
         responses = self._asr_service.streaming_response_generator(
@@ -238,7 +236,7 @@ class ParakeetSTTService(STTService):
             await asyncio.to_thread(self._response_handler)
         except asyncio.CancelledError:
             self._thread_running = False
-            pass
+            raise
 
     async def _handle_response(self, response):
         for result in response.results:
@@ -260,11 +258,8 @@ class ParakeetSTTService(STTService):
 
     async def _response_task_handler(self):
         while True:
-            try:
-                response = await self._response_queue.get()
-                await self._handle_response(response)
-            except asyncio.CancelledError:
-                break
+            response = await self._response_queue.get()
+            await self._handle_response(response)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self._queue.put(audio)
