@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - It is now possible to specify the period of the `PipelineTask` heartbeat
   frames with `heartbeats_period_secs`.
 
-- Added `DailyMeetingTokenProperties` and `DailyMeetingTokenParams` Pydantic models 
+- Added `DailyMeetingTokenProperties` and `DailyMeetingTokenParams` Pydantic models
   for meeting token creation in `get_token` method of `DailyRESTHelper`.
 
 - Added `enable_recording` and `geo` parameters to `DailyRoomProperties`.
@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings to a custom AWS bucket.
 
 ### Changed
+
+- Enhanced `UserIdleProcessor` with retry functionality and control over idle
+  monitoring via new callback signature `(processor, retry_count) -> bool`.
+  Updated the `17-detect-user-idle.py` to show how to use the `retry_count`.
 
 - Add defensive error handling for `OpenAIRealtimeBetaLLMService`'s audio
   truncation. Audio truncation errors during interruptions now log a warning
