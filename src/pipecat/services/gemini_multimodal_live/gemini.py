@@ -248,6 +248,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        await self._connect()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -385,13 +386,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
         await self._ws_send(event.model_dump(exclude_none=True))
 
     async def _connect(self):
+        if self._websocket:
+            # Here we assume that if we have a websocket, we are connected. We
+            # handle disconnections in the send/recv code paths.
+            return
+
         logger.info("Connecting to Gemini service")
         try:
-            if self._websocket:
-                # Here we assume that if we have a websocket, we are connected. We
-                # handle disconnections in the send/recv code paths.
-                return
-
             uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self.api_key}"
             logger.info(f"Connecting to {uri}")
             self._websocket = await websockets.connect(uri=uri)
@@ -464,9 +465,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def _ws_send(self, message):
         # logger.debug(f"Sending message to websocket: {message}")
         try:
-            if not self._websocket:
-                await self._connect()
-            await self._websocket.send(json.dumps(message))
+            if self._websocket:
+                await self._websocket.send(json.dumps(message))
         except Exception as e:
             if self._disconnecting:
                 return
