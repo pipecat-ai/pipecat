@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Add defensive error handling for `OpenAIRealtimeBetaLLMService`'s audio
+  truncation. Audio truncation errors during interruptions now log a warning
+  and allow the session to continue instead of throwing an exception.
+
 - Modified `TranscriptProcessor` to use TTS text frames for more accurate assistant
   transcripts. Assistant messages are now aggregated based on bot speaking boundaries
   rather than LLM context, providing better handling of interruptions and partial

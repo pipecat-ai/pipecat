@@ -167,8 +167,11 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         either the wall clock time or the actual audio duration to prevent invalid truncation
         requests.
         """
+        if not self._current_audio_response:
+            return
+
         # if the bot is still speaking, truncate the last message
-        if self._current_audio_response:
+        try:
             current = self._current_audio_response
             self._current_audio_response = None
 
@@ -179,6 +182,11 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             elapsed_ms = int(time.time() * 1000 - current.start_time_ms)
             truncate_ms = min(elapsed_ms, audio_duration_ms)
 
+            logger.trace(
+                f"Truncating audio: duration={audio_duration_ms}ms, "
+                f"elapsed={elapsed_ms}ms, truncate={truncate_ms}ms"
+            )
+
             await self.send_client_event(
                 events.ConversationItemTruncateEvent(
                     item_id=current.item_id,
@@ -186,6 +194,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                     audio_end_ms=truncate_ms,
                 )
             )
+        except Exception as e:
+            # Log warning and don't re-raise - allow session to continue
+            logger.warning(f"Audio truncation failed (non-fatal): {e}")
 
     #
     # frame processing
