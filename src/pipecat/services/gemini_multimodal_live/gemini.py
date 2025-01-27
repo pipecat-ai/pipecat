@@ -692,7 +692,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_text_buffer = ""
 
         if audio and self._transcribe_model_audio and self._context:
-            await self._transcribe_model_audio.put(audio)
+            await self._transcribe_model_audio_queue.put(audio)
         elif text:
             await self.push_frame(LLMFullResponseEndFrame())
 
