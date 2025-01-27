@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- In order to create tasks in Pipecat frame processors it is now recommended to
+  use `FrameProcessor.create_task()` (which uses the new
+  `utils.asyncio.create_task()`). It takes care of uncaught exceptions, task
+  cancellation handling and task management. To cancel or wait for a task there
+  is `FrameProcessor.cancel_task()` and `FrameProcessor.wait_for_task()`. All of
+  Pipecat processors have been updated accordingly. Also, when a pipeline runner
+  finishes, a warning about dangling tasks might appear, which indicates if any
+  of the created tasks was never cancelled or awaited for (using these new
+  functions).
+
 - It is now possible to specify the period of the `PipelineTask` heartbeat
   frames with `heartbeats_period_secs`.
 
@@ -40,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TranscriptProcessor`.
 
 ### Fixed
+
+- Fixed an `GeminiMultimodalLiveLLMService` issue that was preventing the user
+  to push initial LLM assistant messages (using `LLMMessagesAppendFrame`).
+
+- Added missing `FrameProcessor.cleanup()` calls to `Pipeline`,
+  `ParallelPipeline` and `UserIdleProcessor`.
 
 - Fixed a type error when using `voice_settings` in `ElevenLabsHttpTTSService`.
 

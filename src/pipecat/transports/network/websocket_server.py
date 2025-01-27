@@ -71,17 +71,16 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        self._server_task = self.get_event_loop().create_task(self._server_task_handler())
+        self._server_task = self.create_task(self._server_task_handler())
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
         self._stop_server_event.set()
-        await self._server_task
+        await self.wait_for_task(self._server_task)
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
-        self._stop_server_event.set()
-        await self._server_task
+        await self.cancel_task(self._server_task)
 
     async def _server_task_handler(self):
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
@@ -131,6 +130,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
                 await self._callbacks.on_session_timeout(websocket)
         except asyncio.CancelledError:
             logger.info(f"Monitoring task cancelled for: {websocket.remote_address}")
+            raise
 
 
 class WebsocketServerOutputTransport(BaseOutputTransport):

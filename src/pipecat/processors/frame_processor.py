@@ -6,15 +6,15 @@
 
 import asyncio
 import inspect
+import sys
 from enum import Enum
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Coroutine, Optional
 
 from loguru import logger
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     CancelFrame,
-    EndFrame,
     ErrorFrame,
     Frame,
     StartFrame,
@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
+from pipecat.utils.asyncio import cancel_task, create_task, wait_for_task
 from pipecat.utils.utils import obj_count, obj_id
 
 
@@ -41,8 +42,8 @@ class FrameProcessor:
         loop: asyncio.AbstractEventLoop | None = None,
         **kwargs,
     ):
-        self.id: int = obj_id()
-        self.name = name or f"{self.__class__.__name__}#{obj_count(self)}"
+        self._id: int = obj_id()
+        self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
         self._parent: "FrameProcessor" | None = None
         self._prev: "FrameProcessor" | None = None
         self._next: "FrameProcessor" | None = None
@@ -82,6 +83,14 @@ class FrameProcessor:
         # task. This avoid problems like audio overlapping. System frames are
         # the exception to this rule. This create this task.
         self.__create_push_task()
+
+    @property
+    def id(self) -> int:
+        return self._id
+
+    @property
+    def name(self) -> str:
+        return self._name
 
     @property
     def interruptions_allowed(self):
@@ -141,6 +150,16 @@ class FrameProcessor:
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
+    def create_task(self, coroutine: Coroutine) -> asyncio.Task:
+        name = f"{self}::{coroutine.cr_code.co_name}"
+        return create_task(self.get_event_loop(), coroutine, name)
+
+    async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
+        await cancel_task(task, timeout)
+
+    async def wait_for_task(self, task: asyncio.Task, timeout: Optional[float] = None):
+        await wait_for_task(task, timeout)
+
     async def cleanup(self):
         await self.__cancel_input_task()
         await self.__cancel_push_task()
@@ -188,7 +207,6 @@ class FrameProcessor:
     async def resume_processing_frames(self):
         logger.trace(f"{self}: resuming frame processing")
         self.__input_event.set()
-        self.__should_block_frames = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
@@ -283,61 +301,44 @@ class FrameProcessor:
     def __create_input_task(self):
         self.__should_block_frames = False
         self.__input_queue = asyncio.Queue()
-        self.__input_frame_task = self.get_event_loop().create_task(
-            self.__input_frame_task_handler()
-        )
         self.__input_event = asyncio.Event()
+        self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
     async def __cancel_input_task(self):
-        self.__input_frame_task.cancel()
-        await self.__input_frame_task
+        await self.cancel_task(self.__input_frame_task)
 
     async def __input_frame_task_handler(self):
         while True:
-            try:
-                if self.__should_block_frames:
-                    logger.trace(f"{self}: frame processing paused")
-                    await self.__input_event.wait()
-                    self.__input_event.clear()
-                    logger.trace(f"{self}: frame processing resumed")
+            if self.__should_block_frames:
+                logger.trace(f"{self}: frame processing paused")
+                await self.__input_event.wait()
+                self.__input_event.clear()
+                self.__should_block_frames = False
+                logger.trace(f"{self}: frame processing resumed")
 
-                (frame, direction, callback) = await self.__input_queue.get()
+            (frame, direction, callback) = await self.__input_queue.get()
 
-                # Process the frame.
-                await self.process_frame(frame, direction)
+            # Process the frame.
+            await self.process_frame(frame, direction)
 
-                # If this frame has an associated callback, call it now.
-                if callback:
-                    await callback(self, frame, direction)
+            # If this frame has an associated callback, call it now.
+            if callback:
+                await callback(self, frame, direction)
 
-                self.__input_queue.task_done()
-            except asyncio.CancelledError:
-                logger.trace(f"{self}: cancelled input task")
-                break
-            except Exception as e:
-                logger.exception(f"{self}: Uncaught exception {e}")
-                await self.push_error(ErrorFrame(str(e)))
+            self.__input_queue.task_done()
 
     def __create_push_task(self):
         self.__push_queue = asyncio.Queue()
-        self.__push_frame_task = self.get_event_loop().create_task(self.__push_frame_task_handler())
+        self.__push_frame_task = self.create_task(self.__push_frame_task_handler())
 
     async def __cancel_push_task(self):
-        self.__push_frame_task.cancel()
-        await self.__push_frame_task
+        await self.cancel_task(self.__push_frame_task)
 
     async def __push_frame_task_handler(self):
         while True:
-            try:
-                (frame, direction) = await self.__push_queue.get()
-                await self.__internal_push_frame(frame, direction)
-                self.__push_queue.task_done()
-            except asyncio.CancelledError:
-                logger.trace(f"{self}: cancelled push task")
-                break
-            except Exception as e:
-                logger.exception(f"{self}: Uncaught exception {e}")
-                await self.push_error(ErrorFrame(str(e)))
+            (frame, direction) = await self.__push_queue.get()
+            await self.__internal_push_frame(frame, direction)
+            self.__push_queue.task_done()
 
     async def _call_event_handler(self, event_name: str, *args, **kwargs):
         try:
