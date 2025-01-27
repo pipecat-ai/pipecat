@@ -10,7 +10,8 @@ import signal
 from loguru import logger
 
 from pipecat.pipeline.task import PipelineTask
-from pipecat.utils.utils import current_tasks, obj_count, obj_id
+from pipecat.utils.asyncio import current_tasks
+from pipecat.utils.utils import obj_count, obj_id
 
 
 class PipelineRunner:

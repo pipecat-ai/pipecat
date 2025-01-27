@@ -51,7 +51,6 @@ from pipecat.services.openai import (
     OpenAIUserContextAggregator,
 )
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.utils import wait_for_task
 
 from . import events
 from .audio_transcriber import AudioTranscriber

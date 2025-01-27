@@ -35,8 +35,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
+from pipecat.utils.asyncio import wait_for_task
 from pipecat.utils.time import nanoseconds_to_seconds
-from pipecat.utils.utils import wait_for_task
 
 
 class BaseOutputTransport(FrameProcessor):
