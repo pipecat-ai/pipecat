@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
-from pipecat.utils.asyncio import cancel_task, create_task
+from pipecat.utils.asyncio import cancel_task, create_task, wait_for_task
 from pipecat.utils.utils import obj_count, obj_id
 
 
@@ -156,6 +156,9 @@ class FrameProcessor:
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
         await cancel_task(task, timeout)
+
+    async def wait_for_task(self, task: asyncio.Task, timeout: Optional[float] = None):
+        await wait_for_task(task, timeout)
 
     async def cleanup(self):
         await self.__cancel_input_task()
