@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import inspect
 from typing import Awaitable, Callable, Union
 
 from pipecat.frames.frames import (
@@ -85,9 +86,11 @@ class UserIdleProcessor(FrameProcessor):
         Returns:
             A wrapped callback that returns bool to indicate whether to continue monitoring.
         """
+        sig = inspect.signature(callback)
+        param_count = len(sig.parameters)
 
         async def wrapper(processor: "UserIdleProcessor", retry_count: int) -> bool:
-            if len(callback.__code__.co_varnames) == 1:
+            if param_count == 1:
                 # Basic callback
                 await callback(processor)  # type: ignore
                 return True
