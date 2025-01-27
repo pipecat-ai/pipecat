@@ -56,6 +56,8 @@ class SimliVideoService(FrameProcessor):
         try:
             await self._pipecat_resampler_event.wait()
             async for audio_frame in self._simli_client.getAudioStreamIterator():
+                if audio_frame.to_ndarray().mean() == 0:
+                    continue
                 resampled_frames = self._pipecat_resampler.resample(audio_frame)
                 for resampled_frame in resampled_frames:
                     await self.push_frame(
@@ -92,8 +94,8 @@ class SimliVideoService(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
-            await self.push_frame(frame, direction)
             await self._start_connection()
+
         elif isinstance(frame, TTSAudioRawFrame):
             # Send audio frame to Simli
             try:
@@ -116,14 +118,13 @@ class SimliVideoService(FrameProcessor):
                     )
             except Exception as e:
                 logger.exception(f"{self} exception: {e}")
+            return
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
-            await self.push_frame(frame, direction)
+
         elif isinstance(frame, StartInterruptionFrame):
             await self._simli_client.clearBuffer()
-            await self.push_frame(frame, direction)
-        else:
-            await self.push_frame(frame, direction)
+        await self.push_frame(frame, direction)
 
     async def _stop(self):
         await self._simli_client.stop()
