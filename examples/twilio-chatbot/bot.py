@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -85,7 +84,7 @@ async def run_bot(websocket_client, stream_sid):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        await task.queue_frames([EndFrame()])
+        await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)
 
