@@ -279,7 +279,7 @@ class PipelineTask(BaseTask):
             await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
             if isinstance(frame, EndFrame):
                 await self._wait_for_endframe()
-            running = not isinstance(frame, (StopTaskFrame, EndFrame))
+            running = not isinstance(frame, (CancelFrame, EndFrame, StopTaskFrame))
             should_cleanup = not isinstance(frame, StopTaskFrame)
             self._push_queue.task_done()
         # Cleanup only if we need to.
