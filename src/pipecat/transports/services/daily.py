@@ -140,7 +140,6 @@ class DailyCallbacks(BaseModel):
     on_dialout_stopped: Callable[[Any], Awaitable[None]]
     on_dialout_error: Callable[[Any], Awaitable[None]]
     on_dialout_warning: Callable[[Any], Awaitable[None]]
-    on_first_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
@@ -201,9 +200,9 @@ class DailyTransportClient(EventHandler):
         self._video_renderers = {}
         self._transcription_ids = []
         self._transcription_status = None
-        self._other_participant_has_joined = False
 
         self._joined = False
+        self._joined_event = asyncio.Event()
         self._leave_counter = 0
 
         # We use the executor to cleanup the client. We just do it from one
@@ -353,6 +352,8 @@ class DailyTransportClient(EventHandler):
                     await self._start_transcription()
 
                 await self._callbacks.on_joined(data)
+
+                self._joined_event.set()
             else:
                 error_msg = f"Error joining {self._room_url}: {error}"
                 logger.error(error_msg)
@@ -441,6 +442,7 @@ class DailyTransportClient(EventHandler):
             return
 
         self._joined = False
+        self._joined_event.clear()
 
         logger.info(f"Leaving {self._room_url}")
 
@@ -629,19 +631,9 @@ class DailyTransportClient(EventHandler):
         self._call_async_callback(self._callbacks.on_dialout_warning, data)
 
     def on_participant_joined(self, participant):
-        id = participant["id"]
-        logger.info(f"Participant joined {id}")
-
-        if not self._other_participant_has_joined:
-            self._other_participant_has_joined = True
-            self._call_async_callback(self._callbacks.on_first_participant_joined, participant)
-
         self._call_async_callback(self._callbacks.on_participant_joined, participant)
 
     def on_participant_left(self, participant, reason):
-        id = participant["id"]
-        logger.info(f"Participant left {id}")
-
         self._call_async_callback(self._callbacks.on_participant_left, participant, reason)
 
     def on_participant_updated(self, participant):
@@ -695,6 +687,8 @@ class DailyTransportClient(EventHandler):
 
     async def _callback_task_handler(self):
         while True:
+            # Wait to process any callback until we are joined.
+            await self._joined_event.wait()
             (callback, *args) = await self._callback_queue.get()
             await callback(*args)
 
@@ -901,7 +895,6 @@ class DailyTransport(BaseTransport):
             on_dialout_stopped=self._on_dialout_stopped,
             on_dialout_error=self._on_dialout_error,
             on_dialout_warning=self._on_dialout_warning,
-            on_first_participant_joined=self._on_first_participant_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
@@ -917,6 +910,8 @@ class DailyTransport(BaseTransport):
         )
         self._input: DailyInputTransport | None = None
         self._output: DailyOutputTransport | None = None
+
+        self._other_participant_has_joined = False
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
@@ -1124,16 +1119,22 @@ class DailyTransport(BaseTransport):
         await self._call_event_handler("on_dialout_warning", data)
 
     async def _on_participant_joined(self, participant):
+        id = participant["id"]
+        logger.info(f"Participant joined {id}")
+
+        if not self._other_participant_has_joined:
+            self._other_participant_has_joined = True
+            await self._call_event_handler("on_first_participant_joined", participant)
+
         await self._call_event_handler("on_participant_joined", participant)
 
     async def _on_participant_left(self, participant, reason):
+        id = participant["id"]
+        logger.info(f"Participant left {id}")
         await self._call_event_handler("on_participant_left", participant, reason)
 
     async def _on_participant_updated(self, participant):
         await self._call_event_handler("on_participant_updated", participant)
-
-    async def _on_first_participant_joined(self, participant):
-        await self._call_event_handler("on_first_participant_joined", participant)
 
     async def _on_transcription_message(self, message):
         await self._call_event_handler("on_transcription_message", message)
