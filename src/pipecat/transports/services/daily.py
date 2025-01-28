@@ -204,6 +204,7 @@ class DailyTransportClient(EventHandler):
         self._other_participant_has_joined = False
 
         self._joined = False
+        self._pending_participants_before_bot_joined = []
         self._leave_counter = 0
 
         # We use the executor to cleanup the client. We just do it from one
@@ -361,6 +362,12 @@ class DailyTransportClient(EventHandler):
             error_msg = f"Time out joining {self._room_url}"
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
+
+        # Call on_participant_joined for participants that joined before the bot
+        for participant in self._pending_participants_before_bot_joined:
+            self.on_participant_joined(participant, already_joined=True)
+
+        self._pending_participants_before_bot_joined = []
 
     async def _start_transcription(self):
         if not self._token:
@@ -628,9 +635,15 @@ class DailyTransportClient(EventHandler):
     def on_dialout_warning(self, data: Any):
         self._call_async_callback(self._callbacks.on_dialout_warning, data)
 
-    def on_participant_joined(self, participant):
+    def on_participant_joined(self, participant, already_joined=False):
         id = participant["id"]
-        logger.info(f"Participant joined {id}")
+        if not already_joined:
+            logger.info(f"Participant joined {id}")
+
+        if not self._joined:
+            self._pending_participants_before_bot_joined.append(participant)
+            logger.info(f"Participant joined before bot joined {id}")
+            return
 
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
