@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed a `DailyTransport` issue that would cause events to be triggered before
   join finished.
 
+- Fixed a `PipelineTask` issue that was preventing processors to be cleaned up
+  after cancelling the task.
+
 ## [0.0.54] - 2025-01-27
 
 ### Added
