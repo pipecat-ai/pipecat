@@ -17,7 +17,6 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
-    EndFrame,
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -170,7 +169,7 @@ async def main():
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

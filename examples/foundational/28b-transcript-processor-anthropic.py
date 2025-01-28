@@ -15,11 +15,7 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import (
-    CancelFrame,
-    TranscriptionMessage,
-    TranscriptionUpdateFrame,
-)
+from pipecat.frames.frames import TranscriptionMessage, TranscriptionUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -170,7 +166,7 @@ async def main():
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             # Stop the pipeline immediately when the participant leaves
-            await task.queue_frame(CancelFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 
