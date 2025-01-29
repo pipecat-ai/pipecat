@@ -944,7 +944,6 @@ class GoogleImageGenService(ImageGenService):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        # TODO-CB: not sure what this does but it looks like it matters for metrics
         self.set_model_name(params.model)
         self._params = params
         self._client = genai.Client(api_key=api_key)
