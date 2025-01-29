@@ -14,7 +14,7 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, Frame, MetricsFrame
+from pipecat.frames.frames import Frame, MetricsFrame
 from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
     ProcessingMetricsData,
@@ -115,7 +115,7 @@ async def main():
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

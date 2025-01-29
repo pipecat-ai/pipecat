@@ -16,7 +16,6 @@ from runner import configure
 
 from pipecat.frames.frames import (
     BotInterruptionFrame,
-    EndFrame,
     StopInterruptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -106,7 +105,7 @@ async def main():
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

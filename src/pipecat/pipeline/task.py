@@ -160,7 +160,6 @@ class PipelineTask(BaseTask):
         await self._source.push_frame(CancelFrame())
         # Only cancel the push task. Everything else will be cancelled in run().
         await cancel_task(self._process_push_task)
-        await self._cleanup()
 
     async def run(self):
         """
@@ -176,6 +175,7 @@ class PipelineTask(BaseTask):
             # awaiting a task.
             pass
         await self._cancel_tasks()
+        await self._cleanup()
         self._finished = True
 
     async def queue_frame(self, frame: Frame):
@@ -279,7 +279,7 @@ class PipelineTask(BaseTask):
             await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
             if isinstance(frame, EndFrame):
                 await self._wait_for_endframe()
-            running = not isinstance(frame, (StopTaskFrame, EndFrame))
+            running = not isinstance(frame, (CancelFrame, EndFrame, StopTaskFrame))
             should_cleanup = not isinstance(frame, StopTaskFrame)
             self._push_queue.task_done()
         # Cleanup only if we need to.
