@@ -1,3 +1,5 @@
+<!-- @format -->
+
 <div align="center">
  <img alt="pipecat" width="300px" height="auto" src="image.png">
 </div>
@@ -74,11 +76,34 @@ For the bot to dial out to a number, make a POST request to `/daily_start_bot` a
 For example:
 
 ```shell
-url -X "POST" "http://localhost:7860/daily_start_bot" \
+curl -X "POST" "http://localhost:7860/daily_start_bot" \
      -H 'Content-Type: application/json; charset=utf-8' \
      -d $'{
   "dialoutNumber": "+12125551234"
 }'
+```
+
+### Voicemail detection
+
+To start the bot and test voicemail detection, send a POST request to /daily_start_bot with "detectVoicemail": true in the request body.
+
+- If you only include `"detectVoicemail": true`, the bot will not dial out. Instead, you can test it in Daily Prebuilt by visiting the URL provided in the response.
+- If you include both `"detectVoicemail": true` and a phone number under `"dialoutNumber"`, the bot will dial out to that number.
+
+Example: Testing in Daily Prebuilt:
+
+```shell
+curl -X POST "http://localhost:7860/daily_start_bot" \                                                                                                        py pipecat
+     -H "Content-Type: application/json" \
+     -d '{"detectVoicemail": true}'
+```
+
+Example: Testing with Dial-Out:
+
+```shell
+curl -X POST "http://localhost:7860/daily_start_bot" \                                                                                                        py pipecat
+     -H "Content-Type: application/json" \
+     -d '{"dialoutNumber": "+18057145330", "detectVoicemail": true}'
 ```
 
 ### More information
