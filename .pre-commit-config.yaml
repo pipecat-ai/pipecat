@@ -1,0 +1,7 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format-hook
+        name: Check ruff formatting
+        entry: sh scripts/pre-commit.sh
+        language: system

@@ -67,8 +67,8 @@ talking_frame = SpriteFrame(images=sprites)
 
 
 class TalkingAnimation(FrameProcessor):
-    """This class starts a talking animation when it receives an first AudioFrame,
-    and then returns to a "quiet" sprite when it sees a TTSStoppedFrame.
+    """This class starts a talking animation when it receives an first BotStartedSpeakingFrame,
+    and then returns to a "quiet" sprite when it sees a BotStoppedSpeakingFrame.
     """
 
     def __init__(self):

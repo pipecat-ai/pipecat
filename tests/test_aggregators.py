@@ -1,122 +1,70 @@
-import asyncio
-import doctest
-import functools
+#
+# Copyright (c) 2024-2025 Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import unittest
 
 from pipecat.frames.frames import (
-    AudioRawFrame,
-    EndFrame,
-    Frame,
     ImageRawFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    OutputAudioRawFrame,
+    OutputImageRawFrame,
     TextFrame,
 )
-from pipecat.pipeline.parallel_pipeline import ParallelPipeline
-from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.gated import GatedAggregator
 from pipecat.processors.aggregators.sentence import SentenceAggregator
-from pipecat.processors.text_transformer import StatelessTextTransformer
+from pipecat.tests.utils import run_test
 
 
-class TestDailyFrameAggregators(unittest.IsolatedAsyncioTestCase):
-    @unittest.skip("FIXME: This test is failing")
+class TestSentenceAggregator(unittest.IsolatedAsyncioTestCase):
     async def test_sentence_aggregator(self):
-        sentence = "Hello, world. How are you? I am fine"
-        expected_sentences = ["Hello, world.", " How are you?", " I am fine "]
         aggregator = SentenceAggregator()
+
+        sentence = "Hello, world. How are you? I am fine!"
+
+        frames_to_send = []
         for word in sentence.split(" "):
-            async for sentence in aggregator.process_frame(TextFrame(word + " ")):
-                self.assertIsInstance(sentence, TextFrame)
-                if isinstance(sentence, TextFrame):
-                    self.assertEqual(sentence.text, expected_sentences.pop(0))
+            frames_to_send.append(TextFrame(text=word + " "))
 
-        async for sentence in aggregator.process_frame(EndFrame()):
-            if len(expected_sentences):
-                self.assertIsInstance(sentence, TextFrame)
-                if isinstance(sentence, TextFrame):
-                    self.assertEqual(sentence.text, expected_sentences.pop(0))
-            else:
-                self.assertIsInstance(sentence, EndFrame)
+        expected_returned_frames = [TextFrame, TextFrame, TextFrame]
 
-        self.assertEqual(expected_sentences, [])
+        (received_down, _) = await run_test(aggregator, frames_to_send, expected_returned_frames)
+        assert received_down[-3].text == "Hello, world. "
+        assert received_down[-2].text == "How are you? "
+        assert received_down[-1].text == "I am fine! "
 
-    @unittest.skip("FIXME: This test is failing")
-    async def test_gated_accumulator(self):
+
+class TestGatedAggregator(unittest.IsolatedAsyncioTestCase):
+    async def test_gated_aggregator(self):
         gated_aggregator = GatedAggregator(
             gate_open_fn=lambda frame: isinstance(frame, ImageRawFrame),
             gate_close_fn=lambda frame: isinstance(frame, LLMFullResponseStartFrame),
             start_open=False,
         )
 
-        frames = [
+        frames_to_send = [
             LLMFullResponseStartFrame(),
             TextFrame("Hello, "),
             TextFrame("world."),
-            AudioRawFrame(b"hello"),
-            ImageRawFrame(b"image", (0, 0)),
-            AudioRawFrame(b"world"),
+            OutputAudioRawFrame(audio=b"hello", sample_rate=16000, num_channels=1),
+            OutputImageRawFrame(image=b"image", size=(0, 0), format="RGB"),
+            OutputAudioRawFrame(audio=b"world", sample_rate=16000, num_channels=1),
             LLMFullResponseEndFrame(),
         ]
 
-        expected_output_frames = [
-            ImageRawFrame(b"image", (0, 0)),
-            LLMFullResponseStartFrame(),
-            TextFrame("Hello, "),
-            TextFrame("world."),
-            AudioRawFrame(b"hello"),
-            AudioRawFrame(b"world"),
-            LLMFullResponseEndFrame(),
+        expected_returned_frames = [
+            OutputImageRawFrame,
+            LLMFullResponseStartFrame,
+            TextFrame,
+            TextFrame,
+            OutputAudioRawFrame,
+            OutputAudioRawFrame,
+            LLMFullResponseEndFrame,
         ]
-        for frame in frames:
-            async for out_frame in gated_aggregator.process_frame(frame):
-                self.assertEqual(out_frame, expected_output_frames.pop(0))
-        self.assertEqual(expected_output_frames, [])
 
-    @unittest.skip("FIXME: This test is failing")
-    async def test_parallel_pipeline(self):
-        async def slow_add(sleep_time: float, name: str, x: str):
-            await asyncio.sleep(sleep_time)
-            return ":".join([x, name])
-
-        pipe1_annotation = StatelessTextTransformer(functools.partial(slow_add, 0.1, "pipe1"))
-        pipe2_annotation = StatelessTextTransformer(functools.partial(slow_add, 0.2, "pipe2"))
-        sentence_aggregator = SentenceAggregator()
-        add_dots = StatelessTextTransformer(lambda x: x + ".")
-
-        source = asyncio.Queue()
-        sink = asyncio.Queue()
-        pipeline = Pipeline(
-            [
-                ParallelPipeline([[pipe1_annotation], [sentence_aggregator, pipe2_annotation]]),
-                add_dots,
-            ],
-            source,
-            sink,
+        (received_down, _) = await run_test(
+            gated_aggregator, frames_to_send, expected_returned_frames
         )
-
-        frames = [TextFrame("Hello, "), TextFrame("world."), EndFrame()]
-
-        expected_output_frames: list[Frame] = [
-            TextFrame(text="Hello, :pipe1."),
-            TextFrame(text="world.:pipe1."),
-            TextFrame(text="Hello, world.:pipe2."),
-            EndFrame(),
-        ]
-
-        for frame in frames:
-            await source.put(frame)
-
-        await pipeline.run_pipeline()
-
-        while not sink.empty():
-            frame = await sink.get()
-            self.assertEqual(frame, expected_output_frames.pop(0))
-
-
-def load_tests(loader, tests, ignore):
-    """Run doctests on the aggregators module."""
-    from pipecat.processors import aggregators
-
-    tests.addTests(doctest.DocTestSuite(aggregators))
-    return tests

@@ -169,8 +169,7 @@ class OutputGate(FrameProcessor):
         self._gate_task = self.get_event_loop().create_task(self._gate_task_handler())
 
     async def _stop(self):
-        self._gate_task.cancel()
-        await self._gate_task
+        await self.cancel_task(self._gate_task)
 
     async def _gate_task_handler(self):
         while True:

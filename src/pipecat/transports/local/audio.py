@@ -69,7 +69,9 @@ class LocalAudioOutputTransport(BaseOutputTransport):
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
 
-        self._executor = ThreadPoolExecutor(max_workers=5)
+        # We only write audio frames from a single task, so only one thread
+        # should be necessary.
+        self._executor = ThreadPoolExecutor(max_workers=1)
 
         self._out_stream = py_audio.open(
             format=py_audio.get_format_from_width(2),
@@ -96,6 +98,7 @@ class LocalAudioOutputTransport(BaseOutputTransport):
 
 class LocalAudioTransport(BaseTransport):
     def __init__(self, params: TransportParams):
+        super().__init__()
         self._params = params
         self._pyaudio = pyaudio.PyAudio()
 

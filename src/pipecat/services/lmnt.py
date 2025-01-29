@@ -113,16 +113,13 @@ class LmntTTSService(TTSService, WebsocketService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.get_event_loop().create_task(
-            self._receive_task_handler(self.push_error)
-        )
+        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
         await self._disconnect_websocket()
 
         if self._receive_task:
-            self._receive_task.cancel()
-            await self._receive_task
+            await self.cancel_task(self._receive_task)
             self._receive_task = None
 
     async def _connect_websocket(self):
@@ -186,10 +183,10 @@ class LmntTTSService(TTSService, WebsocketService):
                 try:
                     msg = json.loads(message)
                     if "error" in msg:
-                        logger.error(f'{self} error: {msg["error"]}')
+                        logger.error(f"{self} error: {msg['error']}")
                         await self.push_frame(TTSStoppedFrame())
                         await self.stop_all_metrics()
-                        await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                        await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
                         return
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")

@@ -75,6 +75,14 @@ class TavusVideoService(AIService):
         logger.debug(f"TavusVideoService persona grabbed {response_json}")
         return response_json["persona_name"]
 
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self._end_conversation()
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self._end_conversation()
+
     async def _end_conversation(self) -> None:
         url = f"https://tavusapi.com/v2/conversations/{self._conversation_id}/end"
         headers = {"Content-Type": "application/json", "x-api-key": self._api_key}
@@ -88,7 +96,7 @@ class TavusVideoService(AIService):
         if not done:
             audio = resample_audio(audio, original_sample_rate, 16000)
         audio_base64 = base64.b64encode(audio).decode("utf-8")
-        logger.trace(f"TavusVideoService sending {len(audio)} bytes")
+        logger.trace(f"{self}: sending {len(audio)} bytes")
         await self._send_audio_message(audio_base64, done=done)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -105,8 +113,6 @@ class TavusVideoService(AIService):
             await self.stop_processing_metrics()
         elif isinstance(frame, StartInterruptionFrame):
             await self._send_interrupt_message()
-        elif isinstance(frame, (EndFrame, CancelFrame)):
-            await self._end_conversation()
         else:
             await self.push_frame(frame, direction)
 
