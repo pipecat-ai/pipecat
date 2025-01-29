@@ -47,11 +47,13 @@ class Frame:
     id: int = field(init=False)
     name: str = field(init=False)
     pts: Optional[int] = field(init=False)
+    metadata: dict = field(init=False)
 
     def __post_init__(self):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
         self.pts: Optional[int] = None
+        self.metadata: dict = {}
 
     def __str__(self):
         return self.name
