@@ -208,6 +208,10 @@ class TTSService(AIService):
         push_stop_frames: bool = False,
         # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
         stop_frame_timeout_s: float = 1.0,
+        # if True, TTSService will push silence audio frames after TTSStoppedFrame
+        push_silence_after_stop: bool = False,
+        # if push_silence_after_stop is True, send this amount of audio silence
+        silence_time_s: float = 2.0,
         # TTS output sample rate
         sample_rate: int = 24000,
         text_filter: Optional[BaseTextFilter] = None,
@@ -218,6 +222,8 @@ class TTSService(AIService):
         self._push_text_frames: bool = push_text_frames
         self._push_stop_frames: bool = push_stop_frames
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
+        self._push_silence_after_stop: bool = push_silence_after_stop
+        self._silence_time_s: float = silence_time_s
         self._sample_rate: int = sample_rate
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
@@ -314,6 +320,16 @@ class TTSService(AIService):
             await self.push_frame(frame, direction)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        if self._push_silence_after_stop and isinstance(frame, TTSStoppedFrame):
+            silence_num_bytes = int(self._silence_time_s * self.sample_rate * 2)  # 16-bit
+            await self.push_frame(
+                TTSAudioRawFrame(
+                    audio=b"\x00" * silence_num_bytes,
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                )
+            )
+
         await super().push_frame(frame, direction)
 
         if self._push_stop_frames and (
