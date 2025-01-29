@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `test/utils.py` inside of pipecat package.
+
 ### Fixed
 
 - Fixed an issue where `ElevenLabsTTSService` messages would return a 1009 websocket error by increasing the max message size limit to 16MB.
