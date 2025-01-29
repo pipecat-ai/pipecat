@@ -62,9 +62,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ----------------- Daily Dial-in Bot ----------------- #
-
-
 """
 Create Daily room, tell the bot if the room is created for Twilio's SIP or Daily's SIP (vendor).
 When the vendor is Daily, the bot handles the call forwarding automatically,
@@ -76,7 +73,9 @@ action using the Twilio Client library.
 """
 
 
-async def _create_daily_room(room_url, callId, callDomain=None, dialoutNumber=None, vendor="daily"):
+async def _create_daily_room(
+    room_url, callId, callDomain=None, dialoutNumber=None, vendor="daily", detect_voicemail=False
+):
     if not room_url:
         # Create base properties with SIP settings
         properties = DailyRoomProperties(
@@ -112,7 +111,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, dialoutNumber=No
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
     if vendor == "daily":
-        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain}"
+        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain}{' -v' if detect_voicemail else ''}"
         if dialoutNumber:
             bot_proc += f" -o {dialoutNumber}"
     else:
@@ -185,6 +184,7 @@ async def daily_start_bot(request: Request) -> JSONResponse:
         if "test" in data:
             # Pass through any webhook checks
             return JSONResponse({"test": True})
+        detect_voicemail = data.get("detectVoicemail", False)
         callId = data.get("callId", None)
         callDomain = data.get("callDomain", None)
         dialoutNumber = data.get("dialoutNumber", None)
@@ -194,109 +194,11 @@ async def daily_start_bot(request: Request) -> JSONResponse:
         )
 
     room: DailyRoomObject = await _create_daily_room(
-        room_url, callId, callDomain, dialoutNumber, "daily"
+        room_url, callId, callDomain, dialoutNumber, "daily", detect_voicemail
     )
 
     # Grab a token for the user to join with
     return JSONResponse({"room_url": room.url, "sipUri": room.config.sip_endpoint})
-
-
-# ----------------- Daily Voicemail Detection Bot ----------------- #
-
-
-async def _create_daily_vmd_room(room_url, useDialout=False, dialoutNumber=None):
-    print("Creating Daily Voicemail Detection Bot room...")
-    if not room_url:
-        print("Creating new room...")
-        # Only enable dialout if dialoutNumber is provided and useDialout is true. Domains must have `allow_dialout` enabled.
-        if dialoutNumber and useDialout:
-            print("Dialout enabled and dialout number provided.")
-            properties = DailyRoomProperties(
-                enable_dialout=True,
-                start_video_off=True,
-            )
-            privacy = "private"  # When using dial-out, we can keep the room private
-        else:
-            print("Dialout disabled.")
-            properties = DailyRoomProperties(
-                start_video_off=True,
-            )
-            privacy = "public"  # We'll keep the room public during testing with Prebuilt, otherwise you will need a meeting token to join.
-
-        params = DailyRoomParams(privacy=privacy, properties=properties)
-
-        print(f"We have the following params: {params}")
-        room: DailyRoomObject = await daily_helpers["rest"].create_room(params=params)
-
-    else:
-        # Check passed room URL exist.
-        print("Room URL provided.")
-        try:
-            print("Getting room from URL...")
-            room: DailyRoomObject = await daily_helpers["rest"].get_room_from_url(room_url)
-            print(f"Room: {room}")
-        except Exception:
-            raise HTTPException(status_code=500, detail=f"Room not found: {room_url}")
-
-    print(f"Daily room: {room.url}")
-
-    # Give the agent a token to join the session
-    print("Getting token...")
-    token = await daily_helpers["rest"].get_token(room.url, MAX_SESSION_TIME)
-    print(f"Token: {token}")
-
-    if not room or not token:
-        raise HTTPException(status_code=500, detail=f"Failed to get room or token token")
-
-    # Spawn a new agent, and join the user session
-    # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
-    print(f"Starting subprocess... Room URL: {room.url}, Token: {token}, Use dialout: {useDialout}")
-    bot_proc = (
-        f"python3 -m bot_voicemail_detection -u {room.url} -t {token}{' -s' if useDialout else ''}"
-    )
-    if dialoutNumber and useDialout:
-        print("Dialout number detected; adding to subprocess.")
-        bot_proc += f" -o {dialoutNumber}"
-
-    try:
-        subprocess.Popen(
-            [bot_proc], shell=True, bufsize=1, cwd=os.path.dirname(os.path.abspath(__file__))
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
-
-    return room
-
-
-@app.post("/daily_start_vmd_bot")
-async def daily_start_vmd_bot(request: Request) -> JSONResponse:
-    # The /daily_start_vmd_bot is invoked when a call is received on Daily's SIP URI
-    # daily_start_bot will create the room, put the call on hold until
-    # the bot and sip worker are ready. Daily will automatically
-    # forward the call to the SIP URi when dialin_ready fires.
-
-    # Use specified room URL, or create a new one if not specified
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
-    # Get the dial-in properties from the request
-    print("POST /Daily Voicemail Detection Bot")
-    try:
-        data = await request.json()
-        if "test" in data:
-            # Pass through any webhook checks
-            return JSONResponse({"test": True})
-        useDialout = data.get("useDialout", False)
-        print(f"Use Dialout: {useDialout}")
-        dialoutNumber = data.get("dialoutNumber", None)
-        print(f"Dialout Number: {dialoutNumber}")
-    except Exception:
-        raise HTTPException(
-            status_code=500, detail="Missing properties 'callId', 'callDomain', or 'dialoutNumber'"
-        )
-
-    room: DailyRoomObject = await _create_daily_vmd_room(room_url, useDialout, dialoutNumber)
-
-    # Grab a token for the user to join with
-    return JSONResponse({"room_url": room.url})
 
 
 # ----------------- Main ----------------- #
