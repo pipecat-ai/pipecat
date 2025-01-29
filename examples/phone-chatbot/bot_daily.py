@@ -9,7 +9,6 @@ from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import EndFrame, EndTaskFrame
-
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
