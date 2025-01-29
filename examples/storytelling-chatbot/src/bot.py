@@ -17,20 +17,14 @@ from prompts import CUE_USER_TURN, LLM_BASE_PROMPT
 from utils.helpers import load_images, load_sounds
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, StopTaskFrame
+from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
-from pipecat.processors.logger import FrameLogger
-from pipecat.services.cartesia import CartesiaHttpTTSService, CartesiaTTSService
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.services.google import GoogleLLMService
-from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,
@@ -145,11 +139,13 @@ async def main(room_url, token=None):
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await main_task.queue_frame(EndFrame())
+            await main_task.cancel()
 
         @transport.event_handler("on_call_state_updated")
         async def on_call_state_updated(transport, state):
             if state == "left":
+                # Here we don't want to cancel, we just want to finish sending
+                # whatever is queued, so we use an EndFrame().
                 await main_task.queue_frame(EndFrame())
 
         await runner.run(main_task)
