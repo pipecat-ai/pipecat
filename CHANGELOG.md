@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new transport: `WebsocketClientTransport`.
+
 - Added a `metadata` field to `Frame` which makes it possible to pass custom
   data to all frames.
 
