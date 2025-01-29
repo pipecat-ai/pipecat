@@ -197,7 +197,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
             "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
@@ -459,7 +459,7 @@ class ElevenLabsHttpTTSService(TTSService):
             "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
             "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
