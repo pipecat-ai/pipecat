@@ -13,7 +13,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameProcessor
-from tests.utils import HeartbeatsObserver, run_test
+from pipecat.tests.utils import HeartbeatsObserver, run_test
 
 
 class TestPipeline(unittest.IsolatedAsyncioTestCase):
