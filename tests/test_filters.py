@@ -19,7 +19,7 @@ from pipecat.processors.filters.frame_filter import FrameFilter
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.filters.wake_check_filter import WakeCheckFilter
-from tests.utils import EndTestFrame, run_test
+from pipecat.tests.utils import EndTestFrame, run_test
 
 
 class TestIdentifyFilter(unittest.IsolatedAsyncioTestCase):
