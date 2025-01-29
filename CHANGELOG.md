@@ -5,6 +5,28 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed a `DailyTransport` issue that would cause events to be triggered before
+  join finished.
+
+- Fixed a `PipelineTask` issue that was preventing processors to be cleaned up
+  after cancelling the task.
+
+- Fixed an issue where queuing a `CancelFrame` to a pipeline task would not
+  cause the task to finish. However, using `PipelineTask.cancel()` is still the
+  recommended way to cancel a task.
+
+### Other
+
+- Updated all examples to use `task.cancel()` instead of pushing an `EndFrame`
+  when a participant leaves/disconnects. If you push an `EndFrame` this will
+  cause the bot to run through everything that is internally queued (which could
+  take seconds). Instead, if a participant disconnects there is nothing else to
+  be sent and therefore we should stop immediately.
+
 ## [0.0.54] - 2025-01-27
 
 ### Added

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024-2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, Frame
+from pipecat.frames.frames import Frame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -156,7 +156,7 @@ async def main():
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
         await runner.run(task)
