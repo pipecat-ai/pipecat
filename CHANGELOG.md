@@ -9,11 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a `metadata` field to `Frame` which makes it possible to pass custom
+  data to all frames.
+
 - Added `test/utils.py` inside of pipecat package.
 
 ### Fixed
 
-- Fixed an issue where `ElevenLabsTTSService` messages would return a 1009 websocket error by increasing the max message size limit to 16MB.
+- Fixed an issue where `ElevenLabsTTSService` messages would return a 1009
+  websocket error by increasing the max message size limit to 16MB.
 
 - Fixed a `DailyTransport` issue that would cause events to be triggered before
   join finished.
