@@ -40,7 +40,7 @@ pip install -r requirements.txt
 If you want to use the local version of `pipecat` in this repo rather than the last published version, also run:
 
 ```bash
-pip install --editable "../../../[daily,cartesia]"
+pip install --editable "../../../[daily,cartesia,openai]"
 ```
 
 Run the server:
