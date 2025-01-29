@@ -14,7 +14,7 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -63,16 +63,36 @@ async def main():
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
-        async def user_idle_callback(user_idle: UserIdleProcessor):
-            messages.append(
-                {
-                    "role": "system",
-                    "content": "Ask the user if they are still there and try to prompt for some input, but be short.",
-                }
-            )
-            await user_idle.push_frame(LLMMessagesFrame(messages))
+        async def handle_user_idle(user_idle: UserIdleProcessor, retry_count: int) -> bool:
+            if retry_count == 1:
+                # First attempt: Add a gentle prompt to the conversation
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": "The user has been quiet. Politely and briefly ask if they're still there.",
+                    }
+                )
+                await user_idle.push_frame(LLMMessagesFrame(messages))
+                return True
+            elif retry_count == 2:
+                # Second attempt: More direct prompt
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
+                    }
+                )
+                await user_idle.push_frame(LLMMessagesFrame(messages))
+                return True
+            else:
+                # Third attempt: End the conversation
+                await user_idle.push_frame(
+                    TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
+                )
+                await task.queue_frame(EndFrame())
+                return False
 
-        user_idle = UserIdleProcessor(callback=user_idle_callback, timeout=5.0)
+        user_idle = UserIdleProcessor(callback=handle_user_idle, timeout=5.0)
 
         pipeline = Pipeline(
             [

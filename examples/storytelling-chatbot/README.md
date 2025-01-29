@@ -66,7 +66,7 @@ The build UI files can be found in `frontend/out`
 
 Start the API / bot manager:
 
-`python src/bot_runner.py`
+`python src/bot_runner.py --host localhost`
 
 If you'd like to run a custom domain or port:
 

@@ -8,14 +8,14 @@ import audioop
 
 import numpy as np
 import pyloudnorm as pyln
-import resampy
+import soxr
 
 
 def resample_audio(audio: bytes, original_rate: int, target_rate: int) -> bytes:
     if original_rate == target_rate:
         return audio
     audio_data = np.frombuffer(audio, dtype=np.int16)
-    resampled_audio = resampy.resample(audio_data, original_rate, target_rate)
+    resampled_audio = soxr.resample(audio_data, original_rate, target_rate)
     return resampled_audio.astype(np.int16).tobytes()
 
 
@@ -80,14 +80,14 @@ def ulaw_to_pcm(ulaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
     in_pcm_bytes = audioop.ulaw2lin(ulaw_bytes, 2)
 
     # Resample
-    out_pcm_bytes = audioop.ratecv(in_pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
+    out_pcm_bytes = resample_audio(in_pcm_bytes, in_sample_rate, out_sample_rate)
 
     return out_pcm_bytes
 
 
 def pcm_to_ulaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
     # Resample
-    in_pcm_bytes = audioop.ratecv(pcm_bytes, 2, 1, in_sample_rate, out_sample_rate, None)[0]
+    in_pcm_bytes = resample_audio(pcm_bytes, in_sample_rate, out_sample_rate)
 
     # Convert PCM to μ-law
     ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)

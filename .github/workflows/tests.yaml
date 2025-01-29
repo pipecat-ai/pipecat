@@ -1,4 +1,4 @@
-name: test
+name: tests
 
 on:
   workflow_dispatch:
@@ -49,4 +49,4 @@ jobs:
       - name: Test with pytest
         run: |
           source .venv/bin/activate
-          pytest --ignore-glob="*to_be_updated*" --ignore-glob=*pipeline_source* src tests
+          pytest

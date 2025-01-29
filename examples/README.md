@@ -39,10 +39,10 @@ Next, follow the steps in the README for each demo.
 | [Translation Chatbot](translation-chatbot)   | Listens for user speech, then translates that speech to Spanish and speaks the translation back. Demonstrates multi-participant use-cases. | Deepgram, Azure, OpenAI, Daily, Daily Prebuilt UI                 |
 | [Moondream Chatbot](moondream-chatbot)       | Demonstrates how to add vision capabilities to GPT4. **Note: works best with a GPU**                                                       | Deepgram, ElevenLabs, OpenAI, Moondream, Daily, Daily Prebuilt UI |
 | [Patient intake](patient-intake)             | A chatbot that can call functions in response to user input.                                                                               | Deepgram, ElevenLabs, OpenAI, Daily, Daily Prebuilt UI            |
-| [Dialin Chatbot](dialin-chatbot)             | A chatbot that connects to an incoming phone call from Daily or Twilio.                                                                    | Deepgram, ElevenLabs, OpenAI, Daily, Twilio                       |
+| [Phone Chatbot](phone-chatbot)             | A chatbot that connects to PSTN/SIP phone calls, powered by Daily or Twilio.                                                                    | Deepgram, ElevenLabs, OpenAI, Daily, Twilio                       |
 | [Twilio Chatbot](twilio-chatbot)             | A chatbot that connects to an incoming phone call from Twilio.                                                                             | Deepgram, ElevenLabs, OpenAI, Daily, Twilio                       |
 | [studypal](studypal)                         | A chatbot to have a conversation about any article on the web                                                                              |                                                                   |
-| [WebSocket Chatbot Server](websocket-server) | A real-time websocket server that handles audio streaming and bot interactions with speech-to-text and text-to-speech capabilities | `python-websockets`, `openai`, `deepgram`, `silero-tts`, `numpy` |
+| [WebSocket Chatbot Server](websocket-server) | A real-time websocket server that handles audio streaming and bot interactions with speech-to-text and text-to-speech capabilities. | Cartesia, Deepgram, OpenAI, Websockets |
 
 > [!IMPORTANT]
 > These example projects use Daily as a WebRTC transport and can be joined using their hosted Prebuilt UI.
