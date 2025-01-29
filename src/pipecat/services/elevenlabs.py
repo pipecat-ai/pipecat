@@ -334,7 +334,8 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
                     f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
                 )
 
-            self._websocket = await websockets.connect(url)
+            # Set max websocket message size to 16MB for large audio responses
+            self._websocket = await websockets.connect(url, max_size=16 * 1024 * 1024)
 
             # According to ElevenLabs, we should always start with a single space.
             msg: Dict[str, Any] = {
