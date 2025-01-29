@@ -932,8 +932,9 @@ class GoogleTTSService(TTSService):
 
 class GoogleImageGenService(ImageGenService):
     class InputParams(BaseModel):
-        num_images: int = Field(default=1, ge=1, le=8)
+        number_of_images: int = Field(default=1, ge=1, le=8)
         model: str = Field(default="imagen-3.0-generate-002")
+        negative_prompt: str = Field(default=None)
 
     def __init__(
         self,
@@ -964,12 +965,12 @@ class GoogleImageGenService(ImageGenService):
         await self.start_ttfb_metrics()
 
         try:
-            # TODO: Support all config properties on init and generate?
             response = await self._client.aio.models.generate_images(
                 model=self._params.model,
                 prompt=prompt,
                 config=types.GenerateImagesConfig(
-                    number_of_images=self._params.num_images,
+                    number_of_images=self._params.number_of_images,
+                    negative_prompt=self._params.negative_prompt,
                 ),
             )
             await self.stop_ttfb_metrics()

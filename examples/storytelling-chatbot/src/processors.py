@@ -139,7 +139,8 @@ class StoryProcessor(FrameProcessor):
 
         elif isinstance(frame, TextFrame):
             # Add new text to the buffer
-            self._text += frame.text
+            # (character replace hack to fix TTS sequencing)
+            self._text += frame.text.replace(";", "—")
             # Process any complete patterns in the order they appear
             await self.process_text_content()
 
