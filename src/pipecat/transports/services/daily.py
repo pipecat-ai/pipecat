@@ -223,7 +223,7 @@ class DailyTransportClient(EventHandler):
         self._callback_task = create_task(
             self._loop,
             self._callback_task_handler(),
-            f"{self._transport_name}::DailyTransportClient::callback_task",
+            f"{self._transport_name}::DailyTransportClient::_callback_task_handler",
         )
 
         self._camera: VirtualCameraDevice | None = None
