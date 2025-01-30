@@ -88,7 +88,7 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
         voice_id: str,
         cartesia_version: str = "2024-06-10",
         url: str = "wss://api.cartesia.ai/tts/websocket",
-        model: str = "sonic-english",
+        model: str = "sonic",
         sample_rate: int = 24000,
         encoding: str = "pcm_s16le",
         container: str = "raw",
@@ -187,16 +187,13 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.get_event_loop().create_task(
-            self._receive_task_handler(self.push_error)
-        )
+        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
         await self._disconnect_websocket()
 
         if self._receive_task:
-            self._receive_task.cancel()
-            await self._receive_task
+            await self.cancel_task(self._receive_task)
             self._receive_task = None
 
     async def _connect_websocket(self):
@@ -329,7 +326,7 @@ class CartesiaHttpTTSService(TTSService):
         *,
         api_key: str,
         voice_id: str,
-        model: str = "sonic-english",
+        model: str = "sonic",
         base_url: str = "https://api.cartesia.ai",
         sample_rate: int = 24000,
         encoding: str = "pcm_s16le",

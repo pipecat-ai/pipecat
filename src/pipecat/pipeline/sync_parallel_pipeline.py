@@ -24,7 +24,7 @@ class SyncFrame(ControlFrame):
     pass
 
 
-class Source(FrameProcessor):
+class SyncParallelPipelineSource(FrameProcessor):
     def __init__(self, upstream_queue: asyncio.Queue):
         super().__init__()
         self._up_queue = upstream_queue
@@ -39,7 +39,7 @@ class Source(FrameProcessor):
                 await self.push_frame(frame, direction)
 
 
-class Sink(FrameProcessor):
+class SyncParallelPipelineSink(FrameProcessor):
     def __init__(self, downstream_queue: asyncio.Queue):
         super().__init__()
         self._down_queue = downstream_queue
@@ -76,8 +76,8 @@ class SyncParallelPipeline(BasePipeline):
             # We add a source at the beginning of the pipeline and a sink at the end.
             up_queue = asyncio.Queue()
             down_queue = asyncio.Queue()
-            source = Source(up_queue)
-            sink = Sink(down_queue)
+            source = SyncParallelPipelineSource(up_queue)
+            sink = SyncParallelPipelineSink(down_queue)
             processors: List[FrameProcessor] = [source] + processors + [sink]
 
             # Keep track of sources and sinks. We also keep the output queue of
@@ -100,6 +100,10 @@ class SyncParallelPipeline(BasePipeline):
     #
     # Frame processor
     #
+
+    async def cleanup(self):
+        await super().cleanup()
+        await asyncio.gather(*[p.cleanup() for p in self._pipelines])
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

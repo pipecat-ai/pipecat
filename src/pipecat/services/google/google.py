@@ -39,6 +39,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
+from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.openai import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
@@ -566,23 +567,56 @@ class GoogleLLMContext(OpenAILLMContext):
         return [msg]
 
     def _restructure_from_openai_messages(self):
+        """Restructures messages to ensure proper Google format and message ordering.
+
+        This method handles conversion of OpenAI-formatted messages to Google format,
+        with special handling for function calls, function responses, and system messages.
+        System messages are added back to the context as user messages when needed.
+
+        The final message order is preserved as:
+        1. Function calls (from model)
+        2. Function responses (from user)
+        3. Text messages (converted from system messages)
+
+        Note:
+            System messages are only added back when there are no regular text
+            messages in the context, ensuring proper conversation continuity
+            after function calls.
+        """
         self.system_message = None
-        # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
-        try:
-            self._messages[:] = [
-                msg
-                for msg in (self.from_standard_message(m) for m in self._messages)
-                if msg is not None
-            ]
-            # We might have been given a messages list with only a system message. If so, let's put that back in
-            # the messages list as a user message.
-            if self.system_message and not self._messages:
-                self.add_message(
-                    glm.Content(role="user", parts=[glm.Part(text=self.system_message)])
-                )
-        except Exception as e:
-            logger.error(f"Error mapping messages: {e}")
-        # iterate over messages and remove any messages that have an empty content list
+        converted_messages = []
+
+        # Process each message, preserving Google-formatted messages and converting others
+        for message in self._messages:
+            if isinstance(message, glm.Content):
+                # Keep existing Google-formatted messages (e.g., function calls/responses)
+                converted_messages.append(message)
+                continue
+
+            # Convert OpenAI format to Google format, system messages return None
+            converted = self.from_standard_message(message)
+            if converted is not None:
+                converted_messages.append(converted)
+
+        # Update message list
+        self._messages[:] = converted_messages
+
+        # Check if we only have function-related messages (no regular text)
+        has_regular_messages = any(
+            len(msg.parts) == 1
+            and hasattr(msg.parts[0], "text")
+            and not hasattr(msg.parts[0], "function_call")
+            and not hasattr(msg.parts[0], "function_response")
+            for msg in self._messages
+        )
+
+        # Add system message back as a user message if we only have function messages
+        if self.system_message and not has_regular_messages:
+            self._messages.append(
+                glm.Content(role="user", parts=[glm.Part(text=self.system_message)])
+            )
+
+        # Remove any empty messages
         self._messages = [m for m in self._messages if m.parts]
 
 
@@ -642,6 +676,9 @@ class GoogleLLMService(LLMService):
         completion_tokens = 0
         total_tokens = 0
 
+        grounding_metadata = None
+        search_result = ""
+
         try:
             logger.debug(
                 # f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
@@ -700,6 +737,7 @@ class GoogleLLMService(LLMService):
                 try:
                     for c in chunk.parts:
                         if c.text:
+                            search_result += c.text
                             await self.push_frame(LLMTextFrame(c.text))
                         elif c.function_call:
                             logger.debug(f"Function call: {c.function_call}")
@@ -709,6 +747,63 @@ class GoogleLLMService(LLMService):
                                 tool_call_id="what_should_this_be",
                                 function_name=c.function_call.name,
                                 arguments=args,
+                            )
+                    # Handle grounding metadata
+                    # It seems only the last chunk that we receive may contain this information
+                    # If the response doesn't include groundingMetadata, this means the response wasn't grounded.
+                    if chunk.candidates:
+                        for candidate in chunk.candidates:
+                            # logger.debug(f"candidate received: {candidate}")
+                            # Extract grounding metadata
+                            grounding_metadata = (
+                                {
+                                    "rendered_content": getattr(
+                                        getattr(candidate, "grounding_metadata", None),
+                                        "search_entry_point",
+                                        None,
+                                    ).rendered_content
+                                    if hasattr(
+                                        getattr(candidate, "grounding_metadata", None),
+                                        "search_entry_point",
+                                    )
+                                    else None,
+                                    "origins": [
+                                        {
+                                            "site_uri": getattr(grounding_chunk.web, "uri", None),
+                                            "site_title": getattr(
+                                                grounding_chunk.web, "title", None
+                                            ),
+                                            "results": [
+                                                {
+                                                    "text": getattr(
+                                                        grounding_support.segment, "text", ""
+                                                    ),
+                                                    "confidence": getattr(
+                                                        grounding_support, "confidence_scores", None
+                                                    ),
+                                                }
+                                                for grounding_support in getattr(
+                                                    getattr(candidate, "grounding_metadata", None),
+                                                    "grounding_supports",
+                                                    [],
+                                                )
+                                                if index
+                                                in getattr(
+                                                    grounding_support, "grounding_chunk_indices", []
+                                                )
+                                            ],
+                                        }
+                                        for index, grounding_chunk in enumerate(
+                                            getattr(
+                                                getattr(candidate, "grounding_metadata", None),
+                                                "grounding_chunks",
+                                                [],
+                                            )
+                                        )
+                                    ],
+                                }
+                                if getattr(candidate, "grounding_metadata", None)
+                                else None
                             )
                 except Exception as e:
                     # Google LLMs seem to flag safety issues a lot!
@@ -722,6 +817,14 @@ class GoogleLLMService(LLMService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
+            if grounding_metadata is not None and isinstance(grounding_metadata, dict):
+                llm_search_frame = LLMSearchResponseFrame(
+                    search_result=search_result,
+                    origins=grounding_metadata["origins"],
+                    rendered_content=grounding_metadata["rendered_content"],
+                )
+                await self.push_frame(llm_search_frame)
+
             await self.start_llm_usage_metrics(
                 LLMTokenUsage(
                     prompt_tokens=prompt_tokens,

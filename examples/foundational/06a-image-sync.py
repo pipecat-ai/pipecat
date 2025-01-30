@@ -15,10 +15,16 @@ from PIL import Image
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, Frame, OutputImageRawFrame, SystemFrame, TextFrame
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    Frame,
+    OutputImageRawFrame,
+    TextFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaHttpTTSService
@@ -45,7 +51,7 @@ class ImageSyncAggregator(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if not isinstance(frame, SystemFrame) and direction == FrameDirection.DOWNSTREAM:
+        if isinstance(frame, BotStartedSpeakingFrame):
             await self.push_frame(
                 OutputImageRawFrame(
                     image=self._speaking_image_bytes,
@@ -53,7 +59,8 @@ class ImageSyncAggregator(FrameProcessor):
                     format=self._speaking_image_format,
                 )
             )
-            await self.push_frame(frame)
+
+        elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_frame(
                 OutputImageRawFrame(
                     image=self._waiting_image_bytes,
@@ -61,8 +68,8 @@ class ImageSyncAggregator(FrameProcessor):
                     format=self._waiting_image_format,
                 )
             )
-        else:
-            await self.push_frame(frame)
+
+        await self.push_frame(frame)
 
 
 async def main():
@@ -109,16 +116,24 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),
-                image_sync_aggregator,
                 context_aggregator.user(),
                 llm,
                 tts,
+                image_sync_aggregator,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
         )
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(
+            pipeline,
+            PipelineParams(
+                allow_interruptions=True,
+                enable_metrics=True,
+                enable_usage_metrics=True,
+                report_only_initial_ttfb=True,
+            ),
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
@@ -128,7 +143,7 @@ async def main():
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

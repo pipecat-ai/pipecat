@@ -71,6 +71,7 @@ class Pipeline(BasePipeline):
     #
 
     async def cleanup(self):
+        await super().cleanup()
         await self._cleanup_processors()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

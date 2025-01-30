@@ -46,6 +46,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.asyncio import cancel_task, create_task
 
 try:
     from daily import CallClient, Daily, EventHandler
@@ -139,7 +140,6 @@ class DailyCallbacks(BaseModel):
     on_dialout_stopped: Callable[[Any], Awaitable[None]]
     on_dialout_error: Callable[[Any], Awaitable[None]]
     on_dialout_warning: Callable[[Any], Awaitable[None]]
-    on_first_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
@@ -180,6 +180,7 @@ class DailyTransportClient(EventHandler):
         params: DailyParams,
         callbacks: DailyCallbacks,
         loop: asyncio.AbstractEventLoop,
+        transport_name: str,
     ):
         super().__init__()
 
@@ -193,14 +194,15 @@ class DailyTransportClient(EventHandler):
         self._params: DailyParams = params
         self._callbacks = callbacks
         self._loop = loop
+        self._transport_name = transport_name
 
         self._participant_id: str = ""
         self._video_renderers = {}
         self._transcription_ids = []
         self._transcription_status = None
-        self._other_participant_has_joined = False
 
         self._joined = False
+        self._joined_event = asyncio.Event()
         self._leave_counter = 0
 
         # We use the executor to cleanup the client. We just do it from one
@@ -218,7 +220,11 @@ class DailyTransportClient(EventHandler):
         # future) we will deadlock because completions use event handlers (which
         # are holding the GIL).
         self._callback_queue = asyncio.Queue()
-        self._callback_task = self._loop.create_task(self._callback_task_handler())
+        self._callback_task = create_task(
+            self._loop,
+            self._callback_task_handler(),
+            f"{self._transport_name}::DailyTransportClient::_callback_task_handler",
+        )
 
         self._camera: VirtualCameraDevice | None = None
         if self._params.camera_out_enabled:
@@ -346,6 +352,8 @@ class DailyTransportClient(EventHandler):
                     await self._start_transcription()
 
                 await self._callbacks.on_joined(data)
+
+                self._joined_event.set()
             else:
                 error_msg = f"Error joining {self._room_url}: {error}"
                 logger.error(error_msg)
@@ -434,6 +442,7 @@ class DailyTransportClient(EventHandler):
             return
 
         self._joined = False
+        self._joined_event.clear()
 
         logger.info(f"Leaving {self._room_url}")
 
@@ -469,8 +478,9 @@ class DailyTransportClient(EventHandler):
         return await asyncio.wait_for(future, timeout=10)
 
     async def cleanup(self):
-        self._callback_task.cancel()
-        await self._callback_task
+        if self._callback_task:
+            await cancel_task(self._callback_task)
+            self._callback_task = None
         # Make sure we don't block the event loop in case `client.release()`
         # takes extra time.
         await self._loop.run_in_executor(self._executor, self._cleanup)
@@ -621,19 +631,9 @@ class DailyTransportClient(EventHandler):
         self._call_async_callback(self._callbacks.on_dialout_warning, data)
 
     def on_participant_joined(self, participant):
-        id = participant["id"]
-        logger.info(f"Participant joined {id}")
-
-        if not self._other_participant_has_joined:
-            self._other_participant_has_joined = True
-            self._call_async_callback(self._callbacks.on_first_participant_joined, participant)
-
         self._call_async_callback(self._callbacks.on_participant_joined, participant)
 
     def on_participant_left(self, participant, reason):
-        id = participant["id"]
-        logger.info(f"Participant left {id}")
-
         self._call_async_callback(self._callbacks.on_participant_left, participant, reason)
 
     def on_participant_updated(self, participant):
@@ -687,11 +687,10 @@ class DailyTransportClient(EventHandler):
 
     async def _callback_task_handler(self):
         while True:
-            try:
-                (callback, *args) = await self._callback_queue.get()
-                await callback(*args)
-            except asyncio.CancelledError:
-                break
+            # Wait to process any callback until we are joined.
+            await self._joined_event.wait()
+            (callback, *args) = await self._callback_queue.get()
+            await callback(*args)
 
 
 class DailyInputTransport(BaseInputTransport):
@@ -721,7 +720,7 @@ class DailyInputTransport(BaseInputTransport):
         # Create audio task. It reads audio frames from Daily and push them
         # internally for VAD processing.
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_task = self.get_event_loop().create_task(self._audio_in_task_handler())
+            self._audio_in_task = self.create_task(self._audio_in_task_handler())
 
     async def stop(self, frame: EndFrame):
         # Parent stop.
@@ -730,8 +729,7 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.leave()
         # Stop audio thread.
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
-            self._audio_in_task.cancel()
-            await self._audio_in_task
+            await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
 
     async def cancel(self, frame: CancelFrame):
@@ -741,8 +739,7 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.leave()
         # Stop audio thread.
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
-            self._audio_in_task.cancel()
-            await self._audio_in_task
+            await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
 
     async def cleanup(self):
@@ -779,12 +776,9 @@ class DailyInputTransport(BaseInputTransport):
 
     async def _audio_in_task_handler(self):
         while True:
-            try:
-                frame = await self._client.read_next_audio_frame()
-                if frame:
-                    await self.push_audio_frame(frame)
-            except asyncio.CancelledError:
-                break
+            frame = await self._client.read_next_audio_frame()
+            if frame:
+                await self.push_audio_frame(frame)
 
     #
     # Camera in
@@ -901,7 +895,6 @@ class DailyTransport(BaseTransport):
             on_dialout_stopped=self._on_dialout_stopped,
             on_dialout_error=self._on_dialout_error,
             on_dialout_warning=self._on_dialout_warning,
-            on_first_participant_joined=self._on_first_participant_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
@@ -913,10 +906,12 @@ class DailyTransport(BaseTransport):
         self._params = params
 
         self._client = DailyTransportClient(
-            room_url, token, bot_name, params, callbacks, self._loop
+            room_url, token, bot_name, params, callbacks, self._loop, self.name
         )
         self._input: DailyInputTransport | None = None
         self._output: DailyOutputTransport | None = None
+
+        self._other_participant_has_joined = False
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
@@ -1124,16 +1119,22 @@ class DailyTransport(BaseTransport):
         await self._call_event_handler("on_dialout_warning", data)
 
     async def _on_participant_joined(self, participant):
+        id = participant["id"]
+        logger.info(f"Participant joined {id}")
+
+        if not self._other_participant_has_joined:
+            self._other_participant_has_joined = True
+            await self._call_event_handler("on_first_participant_joined", participant)
+
         await self._call_event_handler("on_participant_joined", participant)
 
     async def _on_participant_left(self, participant, reason):
+        id = participant["id"]
+        logger.info(f"Participant left {id}")
         await self._call_event_handler("on_participant_left", participant, reason)
 
     async def _on_participant_updated(self, participant):
         await self._call_event_handler("on_participant_updated", participant)
-
-    async def _on_first_participant_joined(self, participant):
-        await self._call_event_handler("on_first_participant_joined", participant)
 
     async def _on_transcription_message(self, message):
         await self._call_event_handler("on_transcription_message", message)

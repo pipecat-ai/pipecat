@@ -58,6 +58,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame
 from pipecat.utils.string import match_endofsentence
 
 RTVI_PROTOCOL_VERSION = "0.3.0"
@@ -295,6 +296,12 @@ class RTVITextMessageData(BaseModel):
     text: str
 
 
+class RTVISearchResponseMessageData(BaseModel):
+    search_result: Optional[str]
+    rendered_content: Optional[str]
+    origins: List[LLMSearchOrigin]
+
+
 class RTVIBotTranscriptionMessage(BaseModel):
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-transcription"] = "bot-transcription"
@@ -305,6 +312,12 @@ class RTVIBotLLMTextMessage(BaseModel):
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["bot-llm-text"] = "bot-llm-text"
     data: RTVITextMessageData
+
+
+class RTVIBotLLMSearchResponseMessage(BaseModel):
+    label: Literal["rtvi-ai"] = "rtvi-ai"
+    type: Literal["bot-llm-search-response"] = "bot-llm-search-response"
+    data: RTVISearchResponseMessageData
 
 
 class RTVIBotTTSTextMessage(BaseModel):
@@ -610,6 +623,8 @@ class RTVIObserver(BaseObserver):
             await self._push_transport_message_urgent(RTVIBotLLMStoppedMessage())
         elif isinstance(frame, LLMTextFrame):
             await self._handle_llm_text_frame(frame)
+        elif isinstance(frame, LLMSearchResponseFrame):
+            await self._handle_llm_search_response_frame(frame)
         elif isinstance(frame, TTSStartedFrame):
             await self._push_transport_message_urgent(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame):
@@ -660,6 +675,16 @@ class RTVIObserver(BaseObserver):
         if match_endofsentence(self._bot_transcription):
             await self._push_bot_transcription()
 
+    async def _handle_llm_search_response_frame(self, frame: LLMSearchResponseFrame):
+        message = RTVIBotLLMSearchResponseMessage(
+            data=RTVISearchResponseMessageData(
+                search_result=frame.search_result,
+                origins=frame.origins,
+                rendered_content=frame.rendered_content,
+            )
+        )
+        await self._push_transport_message_urgent(message)
+
     async def _handle_user_transcriptions(self, frame: Frame):
         message = None
         if isinstance(frame, TranscriptionFrame):
@@ -679,17 +704,20 @@ class RTVIObserver(BaseObserver):
             await self._push_transport_message_urgent(message)
 
     async def _handle_context(self, frame: OpenAILLMContextFrame):
-        messages = frame.context.messages
-        if len(messages) > 0:
-            message = messages[-1]
-            if message["role"] == "user":
-                content = message["content"]
-                if isinstance(content, list):
-                    text = " ".join(item["text"] for item in content if "text" in item)
-                else:
-                    text = content
-                rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
-                await self._push_transport_message_urgent(rtvi_message)
+        try:
+            messages = frame.context.messages
+            if len(messages) > 0:
+                message = messages[-1]
+                if message["role"] == "user":
+                    content = message["content"]
+                    if isinstance(content, list):
+                        text = " ".join(item["text"] for item in content if "text" in item)
+                    else:
+                        text = content
+                    rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
+                    await self._push_transport_message_urgent(rtvi_message)
+        except TypeError as e:
+            logger.warning(f"Caught an error while trying to handle context: {e}")
 
     async def _handle_metrics(self, frame: MetricsFrame):
         metrics = {}
@@ -736,11 +764,11 @@ class RTVIProcessor(FrameProcessor):
 
         # A task to process incoming action frames.
         self._action_queue = asyncio.Queue()
-        self._action_task = self.get_event_loop().create_task(self._action_task_handler())
+        self._action_task = self.create_task(self._action_task_handler())
 
         # A task to process incoming transport messages.
         self._message_queue = asyncio.Queue()
-        self._message_task = self.get_event_loop().create_task(self._message_task_handler())
+        self._message_task = self.create_task(self._message_task_handler())
 
         self._register_event_handler("on_bot_started")
         self._register_event_handler("on_client_ready")
@@ -845,13 +873,11 @@ class RTVIProcessor(FrameProcessor):
 
     async def _cancel_tasks(self):
         if self._action_task:
-            self._action_task.cancel()
-            await self._action_task
+            await self.cancel_task(self._action_task)
             self._action_task = None
 
         if self._message_task:
-            self._message_task.cancel()
-            await self._message_task
+            await self.cancel_task(self._message_task)
             self._message_task = None
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
@@ -860,21 +886,15 @@ class RTVIProcessor(FrameProcessor):
 
     async def _action_task_handler(self):
         while True:
-            try:
-                frame = await self._action_queue.get()
-                await self._handle_action(frame.message_id, frame.rtvi_action_run)
-                self._action_queue.task_done()
-            except asyncio.CancelledError:
-                break
+            frame = await self._action_queue.get()
+            await self._handle_action(frame.message_id, frame.rtvi_action_run)
+            self._action_queue.task_done()
 
     async def _message_task_handler(self):
         while True:
-            try:
-                message = await self._message_queue.get()
-                await self._handle_message(message)
-                self._message_queue.task_done()
-            except asyncio.CancelledError:
-                break
+            message = await self._message_queue.get()
+            await self._handle_message(message)
+            self._message_queue.task_done()
 
     async def _handle_transport_message(self, frame: TransportMessageUrgentFrame):
         try:
