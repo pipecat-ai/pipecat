@@ -86,20 +86,20 @@ const CallScreen = () => {
           <View style={styles.statusBar}>
             <Text>Status: <Text style={styles.status}>{connectionStatus}</Text></Text>
             <View style={styles.controls}>
-              <Button title="Connect" onPress={connect} disabled={isConnected} />
-              <Button title="Disconnect" onPress={disconnect} disabled={!isConnected} />
+              <Button
+                title={isConnected ? "Disconnect" : "Connect"}
+                onPress={isConnected ? disconnect : connect}
+              />
             </View>
           </View>
 
           <View style={styles.debugPanel}>
             <Text style={styles.debugTitle}>Debug Info</Text>
-            <View style={styles.debugLog}>
-              <ScrollView style={styles.debugLog}>
-                {logs.map((logEntry, index) => (
-                    <Text key={index} style={styles.logText}>{logEntry}</Text>
-                ))}
-              </ScrollView>
-            </View>
+            <ScrollView style={styles.debugLog}>
+              {logs.map((logEntry, index) => (
+                  <Text key={index} style={styles.logText}>{logEntry}</Text>
+              ))}
+            </ScrollView>
           </View>
         </View>
       </SafeAreaView>
@@ -108,13 +108,13 @@ const CallScreen = () => {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#f0f0f0', padding: 20 },
-  container: { flex: 1, maxWidth: 1200, margin: 'auto' },
+  container: { flex: 1, margin: 20 },
   statusBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, backgroundColor: '#fff', borderRadius: 8, marginBottom: 20 },
   status: { fontWeight: 'bold' },
   controls: { flexDirection: 'row', gap: 10 },
-  debugPanel: { backgroundColor: '#fff', borderRadius: 8, padding: 20 },
+  debugPanel: { height: '80%', backgroundColor: '#fff', borderRadius: 8, padding: 20},
   debugTitle: { fontSize: 16, fontWeight: 'bold' },
-  debugLog: { height: 200, overflow: 'scroll', backgroundColor: '#f8f8f8', padding: 10, borderRadius: 4, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.4 },
+  debugLog: { height: '100%', overflow: 'scroll', backgroundColor: '#f8f8f8', padding: 10, borderRadius: 4, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.4 },
 });
 
 export default CallScreen;
