@@ -12,7 +12,7 @@ from attr import dataclass
 from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio import cancel_task, create_task
+from pipecat.utils.asyncio import TaskManager
 from pipecat.utils.utils import obj_count, obj_id
 
 
@@ -55,10 +55,11 @@ class TaskObserver(BaseObserver):
 
     """
 
-    def __init__(self, observers: List[BaseObserver] = []):
+    def __init__(self, *, observers: List[BaseObserver] = [], task_manager: TaskManager):
         self._id: int = obj_id()
         self._name: str = f"{self.__class__.__name__}#{obj_count(self)}"
         self._proxies: List[Proxy] = self._create_proxies(observers)
+        self._task_manager = task_manager
 
     @property
     def id(self) -> int:
@@ -71,7 +72,7 @@ class TaskObserver(BaseObserver):
     async def stop(self):
         """Stops all proxy observer tasks."""
         for proxy in self._proxies:
-            await cancel_task(proxy.task)
+            await self._task_manager.cancel_task(proxy.task)
 
     async def on_push_frame(
         self,
@@ -90,11 +91,9 @@ class TaskObserver(BaseObserver):
 
     def _create_proxies(self, observers) -> List[Proxy]:
         proxies = []
-        loop = asyncio.get_running_loop()
         for observer in observers:
             queue = asyncio.Queue()
-            task = create_task(
-                loop,
+            task = self._task_manager.create_task(
                 self._proxy_task_handler(queue, observer),
                 f"{self}::{observer.__class__.__name__}::_proxy_task_handler",
             )

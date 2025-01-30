@@ -6,7 +6,6 @@
 
 import asyncio
 import inspect
-import sys
 from enum import Enum
 from typing import Awaitable, Callable, Coroutine, Optional
 
@@ -24,7 +23,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
-from pipecat.utils.asyncio import cancel_task, create_task, wait_for_task
+from pipecat.utils.asyncio import TaskManager
 from pipecat.utils.utils import obj_count, obj_id
 
 
@@ -37,24 +36,25 @@ class FrameProcessor:
     def __init__(
         self,
         *,
-        name: str | None = None,
-        metrics: FrameProcessorMetrics | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
+        name: Optional[str] = None,
+        metrics: Optional[FrameProcessorMetrics] = None,
         **kwargs,
     ):
         self._id: int = obj_id()
         self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
-        self._parent: "FrameProcessor" | None = None
-        self._prev: "FrameProcessor" | None = None
-        self._next: "FrameProcessor" | None = None
-        self._loop: asyncio.AbstractEventLoop = loop or asyncio.get_running_loop()
+        self._parent: Optional["FrameProcessor"] = None
+        self._prev: Optional["FrameProcessor"] = None
+        self._next: Optional["FrameProcessor"] = None
 
         self._event_handlers: dict = {}
 
         # Clock
-        self._clock: BaseClock | None = None
+        self._clock: Optional[BaseClock] = None
 
-        # Properties
+        # Task Manager
+        self._task_manager: Optional[TaskManager] = None
+
+        # Other properties
         self._allow_interruptions = False
         self._enable_metrics = False
         self._enable_usage_metrics = False
@@ -73,16 +73,16 @@ class FrameProcessor:
         self._metrics.set_processor_name(self.name)
 
         # Processors have an input queue. The input queue will be processed
-        # immediately (default) or it will block if `pause_processing_frames()`
-        # is called. To resume processing frames we need to call
+        # immediately (default) or it will block if `pause_processing_frames()` is
+        # called. To resume processing frames we need to call
         # `resume_processing_frames()`.
         self.__should_block_frames = False
-        self.__create_input_task()
+        self.__input_frame_task: Optional[asyncio.Task] = None
 
         # Every processor in Pipecat should only output frames from a single
-        # task. This avoid problems like audio overlapping. System frames are
-        # the exception to this rule. This create this task.
-        self.__create_push_task()
+        # task. This avoid problems like audio overlapping. System frames are the
+        # exception to this rule. This create this task.
+        self.__push_frame_task: Optional[asyncio.Task] = None
 
     @property
     def id(self) -> int:
@@ -151,14 +151,20 @@ class FrameProcessor:
         await self.stop_processing_metrics()
 
     def create_task(self, coroutine: Coroutine) -> asyncio.Task:
+        if not self._task_manager:
+            raise Exception(f"{self} TaskManager is still not initialized.")
         name = f"{self}::{coroutine.cr_code.co_name}"
-        return create_task(self.get_event_loop(), coroutine, name)
+        return self._task_manager.create_task(coroutine, name)
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
-        await cancel_task(task, timeout)
+        if not self._task_manager:
+            raise Exception(f"{self} TaskManager is still not initialized.")
+        await self._task_manager.cancel_task(task, timeout)
 
     async def wait_for_task(self, task: asyncio.Task, timeout: Optional[float] = None):
-        await wait_for_task(task, timeout)
+        if not self._task_manager:
+            raise Exception(f"{self} TaskManager is still not initialized.")
+        await self._task_manager.wait_for_task(task, timeout)
 
     async def cleanup(self):
         await self.__cancel_input_task()
@@ -170,16 +176,25 @@ class FrameProcessor:
         logger.debug(f"Linking {self} -> {self._next}")
 
     def get_event_loop(self) -> asyncio.AbstractEventLoop:
-        return self._loop
+        if not self._task_manager:
+            raise Exception(f"{self} TaskManager is still not initialized.")
+        return self._task_manager.get_event_loop()
 
     def set_parent(self, parent: "FrameProcessor"):
         self._parent = parent
 
-    def get_parent(self) -> "FrameProcessor":
+    def get_parent(self) -> Optional["FrameProcessor"]:
         return self._parent
 
     def get_clock(self) -> BaseClock:
+        if not self._clock:
+            raise Exception(f"{self} Clock is still not initialized.")
         return self._clock
+
+    def get_task_manager(self) -> TaskManager:
+        if not self._task_manager:
+            raise Exception(f"{self} TaskManager is still not initialized.")
+        return self._task_manager
 
     async def queue_frame(
         self,
@@ -211,11 +226,13 @@ class FrameProcessor:
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
             self._clock = frame.clock
+            self._task_manager = frame.task_manager
             self._allow_interruptions = frame.allow_interruptions
             self._enable_metrics = frame.enable_metrics
             self._enable_usage_metrics = frame.enable_usage_metrics
             self._report_only_initial_ttfb = frame.report_only_initial_ttfb
             self._observer = frame.observer
+            await self.__start(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._start_interruption()
             await self.stop_all_metrics()
@@ -249,6 +266,10 @@ class FrameProcessor:
         if event_name in self._event_handlers:
             raise Exception(f"Event handler {event_name} already registered")
         self._event_handlers[event_name] = []
+
+    async def __start(self, frame: StartFrame):
+        self.__create_input_task()
+        self.__create_push_task()
 
     #
     # Handle interruptions
@@ -299,13 +320,16 @@ class FrameProcessor:
             raise
 
     def __create_input_task(self):
-        self.__should_block_frames = False
-        self.__input_queue = asyncio.Queue()
-        self.__input_event = asyncio.Event()
-        self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
+        if not self.__input_frame_task:
+            self.__should_block_frames = False
+            self.__input_queue = asyncio.Queue()
+            self.__input_event = asyncio.Event()
+            self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
     async def __cancel_input_task(self):
-        await self.cancel_task(self.__input_frame_task)
+        if self.__input_frame_task:
+            await self.cancel_task(self.__input_frame_task)
+            self.__input_frame_task = None
 
     async def __input_frame_task_handler(self):
         while True:
@@ -328,11 +352,14 @@ class FrameProcessor:
             self.__input_queue.task_done()
 
     def __create_push_task(self):
-        self.__push_queue = asyncio.Queue()
-        self.__push_frame_task = self.create_task(self.__push_frame_task_handler())
+        if not self.__push_frame_task:
+            self.__push_queue = asyncio.Queue()
+            self.__push_frame_task = self.create_task(self.__push_frame_task_handler())
 
     async def __cancel_push_task(self):
-        await self.cancel_task(self.__push_frame_task)
+        if self.__push_frame_task:
+            await self.cancel_task(self.__push_frame_task)
+            self.__push_frame_task = None
 
     async def __push_frame_task_handler(self):
         while True:
