@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- It is now possible to specify the asyncio event loop that a `PipelineTask` and
+  all the processors should run on by passing it as a new argument to the
+  `PipelineRunner`. This could allow running pipelines in multiple threads each
+  one with its own event loop.
+
+- Added a new `utils.TaskManager`. Instead of a global task manager we now have
+  a task manager per `PipelineTask`. In the previous version the task manager
+  was global, so running multiple simultaneous `PipelineTask`s could result in
+  dangling task warnings which were not actually true. In order, for all the
+  processors to know about the task manager, we pass it through the
+  `StartFrame`. This means that processors should create tasks when they receive
+  a `StartFrame` but not before (because they don't have a task manager yet).
+
 - Added `TelnyxFrameSerializer` to support Telnyx calls. A full running example
   has also been added to `examples/telnyx-chatbot`.
 

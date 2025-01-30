@@ -399,7 +399,7 @@ class WordTTSService(TTSService):
         super().__init__(**kwargs)
         self._initial_word_timestamp = -1
         self._words_queue = asyncio.Queue()
-        self._words_task = self.create_task(self._words_task_handler())
+        self._words_task = None
 
     def start_word_timestamps(self):
         if self._initial_word_timestamp == -1:
@@ -411,6 +411,10 @@ class WordTTSService(TTSService):
     async def add_word_timestamps(self, word_times: List[Tuple[str, float]]):
         for word, timestamp in word_times:
             await self._words_queue.put((word, seconds_to_nanoseconds(timestamp)))
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        await self._create_words_task()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -429,6 +433,9 @@ class WordTTSService(TTSService):
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         self.reset_word_timestamps()
+
+    async def _create_words_task(self):
+        self._words_task = self.create_task(self._words_task_handler())
 
     async def _stop_words_task(self):
         if self._words_task:

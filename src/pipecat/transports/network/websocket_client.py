@@ -9,7 +9,7 @@ import asyncio
 import io
 import time
 import wave
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 import websockets
 from loguru import logger
@@ -30,7 +30,7 @@ from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import cancel_task, create_task
+from pipecat.utils.asyncio import TaskManager
 
 
 class WebsocketClientParams(TransportParams):
@@ -50,16 +50,28 @@ class WebsocketClientSession:
         uri: str,
         params: WebsocketClientParams,
         callbacks: WebsocketClientCallbacks,
-        loop: asyncio.AbstractEventLoop,
         transport_name: str,
     ):
         self._uri = uri
         self._params = params
         self._callbacks = callbacks
-        self._loop = loop
         self._transport_name = transport_name
 
+        self._task_manager: Optional[TaskManager] = None
+
         self._websocket: websockets.WebSocketClientProtocol | None = None
+
+    @property
+    def task_manager(self) -> TaskManager:
+        if not self._task_manager:
+            raise Exception(
+                f"{self._transport_name}::WebsocketClientSession: TaskManager not initialized (pipeline not started?)"
+            )
+        return self._task_manager
+
+    async def setup(self, frame: StartFrame):
+        if not self._task_manager:
+            self._task_manager = frame.task_manager
 
     async def connect(self):
         if self._websocket:
@@ -67,8 +79,7 @@ class WebsocketClientSession:
 
         try:
             self._websocket = await websockets.connect(uri=self._uri, open_timeout=10)
-            self._client_task = create_task(
-                self._loop,
+            self._client_task = self.task_manager.create_task(
                 self._client_task_handler(),
                 f"{self._transport_name}::WebsocketClientSession::_client_task_handler",
             )
@@ -80,21 +91,30 @@ class WebsocketClientSession:
         if not self._websocket:
             return
 
-        await cancel_task(self._client_task)
+        await self.task_manager.cancel_task(self._client_task)
 
         await self._websocket.close()
         self._websocket = None
 
     async def send(self, message: websockets.Data):
-        if self._websocket:
-            await self._websocket.send(message)
+        try:
+            if self._websocket:
+                await self._websocket.send(message)
+        except Exception as e:
+            logger.error(f"{self} exception sending data (class: {e.__class__.__name__})")
 
     async def _client_task_handler(self):
-        # Handle incoming messages
-        async for message in self._websocket:
-            await self._callbacks.on_message(self._websocket, message)
+        try:
+            # Handle incoming messages
+            async for message in self._websocket:
+                await self._callbacks.on_message(self._websocket, message)
+        except Exception as e:
+            logger.error(f"{self} exception receiving data (class: {e.__class__.__name__})")
 
         await self._callbacks.on_disconnected(self._websocket)
+
+    def __str__(self):
+        return f"{self._transport_name}::WebsocketClientSession"
 
 
 class WebsocketClientInputTransport(BaseInputTransport):
@@ -106,6 +126,7 @@ class WebsocketClientInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        await self._session.setup(frame)
         await self._session.connect()
 
     async def stop(self, frame: EndFrame):
@@ -138,6 +159,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        await self._session.setup(frame)
         await self._session.connect()
 
     async def stop(self, frame: EndFrame):
@@ -198,9 +220,8 @@ class WebsocketClientTransport(BaseTransport):
         self,
         uri: str,
         params: WebsocketClientParams = WebsocketClientParams(),
-        loop: asyncio.AbstractEventLoop | None = None,
     ):
-        super().__init__(loop=loop)
+        super().__init__()
 
         self._params = params
 
@@ -210,7 +231,7 @@ class WebsocketClientTransport(BaseTransport):
             on_message=self._on_message,
         )
 
-        self._session = WebsocketClientSession(uri, params, callbacks, self._loop, self.name)
+        self._session = WebsocketClientSession(uri, params, callbacks, self.name)
         self._input: WebsocketClientInputTransport | None = None
         self._output: WebsocketClientOutputTransport | None = None
 
