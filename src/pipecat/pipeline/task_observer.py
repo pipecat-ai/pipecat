@@ -96,7 +96,7 @@ class TaskObserver(BaseObserver):
             task = create_task(
                 loop,
                 self._proxy_task_handler(queue, observer),
-                f"{self}::{observer.__class__.__name__}",
+                f"{self}::{observer.__class__.__name__}::_proxy_task_handler",
             )
             proxy = Proxy(queue=queue, task=task, observer=observer)
             proxies.append(proxy)
