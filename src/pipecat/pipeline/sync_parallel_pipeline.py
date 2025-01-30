@@ -105,7 +105,9 @@ class SyncParallelPipeline(BasePipeline):
 
     async def cleanup(self):
         await super().cleanup()
+        await asyncio.gather(*[s["processor"].cleanup() for s in self._sources])
         await asyncio.gather(*[p.cleanup() for p in self._pipelines])
+        await asyncio.gather(*[s["processor"].cleanup() for s in self._sinks])
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
