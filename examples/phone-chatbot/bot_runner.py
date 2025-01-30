@@ -73,7 +73,9 @@ action using the Twilio Client library.
 """
 
 
-async def _create_daily_room(room_url, callId, callDomain=None, dialoutNumber=None, vendor="daily"):
+async def _create_daily_room(
+    room_url, callId, callDomain=None, dialoutNumber=None, vendor="daily", detect_voicemail=False
+):
     if not room_url:
         # Create base properties with SIP settings
         properties = DailyRoomProperties(
@@ -109,7 +111,7 @@ async def _create_daily_room(room_url, callId, callDomain=None, dialoutNumber=No
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
     if vendor == "daily":
-        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain}"
+        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain}{' -v' if detect_voicemail else ''}"
         if dialoutNumber:
             bot_proc += f" -o {dialoutNumber}"
     else:
@@ -182,6 +184,7 @@ async def daily_start_bot(request: Request) -> JSONResponse:
         if "test" in data:
             # Pass through any webhook checks
             return JSONResponse({"test": True})
+        detect_voicemail = data.get("detectVoicemail", False)
         callId = data.get("callId", None)
         callDomain = data.get("callDomain", None)
         dialoutNumber = data.get("dialoutNumber", None)
@@ -191,7 +194,7 @@ async def daily_start_bot(request: Request) -> JSONResponse:
         )
 
     room: DailyRoomObject = await _create_daily_room(
-        room_url, callId, callDomain, dialoutNumber, "daily"
+        room_url, callId, callDomain, dialoutNumber, "daily", detect_voicemail
     )
 
     # Grab a token for the user to join with
