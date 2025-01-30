@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `TwilioSerializer` now supports transport message frames. With this we can
+  create Twilio emulators.
+
 - Added a new transport: `WebsocketClientTransport`.
 
 - Added a `metadata` field to `Frame` which makes it possible to pass custom

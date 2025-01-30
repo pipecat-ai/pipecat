@@ -17,6 +17,8 @@ from pipecat.frames.frames import (
     InputDTMFFrame,
     KeypadEntry,
     StartInterruptionFrame,
+    TransportMessageFrame,
+    TransportMessageUrgentFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
@@ -35,7 +37,10 @@ class TwilioFrameSerializer(FrameSerializer):
         return FrameSerializerType.TEXT
 
     def serialize(self, frame: Frame) -> str | bytes | None:
-        if isinstance(frame, AudioRawFrame):
+        if isinstance(frame, StartInterruptionFrame):
+            answer = {"event": "clear", "streamSid": self._stream_sid}
+            return json.dumps(answer)
+        elif isinstance(frame, AudioRawFrame):
             data = frame.audio
 
             serialized_data = pcm_to_ulaw(data, frame.sample_rate, self._params.twilio_sample_rate)
@@ -47,10 +52,8 @@ class TwilioFrameSerializer(FrameSerializer):
             }
 
             return json.dumps(answer)
-
-        if isinstance(frame, StartInterruptionFrame):
-            answer = {"event": "clear", "streamSid": self._stream_sid}
-            return json.dumps(answer)
+        elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
+            return json.dumps(frame.message)
 
     def deserialize(self, data: str | bytes) -> Frame | None:
         message = json.loads(data)
