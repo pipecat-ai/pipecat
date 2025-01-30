@@ -58,8 +58,9 @@ class TaskObserver(BaseObserver):
     def __init__(self, *, observers: List[BaseObserver] = [], task_manager: TaskManager):
         self._id: int = obj_id()
         self._name: str = f"{self.__class__.__name__}#{obj_count(self)}"
-        self._proxies: List[Proxy] = self._create_proxies(observers)
+        self._observers = observers
         self._task_manager = task_manager
+        self._proxies: List[Proxy] = []
 
     @property
     def id(self) -> int:
@@ -68,6 +69,10 @@ class TaskObserver(BaseObserver):
     @property
     def name(self) -> str:
         return self._name
+
+    async def start(self):
+        """Starts all proxy observer tasks."""
+        self._proxies = self._create_proxies(self._observers)
 
     async def stop(self):
         """Stops all proxy observer tasks."""

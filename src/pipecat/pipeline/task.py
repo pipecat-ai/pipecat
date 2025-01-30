@@ -173,7 +173,7 @@ class PipelineTask(BaseTask):
         if self.has_finished():
             return
         try:
-            push_task = self._create_tasks()
+            push_task = await self._create_tasks()
             await self._task_manager.wait_for_task(push_task)
         except asyncio.CancelledError:
             # We are awaiting on the push task and it might be cancelled
@@ -203,7 +203,7 @@ class PipelineTask(BaseTask):
             for frame in frames:
                 await self.queue_frame(frame)
 
-    def _create_tasks(self):
+    async def _create_tasks(self):
         self._process_up_task = self._task_manager.create_task(
             self._process_up_queue(), f"{self}::_process_up_queue"
         )
@@ -213,6 +213,8 @@ class PipelineTask(BaseTask):
         self._process_push_task = self._task_manager.create_task(
             self._process_push_queue(), f"{self}::_process_push_queue"
         )
+
+        await self._observer.start()
 
         return self._process_push_task
 
