@@ -34,6 +34,10 @@ npm i
 
 # Before a native app can be compiled, the native source code must be generated.
 npx expo prebuild
+
+# Configure the environment variable to connect to the local server
+cp env.example .env
+# edit .env and add your local ip address, for example: http://192.168.1.16:7860
 ```
 
 #### Running on Android

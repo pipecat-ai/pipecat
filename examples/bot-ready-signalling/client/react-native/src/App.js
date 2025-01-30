@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {SafeAreaView, View, Text, Button, StyleSheet, ScrollView} from 'react-native';
 import Daily from "@daily-co/react-native-daily-js";
+import { API_BASE_URL } from "@env";
 
 const CallScreen = () => {
   const [connectionStatus, setConnectionStatus] = useState('Disconnected');
@@ -59,7 +60,7 @@ const CallScreen = () => {
     try {
       const callObject = Daily.createCallObject({ subscribeToTracksAutomatically: true });
       setCallObject(callObject);
-      const connectionUrl = 'http://192.168.1.16:7860/connect'
+      const connectionUrl = `${API_BASE_URL}/connect`
       const res = await fetch(connectionUrl, { method: "POST", headers: { "Content-Type": "application/json" } });
       const roomInfo = await res.json();
       await callObject.join({ url: roomInfo.room_url });
