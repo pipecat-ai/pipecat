@@ -121,6 +121,8 @@ class STTMuteFilter(FrameProcessor):
         return False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         """Processes incoming frames and manages muting state."""
         # Handle function call state changes
         if isinstance(frame, FunctionCallInProgressFrame):
