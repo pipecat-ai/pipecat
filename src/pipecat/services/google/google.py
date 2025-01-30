@@ -658,6 +658,46 @@ class GoogleLLMService(LLMService):
         self._tools = tools
         self._tool_config = tool_config
 
+    @staticmethod
+    def is_gemini_format(tools):
+        """Checks if the given tool format is in Google Gemini format.
+
+        Args:
+            tools (list): Tool format to check.
+
+        Returns:
+            bool: True if it's in Gemini format, False otherwise.
+        """
+        return isinstance(tools, list) and len(tools) == 1 and "function_declarations" in tools[0]
+
+    @classmethod
+    def convert_openai_to_gemini(cls, tools):
+        """Converts OpenAI tool format to Google Gemini tool format if needed.
+
+        Args:
+            tools (list): Tool format, either OpenAI or Gemini.
+
+        Returns:
+            list: Google Gemini formatted tools or the original input if already in Gemini format.
+        """
+        if cls.is_gemini_format(tools):
+            print("Already in Google Gemini format.")
+            return tools  # Return unchanged
+
+        gemini_tools = {"function_declarations": []}
+
+        for tool in tools:
+            if "function" in tool:
+                function_data = tool["function"]
+                gemini_function = {
+                    "name": function_data.get("name"),
+                    "description": function_data.get("description"),
+                    "parameters": function_data.get("parameters"),
+                }
+                gemini_tools["function_declarations"].append(gemini_function)
+
+        return [gemini_tools]  # Wrap in a list as required by Gemini format
+
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -708,6 +748,8 @@ class GoogleLLMService(LLMService):
                 tools = context.tools
             elif self._tools:
                 tools = self._tools
+
+            tools = self.convert_openai_to_gemini(tools)
             tool_config = None
             if self._tool_config:
                 tool_config = self._tool_config

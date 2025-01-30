@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `test/utils.py` inside of pipecat package.
 
+- Added conversion of `OpenAI` tools format to `Google` tools format in
+  `GoogleLLMService`.
+
 ### Changed
 
 - Updated `GoogleLLMContext` to support pushing `LLMMessagesUpdateFrame`s that
