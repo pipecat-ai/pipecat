@@ -84,6 +84,9 @@ class FrameProcessor:
         # exception to this rule. This create this task.
         self.__push_frame_task: Optional[asyncio.Task] = None
 
+        # This enables an input frame's metadata to be copied to output frames
+        self._input_frame_metadata = {}
+
     @property
     def id(self) -> int:
         return self._id
@@ -224,6 +227,12 @@ class FrameProcessor:
         self.__input_event.set()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        # System frames skip the queue and blow up determinism
+        if not isinstance(frame, SystemFrame):
+            self._input_frame_metadata = frame.metadata
+            # print(
+            #     f"!!! PROCESS: I am {self._name}, input frame is a {frame.name}, metadata is {self._input_frame_metadata}"
+            # )
         if isinstance(frame, StartFrame):
             self._clock = frame.clock
             self._task_manager = frame.task_manager
@@ -248,6 +257,14 @@ class FrameProcessor:
         if isinstance(frame, SystemFrame):
             await self.__internal_push_frame(frame, direction)
         else:
+            # print(
+            #     f"!!! PUSH: I am {self._name}, input frame is a {frame.name}, combining input frame metadata: {self._input_frame_metadata} with frame metadata: {frame.metadata}"
+            # )
+            new_metadata = self._input_frame_metadata | frame.metadata
+            frame.metadata = new_metadata
+            # print(
+            #     f"!!! PUSH2: I am {self._name}, input frame is a {frame.name}, frame metadata is now {frame.metadata}"
+            # )
             await self.__push_queue.put((frame, direction))
 
     def event_handler(self, event_name: str):

@@ -75,6 +75,7 @@ class StoryImageProcessor(FrameProcessor):
 
         if isinstance(frame, StoryPageFrame):
             # Special syntax for the first page
+            print(f"!!! generating image for story page frame # {frame.metadata['story_page_id']}")
             if self.pages == []:
                 prompt = FIRST_IMAGE_PROMPT % frame.text
             else:
@@ -98,10 +99,14 @@ class StoryImageProcessor(FrameProcessor):
                     async for i in self._image_gen_service.run_image_gen(
                         IMAGE_GEN_PROMPT % image_description
                     ):
+                        print(
+                            f"@@@ about to push a storyimageframe, input metadata is {self._input_frame_metadata}"
+                        )
                         await self.push_frame(i)
             except TimeoutError:
                 logger.debug("Image gen timeout")
                 pass
+            print(f"### past image gen try block, source frame is {frame.name}")
             await self.stop_ttfb_metrics()
             # Push the StoryPageFrame so it gets TTS
             await self.push_frame(frame)
@@ -128,6 +133,7 @@ class StoryProcessor(FrameProcessor):
         self._messages = messages
         self._text = ""
         self._story = story
+        self._current_page = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -187,7 +193,10 @@ class StoryProcessor(FrameProcessor):
 
                 if len(before_break) > 2:
                     self._story.append(before_break)
-                    await self.push_frame(StoryPageFrame(before_break))
+                    spf = StoryPageFrame(before_break)
+                    spf.metadata["story_page_id"] = self._current_page
+                    self._current_page += 1
+                    await self.push_frame(spf)
                     # await self.push_frame(sounds["ding"])
                     await self.push_frame(DailyTransportMessageFrame(CUE_ASSISTANT_TURN))
 

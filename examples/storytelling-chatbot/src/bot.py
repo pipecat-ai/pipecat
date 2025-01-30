@@ -12,19 +12,21 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from processors import StoryImageProcessor, StoryProcessor
+from processors import StoryImageFrame, StoryImageProcessor, StoryPageFrame, StoryProcessor
 from prompts import CUE_USER_TURN, LLM_BASE_PROMPT
 from utils.helpers import load_images, load_sounds
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame
+from pipecat.frames.frames import EndFrame, Frame, ImageRawFrame, TextFrame
+from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
-from pipecat.services.google import GoogleLLMService
+from pipecat.services.google import GoogleImageGenService, GoogleLLMService
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,
@@ -38,6 +40,50 @@ logger.add(sys.stderr, level="DEBUG")
 
 sounds = load_sounds(["listening.wav"])
 images = load_images(["book1.png", "book2.png"])
+
+
+class DebugObserver(BaseObserver):
+    """Observer to log interruptions and bot speaking events to the console.
+
+    Logs all frame instances of:
+    - StartInterruptionFrame
+    - BotStartedSpeakingFrame
+    - BotStoppedSpeakingFrame
+
+    This allows you to see the frame flow from processor to processor through the pipeline for these frames.
+    Log format: [EVENT TYPE]: [source processor] → [destination processor] at [timestamp]s
+    """
+
+    async def on_push_frame(
+        self,
+        src: FrameProcessor,
+        dst: FrameProcessor,
+        frame: Frame,
+        direction: FrameDirection,
+        timestamp: int,
+    ):
+        # Convert timestamp to seconds for readability
+        time_sec = timestamp / 1_000_000_000
+
+        # Create direction arrow
+        arrow = "→" if direction == FrameDirection.DOWNSTREAM else "←"
+
+        if isinstance(frame, ImageRawFrame):
+            logger.info(
+                f"⚡ RAW IMAGE FRAME: {src} {arrow} {dst} at {time_sec:.2f}s, metadata: {frame.metadata}"
+            )
+        elif isinstance(frame, StoryPageFrame):
+            logger.info(
+                f"⚡ STORY PAGE FRAME: {src} {arrow} {dst} at {time_sec:.2f}s, metadata: {frame.metadata}"
+            )
+        elif isinstance(frame, StoryImageFrame):
+            logger.info(
+                f"⚡ STORY IMAGE FRAME: {src} {arrow} {dst} at {time_sec:.2f}s, metadata: {frame.metadata}"
+            )
+        elif isinstance(frame, TextFrame):
+            logger.info(
+                f"⚡ TEXT FRAME: {src} {arrow} {dst} at {time_sec:.2f}s, metadata: {frame.metadata}"
+            )
 
 
 async def main(room_url, token=None):
@@ -109,6 +155,7 @@ async def main(room_url, token=None):
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
+                observers=[DebugObserver()],
             ),
         )
 
