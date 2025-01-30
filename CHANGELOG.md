@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Allow pushing silence audio frames before `TTSStoppedFrame`. This might be
+  useful for testing purposes, for example, passing bot audio to an STT service
+  which usually needs additional audio data to detect the utterance stopped.
+
 - `TwilioSerializer` now supports transport message frames. With this we can
   create Twilio emulators.
 
