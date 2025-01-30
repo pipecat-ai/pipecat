@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `TelnyxFrameSerializer` to support Telnyx calls. A full running example
+  has also been added to `examples/telnyx-chatbot`.
+
 - Allow pushing silence audio frames before `TTSStoppedFrame`. This might be
   useful for testing purposes, for example, passing bot audio to an STT service
   which usually needs additional audio data to detect the utterance stopped.
