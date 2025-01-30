@@ -328,6 +328,8 @@ class CompletenessCheck(FrameProcessor):
             await self._notifier.notify()
         elif isinstance(frame, TextFrame) and frame.text == "NO":
             logger.debug("!!! Completeness check NO")
+        else:
+            await self.push_frame(frame, direction)
 
 
 class OutputGate(FrameProcessor):

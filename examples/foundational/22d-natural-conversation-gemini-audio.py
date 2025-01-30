@@ -456,6 +456,8 @@ class CompletenessCheck(FrameProcessor):
                     # logger.debug("!!! CompletenessCheck idle wait START")
                     self._wakeup_time = time.time() + self.wait_time
                     self._idle_task = self.create_task(self._idle_task_handler())
+        else:
+            await self.push_frame(frame, direction)
 
     async def _idle_task_handler(self):
         try:

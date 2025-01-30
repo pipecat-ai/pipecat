@@ -117,12 +117,15 @@ class CompletenessCheck(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+
         if isinstance(frame, TextFrame) and frame.text == "YES":
             logger.debug("Completeness check YES")
             await self.push_frame(UserStoppedSpeakingFrame())
             await self._notifier.notify()
         elif isinstance(frame, TextFrame) and frame.text == "NO":
             logger.debug("Completeness check NO")
+        else:
+            await self.push_frame(frame, direction)
 
 
 class OutputGate(FrameProcessor):
