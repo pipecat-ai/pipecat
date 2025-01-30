@@ -36,13 +36,16 @@ const CallScreen = () => {
         log(`Failed to disconnect ${err}`);
       })
     });
+    // Trigger so the bot can start sending audio
+    callObject.on("track-started", (evt) => {
+      if (evt.track.kind === "audio" && evt.participant.local === false) {
+        handleEventToConsole(evt)
+        log("Sending the message that will trigger the bot to play the audio.")
+        callObject.sendAppMessage("playable")
+      }
+    });
     callObject.on("error", (evt) => log(`Error: ${evt.error}`));
     // Other events just for awareness
-    callObject.on("track-started", (evt) => {
-      handleEventToConsole(evt)
-      log("Will send the audio message to play the audio at the next tick")
-      callObject.sendAppMessage("playable")
-    });
     callObject.on("track-stopped", handleEventToConsole);
     callObject.on("participant-joined", handleEventToConsole);
     callObject.on("participant-updated", handleEventToConsole);
