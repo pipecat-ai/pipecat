@@ -34,7 +34,7 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def run_bot(websocket_client, stream_id, encoding):
+async def run_bot(websocket_client, stream_id, outbound_encoding, inbound_encoding):
     transport = FastAPIWebsocketTransport(
         websocket=websocket_client,
         params=FastAPIWebsocketParams(
@@ -43,7 +43,7 @@ async def run_bot(websocket_client, stream_id, encoding):
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            serializer=TelnyxFrameSerializer(stream_id, encoding),
+            serializer=TelnyxFrameSerializer(stream_id, outbound_encoding, inbound_encoding),
         ),
     )
 
@@ -55,9 +55,7 @@ async def run_bot(websocket_client, stream_id, encoding):
         api_key=os.getenv("ELEVENLABS_API_KEY"),
         voice_id="CwhRBWXzGAHq8TQ4Fs17",
         output_format="pcm_24000",
-        params=ElevenLabsTTSService.InputParams(
-            language=Language.EN
-        )
+        params=ElevenLabsTTSService.InputParams(language=Language.EN),
     )
 
     messages = [

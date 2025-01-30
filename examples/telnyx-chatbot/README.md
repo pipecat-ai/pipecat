@@ -76,7 +76,7 @@ This project is a FastAPI-based chatbot that integrates with Telnyx to handle We
      ```
    - In `templates/streams.xml`, replace `<your server url>` with your ngrok URL (without `https://`)
    - The final URL should look like: `wss://abc123.ngrok.io/ws`
-   - The encoding (`bidirectionalCodec`) should be `PCMU` or `PCMA` depending on your needs. Based on selected encoding, set the outbound_encoding in the `TelnyxFrameSerializer` in `src/pipecat/serializers/telnyx.py`
+   - The encoding (`bidirectionalCodec`) should be `PCMU` or `PCMA` depending on your needs. Based on selected encoding, set the outbound_encoding in `server.py` when the bot is initialized.
    - The inbound encoding can be controlled from the application configuration for inbound calls and dial/transfer commands for outbound calls.
 
 ## Running the Application

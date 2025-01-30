@@ -16,12 +16,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.post("/")
 async def start_call():
     print("POST TeXML")
     return HTMLResponse(content=open("templates/streams.xml").read(), media_type="application/xml")
-
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -31,10 +29,9 @@ async def websocket_endpoint(websocket: WebSocket):
     call_data = json.loads(await start_data.__anext__())
     print(call_data, flush=True)
     stream_id = call_data["stream_id"]
-    encoding = call_data["start"]["media_format"]["encoding"]
+    outbound_encoding = call_data["start"]["media_format"]["encoding"]
     print("WebSocket connection accepted")
-    await run_bot(websocket, stream_id, encoding)
-
+    await run_bot(websocket, stream_id, outbound_encoding, "PCMU")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8765)
