@@ -45,7 +45,10 @@ except ModuleNotFoundError as e:
 ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
 
 # Models that support language codes
-# eleven_multilingual_v2 doesn't support language codes, so it's excluded
+# The following models are excluded as they don't support language codes:
+# - eleven_flash_v2
+# - eleven_turbo_v2
+# - eleven_multilingual_v2
 ELEVENLABS_MULTILINGUAL_MODELS = {
     "eleven_flash_v2_5",
     "eleven_turbo_v2_5",
@@ -137,7 +140,7 @@ def calculate_word_times(
 
 class ElevenLabsTTSService(WordTTSService, WebsocketService):
     class InputParams(BaseModel):
-        language: Optional[Language] = Language.EN
+        language: Optional[Language] = None
         optimize_streaming_latency: Optional[str] = None
         stability: Optional[float] = None
         similarity_boost: Optional[float] = None
@@ -197,7 +200,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
             "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
@@ -327,9 +330,10 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
 
             # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
             language = self._settings["language"]
-            if model in ELEVENLABS_MULTILINGUAL_MODELS:
+            if model in ELEVENLABS_MULTILINGUAL_MODELS and language is not None:
                 url += f"&language_code={language}"
-            else:
+                logger.debug(f"Using language code: {language}")
+            elif language is not None:
                 logger.warning(
                     f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
                 )
@@ -429,7 +433,7 @@ class ElevenLabsHttpTTSService(TTSService):
     """
 
     class InputParams(BaseModel):
-        language: Optional[Language] = Language.EN
+        language: Optional[Language] = None
         optimize_streaming_latency: Optional[int] = None
         stability: Optional[float] = None
         similarity_boost: Optional[float] = None
@@ -460,7 +464,7 @@ class ElevenLabsHttpTTSService(TTSService):
             "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
             "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
@@ -525,8 +529,14 @@ class ElevenLabsHttpTTSService(TTSService):
         if self._voice_settings:
             payload["voice_settings"] = self._voice_settings
 
-        if self._settings["language"]:
-            payload["language_code"] = self._settings["language"]
+        language = self._settings["language"]
+        if self._model_name in ELEVENLABS_MULTILINGUAL_MODELS and language:
+            payload["language_code"] = language
+            logger.debug(f"Using language code: {language}")
+        elif language:
+            logger.warning(
+                f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
+            )
 
         headers = {
             "xi-api-key": self._api_key,
