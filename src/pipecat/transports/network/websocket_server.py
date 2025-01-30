@@ -141,8 +141,6 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
         self._websocket: websockets.WebSocketServerProtocol | None = None
 
-        self._websocket_audio_buffer = bytes()
-
         self._send_interval = (self._audio_chunk_size / self._params.audio_out_sample_rate) / 2
         self._next_send_time = 0
 
@@ -186,8 +184,6 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
                 frame = wav_frame
 
         await self._write_frame(frame)
-
-        self._websocket_audio_buffer = bytes()
 
         # Simulate audio playback with a sleep.
         await self._write_audio_sleep()
