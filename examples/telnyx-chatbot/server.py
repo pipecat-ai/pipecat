@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import json
 
 import uvicorn
@@ -16,10 +22,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.post("/")
 async def start_call():
     print("POST TeXML")
     return HTMLResponse(content=open("templates/streams.xml").read(), media_type="application/xml")
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -32,6 +40,7 @@ async def websocket_endpoint(websocket: WebSocket):
     outbound_encoding = call_data["start"]["media_format"]["encoding"]
     print("WebSocket connection accepted")
     await run_bot(websocket, stream_id, outbound_encoding, "PCMU")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8765)
