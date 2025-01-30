@@ -84,6 +84,7 @@ def ulaw_to_pcm(ulaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
     
     return out_pcm_bytes
 
+
 def pcm_to_ulaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
     # Resample
     in_pcm_bytes = resample_audio(pcm_bytes, in_sample_rate, out_sample_rate)
@@ -93,8 +94,8 @@ def pcm_to_ulaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
 
     return ulaw_bytes
 
-def alaw_to_pcm(alaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int) -> bytes:
-        
+
+def alaw_to_pcm(alaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int) -> bytes:     
     # Convert a-law to PCM
     in_pcm_bytes = audioop.alaw2lin(alaw_bytes, 2)
 
@@ -102,6 +103,7 @@ def alaw_to_pcm(alaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int) ->
     out_pcm_bytes = resample_audio(in_pcm_bytes, in_sample_rate, out_sample_rate)
     
     return out_pcm_bytes
+
 
 def pcm_to_alaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
     # Resample
