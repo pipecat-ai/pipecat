@@ -186,10 +186,12 @@ class GladiaSTTService(STTService):
         await super().stop(frame)
         await self._send_stop_recording()
         await self._websocket.close()
+        await self.wait_for_task(self._receive_task)
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._websocket.close()
+        await self.cancel_task(self._receive_task)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_processing_metrics()
