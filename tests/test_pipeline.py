@@ -57,6 +57,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
     async def test_task_single(self):
         pipeline = Pipeline([IdentityFilter()])
         task = PipelineTask(pipeline)
+        task.set_event_loop(asyncio.get_event_loop())
 
         await task.queue_frame(TextFrame(text="Hello!"))
         await task.queue_frames([TextFrame(text="Bye!"), EndFrame()])
@@ -81,6 +82,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 enable_heartbeats=True, heartbeats_period_secs=0.2, observers=[heartbeats_observer]
             ),
         )
+        task.set_event_loop(asyncio.get_event_loop())
 
         expected_heartbeats = 1.0 / 0.2
 
