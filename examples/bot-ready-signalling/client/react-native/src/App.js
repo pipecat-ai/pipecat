@@ -1,153 +1,99 @@
-import {
-  View,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  Button,
-  TextInput,
-} from "react-native";
-import React, { useEffect, useState, useCallback } from "react";
-import Daily, {
-  DailyMediaView,
-  DailyEventObjectParticipant,
-} from "@daily-co/react-native-daily-js";
+import React, { useState, useEffect } from 'react';
+import {SafeAreaView, View, Text, Button, StyleSheet, ScrollView} from 'react-native';
+import Daily from "@daily-co/react-native-daily-js";
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: "#f7f9fa",
-    width: "100%",
-  },
-  outCallContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  inCallContainer: {
-    position: "absolute",
-    width: "100%",
-    height: "100%",
-  },
-  dailyMediaView: {
-    flex: 1,
-    aspectRatio: 9 / 16,
-  },
-  roomUrlInput: {
-    borderRadius: 8,
-    marginVertical: 8,
-    padding: 12,
-    fontStyle: "normal",
-    fontWeight: "normal",
-    borderWidth: 1,
-    width: "100%",
-  },
-  infoView: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  controlButton: {
-    flex: 1,
-  },
-});
+const CallScreen = () => {
+  const [connectionStatus, setConnectionStatus] = useState('Disconnected');
+  const [isConnected, setIsConnected] = useState(false);
+  const [callObject, setCallObject] = useState(null);
+  const [logs, setLogs] = useState([]);
 
-const ROOM_URL_TEMPLATE = "https://filipi.daily.co/public";
-
-export default function App() {
-  const [videoTrack, setVideoTrack] = useState();
-  const [callObject, setCallObject] = useState();
-  const [inCall, setInCall] = useState(false);
-  const [roomUrl, setRoomUrl] = useState(ROOM_URL_TEMPLATE);
-  const [remoteParticipantCount, setRemoteParticipantCount] = useState(0);
-
-  const handleNewParticipantsState = (event: DailyEventObjectParticipant) => {
-    const participant = event.participant;
-    // Early out as needed to avoid display the local participant's video
-    if (participant.local) {
-      return;
-    }
-    const videoTrack = participant.tracks.video;
-    setVideoTrack(videoTrack.persistentTrack);
-    // Set participant count minus the local participant
-    setRemoteParticipantCount(callObject.participantCounts().present - 1);
-  };
-
-  const joinRoom = () => {
-    console.log("Joining room");
-    callObject.join({
-      url: roomUrl,
-    });
-  };
-
-  const leaveRoom = async () => {
-    console.log("Leaving the room");
-    await callObject.leave();
-  };
-
-  // Create the callObject and join the meeting
   useEffect(() => {
-    const callObject = Daily.createCallObject();
-    setCallObject(callObject);
-    return () => {};
-  }, []);
-
-  //Add the listeners
-  useEffect(() => {
-    if (!callObject) {
-      return;
+    if (callObject) {
+      setupTrackListeners(callObject);
     }
-    callObject
-      .on("joined-meeting", () => setInCall(true))
-      .on("left-meeting", () => setInCall(false))
-      .on("participant-joined", handleNewParticipantsState)
-      .on("participant-updated", handleNewParticipantsState)
-      .on("participant-left", handleNewParticipantsState);
-    return () => {};
   }, [callObject]);
 
+  const log = (message) => {
+    setLogs((prevLogs) => [...prevLogs, `${new Date().toISOString()} - ${message}`]);
+    console.log(message);
+  };
+
+  const setupTrackListeners = (callObject) => {
+    callObject.on("joined-meeting", () => {
+      setConnectionStatus('Connected');
+      setIsConnected(true);
+      log('Client connected');
+    });
+    callObject.on("left-meeting", () => {
+      setConnectionStatus('Disconnected');
+      setIsConnected(false);
+      log('Client disconnected');
+    });
+    callObject.on("error", (evt) => log(`Error: ${evt.error}`));
+  };
+
+  const connect = async () => {
+    try {
+      const callObject = Daily.createCallObject({ subscribeToTracksAutomatically: true });
+      setCallObject(callObject);
+      const connectionUrl = 'http://192.168.1.16:7860/connect'
+      const res = await fetch(connectionUrl, { method: "POST", headers: { "Content-Type": "application/json" } });
+      const roomInfo = await res.json();
+      await callObject.join({ url: roomInfo.room_url });
+    } catch (error) {
+      log(`Error connecting: ${error.message}`);
+    }
+  };
+
+  const disconnect = async () => {
+    if (callObject) {
+      try {
+        await callObject.leave();
+        await callObject.destroy();
+        setCallObject(null);
+      } catch (error) {
+        log(`Error disconnecting: ${error.message}`);
+      }
+    }
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      {inCall ? (
-        <View style={styles.inCallContainer}>
-          {remoteParticipantCount > 0 ? (
-            <DailyMediaView
-              videoTrack={videoTrack}
-              mirror={false}
-              objectFit="cover"
-              style={styles.dailyMediaView}
-            />
-          ) : (
-            <View style={styles.infoView}>
-              <Text>No one else is in the call yet!</Text>
-              <Text>Invite others to join the call using this link:</Text>
-              <Text>{roomUrl}</Text>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
+          <View style={styles.statusBar}>
+            <Text>Status: <Text style={styles.status}>{connectionStatus}</Text></Text>
+            <View style={styles.controls}>
+              <Button title="Connect" onPress={connect} disabled={isConnected} />
+              <Button title="Disconnect" onPress={disconnect} disabled={!isConnected} />
             </View>
-          )}
-          <Button
-            style={styles.controlButton}
-            onPress={() => leaveRoom()}
-            title="Leave call"
-          ></Button>
-        </View>
-      ) : (
-        <View style={styles.outCallContainer}>
-          <View style={styles.infoView}>
-            <Text>Not in a call yet</Text>
-            <TextInput
-              style={styles.roomUrlInput}
-              value={roomUrl}
-              onChangeText={(newRoomURL) => {
-                setRoomUrl(newRoomURL);
-              }}
-            />
-            <Button
-              style={styles.controlButton}
-              onPress={() => joinRoom()}
-              title="Join call"
-            ></Button>
+          </View>
+
+          <View style={styles.debugPanel}>
+            <Text style={styles.debugTitle}>Debug Info</Text>
+            <View style={styles.debugLog}>
+              <Text>Debug logs will appear here...</Text>
+              <ScrollView style={styles.debugLog}>
+                {logs.map((logEntry, index) => (
+                    <Text key={index} style={styles.logText}>{logEntry}</Text>
+                ))}
+              </ScrollView>
+            </View>
           </View>
         </View>
-      )}
-    </SafeAreaView>
+      </SafeAreaView>
   );
-}
+};
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: '#f0f0f0', padding: 20 },
+  container: { flex: 1, maxWidth: 1200, margin: 'auto' },
+  statusBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, backgroundColor: '#fff', borderRadius: 8, marginBottom: 20 },
+  status: { fontWeight: 'bold' },
+  controls: { flexDirection: 'row', gap: 10 },
+  debugPanel: { backgroundColor: '#fff', borderRadius: 8, padding: 20 },
+  debugTitle: { fontSize: 16, fontWeight: 'bold' },
+  debugLog: { height: 200, overflow: 'scroll', backgroundColor: '#f8f8f8', padding: 10, borderRadius: 4, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.4 },
+});
+
+export default CallScreen;
