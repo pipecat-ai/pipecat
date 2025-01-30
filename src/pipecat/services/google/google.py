@@ -564,23 +564,56 @@ class GoogleLLMContext(OpenAILLMContext):
         return [msg]
 
     def _restructure_from_openai_messages(self):
+        """Restructures messages to ensure proper Google format and message ordering.
+
+        This method handles conversion of OpenAI-formatted messages to Google format,
+        with special handling for function calls, function responses, and system messages.
+        System messages are added back to the context as user messages when needed.
+
+        The final message order is preserved as:
+        1. Function calls (from model)
+        2. Function responses (from user)
+        3. Text messages (converted from system messages)
+
+        Note:
+            System messages are only added back when there are no regular text
+            messages in the context, ensuring proper conversation continuity
+            after function calls.
+        """
         self.system_message = None
-        # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
-        try:
-            self._messages[:] = [
-                msg
-                for msg in (self.from_standard_message(m) for m in self._messages)
-                if msg is not None
-            ]
-            # We might have been given a messages list with only a system message. If so, let's put that back in
-            # the messages list as a user message.
-            if self.system_message and not self._messages:
-                self.add_message(
-                    glm.Content(role="user", parts=[glm.Part(text=self.system_message)])
-                )
-        except Exception as e:
-            logger.error(f"Error mapping messages: {e}")
-        # iterate over messages and remove any messages that have an empty content list
+        converted_messages = []
+
+        # Process each message, preserving Google-formatted messages and converting others
+        for message in self._messages:
+            if isinstance(message, glm.Content):
+                # Keep existing Google-formatted messages (e.g., function calls/responses)
+                converted_messages.append(message)
+                continue
+
+            # Convert OpenAI format to Google format, system messages return None
+            converted = self.from_standard_message(message)
+            if converted is not None:
+                converted_messages.append(converted)
+
+        # Update message list
+        self._messages[:] = converted_messages
+
+        # Check if we only have function-related messages (no regular text)
+        has_regular_messages = any(
+            len(msg.parts) == 1
+            and hasattr(msg.parts[0], "text")
+            and not hasattr(msg.parts[0], "function_call")
+            and not hasattr(msg.parts[0], "function_response")
+            for msg in self._messages
+        )
+
+        # Add system message back as a user message if we only have function messages
+        if self.system_message and not has_regular_messages:
+            self._messages.append(
+                glm.Content(role="user", parts=[glm.Part(text=self.system_message)])
+            )
+
+        # Remove any empty messages
         self._messages = [m for m in self._messages if m.parts]
 
 
