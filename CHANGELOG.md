@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Improved the language checking logic in `ElevenLabsTTSService` and
+  `ElevenLabsHttpTTSService` to properly handle language codes based on model
+  compatibility, with appropriate warnings when language codes cannot be
+  applied.
+
 - Updated `GoogleLLMContext` to support pushing `LLMMessagesUpdateFrame`s that
   contain a combination of function calls, function call responses, system
   messages, or just messages.
