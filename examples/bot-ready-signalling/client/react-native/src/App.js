@@ -30,7 +30,26 @@ const CallScreen = () => {
       setIsConnected(false);
       log('Client disconnected');
     });
+    callObject.on("participant-left", () => {
+      // When the bot leaves, we are also disconnecting from the call
+      disconnect().catch((err) => {
+        log(`Failed to disconnect ${err}`);
+      })
+    });
     callObject.on("error", (evt) => log(`Error: ${evt.error}`));
+    // Other events just for awareness
+    callObject.on("track-started", (evt) => {
+      handleEventToConsole(evt)
+      log("Will send the audio message to play the audio at the next tick")
+      callObject.sendAppMessage("playable")
+    });
+    callObject.on("track-stopped", handleEventToConsole);
+    callObject.on("participant-joined", handleEventToConsole);
+    callObject.on("participant-updated", handleEventToConsole);
+  };
+
+  const handleEventToConsole = (evt) => {
+    log(`Received event: ${evt.action}`);
   };
 
   const connect = async () => {
@@ -72,7 +91,6 @@ const CallScreen = () => {
           <View style={styles.debugPanel}>
             <Text style={styles.debugTitle}>Debug Info</Text>
             <View style={styles.debugLog}>
-              <Text>Debug logs will appear here...</Text>
               <ScrollView style={styles.debugLog}>
                 {logs.map((logEntry, index) => (
                     <Text key={index} style={styles.logText}>{logEntry}</Text>
