@@ -41,7 +41,7 @@ class ProtobufFrameSerializer(FrameSerializer):
     def type(self) -> FrameSerializerType:
         return FrameSerializerType.BINARY
 
-    def serialize(self, frame: Frame) -> str | bytes | None:
+    async def serialize(self, frame: Frame) -> str | bytes | None:
         proto_frame = frame_protos.Frame()
         if type(frame) not in self.SERIALIZABLE_TYPES:
             logger.warning(f"Frame type {type(frame)} is not serializable")
@@ -57,26 +57,7 @@ class ProtobufFrameSerializer(FrameSerializer):
 
         return proto_frame.SerializeToString()
 
-    def deserialize(self, data: str | bytes) -> Frame | None:
-        """Returns a Frame object from a Frame protobuf.
-
-        Used to convert frames
-        passed over the wire as protobufs to Frame objects used in pipelines
-        and frame processors.
-
-        >>> serializer = ProtobufFrameSerializer()
-        >>> serializer.deserialize(
-        ...     serializer.serialize(OutputAudioFrame(data=b'1234567890')))
-        InputAudioFrame(data=b'1234567890')
-
-        >>> serializer.deserialize(
-        ...     serializer.serialize(TextFrame(text='hello world')))
-        TextFrame(text='hello world')
-
-        >>> serializer.deserialize(serializer.serialize(TranscriptionFrame(
-        ...     text="Hello there!", participantId="123", timestamp="2021-01-01")))
-        TranscriptionFrame(text='Hello there!', participantId='123', timestamp='2021-01-01')
-        """
+    async def deserialize(self, data: str | bytes) -> Frame | None:
         proto = frame_protos.Frame.FromString(data)
         which = proto.WhichOneof("frame")
         if which not in self.DESERIALIZABLE_FIELDS:

@@ -1544,6 +1544,9 @@ async def on_connected(processor):
 
 ### Changed
 
+- `FrameSerializer.serialize()` and `FrameSerializer.deserialize()` are now
+  `async`.
+
 - `Filter` has been renamed to `FrameFilter` and it's now under
   `processors/filters`.
 

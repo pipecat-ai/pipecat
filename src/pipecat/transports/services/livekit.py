@@ -385,7 +385,9 @@ class LiveKitInputTransport(BaseInputTransport):
             audio_data = await self._client.get_next_audio_frame()
             if audio_data:
                 audio_frame_event, participant_id = audio_data
-                pipecat_audio_frame = self._convert_livekit_audio_to_pipecat(audio_frame_event)
+                pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
+                    audio_frame_event
+                )
                 input_audio_frame = InputAudioRawFrame(
                     audio=pipecat_audio_frame.audio,
                     sample_rate=pipecat_audio_frame.sample_rate,
@@ -393,12 +395,12 @@ class LiveKitInputTransport(BaseInputTransport):
                 )
                 await self.push_audio_frame(input_audio_frame)
 
-    def _convert_livekit_audio_to_pipecat(
+    async def _convert_livekit_audio_to_pipecat(
         self, audio_frame_event: rtc.AudioFrameEvent
     ) -> AudioRawFrame:
         audio_frame = audio_frame_event.frame
 
-        audio_data = self._resampler.resample(
+        audio_data = await self._resampler.resample(
             audio_frame.data.tobytes(), audio_frame.sample_rate, self._params.audio_in_sample_rate
         )
 
