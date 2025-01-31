@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import time
+
 from pipecat.audio.utils import create_default_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -12,6 +14,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
+    StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -40,6 +43,9 @@ class AudioBufferProcessor(FrameProcessor):
 
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
+
+        self._last_user_frame_at = 0
+        self._last_bot_frame_at = 0
 
         self._resampler = create_default_resampler()
 
@@ -72,27 +78,34 @@ class AudioBufferProcessor(FrameProcessor):
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
 
+        self._last_user_frame_at = time.time()
+        self._last_bot_frame_at = time.time()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        # Include all audio from the user.
+        if isinstance(frame, StartFrame):
+            self._last_user_frame_at = time.time()
+            self._last_bot_frame_at = time.time()
+
         if isinstance(frame, InputAudioRawFrame):
+            # Add silence if we need to.
+            silence = self._compute_silence(self._last_user_frame_at)
+            self._user_audio_buffer.extend(silence)
+            # Add user audio.
             resampled = await self._resample_audio(frame)
             self._user_audio_buffer.extend(resampled)
-            # Sync the bot's buffer to the user's buffer by adding silence if needed.
-            if len(self._user_audio_buffer) > len(self._bot_audio_buffer):
-                missing = len(self._user_audio_buffer) - len(self._bot_audio_buffer)
-                silence = b"\x00" * missing
-                self._bot_audio_buffer.extend(silence)
-        # If the bot is speaking, include all audio from the bot.
+            # Save time of frame so we can compute silence.
+            self._last_user_frame_at = time.time()
         elif isinstance(frame, OutputAudioRawFrame):
+            # Add silence if we need to.
+            silence = self._compute_silence(self._last_bot_frame_at)
+            self._bot_audio_buffer.extend(silence)
+            # Add bot audio.
             resampled = await self._resample_audio(frame)
             self._bot_audio_buffer.extend(resampled)
-            # Sync the user's buffer to the bot's buffer by adding silence if needed.
-            if len(self._bot_audio_buffer) > len(self._user_audio_buffer):
-                missing = len(self._bot_audio_buffer) - len(self._user_audio_buffer)
-                silence = b"\x00" * missing
-                self._user_audio_buffer.extend(silence)
+            # Save time of frame so we can compute silence.
+            self._last_bot_frame_at = time.time()
 
         if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
             await self._call_on_audio_data_handler()
@@ -117,3 +130,14 @@ class AudioBufferProcessor(FrameProcessor):
 
     async def _resample_audio(self, frame: AudioRawFrame) -> bytes:
         return await self._resampler.resample(frame.audio, frame.sample_rate, self._sample_rate)
+
+    def _compute_silence(self, from_time: float) -> bytes:
+        quiet_time = time.time() - from_time
+        # We should get audio frames very frequently. We pick 100ms because
+        # that's big enough, but it could be even a bit slower since we usually
+        # do 20ms audio frames.
+        if from_time == 0 or quiet_time < 0.1:
+            return b""
+        num_bytes = int(quiet_time * self._sample_rate) * 2
+        silence = b"\x00" * num_bytes
+        return silence
