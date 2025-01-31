@@ -6,7 +6,6 @@
 
 import base64
 import json
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -58,11 +57,11 @@ class TelnyxFrameSerializer(FrameSerializer):
             data = frame.audio
 
             if self._params.inbound_encoding == "PCMU":
-                serialized_data = pcm_to_ulaw(
+                serialized_data = await pcm_to_ulaw(
                     data, frame.sample_rate, self._params.telnyx_sample_rate, self._resampler
                 )
             elif self._params.inbound_encoding == "PCMA":
-                serialized_data = pcm_to_alaw(
+                serialized_data = await pcm_to_alaw(
                     data, frame.sample_rate, self._params.telnyx_sample_rate, self._resampler
                 )
             else:
@@ -88,14 +87,14 @@ class TelnyxFrameSerializer(FrameSerializer):
             payload = base64.b64decode(payload_base64)
 
             if self._params.outbound_encoding == "PCMU":
-                deserialized_data = ulaw_to_pcm(
+                deserialized_data = await ulaw_to_pcm(
                     payload,
                     self._params.telnyx_sample_rate,
                     self._params.sample_rate,
                     self._resampler,
                 )
             elif self._params.outbound_encoding == "PCMA":
-                deserialized_data = alaw_to_pcm(
+                deserialized_data = await alaw_to_pcm(
                     payload,
                     self._params.telnyx_sample_rate,
                     self._params.sample_rate,

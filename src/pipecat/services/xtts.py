@@ -163,7 +163,7 @@ class XTTSService(TTSService):
                         buffer = buffer[48000:]
 
                         # XTTS uses 24000 so we need to resample to our desired rate.
-                        resampled_audio = self._resampler.resample(
+                        resampled_audio = await self._resampler.resample(
                             bytes(process_data), 24000, self._sample_rate
                         )
                         # Create the frame with the resampled audio
@@ -172,7 +172,9 @@ class XTTSService(TTSService):
 
             # Process any remaining data in the buffer.
             if len(buffer) > 0:
-                resampled_audio = self._resampler.resample(bytes(buffer), 24000, self._sample_rate)
+                resampled_audio = await self._resampler.resample(
+                    bytes(buffer), 24000, self._sample_rate
+                )
                 frame = TTSAudioRawFrame(resampled_audio, self._sample_rate, 1)
                 yield frame
 

@@ -91,19 +91,21 @@ def exp_smoothing(value: float, prev_value: float, factor: float) -> float:
     return prev_value + factor * (value - prev_value)
 
 
-def ulaw_to_pcm(ulaw_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler):
+async def ulaw_to_pcm(
+    ulaw_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler
+):
     # Convert μ-law to PCM
     in_pcm_bytes = audioop.ulaw2lin(ulaw_bytes, 2)
 
     # Resample
-    out_pcm_bytes = resampler.resample(in_pcm_bytes, in_rate, out_rate)
+    out_pcm_bytes = await resampler.resample(in_pcm_bytes, in_rate, out_rate)
 
     return out_pcm_bytes
 
 
-def pcm_to_ulaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler):
+async def pcm_to_ulaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler):
     # Resample
-    in_pcm_bytes = resampler.resample(pcm_bytes, in_rate, out_rate)
+    in_pcm_bytes = await resampler.resample(pcm_bytes, in_rate, out_rate)
 
     # Convert PCM to μ-law
     ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)
@@ -111,21 +113,21 @@ def pcm_to_ulaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAu
     return ulaw_bytes
 
 
-def alaw_to_pcm(
+async def alaw_to_pcm(
     alaw_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler
 ) -> bytes:
     # Convert a-law to PCM
     in_pcm_bytes = audioop.alaw2lin(alaw_bytes, 2)
 
     # Resample
-    out_pcm_bytes = resampler.resample(in_pcm_bytes, in_rate, out_rate)
+    out_pcm_bytes = await resampler.resample(in_pcm_bytes, in_rate, out_rate)
 
     return out_pcm_bytes
 
 
-def pcm_to_alaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler):
+async def pcm_to_alaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler):
     # Resample
-    in_pcm_bytes = resampler.resample(pcm_bytes, in_rate, out_rate)
+    in_pcm_bytes = await resampler.resample(pcm_bytes, in_rate, out_rate)
 
     # Convert PCM to μ-law
     alaw_bytes = audioop.lin2alaw(in_pcm_bytes, 2)

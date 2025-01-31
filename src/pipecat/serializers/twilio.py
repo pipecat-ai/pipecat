@@ -45,7 +45,7 @@ class TwilioFrameSerializer(FrameSerializer):
         elif isinstance(frame, AudioRawFrame):
             data = frame.audio
 
-            serialized_data = pcm_to_ulaw(
+            serialized_data = await pcm_to_ulaw(
                 data, frame.sample_rate, self._params.twilio_sample_rate, self._resampler
             )
             payload = base64.b64encode(serialized_data).decode("utf-8")
@@ -66,7 +66,7 @@ class TwilioFrameSerializer(FrameSerializer):
             payload_base64 = message["media"]["payload"]
             payload = base64.b64decode(payload_base64)
 
-            deserialized_data = ulaw_to_pcm(
+            deserialized_data = await ulaw_to_pcm(
                 payload, self._params.twilio_sample_rate, self._params.sample_rate, self._resampler
             )
             audio_frame = InputAudioRawFrame(

@@ -195,10 +195,7 @@ class PollyTTSService(TTSService):
             response = self._polly_client.synthesize_speech(**args)
             if "AudioStream" in response:
                 audio_data = response["AudioStream"].read()
-                resampled = self._resampler.resample(
-                    audio_data, 16000, self._settings["sample_rate"]
-                )
-                return resampled
+                return audio_data
             return None
 
         logger.debug(f"Generating TTS: [{text}]")
@@ -228,6 +225,10 @@ class PollyTTSService(TTSService):
                 logger.error(f"{self} No audio data returned")
                 yield None
                 return
+
+            audio_data = await self._resampler.resample(
+                audio_data, 16000, self._settings["sample_rate"]
+            )
 
             await self.start_tts_usage_metrics(text)
 
