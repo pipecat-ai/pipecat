@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Added `organization` and `project` level authentication to
+  `OpenAILLMService`.
+
 - Improved the language checking logic in `ElevenLabsTTSService` and
   `ElevenLabsHttpTTSService` to properly handle language codes based on model
   compatibility, with appropriate warnings when language codes cannot be
