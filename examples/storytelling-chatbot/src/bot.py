@@ -51,8 +51,8 @@ async def main(room_url, token=None):
             DailyParams(
                 audio_out_enabled=True,
                 camera_out_enabled=True,
-                camera_out_width=768,
-                camera_out_height=768,
+                camera_out_width=1024,
+                camera_out_height=1024,
                 transcription_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_enabled=True,
@@ -69,16 +69,7 @@ async def main(room_url, token=None):
             api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID")
         )
 
-        fal_service_params = FalImageGenService.InputParams(
-            image_size={"width": 768, "height": 768}
-        )
-
-        fal_service = FalImageGenService(
-            aiohttp_session=session,
-            model="fal-ai/stable-diffusion-v35-medium",
-            params=fal_service_params,
-            key=os.getenv("FAL_KEY"),
-        )
+        image_gen = GoogleImageGenService(api_key=os.getenv("GOOGLE_API_KEY"))
 
         # --------------- Setup ----------------- #
 
@@ -92,14 +83,13 @@ async def main(room_url, token=None):
         # -------------- Processors ------------- #
 
         story_processor = StoryProcessor(message_history, story_pages)
-        image_processor = StoryImageProcessor(fal_service)
+        image_processor = StoryImageProcessor(image_gen)
 
         # -------------- Story Loop ------------- #
 
         runner = PipelineRunner()
 
         logger.debug("Waiting for participant...")
-
         main_pipeline = Pipeline(
             [
                 transport.input(),
@@ -119,7 +109,6 @@ async def main(room_url, token=None):
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
             ),
         )
 
