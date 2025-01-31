@@ -94,7 +94,7 @@ class TavusVideoService(AIService):
     async def _encode_audio_and_send(self, audio: bytes, in_rate: int, done: bool) -> None:
         """Encodes audio to base64 and sends it to Tavus"""
         if not done:
-            audio = self._resampler.resample(audio, in_rate, 16000)
+            audio = await self._resampler.resample(audio, in_rate, 16000)
         audio_base64 = base64.b64encode(audio).decode("utf-8")
         logger.trace(f"{self}: sending {len(audio)} bytes")
         await self._send_audio_message(audio_base64, done=done)

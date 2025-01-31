@@ -13,7 +13,7 @@ class BaseAudioResampler(ABC):
     """
 
     @abstractmethod
-    def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
+    async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:
         """
         Resamples the given audio data to a different sample rate.
 
