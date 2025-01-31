@@ -72,6 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `AudioBufferProcessor` where user callback would not be
   called on task cancellation.
 
+- Fixed an issue in `AudioBufferProcessor` that would cause wrong silence
+  padding in some cases.
+
 - Fixed an issue where `ElevenLabsTTSService` messages would return a 1009
   websocket error by increasing the max message size limit to 16MB.
 

@@ -79,14 +79,20 @@ class AudioBufferProcessor(FrameProcessor):
         if isinstance(frame, InputAudioRawFrame):
             resampled = self._resample_audio(frame)
             self._user_audio_buffer.extend(resampled)
-            # Sync the bot's buffer to the user's buffer by adding silence if needed
+            # Sync the bot's buffer to the user's buffer by adding silence if needed.
             if len(self._user_audio_buffer) > len(self._bot_audio_buffer):
-                silence = b"\x00" * len(resampled)
+                missing = len(self._user_audio_buffer) - len(self._bot_audio_buffer)
+                silence = b"\x00" * missing
                 self._bot_audio_buffer.extend(silence)
         # If the bot is speaking, include all audio from the bot.
         elif isinstance(frame, OutputAudioRawFrame):
             resampled = self._resample_audio(frame)
             self._bot_audio_buffer.extend(resampled)
+            # Sync the user's buffer to the bot's buffer by adding silence if needed.
+            if len(self._bot_audio_buffer) > len(self._user_audio_buffer):
+                missing = len(self._bot_audio_buffer) - len(self._user_audio_buffer)
+                silence = b"\x00" * missing
+                self._user_audio_buffer.extend(silence)
 
         if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
             await self._call_on_audio_data_handler()
