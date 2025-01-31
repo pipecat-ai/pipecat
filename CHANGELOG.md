@@ -69,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `AudioBufferProcessor` that would cause crackling in some recordings.
+
 - Fixed an issue in `AudioBufferProcessor` where user callback would not be
   called on task cancellation.
 
