@@ -5,22 +5,32 @@
 #
 
 import asyncio
+import gc
 import signal
+from typing import Optional
 
 from loguru import logger
 
 from pipecat.pipeline.task import PipelineTask
-from pipecat.utils.asyncio import current_tasks
 from pipecat.utils.utils import obj_count, obj_id
 
 
 class PipelineRunner:
-    def __init__(self, *, name: str | None = None, handle_sigint: bool = True):
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        handle_sigint: bool = True,
+        force_gc: bool = False,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+    ):
         self.id: int = obj_id()
         self.name: str = name or f"{self.__class__.__name__}#{obj_count(self)}"
 
         self._tasks = {}
         self._sig_task = None
+        self._force_gc = force_gc
+        self._loop = loop or asyncio.get_running_loop()
 
         if handle_sigint:
             self._setup_sigint()
@@ -28,13 +38,15 @@ class PipelineRunner:
     async def run(self, task: PipelineTask):
         logger.debug(f"Runner {self} started running {task}")
         self._tasks[task.name] = task
+        task.set_event_loop(self._loop)
         await task.run()
         del self._tasks[task.name]
         # If we are cancelling through a signal, make sure we wait for it so
         # everything gets cleaned up nicely.
         if self._sig_task:
             await self._sig_task
-        self._print_dangling_tasks()
+        if self._force_gc:
+            self._gc_collect()
         logger.debug(f"Runner {self} finished running {task}")
 
     async def stop_when_done(self):
@@ -58,10 +70,10 @@ class PipelineRunner:
         logger.warning(f"Interruption detected. Canceling runner {self}")
         await self.cancel()
 
-    def _print_dangling_tasks(self):
-        tasks = [t.get_name() for t in current_tasks()]
-        if tasks:
-            logger.warning(f"Dangling tasks detected: {tasks}")
+    def _gc_collect(self):
+        collected = gc.collect()
+        logger.debug(f"Garbage collector: collected {collected} objects.")
+        logger.debug(f"Garbage collector: uncollectable objects {gc.garbage}")
 
     def __str__(self):
         return self.name

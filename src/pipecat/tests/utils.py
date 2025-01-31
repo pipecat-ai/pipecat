@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.asyncio import TaskManager
 
 
 @dataclass
@@ -54,9 +55,12 @@ class QueuedFrameProcessor(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+
         if self._ignore_start and isinstance(frame, StartFrame):
-            return
-        await self._queue.put(frame)
+            await self.push_frame(frame, direction)
+        else:
+            await self._queue.put(frame)
+            await self.push_frame(frame, direction)
 
 
 async def run_test(
@@ -67,13 +71,15 @@ async def run_test(
 ) -> Tuple[Sequence[Frame], Sequence[Frame]]:
     received_up = asyncio.Queue()
     received_down = asyncio.Queue()
-    up_processor = QueuedFrameProcessor(received_up)
-    down_processor = QueuedFrameProcessor(received_down)
+    source = QueuedFrameProcessor(received_up)
+    sink = QueuedFrameProcessor(received_down)
 
-    up_processor.link(processor)
-    processor.link(down_processor)
+    source.link(processor)
+    processor.link(sink)
 
-    await processor.queue_frame(StartFrame(clock=SystemClock()))
+    task_manager = TaskManager()
+    task_manager.set_event_loop(asyncio.get_event_loop())
+    await source.queue_frame(StartFrame(clock=SystemClock(), task_manager=task_manager))
 
     for frame in frames_to_send:
         await processor.process_frame(frame, FrameDirection.DOWNSTREAM)

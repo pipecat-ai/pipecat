@@ -51,13 +51,11 @@ class BaseTransport(ABC):
         name: Optional[str] = None,
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
-        loop: Optional[asyncio.AbstractEventLoop] = None,
     ):
         self._id: int = obj_id()
         self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
         self._input_name = input_name
         self._output_name = output_name
-        self._loop = loop or asyncio.get_running_loop()
         self._event_handlers: dict = {}
 
     @property

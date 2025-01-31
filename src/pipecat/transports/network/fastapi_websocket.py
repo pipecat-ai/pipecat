@@ -29,7 +29,6 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import cancel_task
 
 try:
     from fastapi import WebSocket
@@ -77,11 +76,11 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
-        await cancel_task(self._receive_task)
+        await self.cancel_task(self._receive_task)
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
-        await cancel_task(self._receive_task)
+        await self.cancel_task(self._receive_task)
 
     def _iter_data(self) -> typing.AsyncIterator[bytes | str]:
         if self._params.serializer.type == FrameSerializerType.BINARY:
@@ -90,16 +89,19 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
             return self._websocket.iter_text()
 
     async def _receive_messages(self):
-        async for message in self._iter_data():
-            frame = self._params.serializer.deserialize(message)
+        try:
+            async for message in self._iter_data():
+                frame = self._params.serializer.deserialize(message)
 
-            if not frame:
-                continue
+                if not frame:
+                    continue
 
-            if isinstance(frame, InputAudioRawFrame):
-                await self.push_audio_frame(frame)
-            else:
-                await self.push_frame(frame)
+                if isinstance(frame, InputAudioRawFrame):
+                    await self.push_audio_frame(frame)
+                else:
+                    await self.push_frame(frame)
+        except Exception as e:
+            logger.error(f"{self} exception receiving data (class: {e.__class__.__name__})")
 
         await self._callbacks.on_client_disconnected(self._websocket)
 
@@ -160,9 +162,12 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         await self._write_audio_sleep()
 
     async def _write_frame(self, frame: Frame):
-        payload = self._params.serializer.serialize(frame)
-        if payload and self._websocket.client_state == WebSocketState.CONNECTED:
-            await self._send_data(payload)
+        try:
+            payload = self._params.serializer.serialize(frame)
+            if payload and self._websocket.client_state == WebSocketState.CONNECTED:
+                await self._send_data(payload)
+        except Exception as e:
+            logger.error(f"{self} exception sending data (class: {e.__class__.__name__})")
 
     def _send_data(self, data: str | bytes):
         if self._params.serializer.type == FrameSerializerType.BINARY:
@@ -188,9 +193,8 @@ class FastAPIWebsocketTransport(BaseTransport):
         params: FastAPIWebsocketParams,
         input_name: str | None = None,
         output_name: str | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
     ):
-        super().__init__(input_name=input_name, output_name=output_name, loop=loop)
+        super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 
         self._callbacks = FastAPIWebsocketCallbacks(
