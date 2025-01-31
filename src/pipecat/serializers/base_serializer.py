@@ -22,9 +22,9 @@ class FrameSerializer(ABC):
         pass
 
     @abstractmethod
-    def serialize(self, frame: Frame) -> str | bytes | None:
+    async def serialize(self, frame: Frame) -> str | bytes | None:
         pass
 
     @abstractmethod
-    def deserialize(self, data: str | bytes) -> Frame | None:
+    async def deserialize(self, data: str | bytes) -> Frame | None:
         pass

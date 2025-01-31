@@ -38,7 +38,7 @@ class TwilioFrameSerializer(FrameSerializer):
     def type(self) -> FrameSerializerType:
         return FrameSerializerType.TEXT
 
-    def serialize(self, frame: Frame) -> str | bytes | None:
+    async def serialize(self, frame: Frame) -> str | bytes | None:
         if isinstance(frame, StartInterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
@@ -59,7 +59,7 @@ class TwilioFrameSerializer(FrameSerializer):
         elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
             return json.dumps(frame.message)
 
-    def deserialize(self, data: str | bytes) -> Frame | None:
+    async def deserialize(self, data: str | bytes) -> Frame | None:
         message = json.loads(data)
 
         if message["event"] == "media":

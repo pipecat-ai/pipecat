@@ -53,7 +53,7 @@ class TelnyxFrameSerializer(FrameSerializer):
     def type(self) -> FrameSerializerType:
         return FrameSerializerType.TEXT
 
-    def serialize(self, frame: Frame) -> str | bytes | None:
+    async def serialize(self, frame: Frame) -> str | bytes | None:
         if isinstance(frame, AudioRawFrame):
             data = frame.audio
 
@@ -80,7 +80,7 @@ class TelnyxFrameSerializer(FrameSerializer):
             answer = {"event": "clear"}
             return json.dumps(answer)
 
-    def deserialize(self, data: str | bytes) -> Frame | None:
+    async def deserialize(self, data: str | bytes) -> Frame | None:
         message = json.loads(data)
 
         if message["event"] == "media":
