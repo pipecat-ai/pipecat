@@ -764,11 +764,11 @@ class RTVIProcessor(FrameProcessor):
 
         # A task to process incoming action frames.
         self._action_queue = asyncio.Queue()
-        self._action_task = self.create_task(self._action_task_handler())
+        self._action_task: Optional[asyncio.Task] = None
 
         # A task to process incoming transport messages.
         self._message_queue = asyncio.Queue()
-        self._message_task = self.create_task(self._message_task_handler())
+        self._message_task: Optional[asyncio.Task] = None
 
         self._register_event_handler("on_bot_started")
         self._register_event_handler("on_client_ready")
@@ -863,6 +863,8 @@ class RTVIProcessor(FrameProcessor):
             await self._pipeline.cleanup()
 
     async def _start(self, frame: StartFrame):
+        self._action_task = self.create_task(self._action_task_handler())
+        self._message_task = self.create_task(self._message_task_handler())
         await self._call_event_handler("on_bot_started")
 
     async def _stop(self, frame: EndFrame):
