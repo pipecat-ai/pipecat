@@ -4,8 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from pipecat.audio.utils import interleave_stereo_audio, mix_audio, resample_audio
+from pipecat.audio.utils import create_default_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
+    AudioRawFrame,
+    CancelFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -38,6 +40,8 @@ class AudioBufferProcessor(FrameProcessor):
 
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
+
+        self._resampler = create_default_resampler()
 
         self._register_event_handler("on_audio_data")
 
@@ -73,7 +77,7 @@ class AudioBufferProcessor(FrameProcessor):
 
         # Include all audio from the user.
         if isinstance(frame, InputAudioRawFrame):
-            resampled = resample_audio(frame.audio, frame.sample_rate, self._sample_rate)
+            resampled = self._resample_audio(frame)
             self._user_audio_buffer.extend(resampled)
             # Sync the bot's buffer to the user's buffer by adding silence if needed
             if len(self._user_audio_buffer) > len(self._bot_audio_buffer):
@@ -81,7 +85,7 @@ class AudioBufferProcessor(FrameProcessor):
                 self._bot_audio_buffer.extend(silence)
         # If the bot is speaking, include all audio from the bot.
         elif isinstance(frame, OutputAudioRawFrame):
-            resampled = resample_audio(frame.audio, frame.sample_rate, self._sample_rate)
+            resampled = self._resample_audio(frame)
             self._bot_audio_buffer.extend(resampled)
 
         if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
@@ -104,3 +108,6 @@ class AudioBufferProcessor(FrameProcessor):
 
     def _buffer_has_audio(self, buffer: bytearray) -> bool:
         return buffer is not None and len(buffer) > 0
+
+    def _resample_audio(self, frame: AudioRawFrame) -> bytes:
+        return self._resampler.resample(frame.audio, frame.sample_rate, self._sample_rate)

@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable, List, Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import resample_audio
+from pipecat.audio.utils import create_default_resampler
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -349,6 +349,7 @@ class LiveKitInputTransport(BaseInputTransport):
         self._client = client
         self._audio_in_task = None
         self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
+        self._resampler = create_default_resampler()
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -397,7 +398,7 @@ class LiveKitInputTransport(BaseInputTransport):
     ) -> AudioRawFrame:
         audio_frame = audio_frame_event.frame
 
-        audio_data = resample_audio(
+        audio_data = self._resampler.resample(
             audio_frame.data.tobytes(), audio_frame.sample_rate, self._params.audio_in_sample_rate
         )
 

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Introduce audio resamplers (`BaseAudioResampler`). This is just a base class
+  to implement audio resamplers. Currently, two implementations are provided
+  `SOXRAudioResampler` and `ResampyResampler`. A new
+  `create_default_resampler()` has been added (replacing the now deprecated
+  `resample_audio()`).
+
 - It is now possible to specify the asyncio event loop that a `PipelineTask` and
   all the processors should run on by passing it as a new argument to the
   `PipelineRunner`. This could allow running pipelines in multiple threads each
@@ -55,6 +61,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `InputDTMFFrame` is now based on `DTMFFrame`. There's also a new
   `OutputDTMFFrame` frame.
+
+### Deprecated
+
+- `resample_audio()` is now deprecated, use `create_default_resampler()`
+  instead.
 
 ### Fixed
 
