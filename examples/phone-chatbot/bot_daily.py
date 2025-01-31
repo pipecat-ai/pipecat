@@ -125,7 +125,7 @@ async def main(
 
             #### **Step 2: Leave a Voicemail Message**
             - Immediately say:  
-            *"Hello, this is a message for Pipecat example user. This is the customer support team from the countries number one e-commerce site ringing about your order. Please call back on 123-456-7891. Thank you."*
+            *"Hello, this is a message for Pipecat example user. This is the customer support team from the country's number one e-commerce site ringing about your order. Please call back on 123-456-7891. Thank you."*
             - **IMMEDIATELY AFTER LEAVING THE MESSAGE, CALL `terminate_call`.**
             - **DO NOT SPEAK AFTER CALLING `terminate_call`.**
             - **FAILURE TO CALL `terminate_call` IMMEDIATELY IS A MISTAKE.**
