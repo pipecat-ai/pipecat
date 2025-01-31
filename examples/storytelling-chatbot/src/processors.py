@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
     LLMMessagesFrame,
+    MetadataFrame,
     TextFrame,
     UserStoppedSpeakingFrame,
 )
@@ -154,6 +155,7 @@ class StoryProcessor(FrameProcessor):
         # Driven by the prompt, the LLM should have asked the user for input
         elif isinstance(frame, LLMFullResponseEndFrame):
             # We use a different frame type, as to avoid image generation ingest
+            await self.push_frame(MetadataFrame())
             await self.push_frame(StoryPromptFrame(self._text))
             self._text = ""
             await self.push_frame(frame)
@@ -193,6 +195,10 @@ class StoryProcessor(FrameProcessor):
 
                 if len(before_break) > 2:
                     self._story.append(before_break)
+                    mf = MetadataFrame()
+                    mf.metadata = {"story_page_id": self._current_page}
+                    await self.push_frame(mf)
+
                     spf = StoryPageFrame(before_break)
                     spf.metadata["story_page_id"] = self._current_page
                     self._current_page += 1

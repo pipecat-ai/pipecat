@@ -91,6 +91,13 @@ class ControlFrame(Frame):
     pass
 
 
+@dataclass
+class MetadataFrame(ControlFrame):
+    """Used to set default metadata for downstream processors to apply to newly
+    created frames such as a frame_group_id.
+    """
+
+
 #
 # Mixins
 #

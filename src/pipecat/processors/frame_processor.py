@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     ErrorFrame,
     Frame,
+    MetadataFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -228,7 +229,7 @@ class FrameProcessor:
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         # System frames skip the queue and blow up determinism
-        if not isinstance(frame, SystemFrame):
+        if isinstance(frame, MetadataFrame):
             self._input_frame_metadata = frame.metadata
             # print(
             #     f"!!! PROCESS: I am {self._name}, input frame is a {frame.name}, metadata is {self._input_frame_metadata}"

@@ -17,13 +17,25 @@ from prompts import CUE_USER_TURN, LLM_BASE_PROMPT
 from utils.helpers import load_images, load_sounds
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, Frame, ImageRawFrame, TextFrame
+from pipecat.frames.frames import (
+    AudioRawFrame,
+    EndFrame,
+    Frame,
+    ImageRawFrame,
+    MetadataFrame,
+    SystemFrame,
+    TextFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+)
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.logger import FrameLogger
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.services.google import GoogleImageGenService, GoogleLLMService
@@ -84,6 +96,18 @@ class DebugObserver(BaseObserver):
             logger.info(
                 f"⚡ TEXT FRAME: {src} {arrow} {dst} at {time_sec:.2f}s, metadata: {frame.metadata}"
             )
+        elif isinstance(frame, TTSStartedFrame):
+            logger.info(
+                f"⚡ TTS STARTED FRAME: {src} {arrow} {dst} at {time_sec:.2f}s, metadata: {frame.metadata}"
+            )
+        elif isinstance(frame, TTSStoppedFrame):
+            logger.info(
+                f"⚡ TTS STOPPED FRAME: {src} {arrow} {dst} at {time_sec:.2f}s, metadata: {frame.metadata}"
+            )
+        elif isinstance(frame, MetadataFrame):
+            logger.info(
+                f"⚡ METADATA FRAME: {src} {arrow} {dst} at {time_sec:.2f}s, metadata: {frame.metadata}"
+            )
 
 
 async def main(room_url, token=None):
@@ -136,13 +160,18 @@ async def main(room_url, token=None):
         runner = PipelineRunner()
 
         logger.debug("Waiting for participant...")
+        after = FrameLogger("After", "red", ignored_frame_types=[SystemFrame, AudioRawFrame])
+        before = FrameLogger("Before", "cyan", ignored_frame_types=[SystemFrame, AudioRawFrame])
         main_pipeline = Pipeline(
             [
                 transport.input(),
                 context_aggregator.user(),
                 llm_service,
                 story_processor,
+                # SyncParallelPipeline([image_processor], [tts_service]),
+                before,
                 image_processor,
+                after,
                 tts_service,
                 transport.output(),
                 context_aggregator.assistant(),
