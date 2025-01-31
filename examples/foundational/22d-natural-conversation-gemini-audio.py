@@ -455,7 +455,9 @@ class CompletenessCheck(FrameProcessor):
                 else:
                     # logger.debug("!!! CompletenessCheck idle wait START")
                     self._wakeup_time = time.time() + self.wait_time
-                    self._idle_task = self.get_event_loop().create_task(self._idle_task_handler())
+                    self._idle_task = self.create_task(self._idle_task_handler())
+        else:
+            await self.push_frame(frame, direction)
 
     async def _idle_task_handler(self):
         try:
@@ -597,7 +599,7 @@ class OutputGate(FrameProcessor):
 
     async def _start(self):
         self._frames_buffer = []
-        self._gate_task = self.get_event_loop().create_task(self._gate_task_handler())
+        self._gate_task = self.create_task(self._gate_task_handler())
 
     async def _stop(self):
         await self.cancel_task(self._gate_task)

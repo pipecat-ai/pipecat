@@ -30,7 +30,7 @@ from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio import cancel_task, create_task, wait_for_task
+from pipecat.utils.asyncio import TaskManager
 from pipecat.utils.utils import obj_count, obj_id
 
 HEARTBEAT_SECONDS = 1.0
@@ -122,7 +122,9 @@ class PipelineTask(BaseTask):
         self._sink = PipelineTaskSink(self._down_queue)
         pipeline.link(self._sink)
 
-        self._observer = TaskObserver(params.observers)
+        self._task_manager = TaskManager()
+
+        self._observer = TaskObserver(observers=params.observers, task_manager=self._task_manager)
 
     @property
     def id(self) -> int:
@@ -133,6 +135,9 @@ class PipelineTask(BaseTask):
     def name(self) -> str:
         """Returns the name of this task."""
         return self._name
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop):
+        self._task_manager.set_event_loop(loop)
 
     def has_finished(self) -> bool:
         """Indicates whether the tasks has finished. That is, all processors
@@ -159,15 +164,17 @@ class PipelineTask(BaseTask):
         # we want to cancel right away.
         await self._source.push_frame(CancelFrame())
         # Only cancel the push task. Everything else will be cancelled in run().
-        await cancel_task(self._process_push_task)
+        await self._task_manager.cancel_task(self._process_push_task)
 
     async def run(self):
         """
         Starts running the given pipeline.
         """
+        if self.has_finished():
+            return
         try:
-            push_task = self._create_tasks()
-            await wait_for_task(push_task)
+            push_task = await self._create_tasks()
+            await self._task_manager.wait_for_task(push_task)
         except asyncio.CancelledError:
             # We are awaiting on the push task and it might be cancelled
             # (e.g. Ctrl-C). This means we will get a CancelledError here as
@@ -176,6 +183,7 @@ class PipelineTask(BaseTask):
             pass
         await self._cancel_tasks()
         await self._cleanup()
+        self._print_dangling_tasks()
         self._finished = True
 
     async def queue_frame(self, frame: Frame):
@@ -195,42 +203,42 @@ class PipelineTask(BaseTask):
             for frame in frames:
                 await self.queue_frame(frame)
 
-    def _create_tasks(self):
-        loop = asyncio.get_running_loop()
-        self._process_up_task = create_task(
-            loop, self._process_up_queue(), f"{self}::_process_up_queue"
+    async def _create_tasks(self):
+        self._process_up_task = self._task_manager.create_task(
+            self._process_up_queue(), f"{self}::_process_up_queue"
         )
-        self._process_down_task = create_task(
-            loop, self._process_down_queue(), f"{self}::_process_down_queue"
+        self._process_down_task = self._task_manager.create_task(
+            self._process_down_queue(), f"{self}::_process_down_queue"
         )
-        self._process_push_task = create_task(
-            loop, self._process_push_queue(), f"{self}::_process_push_queue"
+        self._process_push_task = self._task_manager.create_task(
+            self._process_push_queue(), f"{self}::_process_push_queue"
         )
+
+        await self._observer.start()
 
         return self._process_push_task
 
     def _maybe_start_heartbeat_tasks(self):
         if self._params.enable_heartbeats:
-            loop = asyncio.get_running_loop()
-            self._heartbeat_push_task = create_task(
-                loop, self._heartbeat_push_handler(), f"{self}::_heartbeat_push_handler"
+            self._heartbeat_push_task = self._task_manager.create_task(
+                self._heartbeat_push_handler(), f"{self}::_heartbeat_push_handler"
             )
-            self._heartbeat_monitor_task = create_task(
-                loop, self._heartbeat_monitor_handler(), f"{self}::_heartbeat_monitor_handler"
+            self._heartbeat_monitor_task = self._task_manager.create_task(
+                self._heartbeat_monitor_handler(), f"{self}::_heartbeat_monitor_handler"
             )
 
     async def _cancel_tasks(self):
         await self._maybe_cancel_heartbeat_tasks()
 
-        await cancel_task(self._process_up_task)
-        await cancel_task(self._process_down_task)
+        await self._task_manager.cancel_task(self._process_up_task)
+        await self._task_manager.cancel_task(self._process_down_task)
 
         await self._observer.stop()
 
     async def _maybe_cancel_heartbeat_tasks(self):
         if self._params.enable_heartbeats:
-            await cancel_task(self._heartbeat_push_task)
-            await cancel_task(self._heartbeat_monitor_task)
+            await self._task_manager.cancel_task(self._heartbeat_push_task)
+            await self._task_manager.cancel_task(self._heartbeat_monitor_task)
 
     def _initial_metrics_frame(self) -> MetricsFrame:
         processors = self._pipeline.processors_with_metrics()
@@ -260,12 +268,13 @@ class PipelineTask(BaseTask):
         self._maybe_start_heartbeat_tasks()
 
         start_frame = StartFrame(
+            clock=self._clock,
+            task_manager=self._task_manager,
             allow_interruptions=self._params.allow_interruptions,
             enable_metrics=self._params.enable_metrics,
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             observer=self._observer,
-            clock=self._clock,
         )
         await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
 
@@ -356,6 +365,11 @@ class PipelineTask(BaseTask):
                 logger.warning(
                     f"{self}: heartbeat frame not received for more than {wait_time} seconds"
                 )
+
+    def _print_dangling_tasks(self):
+        tasks = [t.get_name() for t in self._task_manager.current_tasks()]
+        if tasks:
+            logger.warning(f"Dangling tasks detected: {tasks}")
 
     def __str__(self):
         return self.name

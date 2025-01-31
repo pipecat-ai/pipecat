@@ -78,16 +78,18 @@ class SyncParallelPipeline(BasePipeline):
             down_queue = asyncio.Queue()
             source = SyncParallelPipelineSource(up_queue)
             sink = SyncParallelPipelineSink(down_queue)
-            processors: List[FrameProcessor] = [source] + processors + [sink]
+
+            # Create pipeline
+            pipeline = Pipeline(processors)
+            source.link(pipeline)
+            pipeline.link(sink)
+            self._pipelines.append(pipeline)
 
             # Keep track of sources and sinks. We also keep the output queue of
             # the source and the sinks so we can use it later.
             self._sources.append({"processor": source, "queue": down_queue})
             self._sinks.append({"processor": sink, "queue": up_queue})
 
-            # Create pipeline
-            pipeline = Pipeline(processors)
-            self._pipelines.append(pipeline)
         logger.debug(f"Finished creating {self} pipelines")
 
     #
@@ -103,7 +105,9 @@ class SyncParallelPipeline(BasePipeline):
 
     async def cleanup(self):
         await super().cleanup()
+        await asyncio.gather(*[s["processor"].cleanup() for s in self._sources])
         await asyncio.gather(*[p.cleanup() for p in self._pipelines])
+        await asyncio.gather(*[s["processor"].cleanup() for s in self._sinks])
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

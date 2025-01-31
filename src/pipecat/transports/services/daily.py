@@ -46,7 +46,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import cancel_task, create_task
+from pipecat.utils.asyncio import TaskManager
 
 try:
     from daily import CallClient, Daily, EventHandler
@@ -179,7 +179,6 @@ class DailyTransportClient(EventHandler):
         bot_name: str,
         params: DailyParams,
         callbacks: DailyCallbacks,
-        loop: asyncio.AbstractEventLoop,
         transport_name: str,
     ):
         super().__init__()
@@ -193,7 +192,6 @@ class DailyTransportClient(EventHandler):
         self._bot_name: str = bot_name
         self._params: DailyParams = params
         self._callbacks = callbacks
-        self._loop = loop
         self._transport_name = transport_name
 
         self._participant_id: str = ""
@@ -204,6 +202,8 @@ class DailyTransportClient(EventHandler):
         self._joined = False
         self._joined_event = asyncio.Event()
         self._leave_counter = 0
+
+        self._task_manager: Optional[TaskManager] = None
 
         # We use the executor to cleanup the client. We just do it from one
         # place, so only one thread is really needed.
@@ -220,11 +220,7 @@ class DailyTransportClient(EventHandler):
         # future) we will deadlock because completions use event handlers (which
         # are holding the GIL).
         self._callback_queue = asyncio.Queue()
-        self._callback_task = create_task(
-            self._loop,
-            self._callback_task_handler(),
-            f"{self._transport_name}::DailyTransportClient::_callback_task_handler",
-        )
+        self._callback_task = None
 
         self._camera: VirtualCameraDevice | None = None
         if self._params.camera_out_enabled:
@@ -267,9 +263,6 @@ class DailyTransportClient(EventHandler):
     def participant_id(self) -> str:
         return self._participant_id
 
-    def set_callbacks(self, callbacks: DailyCallbacks):
-        self._callbacks = callbacks
-
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         if not self._joined:
             return
@@ -278,7 +271,7 @@ class DailyTransportClient(EventHandler):
         if isinstance(frame, (DailyTransportMessageFrame, DailyTransportMessageUrgentFrame)):
             participant_id = frame.participant_id
 
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.send_app_message(
             frame.message, participant_id, completion=completion_callback(future)
         )
@@ -292,7 +285,7 @@ class DailyTransportClient(EventHandler):
         num_channels = self._params.audio_in_channels
         num_frames = int(sample_rate / 100) * 2  # 20ms of audio
 
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._speaker.read_frames(num_frames, completion=completion_callback(future))
         audio = await future
 
@@ -311,7 +304,7 @@ class DailyTransportClient(EventHandler):
         if not self._mic:
             return None
 
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._mic.write_frames(frames, completion=completion_callback(future))
         await future
 
@@ -320,6 +313,14 @@ class DailyTransportClient(EventHandler):
             return None
 
         self._camera.write_frame(frame.image)
+
+    async def setup(self, frame: StartFrame):
+        if not self._task_manager:
+            self._task_manager = frame.task_manager
+            self._callback_task = self._task_manager.create_task(
+                self._callback_task_handler(),
+                f"{self}::callback_task",
+            )
 
     async def join(self):
         # Transport already joined, ignore.
@@ -370,7 +371,7 @@ class DailyTransportClient(EventHandler):
 
         logger.info(f"Enabling transcription with settings {self._params.transcription_settings}")
 
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.start_transcription(
             settings=self._params.transcription_settings.model_dump(exclude_none=True),
             completion=completion_callback(future),
@@ -381,7 +382,7 @@ class DailyTransportClient(EventHandler):
             return
 
     async def _join(self):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
 
         self._client.join(
             self._room_url,
@@ -466,24 +467,24 @@ class DailyTransportClient(EventHandler):
     async def _stop_transcription(self):
         if not self._token:
             return
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.stop_transcription(completion=completion_callback(future))
         error = await future
         if error:
             logger.error(f"Unable to stop transcription: {error}")
 
     async def _leave(self):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
         return await asyncio.wait_for(future, timeout=10)
 
     async def cleanup(self):
-        if self._callback_task:
-            await cancel_task(self._callback_task)
+        if self._callback_task and self._task_manager:
+            await self._task_manager.cancel_task(self._callback_task)
             self._callback_task = None
         # Make sure we don't block the event loop in case `client.release()`
         # takes extra time.
-        await self._loop.run_in_executor(self._executor, self._cleanup)
+        await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
 
     def _cleanup(self):
         if self._client:
@@ -497,39 +498,39 @@ class DailyTransportClient(EventHandler):
         return self._client.participant_counts()
 
     async def start_dialout(self, settings):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.start_dialout(settings, completion=completion_callback(future))
         await future
 
     async def stop_dialout(self, participant_id):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.stop_dialout(participant_id, completion=completion_callback(future))
         await future
 
     async def send_dtmf(self, settings):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.send_dtmf(settings, completion=completion_callback(future))
         await future
 
     async def sip_call_transfer(self, settings):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.sip_call_transfer(settings, completion=completion_callback(future))
         await future
 
     async def sip_refer(self, settings):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.sip_refer(settings, completion=completion_callback(future))
         await future
 
     async def start_recording(self, streaming_settings, stream_id, force_new):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.start_recording(
             streaming_settings, stream_id, force_new, completion=completion_callback(future)
         )
         await future
 
     async def stop_recording(self, stream_id):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.stop_recording(stream_id, completion=completion_callback(future))
         await future
 
@@ -537,7 +538,7 @@ class DailyTransportClient(EventHandler):
         if not self._joined:
             return
 
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.send_prebuilt_chat_message(
             message, user_name=user_name, completion=completion_callback(future)
         )
@@ -574,14 +575,14 @@ class DailyTransportClient(EventHandler):
         )
 
     async def update_transcription(self, participants=None, instance_id=None):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.update_transcription(
             participants, instance_id, completion=completion_callback(future)
         )
         await future
 
     async def update_subscriptions(self, participant_settings=None, profile_settings=None):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.update_subscriptions(
             participant_settings=participant_settings,
             profile_settings=profile_settings,
@@ -681,7 +682,7 @@ class DailyTransportClient(EventHandler):
 
     def _call_async_callback(self, callback, *args):
         future = asyncio.run_coroutine_threadsafe(
-            self._callback_queue.put((callback, *args)), self._loop
+            self._callback_queue.put((callback, *args)), self._get_event_loop()
         )
         future.result()
 
@@ -691,6 +692,14 @@ class DailyTransportClient(EventHandler):
             await self._joined_event.wait()
             (callback, *args) = await self._callback_queue.get()
             await callback(*args)
+
+    def _get_event_loop(self) -> asyncio.AbstractEventLoop:
+        if not self._task_manager:
+            raise Exception(f"{self}: missing task manager (pipeline not started?)")
+        return self._task_manager.get_event_loop()
+
+    def __str__(self):
+        return f"{self._transport_name}::DailyTransportClient"
 
 
 class DailyInputTransport(BaseInputTransport):
@@ -715,6 +724,8 @@ class DailyInputTransport(BaseInputTransport):
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
+        # Setup client.
+        await self._client.setup(frame)
         # Join the room.
         await self._client.join()
         # Create audio task. It reads audio frames from Daily and push them
@@ -837,6 +848,8 @@ class DailyOutputTransport(BaseOutputTransport):
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
+        # Setup client.
+        await self._client.setup(frame)
         # Join the room.
         await self._client.join()
 
@@ -875,9 +888,8 @@ class DailyTransport(BaseTransport):
         params: DailyParams = DailyParams(),
         input_name: str | None = None,
         output_name: str | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
     ):
-        super().__init__(input_name=input_name, output_name=output_name, loop=loop)
+        super().__init__(input_name=input_name, output_name=output_name)
 
         callbacks = DailyCallbacks(
             on_joined=self._on_joined,
@@ -905,9 +917,7 @@ class DailyTransport(BaseTransport):
         )
         self._params = params
 
-        self._client = DailyTransportClient(
-            room_url, token, bot_name, params, callbacks, self._loop, self.name
-        )
+        self._client = DailyTransportClient(room_url, token, bot_name, params, callbacks, self.name)
         self._input: DailyInputTransport | None = None
         self._output: DailyOutputTransport | None = None
 
@@ -1042,7 +1052,7 @@ class DailyTransport(BaseTransport):
             await self._output.push_error(error_frame)
         else:
             logger.error("Both input and output are None while trying to push error")
-            raise RuntimeError("No valid input or output channel to push error")
+            raise Exception("No valid input or output channel to push error")
 
     async def _on_app_message(self, message: Any, sender: str):
         if self._input:
