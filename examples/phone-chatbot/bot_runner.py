@@ -74,7 +74,13 @@ action using the Twilio Client library.
 
 
 async def _create_daily_room(
-    room_url, callId, callDomain=None, dialoutNumber=None, vendor="daily", detect_voicemail=False
+    room_url,
+    callId,
+    callDomain=None,
+    dialoutNumber=None,
+    vendor="daily",
+    detect_voicemail=False,
+    operatorNumber=None,
 ):
     if not room_url:
         # Create base properties with SIP settings
@@ -85,7 +91,7 @@ async def _create_daily_room(
         )
 
         # Only enable dialout if dialoutNumber is provided
-        if dialoutNumber:
+        if dialoutNumber or operatorNumber:
             properties.enable_dialout = True
 
         params = DailyRoomParams(properties=properties)
@@ -114,6 +120,8 @@ async def _create_daily_room(
         bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain}{' -v' if detect_voicemail else ''}"
         if dialoutNumber:
             bot_proc += f" -o {dialoutNumber}"
+        if operatorNumber:
+            bot_proc += f" -op {operatorNumber}"
     else:
         bot_proc = f"python3 -m bot_twilio -u {room.url} -t {token} -i {callId} -s {room.config.sip_endpoint}"
 
@@ -187,6 +195,7 @@ async def daily_start_bot(request: Request) -> JSONResponse:
         detect_voicemail = data.get("detectVoicemail", False)
         callId = data.get("callId", None)
         callDomain = data.get("callDomain", None)
+        operatorNumber = data.get("operatorNumber", None)
         dialoutNumber = data.get("dialoutNumber", None)
     except Exception:
         raise HTTPException(
@@ -194,7 +203,7 @@ async def daily_start_bot(request: Request) -> JSONResponse:
         )
 
     room: DailyRoomObject = await _create_daily_room(
-        room_url, callId, callDomain, dialoutNumber, "daily", detect_voicemail
+        room_url, callId, callDomain, dialoutNumber, "daily", detect_voicemail, operatorNumber
     )
 
     # Grab a token for the user to join with
