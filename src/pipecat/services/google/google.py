@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    URLImageRawFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -37,7 +38,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService, TTSService
+from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.openai import (
     OpenAIAssistantContextAggregator,
@@ -49,7 +50,9 @@ from pipecat.utils.time import time_now_iso8601
 try:
     import google.ai.generativelanguage as glm
     import google.generativeai as gai
+    from google import genai
     from google.cloud import texttospeech_v1
+    from google.genai import types
     from google.generativeai.types import GenerationConfig
     from google.oauth2 import service_account
 except ModuleNotFoundError as e:
@@ -711,7 +714,6 @@ class GoogleLLMService(LLMService):
             tool_config = None
             if self._tool_config:
                 tool_config = self._tool_config
-
             response = await self._client.generate_content_async(
                 contents=messages,
                 tools=tools,
@@ -738,7 +740,7 @@ class GoogleLLMService(LLMService):
                             search_result += c.text
                             await self.push_frame(LLMTextFrame(c.text))
                         elif c.function_call:
-                            logger.debug(f"!!! Function call: {c.function_call}")
+                            logger.debug(f"Function call: {c.function_call}")
                             args = type(c.function_call).to_dict(c.function_call).get("args", {})
                             await self.call_function(
                                 context=context,
@@ -1029,3 +1031,70 @@ class GoogleTTSService(TTSService):
             yield ErrorFrame(error=error_message)
         finally:
             yield TTSStoppedFrame()
+
+
+class GoogleImageGenService(ImageGenService):
+    class InputParams(BaseModel):
+        number_of_images: int = Field(default=1, ge=1, le=8)
+        model: str = Field(default="imagen-3.0-generate-002")
+        negative_prompt: str = Field(default=None)
+
+    def __init__(
+        self,
+        *,
+        params: InputParams = InputParams(),
+        api_key: str,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.set_model_name(params.model)
+        self._params = params
+        self._client = genai.Client(api_key=api_key)
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
+    async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
+        """Generate images from a text prompt using Google's Imagen model.
+
+        Args:
+            prompt (str): The text description to generate images from.
+
+        Yields:
+            Frame: Generated image frames or error frames.
+        """
+        logger.debug(f"Generating image from prompt: {prompt}")
+        await self.start_ttfb_metrics()
+
+        try:
+            response = await self._client.aio.models.generate_images(
+                model=self._params.model,
+                prompt=prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=self._params.number_of_images,
+                    negative_prompt=self._params.negative_prompt,
+                ),
+            )
+            await self.stop_ttfb_metrics()
+
+            if not response or not response.generated_images:
+                logger.error(f"{self} error: image generation failed")
+                yield ErrorFrame("Image generation failed")
+                return
+
+            for img_response in response.generated_images:
+                # Google returns the image data directly
+                image_bytes = img_response.image.image_bytes
+                image = Image.open(io.BytesIO(image_bytes))
+
+                frame = URLImageRawFrame(
+                    url=None,  # Google doesn't provide URLs, only image data
+                    image=image.tobytes(),
+                    size=image.size,
+                    format=image.format,
+                )
+                yield frame
+
+        except Exception as e:
+            logger.error(f"{self} error generating image: {e}")
+            yield ErrorFrame(f"Image generation error: {str(e)}")

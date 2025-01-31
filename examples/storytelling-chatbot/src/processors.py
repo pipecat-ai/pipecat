@@ -1,16 +1,27 @@
+import os
 import re
 
+import google.ai.generativelanguage as glm
 from async_timeout import timeout
-from prompts import CUE_ASSISTANT_TURN, CUE_USER_TURN, IMAGE_GEN_PROMPT
+from loguru import logger
+from prompts import (
+    CUE_ASSISTANT_TURN,
+    CUE_USER_TURN,
+    FIRST_IMAGE_PROMPT,
+    IMAGE_GEN_PROMPT,
+    NEXT_IMAGE_PROMPT,
+)
 from utils.helpers import load_sounds
 
 from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
+    LLMMessagesFrame,
     TextFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.google import GoogleImageGenService, GoogleLLMContext, GoogleLLMService
 from pipecat.transports.services.daily import DailyTransportMessageFrame
 
 sounds = load_sounds(["talking.wav", "listening.wav", "ding.wav"])
@@ -44,24 +55,56 @@ class StoryImageProcessor(FrameProcessor):
     The processed frames are then yielded back.
 
     Attributes:
-        _fal_service (FALService): The FAL service, generates the images (fast fast!).
+        _image_gen_service: The FAL service, generates the images (fast fast!).
     """
 
-    def __init__(self, fal_service):
+    def __init__(self, image_gen_service):
         super().__init__()
-        self._fal_service = fal_service
+        self._image_gen_service = image_gen_service
+        # Create a new LLM service to use a different system prompt, etc
+        self._llm_service = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+
+        self.pages = []
+        self.image_descriptions = []
+
+    def can_generate_metrics(self) -> bool:
+        return True
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StoryImageFrame):
+        if isinstance(frame, StoryPageFrame):
+            # Special syntax for the first page
+            if self.pages == []:
+                prompt = FIRST_IMAGE_PROMPT % frame.text
+            else:
+                prompt = NEXT_IMAGE_PROMPT % (
+                    " ".join(self.pages),
+                    "; ".join(self.image_descriptions),
+                    frame.text,
+                )
+
+            await self.start_ttfb_metrics()
+            # TODO: This is coupled to google implementation now
+            txt = glm.Content(role="user", parts=[glm.Part(text=prompt)])
+            llm_response = await self._llm_service._client.generate_content_async(
+                contents=[txt], stream=False
+            )
+            image_description = llm_response.text
+            self.pages.append(frame.text)
+            self.image_descriptions.append(image_description)
             try:
-                async with timeout(7):
-                    async for i in self._fal_service.run_image_gen(IMAGE_GEN_PROMPT % frame.text):
+                async with timeout(15):
+                    async for i in self._image_gen_service.run_image_gen(
+                        IMAGE_GEN_PROMPT % image_description
+                    ):
                         await self.push_frame(i)
             except TimeoutError:
+                logger.debug("Image gen timeout")
                 pass
-            pass
+            await self.stop_ttfb_metrics()
+            # Push the StoryPageFrame so it gets TTS
+            await self.push_frame(frame)
         else:
             await self.push_frame(frame)
 
@@ -96,7 +139,8 @@ class StoryProcessor(FrameProcessor):
 
         elif isinstance(frame, TextFrame):
             # Add new text to the buffer
-            self._text += frame.text
+            # (character replace hack to fix TTS sequencing)
+            self._text += frame.text.replace(";", "—")
             # Process any complete patterns in the order they appear
             await self.process_text_content()
 
