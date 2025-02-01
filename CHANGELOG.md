@@ -73,11 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
-- Updated all examples to use `task.cancel()` instead of pushing an `EndFrame`
-  when a participant leaves/disconnects. If you push an `EndFrame` this will
-  cause the bot to run through everything that is internally queued (which could
-  take seconds). Instead, if a participant disconnects there is nothing else to
-  be sent and therefore we should stop immediately.
+- Updated examples to use `task.cancel()` to immediately exit the example when a
+  participant leaves or disconnects, instead of pushing an `EndFrame`. Pushing
+  an `EndFrame` causes the bot to run through everything that is internally
+  queued (which could take some seconds). Note that using `task.cancel()` might
+  not always be the best option and pushing an `EndFrame` could still be
+  desirable to make sure all the pipeline is flushed.
 
 ## [0.0.54] - 2025-01-27
 
