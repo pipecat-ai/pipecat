@@ -14,7 +14,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
-    StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -47,6 +46,8 @@ class AudioBufferProcessor(FrameProcessor):
         self._last_user_frame_at = 0
         self._last_bot_frame_at = 0
 
+        self._recording = False
+
         self._resampler = create_default_resampler()
 
         self._register_event_handler("on_audio_data")
@@ -74,21 +75,18 @@ class AudioBufferProcessor(FrameProcessor):
         else:
             return b""
 
-    def reset_audio_buffers(self):
-        self._user_audio_buffer = bytearray()
-        self._bot_audio_buffer = bytearray()
+    async def start_recording(self):
+        self._recording = True
+        self._reset_recording()
 
-        self._last_user_frame_at = time.time()
-        self._last_bot_frame_at = time.time()
+    async def stop_recording(self):
+        await self._call_on_audio_data_handler()
+        self._recording = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            self._last_user_frame_at = time.time()
-            self._last_bot_frame_at = time.time()
-
-        if isinstance(frame, InputAudioRawFrame):
+        if self._recording and isinstance(frame, InputAudioRawFrame):
             # Add silence if we need to.
             silence = self._compute_silence(self._last_user_frame_at)
             self._user_audio_buffer.extend(silence)
@@ -97,7 +95,7 @@ class AudioBufferProcessor(FrameProcessor):
             self._user_audio_buffer.extend(resampled)
             # Save time of frame so we can compute silence.
             self._last_user_frame_at = time.time()
-        elif isinstance(frame, OutputAudioRawFrame):
+        elif self._recording and isinstance(frame, OutputAudioRawFrame):
             # Add silence if we need to.
             silence = self._compute_silence(self._last_bot_frame_at)
             self._bot_audio_buffer.extend(silence)
@@ -111,22 +109,31 @@ class AudioBufferProcessor(FrameProcessor):
             await self._call_on_audio_data_handler()
 
         if isinstance(frame, (CancelFrame, EndFrame)):
-            await self._call_on_audio_data_handler()
+            await self.stop_recording()
 
         await self.push_frame(frame, direction)
 
     async def _call_on_audio_data_handler(self):
-        if not self.has_audio():
+        if not self.has_audio() or not self._recording:
             return
 
         merged_audio = self.merge_audio_buffers()
         await self._call_event_handler(
             "on_audio_data", merged_audio, self._sample_rate, self._num_channels
         )
-        self.reset_audio_buffers()
+        self._reset_audio_buffers()
 
     def _buffer_has_audio(self, buffer: bytearray) -> bool:
         return buffer is not None and len(buffer) > 0
+
+    def _reset_recording(self):
+        self._reset_audio_buffers()
+        self._last_user_frame_at = time.time()
+        self._last_bot_frame_at = time.time()
+
+    def _reset_audio_buffers(self):
+        self._user_audio_buffer = bytearray()
+        self._bot_audio_buffer = bytearray()
 
     async def _resample_audio(self, frame: AudioRawFrame) -> bytes:
         return await self._resampler.resample(frame.audio, frame.sample_rate, self._sample_rate)

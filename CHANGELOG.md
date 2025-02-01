@@ -67,6 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `resample_audio()` is now deprecated, use `create_default_resampler()`
   instead.
 
+### Removed
+
+- `AudioBufferProcessor.reset_audio_buffers()` has been removed, use
+  `AudioBufferProcessor.start_recording()` and
+  ``AudioBufferProcessor.stop_recording()` instead.
+
 ### Fixed
 
 - Fixed a `AudioBufferProcessor` that would cause crackling in some recordings.
