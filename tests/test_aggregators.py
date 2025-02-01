@@ -16,7 +16,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.gated import GatedAggregator
 from pipecat.processors.aggregators.sentence import SentenceAggregator
-from tests.utils import run_test
+from pipecat.tests.utils import run_test
 
 
 class TestSentenceAggregator(unittest.IsolatedAsyncioTestCase):

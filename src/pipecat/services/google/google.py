@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    URLImageRawFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -37,7 +38,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService, TTSService
+from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.openai import (
     OpenAIAssistantContextAggregator,
@@ -49,7 +50,9 @@ from pipecat.utils.time import time_now_iso8601
 try:
     import google.ai.generativelanguage as glm
     import google.generativeai as gai
+    from google import genai
     from google.cloud import texttospeech_v1
+    from google.genai import types
     from google.generativeai.types import GenerationConfig
     from google.oauth2 import service_account
 except ModuleNotFoundError as e:
@@ -564,23 +567,56 @@ class GoogleLLMContext(OpenAILLMContext):
         return [msg]
 
     def _restructure_from_openai_messages(self):
+        """Restructures messages to ensure proper Google format and message ordering.
+
+        This method handles conversion of OpenAI-formatted messages to Google format,
+        with special handling for function calls, function responses, and system messages.
+        System messages are added back to the context as user messages when needed.
+
+        The final message order is preserved as:
+        1. Function calls (from model)
+        2. Function responses (from user)
+        3. Text messages (converted from system messages)
+
+        Note:
+            System messages are only added back when there are no regular text
+            messages in the context, ensuring proper conversation continuity
+            after function calls.
+        """
         self.system_message = None
-        # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
-        try:
-            self._messages[:] = [
-                msg
-                for msg in (self.from_standard_message(m) for m in self._messages)
-                if msg is not None
-            ]
-            # We might have been given a messages list with only a system message. If so, let's put that back in
-            # the messages list as a user message.
-            if self.system_message and not self._messages:
-                self.add_message(
-                    glm.Content(role="user", parts=[glm.Part(text=self.system_message)])
-                )
-        except Exception as e:
-            logger.error(f"Error mapping messages: {e}")
-        # iterate over messages and remove any messages that have an empty content list
+        converted_messages = []
+
+        # Process each message, preserving Google-formatted messages and converting others
+        for message in self._messages:
+            if isinstance(message, glm.Content):
+                # Keep existing Google-formatted messages (e.g., function calls/responses)
+                converted_messages.append(message)
+                continue
+
+            # Convert OpenAI format to Google format, system messages return None
+            converted = self.from_standard_message(message)
+            if converted is not None:
+                converted_messages.append(converted)
+
+        # Update message list
+        self._messages[:] = converted_messages
+
+        # Check if we only have function-related messages (no regular text)
+        has_regular_messages = any(
+            len(msg.parts) == 1
+            and hasattr(msg.parts[0], "text")
+            and not hasattr(msg.parts[0], "function_call")
+            and not hasattr(msg.parts[0], "function_response")
+            for msg in self._messages
+        )
+
+        # Add system message back as a user message if we only have function messages
+        if self.system_message and not has_regular_messages:
+            self._messages.append(
+                glm.Content(role="user", parts=[glm.Part(text=self.system_message)])
+            )
+
+        # Remove any empty messages
         self._messages = [m for m in self._messages if m.parts]
 
 
@@ -678,7 +714,6 @@ class GoogleLLMService(LLMService):
             tool_config = None
             if self._tool_config:
                 tool_config = self._tool_config
-
             response = await self._client.generate_content_async(
                 contents=messages,
                 tools=tools,
@@ -705,7 +740,7 @@ class GoogleLLMService(LLMService):
                             search_result += c.text
                             await self.push_frame(LLMTextFrame(c.text))
                         elif c.function_call:
-                            logger.debug(f"!!! Function call: {c.function_call}")
+                            logger.debug(f"Function call: {c.function_call}")
                             args = type(c.function_call).to_dict(c.function_call).get("args", {})
                             await self.call_function(
                                 context=context,
@@ -996,3 +1031,70 @@ class GoogleTTSService(TTSService):
             yield ErrorFrame(error=error_message)
         finally:
             yield TTSStoppedFrame()
+
+
+class GoogleImageGenService(ImageGenService):
+    class InputParams(BaseModel):
+        number_of_images: int = Field(default=1, ge=1, le=8)
+        model: str = Field(default="imagen-3.0-generate-002")
+        negative_prompt: str = Field(default=None)
+
+    def __init__(
+        self,
+        *,
+        params: InputParams = InputParams(),
+        api_key: str,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.set_model_name(params.model)
+        self._params = params
+        self._client = genai.Client(api_key=api_key)
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
+    async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
+        """Generate images from a text prompt using Google's Imagen model.
+
+        Args:
+            prompt (str): The text description to generate images from.
+
+        Yields:
+            Frame: Generated image frames or error frames.
+        """
+        logger.debug(f"Generating image from prompt: {prompt}")
+        await self.start_ttfb_metrics()
+
+        try:
+            response = await self._client.aio.models.generate_images(
+                model=self._params.model,
+                prompt=prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=self._params.number_of_images,
+                    negative_prompt=self._params.negative_prompt,
+                ),
+            )
+            await self.stop_ttfb_metrics()
+
+            if not response or not response.generated_images:
+                logger.error(f"{self} error: image generation failed")
+                yield ErrorFrame("Image generation failed")
+                return
+
+            for img_response in response.generated_images:
+                # Google returns the image data directly
+                image_bytes = img_response.image.image_bytes
+                image = Image.open(io.BytesIO(image_bytes))
+
+                frame = URLImageRawFrame(
+                    url=None,  # Google doesn't provide URLs, only image data
+                    image=image.tobytes(),
+                    size=image.size,
+                    format=image.format,
+                )
+                yield frame
+
+        except Exception as e:
+            logger.error(f"{self} error generating image: {e}")
+            yield ErrorFrame(f"Image generation error: {str(e)}")

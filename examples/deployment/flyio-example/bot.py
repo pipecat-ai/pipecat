@@ -79,11 +79,13 @@ async def main(room_url: str, token: str):
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        await task.queue_frame(EndFrame())
+        await task.cancel()
 
     @transport.event_handler("on_call_state_updated")
     async def on_call_state_updated(transport, state):
         if state == "left":
+            # Here we don't want to cancel, we just want to finish sending
+            # whatever is queued, so we use an EndFrame().
             await task.queue_frame(EndFrame())
 
     runner = PipelineRunner()

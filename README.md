@@ -53,7 +53,7 @@ To keep things lightweight, only the core framework is included by default. If y
 pip install "pipecat-ai[option,...]"
 ```
 
-Available options include:
+### Available services
 
 | Category            | Services                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Install Command Example                 |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
@@ -81,7 +81,7 @@ Here is a very basic Pipecat bot that greets a user when they join a real-time s
 ```python
 import asyncio
 
-from pipecat.frames.frames import EndFrame, TextFrame
+from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
@@ -122,7 +122,7 @@ async def main():
   # Register an event handler to exit the application when the user leaves.
   @transport.event_handler("on_participant_left")
   async def on_participant_left(transport, participant, reason):
-    await task.queue_frame(EndFrame())
+    await task.cancel()
 
   # Run the pipeline task
   await runner.run(task)

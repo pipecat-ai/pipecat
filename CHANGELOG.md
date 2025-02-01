@@ -9,10 +9,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- It is now possible to specify the asyncio event loop that a `PipelineTask` and
+  all the processors should run on by passing it as a new argument to the
+  `PipelineRunner`. This could allow running pipelines in multiple threads each
+  one with its own event loop.
+
+- Added a new `utils.TaskManager`. Instead of a global task manager we now have
+  a task manager per `PipelineTask`. In the previous version the task manager
+  was global, so running multiple simultaneous `PipelineTask`s could result in
+  dangling task warnings which were not actually true. In order, for all the
+  processors to know about the task manager, we pass it through the
+  `StartFrame`. This means that processors should create tasks when they receive
+  a `StartFrame` but not before (because they don't have a task manager yet).
+
+- Added `TelnyxFrameSerializer` to support Telnyx calls. A full running example
+  has also been added to `examples/telnyx-chatbot`.
+
+- Allow pushing silence audio frames before `TTSStoppedFrame`. This might be
+  useful for testing purposes, for example, passing bot audio to an STT service
+  which usually needs additional audio data to detect the utterance stopped.
+
+- `TwilioSerializer` now supports transport message frames. With this we can
+  create Twilio emulators.
+
+- Added a new transport: `WebsocketClientTransport`.
+
+- Added a `metadata` field to `Frame` which makes it possible to pass custom
+  data to all frames.
+
+- Added `test/utils.py` inside of pipecat package.
+
+### Changed
+
+- Added `organization` and `project` level authentication to
+  `OpenAILLMService`.
+
+- Improved the language checking logic in `ElevenLabsTTSService` and
+  `ElevenLabsHttpTTSService` to properly handle language codes based on model
+  compatibility, with appropriate warnings when language codes cannot be
+  applied.
+
+- Updated `GoogleLLMContext` to support pushing `LLMMessagesUpdateFrame`s that
+  contain a combination of function calls, function call responses, system
+  messages, or just messages.
+
+- `InputDTMFFrame` is now based on `DTMFFrame`. There's also a new
+  `OutputDTMFFrame` frame.
+
+### Fixed
+
+- Fixed an issue where `ElevenLabsTTSService` messages would return a 1009
+  websocket error by increasing the max message size limit to 16MB.
+
+- Fixed a `DailyTransport` issue that would cause events to be triggered before
+  join finished.
+
+- Fixed a `PipelineTask` issue that was preventing processors to be cleaned up
+  after cancelling the task.
+
+- Fixed an issue where queuing a `CancelFrame` to a pipeline task would not
+  cause the task to finish. However, using `PipelineTask.cancel()` is still the
+  recommended way to cancel a task.
+
+### Other
+
+- Updated examples to use `task.cancel()` to immediately exit the example when a
+  participant leaves or disconnects, instead of pushing an `EndFrame`. Pushing
+  an `EndFrame` causes the bot to run through everything that is internally
+  queued (which could take some seconds). Note that using `task.cancel()` might
+  not always be the best option and pushing an `EndFrame` could still be
+  desirable to make sure all the pipeline is flushed.
+
+## [0.0.54] - 2025-01-27
+
+### Added
+
+- In order to create tasks in Pipecat frame processors it is now recommended to
+  use `FrameProcessor.create_task()` (which uses the new
+  `utils.asyncio.create_task()`). It takes care of uncaught exceptions, task
+  cancellation handling and task management. To cancel or wait for a task there
+  is `FrameProcessor.cancel_task()` and `FrameProcessor.wait_for_task()`. All of
+  Pipecat processors have been updated accordingly. Also, when a pipeline runner
+  finishes, a warning about dangling tasks might appear, which indicates if any
+  of the created tasks was never cancelled or awaited for (using these new
+  functions).
+
 - It is now possible to specify the period of the `PipelineTask` heartbeat
   frames with `heartbeats_period_secs`.
 
-- Added `DailyMeetingTokenProperties` and `DailyMeetingTokenParams` Pydantic models 
+- Added `DailyMeetingTokenProperties` and `DailyMeetingTokenParams` Pydantic models
   for meeting token creation in `get_token` method of `DailyRESTHelper`.
 
 - Added `enable_recording` and `geo` parameters to `DailyRoomProperties`.
@@ -20,6 +105,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings to a custom AWS bucket.
 
 ### Changed
+
+- Enhanced `UserIdleProcessor` with retry functionality and control over idle
+  monitoring via new callback signature `(processor, retry_count) -> bool`.
+  Updated the `17-detect-user-idle.py` to show how to use the `retry_count`.
+
+- Add defensive error handling for `OpenAIRealtimeBetaLLMService`'s audio
+  truncation. Audio truncation errors during interruptions now log a warning
+  and allow the session to continue instead of throwing an exception.
 
 - Modified `TranscriptProcessor` to use TTS text frames for more accurate assistant
   transcripts. Assistant messages are now aggregated based on bot speaking boundaries
@@ -32,6 +125,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TranscriptProcessor`.
 
 ### Fixed
+
+- Fixed an `GeminiMultimodalLiveLLMService` issue that was preventing the user
+  to push initial LLM assistant messages (using `LLMMessagesAppendFrame`).
+
+- Added missing `FrameProcessor.cleanup()` calls to `Pipeline`,
+  `ParallelPipeline` and `UserIdleProcessor`.
 
 - Fixed a type error when using `voice_settings` in `ElevenLabsHttpTTSService`.
 

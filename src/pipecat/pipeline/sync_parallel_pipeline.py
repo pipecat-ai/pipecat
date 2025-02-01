@@ -24,7 +24,7 @@ class SyncFrame(ControlFrame):
     pass
 
 
-class Source(FrameProcessor):
+class SyncParallelPipelineSource(FrameProcessor):
     def __init__(self, upstream_queue: asyncio.Queue):
         super().__init__()
         self._up_queue = upstream_queue
@@ -39,7 +39,7 @@ class Source(FrameProcessor):
                 await self.push_frame(frame, direction)
 
 
-class Sink(FrameProcessor):
+class SyncParallelPipelineSink(FrameProcessor):
     def __init__(self, downstream_queue: asyncio.Queue):
         super().__init__()
         self._down_queue = downstream_queue
@@ -76,18 +76,20 @@ class SyncParallelPipeline(BasePipeline):
             # We add a source at the beginning of the pipeline and a sink at the end.
             up_queue = asyncio.Queue()
             down_queue = asyncio.Queue()
-            source = Source(up_queue)
-            sink = Sink(down_queue)
-            processors: List[FrameProcessor] = [source] + processors + [sink]
+            source = SyncParallelPipelineSource(up_queue)
+            sink = SyncParallelPipelineSink(down_queue)
+
+            # Create pipeline
+            pipeline = Pipeline(processors)
+            source.link(pipeline)
+            pipeline.link(sink)
+            self._pipelines.append(pipeline)
 
             # Keep track of sources and sinks. We also keep the output queue of
             # the source and the sinks so we can use it later.
             self._sources.append({"processor": source, "queue": down_queue})
             self._sinks.append({"processor": sink, "queue": up_queue})
 
-            # Create pipeline
-            pipeline = Pipeline(processors)
-            self._pipelines.append(pipeline)
         logger.debug(f"Finished creating {self} pipelines")
 
     #
@@ -100,6 +102,12 @@ class SyncParallelPipeline(BasePipeline):
     #
     # Frame processor
     #
+
+    async def cleanup(self):
+        await super().cleanup()
+        await asyncio.gather(*[s["processor"].cleanup() for s in self._sources])
+        await asyncio.gather(*[p.cleanup() for p in self._pipelines])
+        await asyncio.gather(*[s["processor"].cleanup() for s in self._sinks])
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
