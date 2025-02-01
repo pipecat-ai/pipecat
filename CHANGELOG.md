@@ -53,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contain a combination of function calls, function call responses, system
   messages, or just messages.
 
-- Additional DTMF frames
+- `InputDTMFFrame` is now based on `DTMFFrame`. There's also a new
+  `OutputDTMFFrame` frame.
 
 ### Fixed
 

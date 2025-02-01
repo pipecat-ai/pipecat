@@ -409,7 +409,7 @@ class InputDTMFFrame(DTMFFrame):
 
 
 @dataclass
-class OuputDTMFFrame(DTMFFrame):
+class OutputDTMFFrame(DTMFFrame):
     """A DTMF button output"""
 
 
