@@ -407,10 +407,14 @@ class DTMFFrame(DataFrame):
 class InputDTMFFrame(DTMFFrame):
     """A DTMF button input"""
 
+    pass
+
 
 @dataclass
 class OutputDTMFFrame(DTMFFrame):
     """A DTMF button output"""
+
+    pass
 
 
 #
