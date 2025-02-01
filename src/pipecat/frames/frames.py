@@ -397,10 +397,20 @@ class TransportMessageFrame(DataFrame):
 
 
 @dataclass
-class InputDTMFFrame(DataFrame):
-    """A DTMF button input"""
+class DTMFFrame(DataFrame):
+    """A DTMF button frame"""
 
     button: KeypadEntry
+
+
+@dataclass
+class InputDTMFFrame(DTMFFrame):
+    """A DTMF button input"""
+
+
+@dataclass
+class OuputDTMFFrame(DTMFFrame):
+    """A DTMF button output"""
 
 
 #

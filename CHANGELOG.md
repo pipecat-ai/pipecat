@@ -53,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contain a combination of function calls, function call responses, system
   messages, or just messages.
 
+- Additional DTMF frames
+
 ### Fixed
 
 - Fixed an issue where `ElevenLabsTTSService` messages would return a 1009
