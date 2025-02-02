@@ -56,13 +56,17 @@ class SummaryFinished(FrameProcessor):
         self.summary_finished = False
         self.operator_connected = False
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
+    def set_operator_connected(self, connected: bool):
+        self.operator_connected = connected
+        if not connected:
+            self.summary_finished = False
 
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
         if self.operator_connected and isinstance(frame, BotStoppedSpeakingFrame):
+            logger.debug("Summary finished, bot will stop speaking")
             self.summary_finished = True
-        else:
-            await self.push_frame(frame, direction)
+
+        await self.push_frame(frame, direction)
 
 
 async def main(
@@ -187,12 +191,11 @@ async def main(
     summary_finished = SummaryFinished()
 
     async def llm_on_filter() -> bool:
-        if not dial_operator_state.operator_connected:
-            return True
-
-    async def llm_off_filter() -> bool:
-        if summary_finished.summary_finished:
-            return True
+        should_speak = (
+            not dial_operator_state.operator_connected or not summary_finished.summary_finished
+        )
+        logger.debug(f"LLM filter check - should bot speak? {should_speak}")
+        return should_speak
 
     pipeline = Pipeline(
         [
@@ -200,7 +203,6 @@ async def main(
             context_aggregator.user(),
             ParallelPipeline(
                 [FunctionFilter(llm_on_filter), llm, tts],
-                [FunctionFilter(llm_off_filter)],
             ),
             summary_finished,
             transport.output(),
@@ -221,23 +223,28 @@ async def main(
                 await transport.start_dialout({"phoneNumber": dialout_number})
 
     # Register operator-related handlers regardless of initial dialout state
+    # Register operator-related handlers
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
         nonlocal operator_session_id
         if dial_operator_state.dialed_operator and not dial_operator_state.operator_connected:
             logger.debug(f"Operator answered: {data}")
-            dial_operator_state.set_operator_connected()
             operator_session_id = data["sessionId"]
-            # Add the operator context message
+
+            # Add the summary request to context
             messages.append(
                 {
                     "role": "system",
                     "content": "Summarise the conversation so far. Keep the summary brief.",
                 }
             )
+
+            # Update states after queuing the summary request
+            dial_operator_state.set_operator_connected()
+            summary_finished.set_operator_connected(True)
+
+            # Queue the context frame to trigger summary
             await task.queue_frames([context_aggregator.user().get_context_frame()])
-            ## Now I want to prevent the bot from speaking
-            ## and let the operator take over
         else:
             logger.debug(f"Customer answered: {data}")
 
@@ -245,13 +252,19 @@ async def main(
     async def on_dialout_stopped(transport, data):
         if operator_session_id and data["sessionId"] == operator_session_id:
             logger.debug("Operator left the call")
+
+            # Reset states
             dial_operator_state.operator_connected = False
+            summary_finished.set_operator_connected(False)
+
+            # Add message about operator leaving
             messages.append(
                 {
                     "role": "system",
                     "content": "Inform the user that the operator has left the call. Ask if they would like to end the call or if they need further assistance.",
                 }
             )
+
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     if detect_voicemail:
