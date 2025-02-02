@@ -36,19 +36,16 @@ async def terminate_call(
     await result_callback("Goodbye")
 
 
-async def dial_operator(
-    function_name,
-    tool_call_id,
-    args,
-    llm: LLMService,
-    transport: DailyTransport,
-    context,
-    result_callback,
-    operator_number,
-):
-    """Function to dial out to an operator and add them to the call."""
-    await transport.start_dialout({"phoneNumber": operator_number})
-    await result_callback("Dialing operator")
+class DialOperatorState:
+    def __init__(self):
+        self.dialed_operator = False
+        self.operator_connected = False
+
+    def set_operator_dialed(self):
+        self.dialed_operator = True
+
+    def set_operator_connected(self):
+        self.operator_connected = True
 
 
 async def main(
@@ -63,6 +60,10 @@ async def main(
     # dialin_settings are only needed if Daily's SIP URI is used
     # If you are handling this via Twilio, Telnyx, set this to None
     # and handle call-forwarding when on_dialin_ready fires.
+
+    dial_operator_state = DialOperatorState()
+
+    operator_session_id = None
 
     dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
     transport = DailyTransport(
@@ -81,6 +82,21 @@ async def main(
             transcription_enabled=True,
         ),
     )
+
+    async def dial_operator(
+        function_name,
+        tool_call_id,
+        args,
+        llm: LLMService,
+        transport: DailyTransport,
+        context,
+        result_callback,
+        operator_number,
+    ):
+        """Function to dial out to an operator and add them to the call."""
+        dial_operator_state.set_operator_dialed()
+        await transport.start_dialout({"phoneNumber": operator_number})
+        await result_callback("I have dialed the operator")
 
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
@@ -164,47 +180,63 @@ async def main(
 
     task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
 
+    # Register all event handlers upfront
     if dialout_number:
         logger.debug("dialout number detected; doing dialout")
 
-        # Configure some handlers for dialing out
         @transport.event_handler("on_joined")
         async def on_joined(transport, data):
-            logger.debug(f"Joined; starting dialout to: {dialout_number}")
-            await transport.start_dialout({"phoneNumber": dialout_number})
+            if not dial_operator_state.dialed_operator:
+                logger.debug(f"Joined; starting dialout to: {dialout_number}")
+                await transport.start_dialout({"phoneNumber": dialout_number})
 
-        @transport.event_handler("on_dialout_connected")
-        async def on_dialout_connected(transport, data):
-            logger.debug(f"Dial-out connected: {data}")
+    # Register operator-related handlers regardless of initial dialout state
+    @transport.event_handler("on_dialout_answered")
+    async def on_dialout_answered(transport, data):
+        nonlocal operator_session_id
+        if dial_operator_state.dialed_operator and not dial_operator_state.operator_connected:
+            logger.debug(f"Operator answered: {data}")
+            dial_operator_state.set_operator_connected()
+            operator_session_id = data["sessionId"]
+            # Add the operator context message
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "Summarise the conversation so far. Keep the summary brief.",
+                }
+            )
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
+            ## Now I want to prevent the bot from speaking
+            ## and let the operator take over
+        else:
+            logger.debug(f"Customer answered: {data}")
 
-        @transport.event_handler("on_dialout_answered")
-        async def on_dialout_answered(transport, data):
-            logger.debug(f"Dial-out answered: {data}")
+    @transport.event_handler("on_dialout_stopped")
+    async def on_dialout_stopped(transport, data):
+        if operator_session_id and data["sessionId"] == operator_session_id:
+            logger.debug("Operator left the call")
+            dial_operator_state.operator_connected = False
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "Inform the user that the operator has left the call. Ask if they would like to end the call or if they need further assistance.",
+                }
+            )
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
-            # unlike the dialin case, for the dialout case, the caller will speak first. Presumably
-            # they will answer the phone and say "Hello?" Since we've captured their transcript,
-            # That will put a frame into the pipeline and prompt an LLM completion, which is how the
-            # bot will then greet the user.
+    if detect_voicemail:
+        logger.debug("Detect voicemail example")
 
-    elif detect_voicemail:
-        logger.debug("Detect voicemail example. You can test this in example in Daily Prebuilt")
-
-        # For the voicemail detection case, we do not want the bot to answer the phone. We want it to wait for the voicemail
-        # machine to say something like 'Leave a message after the beep', or for the user to say 'Hello?'.
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
     else:
-        logger.debug("no dialout number; assuming dialin. Running SIP transfer example")
 
-        # Different handlers for dialin
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+            if not dial_operator_state.dialed_operator:
+                await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
