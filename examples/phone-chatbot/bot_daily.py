@@ -8,12 +8,14 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, EndTaskFrame
+from pipecat.frames.frames import BotStoppedSpeakingFrame, EndFrame, EndTaskFrame
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.filters.function_filter import FunctionFilter
+from pipecat.processors.frame_processor import Frame, FrameDirection, FrameProcessor
 from pipecat.services.ai_services import LLMService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
@@ -46,6 +48,21 @@ class DialOperatorState:
 
     def set_operator_connected(self):
         self.operator_connected = True
+
+
+class SummaryFinished(FrameProcessor):
+    def __init__(self):
+        super().__init__()
+        self.summary_finished = False
+        self.operator_connected = False
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if self.operator_connected and isinstance(frame, BotStoppedSpeakingFrame):
+            self.summary_finished = True
+        else:
+            await self.push_frame(frame, direction)
 
 
 async def main(
@@ -167,12 +184,25 @@ async def main(
     context = OpenAILLMContext(messages, tools)
     context_aggregator = llm.create_context_aggregator(context)
 
+    summary_finished = SummaryFinished()
+
+    async def llm_on_filter() -> bool:
+        if not dial_operator_state.operator_connected:
+            return True
+
+    async def llm_off_filter() -> bool:
+        if summary_finished.summary_finished:
+            return True
+
     pipeline = Pipeline(
         [
             transport.input(),
             context_aggregator.user(),
-            llm,
-            tts,
+            ParallelPipeline(
+                [FunctionFilter(llm_on_filter), llm, tts],
+                [FunctionFilter(llm_off_filter)],
+            ),
+            summary_finished,
             transport.output(),
             context_aggregator.assistant(),
         ]
