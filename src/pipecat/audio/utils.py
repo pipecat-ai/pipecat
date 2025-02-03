@@ -108,9 +108,9 @@ async def pcm_to_ulaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: 
     in_pcm_bytes = await resampler.resample(pcm_bytes, in_rate, out_rate)
 
     # Convert PCM to μ-law
-    ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)
+    out_ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)
 
-    return ulaw_bytes
+    return out_ulaw_bytes
 
 
 async def alaw_to_pcm(
@@ -130,6 +130,6 @@ async def pcm_to_alaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: 
     in_pcm_bytes = await resampler.resample(pcm_bytes, in_rate, out_rate)
 
     # Convert PCM to μ-law
-    alaw_bytes = audioop.lin2alaw(in_pcm_bytes, 2)
+    out_alaw_bytes = audioop.lin2alaw(in_pcm_bytes, 2)
 
-    return alaw_bytes
+    return out_alaw_bytes
