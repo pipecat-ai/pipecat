@@ -250,9 +250,7 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
                 # because we are likely still playing out audio and need the
                 # timestamp to set send context frames.
                 self._context_id = None
-                await self.add_word_timestamps(
-                    [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0), ("Reset", 0)]
-                )
+                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
             elif msg["type"] == "timestamps":
                 await self.add_word_timestamps(
                     list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
