@@ -105,7 +105,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
         # Handle incoming messages
         try:
             async for message in websocket:
-                frame = self._params.serializer.deserialize(message)
+                frame = await self._params.serializer.deserialize(message)
 
                 if not frame:
                     continue
@@ -193,7 +193,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
     async def _write_frame(self, frame: Frame):
         try:
-            payload = self._params.serializer.serialize(frame)
+            payload = await self._params.serializer.serialize(frame)
             if payload and self._websocket:
                 await self._websocket.send(payload)
         except Exception as e:

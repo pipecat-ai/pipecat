@@ -117,7 +117,6 @@ class CanonicalMetricsService(AIService):
         try:
             await self._multipart_upload(filename)
             await aiofiles.os.remove(filename)
-            audio_buffer_processor.reset_audio_buffers()
         except FileNotFoundError:
             pass
         except Exception as e:
