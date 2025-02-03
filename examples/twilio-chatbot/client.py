@@ -43,7 +43,8 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-DEFAULT_DURATION = 30
+DEFAULT_CLIENT_DURATION = 30
+SAMPLE_RATE = 8000
 
 
 async def download_twiml(server_url: str) -> str:
@@ -91,13 +92,15 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
         params=WebsocketClientParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            audio_out_sample_rate=8000,
+            audio_out_sample_rate=SAMPLE_RATE,
             add_wav_header=False,
             serializer=TwilioFrameSerializer(
-                stream_sid, params=TwilioFrameSerializer.InputParams(sample_rate=8000)
+                stream_sid, params=TwilioFrameSerializer.InputParams(sample_rate=SAMPLE_RATE)
             ),
             vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=1.5), sample_rate=8000),
+            vad_analyzer=SileroVADAnalyzer(
+                params=VADParams(stop_secs=1.5), sample_rate=SAMPLE_RATE
+            ),
             vad_audio_passthrough=True,
         ),
     )
@@ -107,14 +110,14 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
     # We let the audio passthrough so we can record the conversation.
     stt = DeepgramSTTService(
         api_key=os.getenv("DEEPGRAM_API_KEY"),
-        live_options=LiveOptions(sample_rate=8000),
+        live_options=LiveOptions(sample_rate=SAMPLE_RATE),
         audio_passthrough=True,
     )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="e13cae5c-ec59-4f71-b0a6-266df3c9bb8e",  # Madame Mischief
-        sample_rate=8000,
+        sample_rate=SAMPLE_RATE,
         push_silence_after_stop=True,
     )
 
@@ -130,7 +133,7 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
 
     # NOTE: Watch out! This will save all the conversation in memory. You can
     # pass `buffer_size` to get periodic callbacks.
-    audiobuffer = AudioBufferProcessor(sample_rate=8000)
+    audiobuffer = AudioBufferProcessor(sample_rate=SAMPLE_RATE)
 
     pipeline = Pipeline(
         [
@@ -185,8 +188,8 @@ async def main():
         "-d",
         "--duration",
         type=int,
-        default=DEFAULT_DURATION,
-        help=f"duration of each client in seconds (default: {DEFAULT_DURATION})",
+        default=DEFAULT_CLIENT_DURATION,
+        help=f"duration of each client in seconds (default: {DEFAULT_CLIENT_DURATION})",
     )
     args, _ = parser.parse_known_args()
 
