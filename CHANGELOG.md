@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `GatedOpenAILLMContextAggregator` now require keyword arguments. Also, a new
+  `start_open` argument has been added to set the initial state of the gate.
+
 - Added `organization` and `project` level authentication to
   `OpenAILLMService`.
 
