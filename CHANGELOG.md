@@ -101,6 +101,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Updated `twilio-chatbot` with a few new features: use 8000 sample rate and
+  avoid resampling, a new client useful for stress testing and testing locally
+  without the need to make phone calls. Also, added audio recording on both the
+  client and the server to make sure the audio sounds good.
+
 - Updated examples to use `task.cancel()` to immediately exit the example when a
   participant leaves or disconnects, instead of pushing an `EndFrame`. Pushing
   an `EndFrame` causes the bot to run through everything that is internally
