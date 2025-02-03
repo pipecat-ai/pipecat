@@ -138,7 +138,7 @@ class WebsocketClientInputTransport(BaseInputTransport):
         await self._session.disconnect()
 
     async def on_message(self, websocket, message):
-        frame = self._params.serializer.deserialize(message)
+        frame = await self._params.serializer.deserialize(message)
         if not frame:
             return
         if isinstance(frame, InputAudioRawFrame) and self._params.audio_in_enabled:
@@ -200,7 +200,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         await self._write_audio_sleep()
 
     async def _write_frame(self, frame: Frame):
-        payload = self._params.serializer.serialize(frame)
+        payload = await self._params.serializer.serialize(frame)
         if payload:
             await self._session.send(payload)
 

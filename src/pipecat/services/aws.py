@@ -10,7 +10,7 @@ from typing import AsyncGenerator, Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import resample_audio
+from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -148,6 +148,8 @@ class PollyTTSService(TTSService):
             "volume": params.volume,
         }
 
+        self._resampler = create_default_resampler()
+
         self.set_voice(voice_id)
 
     def can_generate_metrics(self) -> bool:
@@ -193,8 +195,7 @@ class PollyTTSService(TTSService):
             response = self._polly_client.synthesize_speech(**args)
             if "AudioStream" in response:
                 audio_data = response["AudioStream"].read()
-                resampled = resample_audio(audio_data, 16000, self._settings["sample_rate"])
-                return resampled
+                return audio_data
             return None
 
         logger.debug(f"Generating TTS: [{text}]")
@@ -224,6 +225,10 @@ class PollyTTSService(TTSService):
                 logger.error(f"{self} No audio data returned")
                 yield None
                 return
+
+            audio_data = await self._resampler.resample(
+                audio_data, 16000, self._settings["sample_rate"]
+            )
 
             await self.start_tts_usage_metrics(text)
 

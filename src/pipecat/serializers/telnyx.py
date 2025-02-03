@@ -9,7 +9,13 @@ import json
 
 from pydantic import BaseModel
 
-from pipecat.audio.utils import alaw_to_pcm, pcm_to_alaw, pcm_to_ulaw, ulaw_to_pcm
+from pipecat.audio.utils import (
+    alaw_to_pcm,
+    create_default_resampler,
+    pcm_to_alaw,
+    pcm_to_ulaw,
+    ulaw_to_pcm,
+)
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
@@ -40,21 +46,23 @@ class TelnyxFrameSerializer(FrameSerializer):
         params.inbound_encoding = inbound_encoding
         self._params = params
 
+        self._resampler = create_default_resampler()
+
     @property
     def type(self) -> FrameSerializerType:
         return FrameSerializerType.TEXT
 
-    def serialize(self, frame: Frame) -> str | bytes | None:
+    async def serialize(self, frame: Frame) -> str | bytes | None:
         if isinstance(frame, AudioRawFrame):
             data = frame.audio
 
             if self._params.inbound_encoding == "PCMU":
-                serialized_data = pcm_to_ulaw(
-                    data, frame.sample_rate, self._params.telnyx_sample_rate
+                serialized_data = await pcm_to_ulaw(
+                    data, frame.sample_rate, self._params.telnyx_sample_rate, self._resampler
                 )
             elif self._params.inbound_encoding == "PCMA":
-                serialized_data = pcm_to_alaw(
-                    data, frame.sample_rate, self._params.telnyx_sample_rate
+                serialized_data = await pcm_to_alaw(
+                    data, frame.sample_rate, self._params.telnyx_sample_rate, self._resampler
                 )
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.inbound_encoding}")
@@ -71,7 +79,7 @@ class TelnyxFrameSerializer(FrameSerializer):
             answer = {"event": "clear"}
             return json.dumps(answer)
 
-    def deserialize(self, data: str | bytes) -> Frame | None:
+    async def deserialize(self, data: str | bytes) -> Frame | None:
         message = json.loads(data)
 
         if message["event"] == "media":
@@ -79,12 +87,18 @@ class TelnyxFrameSerializer(FrameSerializer):
             payload = base64.b64decode(payload_base64)
 
             if self._params.outbound_encoding == "PCMU":
-                deserialized_data = ulaw_to_pcm(
-                    payload, self._params.telnyx_sample_rate, self._params.sample_rate
+                deserialized_data = await ulaw_to_pcm(
+                    payload,
+                    self._params.telnyx_sample_rate,
+                    self._params.sample_rate,
+                    self._resampler,
                 )
             elif self._params.outbound_encoding == "PCMA":
-                deserialized_data = alaw_to_pcm(
-                    payload, self._params.telnyx_sample_rate, self._params.sample_rate
+                deserialized_data = await alaw_to_pcm(
+                    payload,
+                    self._params.telnyx_sample_rate,
+                    self._params.sample_rate,
+                    self._resampler,
                 )
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.outbound_encoding}")

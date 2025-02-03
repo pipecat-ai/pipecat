@@ -9,7 +9,7 @@ from typing import Any, AsyncGenerator, Dict
 import aiohttp
 from loguru import logger
 
-from pipecat.audio.utils import resample_audio
+from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -89,6 +89,8 @@ class XTTSService(TTSService):
         self._studio_speakers: Dict[str, Any] | None = None
         self._aiohttp_session = aiohttp_session
 
+        self._resampler = create_default_resampler()
+
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -161,7 +163,7 @@ class XTTSService(TTSService):
                         buffer = buffer[48000:]
 
                         # XTTS uses 24000 so we need to resample to our desired rate.
-                        resampled_audio = resample_audio(
+                        resampled_audio = await self._resampler.resample(
                             bytes(process_data), 24000, self._sample_rate
                         )
                         # Create the frame with the resampled audio
@@ -170,7 +172,9 @@ class XTTSService(TTSService):
 
             # Process any remaining data in the buffer.
             if len(buffer) > 0:
-                resampled_audio = resample_audio(bytes(buffer), 24000, self._sample_rate)
+                resampled_audio = await self._resampler.resample(
+                    bytes(buffer), 24000, self._sample_rate
+                )
                 frame = TTSAudioRawFrame(resampled_audio, self._sample_rate, 1)
                 yield frame
 

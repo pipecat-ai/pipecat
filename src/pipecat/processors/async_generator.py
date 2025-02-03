@@ -30,7 +30,7 @@ class AsyncGeneratorProcessor(FrameProcessor):
         if isinstance(frame, (CancelFrame, EndFrame)):
             await self._data_queue.put(None)
         else:
-            data = self._serializer.serialize(frame)
+            data = await self._serializer.serialize(frame)
             if data:
                 await self._data_queue.put(data)
 

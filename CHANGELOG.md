@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Introduce audio resamplers (`BaseAudioResampler`). This is just a base class
+  to implement audio resamplers. Currently, two implementations are provided
+  `SOXRAudioResampler` and `ResampyResampler`. A new
+  `create_default_resampler()` has been added (replacing the now deprecated
+  `resample_audio()`).
+
 - It is now possible to specify the asyncio event loop that a `PipelineTask` and
   all the processors should run on by passing it as a new argument to the
   `PipelineRunner`. This could allow running pipelines in multiple threads each
@@ -41,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `GatedOpenAILLMContextAggregator` now require keyword arguments. Also, a new
+  `start_open` argument has been added to set the initial state of the gate.
+
 - Added `organization` and `project` level authentication to
   `OpenAILLMService`.
 
@@ -56,7 +65,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `InputDTMFFrame` is now based on `DTMFFrame`. There's also a new
   `OutputDTMFFrame` frame.
 
+### Deprecated
+
+- `resample_audio()` is now deprecated, use `create_default_resampler()`
+  instead.
+
+### Removed
+
+- `AudioBufferProcessor.reset_audio_buffers()` has been removed, use
+  `AudioBufferProcessor.start_recording()` and
+  ``AudioBufferProcessor.stop_recording()` instead.
+
 ### Fixed
+
+- Fixed a `AudioBufferProcessor` that would cause crackling in some recordings.
+
+- Fixed an issue in `AudioBufferProcessor` where user callback would not be
+  called on task cancellation.
+
+- Fixed an issue in `AudioBufferProcessor` that would cause wrong silence
+  padding in some cases.
 
 - Fixed an issue where `ElevenLabsTTSService` messages would return a 1009
   websocket error by increasing the max message size limit to 16MB.
@@ -1526,6 +1554,9 @@ async def on_connected(processor):
   if you say a certain phrase/word.
 
 ### Changed
+
+- `FrameSerializer.serialize()` and `FrameSerializer.deserialize()` are now
+  `async`.
 
 - `Filter` has been renamed to `FrameFilter` and it's now under
   `processors/filters`.

@@ -91,7 +91,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def _receive_messages(self):
         try:
             async for message in self._iter_data():
-                frame = self._params.serializer.deserialize(message)
+                frame = await self._params.serializer.deserialize(message)
 
                 if not frame:
                     continue
@@ -163,7 +163,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
     async def _write_frame(self, frame: Frame):
         try:
-            payload = self._params.serializer.serialize(frame)
+            payload = await self._params.serializer.serialize(frame)
             if payload and self._websocket.client_state == WebSocketState.CONNECTED:
                 await self._send_data(payload)
         except Exception as e:
