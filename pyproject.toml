@@ -41,7 +41,7 @@ Source = "https://github.com/pipecat-ai/pipecat"
 Website = "https://pipecat.ai"
 
 [project.optional-dependencies]
-anthropic = [ "anthropic~=0.39.0" ]
+anthropic = [ "anthropic~=0.45.2" ]
 assemblyai = [ "assemblyai~=0.36.0" ]
 aws = [ "boto3~=1.35.99" ]
 azure = [ "azure-cognitiveservices-speech~=1.42.0", "openai~=1.59.6" ]
@@ -70,7 +70,7 @@ moondream = [ "einops~=0.8.0", "timm~=1.0.13", "transformers~=4.48.0" ]
 nim = [ "openai~=1.59.6" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 openai = [ "openai~=1.59.6", "websockets~=13.1", "python-deepcompare~=2.1.0" ]
-openpipe = [ "openpipe~=4.43.0" ]
+openpipe = [ "openpipe~=4.45.0" ]
 playht = [ "pyht~=0.1.6", "websockets~=13.1" ]
 riva = [ "nvidia-riva-client~=2.18.0" ]
 silero = [ "onnxruntime~=1.20.1" ]
