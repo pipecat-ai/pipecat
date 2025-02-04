@@ -21,6 +21,7 @@ pyaudio~=0.2.14
 pydantic~=2.8.2
 pyloudnorm~=0.1.1
 pyht~=0.1.4
+pytest-aiohttp==1.1.0
 python-dotenv~=1.0.1
 silero-vad~=5.1
 soxr~=0.5.0
