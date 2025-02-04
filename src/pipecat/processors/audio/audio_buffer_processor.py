@@ -5,6 +5,7 @@
 #
 
 import time
+from typing import Optional
 
 from pipecat.audio.utils import create_default_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
@@ -14,6 +15,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
+    StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -33,10 +35,16 @@ class AudioBufferProcessor(FrameProcessor):
     """
 
     def __init__(
-        self, *, sample_rate: int = 24000, num_channels: int = 1, buffer_size: int = 0, **kwargs
+        self,
+        *,
+        sample_rate: Optional[int] = None,
+        num_channels: int = 1,
+        buffer_size: int = 0,
+        **kwargs,
     ):
         super().__init__(**kwargs)
-        self._sample_rate = sample_rate
+        self._init_sample_rate = sample_rate
+        self._sample_rate = 0
         self._num_channels = num_channels
         self._buffer_size = buffer_size
 
@@ -86,6 +94,10 @@ class AudioBufferProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
+        # Update output sample rate if necessary.
+        if isinstance(frame, StartFrame):
+            self._update_sample_rate(frame)
+
         if self._recording and isinstance(frame, InputAudioRawFrame):
             # Add silence if we need to.
             silence = self._compute_silence(self._last_user_frame_at)
@@ -112,6 +124,9 @@ class AudioBufferProcessor(FrameProcessor):
             await self.stop_recording()
 
         await self.push_frame(frame, direction)
+
+    def _update_sample_rate(self, frame: StartFrame):
+        self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
 
     async def _call_on_audio_data_handler(self):
         if not self.has_audio() or not self._recording:

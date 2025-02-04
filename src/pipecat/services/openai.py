@@ -415,17 +415,14 @@ class OpenAITTSService(TTSService):
     def __init__(
         self,
         *,
-        api_key: str | None = None,
+        api_key: Optional[str] = None,
         voice: str = "alloy",
         model: Literal["tts-1", "tts-1-hd"] = "tts-1",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        self._settings = {
-            "sample_rate": sample_rate,
-        }
         self.set_model_name(model)
         self.set_voice(voice)
 
@@ -465,7 +462,7 @@ class OpenAITTSService(TTSService):
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                         yield frame
                 yield TTSStoppedFrame()
         except BadRequestError as e:

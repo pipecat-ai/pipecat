@@ -6,6 +6,7 @@
 
 from abc import abstractmethod
 from enum import Enum
+from typing import Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -33,11 +34,11 @@ class VADParams(BaseModel):
 
 
 class VADAnalyzer:
-    def __init__(self, *, sample_rate: int, num_channels: int, params: VADParams):
-        self._sample_rate = sample_rate
-        self._num_channels = num_channels
-
-        self.set_params(params)
+    def __init__(self, *, sample_rate: Optional[int] = None, params: VADParams):
+        self._init_sample_rate = sample_rate
+        self._sample_rate = 0
+        self._params = params
+        self._num_channels = 1
 
         self._vad_buffer = b""
 
@@ -65,13 +66,17 @@ class VADAnalyzer:
     def voice_confidence(self, buffer) -> float:
         pass
 
+    def set_sample_rate(self, sample_rate: int):
+        self._sample_rate = self._init_sample_rate or sample_rate
+        self.set_params(self._params)
+
     def set_params(self, params: VADParams):
         logger.info(f"Setting VAD params to: {params}")
         self._params = params
         self._vad_frames = self.num_frames_required()
         self._vad_frames_num_bytes = self._vad_frames * self._num_channels * 2
 
-        vad_frames_per_sec = self._vad_frames / self._sample_rate
+        vad_frames_per_sec = self._vad_frames / self.sample_rate
 
         self._vad_start_frames = round(self._params.start_secs / vad_frames_per_sec)
         self._vad_stop_frames = round(self._params.stop_secs / vad_frames_per_sec)
@@ -80,7 +85,7 @@ class VADAnalyzer:
         self._vad_state: VADState = VADState.QUIET
 
     def _get_smoothed_volume(self, audio: bytes) -> float:
-        volume = calculate_audio_volume(audio, self._sample_rate)
+        volume = calculate_audio_volume(audio, self.sample_rate)
         return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
 
     def analyze_audio(self, buffer) -> VADState:
