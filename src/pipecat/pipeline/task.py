@@ -40,6 +40,8 @@ HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 5
 class PipelineParams(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    audio_in_sample_rate: int = 16000
+    audio_out_sample_rate: int = 24000
     allow_interruptions: bool = False
     enable_heartbeats: bool = False
     enable_metrics: bool = False
@@ -135,6 +137,11 @@ class PipelineTask(BaseTask):
     def name(self) -> str:
         """Returns the name of this task."""
         return self._name
+
+    @property
+    def params(self) -> PipelineParams:
+        """Returns the pipeline parameters of this task."""
+        return self._params
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         self._task_manager.set_event_loop(loop)
@@ -275,6 +282,8 @@ class PipelineTask(BaseTask):
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             observer=self._observer,
+            audio_in_sample_rate=self._params.audio_in_sample_rate,
+            audio_out_sample_rate=self._params.audio_out_sample_rate,
         )
         await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
 

@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+from typing import Optional
+
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -11,6 +13,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams, VADState
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
+    StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
     UserStartedSpeakingFrame,
@@ -23,7 +26,7 @@ class SileroVAD(FrameProcessor):
     def __init__(
         self,
         *,
-        sample_rate: int = 16000,
+        sample_rate: Optional[int] = None,
         vad_params: VADParams = VADParams(),
         audio_passthrough: bool = False,
     ):
@@ -40,6 +43,9 @@ class SileroVAD(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame):
+            self._vad_analyzer.set_sample_rate(frame.audio_in_sample_rate)
 
         if isinstance(frame, AudioRawFrame):
             await self._analyze_audio(frame)

@@ -101,6 +101,7 @@ class LiveKitTransportClient:
         return self._room
 
     async def setup(self, frame: StartFrame):
+        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
         if not self._task_manager:
             self._task_manager = frame.task_manager
             self._room = rtc.Room(loop=self._task_manager.get_event_loop())
@@ -138,7 +139,7 @@ class LiveKitTransportClient:
 
             # Set up audio source and track
             self._audio_source = rtc.AudioSource(
-                self._params.audio_out_sample_rate, self._params.audio_out_channels
+                self._out_sample_rate, self._params.audio_out_channels
             )
             self._audio_track = rtc.LocalAudioTrack.create_audio_track(
                 "pipecat-audio", self._audio_source
@@ -351,6 +352,10 @@ class LiveKitInputTransport(BaseInputTransport):
         self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
         self._resampler = create_default_resampler()
 
+    @property
+    def vad_analyzer(self) -> VADAnalyzer | None:
+        return self._vad_analyzer
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._client.setup(frame)
@@ -371,9 +376,6 @@ class LiveKitInputTransport(BaseInputTransport):
         await self._client.disconnect()
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             await self.cancel_task(self._audio_in_task)
-
-    def vad_analyzer(self) -> VADAnalyzer | None:
-        return self._vad_analyzer
 
     async def push_app_message(self, message: Any, sender: str):
         frame = LiveKitTransportMessageUrgentFrame(message=message, participant_id=sender)
@@ -401,12 +403,12 @@ class LiveKitInputTransport(BaseInputTransport):
         audio_frame = audio_frame_event.frame
 
         audio_data = await self._resampler.resample(
-            audio_frame.data.tobytes(), audio_frame.sample_rate, self._params.audio_in_sample_rate
+            audio_frame.data.tobytes(), audio_frame.sample_rate, self.sample_rate
         )
 
         return AudioRawFrame(
             audio=audio_data,
-            sample_rate=self._params.audio_in_sample_rate,
+            sample_rate=self.sample_rate,
             num_channels=audio_frame.num_channels,
         )
 
@@ -448,7 +450,7 @@ class LiveKitOutputTransport(BaseOutputTransport):
 
         return rtc.AudioFrame(
             data=pipecat_audio,
-            sample_rate=self._params.audio_out_sample_rate,
+            sample_rate=self.sample_rate,
             num_channels=self._params.audio_out_channels,
             samples_per_channel=samples_per_channel,
         )

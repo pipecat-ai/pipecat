@@ -450,14 +450,13 @@ class AzureBaseTTSService(TTSService):
         api_key: str,
         region: str,
         voice="en-US-SaraNeural",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = {
-            "sample_rate": sample_rate,
             "emphasis": params.emphasis,
             "language": self.language_to_service_language(params.language)
             if params.language
@@ -537,7 +536,7 @@ class AzureTTSService(AzureBaseTTSService):
             speech_recognition_language=self._settings["language"],
         )
         speech_config.set_speech_synthesis_output_format(
-            sample_rate_to_output_format(self._settings["sample_rate"])
+            sample_rate_to_output_format(self.sample_rate)
         )
         speech_config.set_service_property(
             "synthesizer.synthesis.connection.synthesisConnectionImpl",
@@ -591,7 +590,7 @@ class AzureTTSService(AzureBaseTTSService):
 
                 yield TTSAudioRawFrame(
                     audio=chunk,
-                    sample_rate=self._settings["sample_rate"],
+                    sample_rate=self.sample_rate,
                     num_channels=1,
                 )
 
@@ -612,7 +611,7 @@ class AzureHttpTTSService(AzureBaseTTSService):
             speech_recognition_language=self._settings["language"],
         )
         speech_config.set_speech_synthesis_output_format(
-            sample_rate_to_output_format(self._settings["sample_rate"])
+            sample_rate_to_output_format(self.sample_rate)
         )
 
         self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
@@ -633,7 +632,7 @@ class AzureHttpTTSService(AzureBaseTTSService):
             # Azure always sends a 44-byte header. Strip it off.
             yield TTSAudioRawFrame(
                 audio=result.audio_data[44:],
-                sample_rate=self._settings["sample_rate"],
+                sample_rate=self.sample_rate,
                 num_channels=1,
             )
             yield TTSStoppedFrame()
@@ -650,24 +649,14 @@ class AzureSTTService(STTService):
         *,
         api_key: str,
         region: str,
-        language=Language.EN_US,
-        sample_rate=24000,
-        channels=1,
+        language: Language = Language.EN_US,
+        sample_rate: Optional[int] = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
-        speech_config = SpeechConfig(subscription=api_key, region=region)
-        speech_config.speech_recognition_language = language
-
-        stream_format = AudioStreamFormat(samples_per_second=sample_rate, channels=channels)
-        self._audio_stream = PushAudioInputStream(stream_format)
-
-        audio_config = AudioConfig(stream=self._audio_stream)
-        self._speech_recognizer = SpeechRecognizer(
-            speech_config=speech_config, audio_config=audio_config
-        )
-        self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+        self._speech_config = SpeechConfig(subscription=api_key, region=region)
+        self._speech_config.speech_recognition_language = language
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_processing_metrics()
@@ -677,6 +666,16 @@ class AzureSTTService(STTService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
+        self._audio_stream = PushAudioInputStream(stream_format)
+
+        audio_config = AudioConfig(stream=self._audio_stream)
+
+        self._speech_recognizer = SpeechRecognizer(
+            speech_config=self._speech_config, audio_config=audio_config
+        )
+        self._speech_recognizer.recognized.connect(self._on_handle_recognized)
         self._speech_recognizer.start_continuous_recognition_async()
 
     async def stop(self, frame: EndFrame):
