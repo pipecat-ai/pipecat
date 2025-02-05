@@ -6,11 +6,8 @@
 
 import io
 import os
-import uuid
 import wave
 from asyncio import sleep
-from datetime import datetime
-from typing import Dict, List, Tuple, Optional
 
 import aiohttp
 from loguru import logger
@@ -43,19 +40,19 @@ class ConnexityInterface(AIService):
         self._assistant_speaks_first = assistant_speaks_first
 
     def _request_headers(self):
-        return {"Content-Type": "application/json", "X-Connexity-Api-Key": self._api_key}
+        return {"Content-Type": "application/json", "X-API-KEY": self._api_key}
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
 
     async def send_audio_url_to_connexity(self, audio_url):
-        answer_list = [{
+        answer_list = {"items" : [{
             "agent_id": self._assistant_id,
             "sid": self._call_id,
             "first_speaker_role": "assistant" if self._assistant_speaks_first else "user",
             "audio_link": audio_url
-        }]
+        }]}
         async with aiohttp.ClientSession() as session:
             async with session.post(self._api_url, headers=self._request_headers(), json=answer_list) as response:
                 # Optionally handle the response, for example:
@@ -94,7 +91,7 @@ class ConnexityLocalMetricsService(ConnexityInterface):
         call_id: str,
         assistant_id: str,
         api_key: str,
-        api_url: str = "https://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/file",
+        api_url: str = "http://localhost:8080/process/blackbox/file/pipecat",
         assistant_speaks_first: bool = True,
         **kwargs,
     ):
@@ -111,11 +108,14 @@ class ConnexityLocalMetricsService(ConnexityInterface):
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
         await self._process_audio()
+        await self.send_audio_file_to_connexity()
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._process_audio()
-        await self.send_data_to_connexity()
+
+    def _request_headers(self):
+        return {"X-API-KEY": self._api_key}
 
     async def _process_audio(self):
         audio_buffer_processor = self._audio_buffer_processor
@@ -123,38 +123,43 @@ class ConnexityLocalMetricsService(ConnexityInterface):
         if not audio_buffer_processor.has_audio():
             return
 
-        audio = audio_buffer_processor.merge_audio_buffers()
+        # Merge the raw PCM data from the buffer processor
+        new_audio = audio_buffer_processor.merge_audio_buffers()
 
         try:
-            # Use a temporary buffer to process new audio
+            # Build a temporary WAV buffer from the new audio chunk
             temp_buffer = io.BytesIO()
             with wave.open(temp_buffer, "wb") as wf:
-                wf.setsampwidth(2)  # Set sample width
-                wf.setnchannels(audio_buffer_processor.num_channels)  # Set number of channels
-                wf.setframerate(audio_buffer_processor.sample_rate)  # Set sample rate
-                wf.writeframes(audio)
-
-            # Append new audio to the existing memory buffer
+                wf.setsampwidth(2)  # 16-bit
+                wf.setnchannels(audio_buffer_processor.num_channels)
+                wf.setframerate(audio_buffer_processor.sample_rate)
+                wf.writeframes(new_audio)
             temp_buffer.seek(0)
+
+            # If this is the *first* chunk, just copy the entire WAV (header + frames)
             if self._audio_memory_buffer.tell() == 0:
-                # If the main buffer is empty, copy the header and frames
                 self._audio_memory_buffer.write(temp_buffer.getvalue())
             else:
-                # If the main buffer already contains data, append only frames
+                # Otherwise, read out existing frames, then rewrite the WAV
+                self._audio_memory_buffer.seek(0)
                 with wave.open(self._audio_memory_buffer, "rb") as existing_wf:
                     params = existing_wf.getparams()
-                    frames = existing_wf.readframes(existing_wf.getnframes())
+                    existing_frames = existing_wf.readframes(existing_wf.getnframes())
+
+                # Truncate the main buffer, and rewrite with the old + new frames
+                self._audio_memory_buffer.seek(0)
+                self._audio_memory_buffer.truncate(0)
 
                 with wave.open(self._audio_memory_buffer, "wb") as new_wf:
                     new_wf.setparams(params)
-                    new_wf.writeframes(frames)
-                    new_wf.writeframes(temp_buffer.getvalue()[44:])  # Skip the header
+                    new_wf.writeframes(existing_frames)
+                    # Skip the standard 44-byte header from the new chunk
+                    new_wf.writeframes(temp_buffer.getvalue()[44:])
 
-            # Reset audio buffer processor
+            # Reset so we don't double-process the same audio
             audio_buffer_processor.reset_audio_buffers()
+            logger.info("Audio processed and appended to the in-memory buffer.")
 
-            # Log success
-            logger.info("Audio processed and appended to memory.")
         except Exception as e:
             logger.error(f"Failed to process audio: {e}")
 
@@ -171,13 +176,16 @@ class ConnexityLocalMetricsService(ConnexityInterface):
             "first_speaker_role",
             "assistant" if self._assistant_speaks_first else "user",
         )
+        data.add_field("agent_id", self._assistant_id)
+        print(data.__dict__, flush=True)
+        print(self._audio_memory_buffer.read())
         async with aiohttp.ClientSession() as session:
             async with session.post(self._api_url, headers=self._request_headers(), data=data) as response:
                 # Optionally handle the response, for example:
                 if response.status != 200:
-                    print(f"Failed to send data: {response.status}")
+                    print(f"Failed to send data: {response}")
                 else:
-                    print(f"Data sent successfully: {response.status}")
+                    print(f"Data sent successfully: {response}")
 
 
 class ConnexityTwilioMetricsService(ConnexityInterface):
@@ -227,15 +235,24 @@ class ConnexityTwilioMetricsService(ConnexityInterface):
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
-        await self.send_audio_url_to_connexity(self._get_twilio_recording())
+        await self.send_audio_url_to_connexity(await self._get_twilio_recording())
 
     async def _get_twilio_recording(self):
         client = Client(
-            self.twilio_account_id, self.twilio_auth_token
+            os.environ["TWILIO_ACCOUNT_ID"], os.environ["TWILIO_AUTH_TOKEN"]
         )
-        await sleep(3)
-        recording = client.recordings.get(sid=self._call_id)
-        return recording._uri
+        i = 0
+        recording = None
+
+        while not recording:
+            i += 1
+            recording = client.recordings.list(call_sid=self._call_id)
+            if recording:
+                recording_url = f"https://api.twilio.com/2010-04-01/Accounts/{os.environ["TWILIO_ACCOUNT_ID"]}/Recordings/{recording[0].sid}.wav"
+                return recording_url
+            await sleep(3)
+            if i == 3:
+                return None
 
 
 class ConnexityDailyMetricsService(ConnexityInterface):
