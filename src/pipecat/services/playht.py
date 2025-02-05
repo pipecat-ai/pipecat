@@ -352,7 +352,6 @@ class PlayHTHttpTTSService(TTSService):
             api_key=self._api_key,
         )
         self._settings = {
-            "sample_rate": sample_rate,
             "language": self.language_to_service_language(params.language)
             if params.language
             else "english",
@@ -381,7 +380,7 @@ class PlayHTHttpTTSService(TTSService):
         return TTSOptions(
             voice=self._voice_id,
             language=playht_language,
-            sample_rate=self._settings["sample_rate"],
+            sample_rate=self.sample_rate,
             format=self._settings["format"],
             speed=self._settings["speed"],
             seed=self._settings["seed"],
