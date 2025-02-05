@@ -102,7 +102,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                 else:
                     await self.push_frame(frame)
         except Exception as e:
-            logger.error(f"{self} exception receiving data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
         await self._callbacks.on_client_disconnected(self._websocket)
 
@@ -178,7 +178,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             if payload and self._websocket.client_state == WebSocketState.CONNECTED:
                 await self._send_data(payload)
         except Exception as e:
-            logger.error(f"{self} exception sending data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
 
     def _send_data(self, data: str | bytes):
         if self._params.serializer.type == FrameSerializerType.BINARY:

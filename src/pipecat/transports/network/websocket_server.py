@@ -128,7 +128,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
                 else:
                     await self.push_frame(frame)
         except Exception as e:
-            logger.error(f"{self} exception receiving data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
         # Notify disconnection
         await self._callbacks.on_client_disconnected(websocket)
@@ -223,7 +223,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             if payload and self._websocket:
                 await self._websocket.send(payload)
         except Exception as e:
-            logger.error(f"{self} exception sending data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
 
     async def _write_audio_sleep(self):
         # Simulate a clock.
