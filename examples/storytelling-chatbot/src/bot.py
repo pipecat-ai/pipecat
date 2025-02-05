@@ -12,19 +12,22 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from processors import StoryImageProcessor, StoryProcessor
+from processors import StoryBreakReinsertProcessor, StoryImageProcessor, StoryProcessor
 from prompts import CUE_USER_TURN, LLM_BASE_PROMPT
 from utils.helpers import load_images, load_sounds
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import EndFrame
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.processors.logger import FrameLogger
+from pipecat.services.elevenlabs import ElevenLabsHttpTTSService, ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
-from pipecat.services.google import GoogleLLMService
+from pipecat.services.google import GoogleImageGenService, GoogleLLMService
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,
@@ -63,13 +66,20 @@ async def main(room_url, token=None):
 
         # -------------- Services --------------- #
 
-        llm_service = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
-
-        tts_service = ElevenLabsTTSService(
-            api_key=os.getenv("ELEVENLABS_API_KEY"), voice_id=os.getenv("ELEVENLABS_VOICE_ID")
+        llm_service = GoogleLLMService(
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            model="gemini-2.0-flash-exp",
         )
 
-        image_gen = GoogleImageGenService(api_key=os.getenv("GOOGLE_API_KEY"))
+        tts_service = ElevenLabsHttpTTSService(
+            aiohttp_session=session,
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
+        )
+
+        image_gen = GoogleImageGenService(
+            api_key=os.getenv("GOOGLE_API_KEY"),  # model="imagen-3.0-fast-generate-001"
+        )
 
         # --------------- Setup ----------------- #
 
@@ -90,6 +100,10 @@ async def main(room_url, token=None):
         runner = PipelineRunner()
 
         logger.debug("Waiting for participant...")
+        fl = FrameLogger("Into parallel pipeline", "cyan")
+        fl2 = FrameLogger("Out of parallel pipeline", "red")
+        fl3 = FrameLogger("out of LLM service", "green")
+        fl4 = FrameLogger("out of tts", "magenta")
         main_pipeline = Pipeline(
             [
                 transport.input(),
@@ -97,8 +111,15 @@ async def main(room_url, token=None):
                 llm_service,
                 story_processor,
                 image_processor,
+                # fl,
+                # SyncParallelPipeline(
+                #     [tts_service],  # Audio pipeline
+                #     [image_processor],  # Image pipeline
+                # ),
+                # fl2,
                 tts_service,
                 transport.output(),
+                StoryBreakReinsertProcessor(),
                 context_aggregator.assistant(),
             ]
         )

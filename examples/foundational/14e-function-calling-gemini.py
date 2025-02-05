@@ -63,7 +63,7 @@ async def main():
         )
 
         llm = GoogleLLMService(
-            model="gemini-1.5-flash-latest",
+            model="gemini-2.0-flash-exp",
             # model="gemini-exp-1114",
             api_key=os.getenv("GOOGLE_API_KEY"),
         )

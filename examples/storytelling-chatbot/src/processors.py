@@ -44,6 +44,15 @@ class StoryPromptFrame(TextFrame):
     pass
 
 
+class StoryBreakFrame(Frame):
+    """Frame for storing story text that needs a [break] tag reinserted.
+    Does not inherit from TextFrame to avoid TTS processing.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+
 # ------------ Frame Processors ----------- #
 
 
@@ -62,7 +71,10 @@ class StoryImageProcessor(FrameProcessor):
         super().__init__()
         self._image_gen_service = image_gen_service
         # Create a new LLM service to use a different system prompt, etc
-        self._llm_service = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+        self._llm_service = GoogleLLMService(
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            model="gemini-2.0-flash-exp",
+        )
 
         self.pages = []
         self.image_descriptions = []
@@ -153,7 +165,7 @@ class StoryProcessor(FrameProcessor):
             await self.push_frame(frame)
             # Send an app message to the UI
             await self.push_frame(DailyTransportMessageFrame(CUE_USER_TURN))
-            await self.push_frame(sounds["listening"])
+            # await self.push_frame(sounds["listening"])
 
         # Anything that is not a TextFrame pass through
         else:
@@ -188,8 +200,25 @@ class StoryProcessor(FrameProcessor):
                 if len(before_break) > 2:
                     self._story.append(before_break)
                     await self.push_frame(StoryPageFrame(before_break))
-                    # await self.push_frame(sounds["ding"])
+                    await self.push_frame(StoryBreakFrame())
                     await self.push_frame(DailyTransportMessageFrame(CUE_ASSISTANT_TURN))
 
                 # Keep the remainder (if any) in the buffer
                 self._text = parts[1].strip() if len(parts) > 1 else ""
+
+
+class StoryBreakReinsertProcessor(FrameProcessor):
+    """Re-inserts [break] tags into story text before it reaches the assistant context aggregator.
+
+    This processor looks for StoryBreakFrames (which aren't processed by TTS) and creates
+    TextFrames with [break] tags for the context aggregator.
+    """
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StoryBreakFrame):
+            # Create a new TextFrame with [break] tag
+            await self.push_frame(TextFrame(" [break]"))
+        else:
+            await self.push_frame(frame)
