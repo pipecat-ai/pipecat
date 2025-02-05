@@ -82,6 +82,7 @@ class CanonicalMetricsService(AIService):
         self._assistant_speaks_first = assistant_speaks_first
         self._output_dir = output_dir
         self._context = context
+        self._audio_filename = self._get_output_filename()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -95,32 +96,41 @@ class CanonicalMetricsService(AIService):
         await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
 
-    async def _process_audio(self):
-        audio_buffer_processor = self._audio_buffer_processor
+    async def process_audio_buffer(
+        self, audio_buffer: bytes, sample_rate: int, num_channels: int, end_of_audio: bool
+    ):
+        # Create output directory if it doesn't exist
+        os.makedirs(self._output_dir, exist_ok=True)
 
-        if not audio_buffer_processor.has_audio():
+        # Write audio buffer to file with proper WAV format
+        try:
+            # First write: create file with WAV header
+            if not os.path.exists(self._audio_filename):
+                with io.BytesIO() as buffer:
+                    with wave.open(buffer, "wb") as wf:
+                        wf.setsampwidth(2)  # 16-bit audio
+                        wf.setnchannels(num_channels)
+                        wf.setframerate(sample_rate)
+                        wf.writeframes(audio_buffer)
+                    async with aiofiles.open(self._audio_filename, "wb") as file:
+                        await file.write(buffer.getvalue())
+            # Subsequent writes: append raw audio data
+            else:
+                async with aiofiles.open(self._audio_filename, "ab") as file:
+                    await file.write(audio_buffer)
+        except Exception as e:
+            logger.error(f"Failed to write audio buffer: {e}")
             return
 
-        os.makedirs(self._output_dir, exist_ok=True)
-        filename = self._get_output_filename()
-        audio = audio_buffer_processor.merge_audio_buffers()
-
-        with io.BytesIO() as buffer:
-            with wave.open(buffer, "wb") as wf:
-                wf.setsampwidth(2)
-                wf.setnchannels(audio_buffer_processor.num_channels)
-                wf.setframerate(audio_buffer_processor.sample_rate)
-                wf.writeframes(audio)
-            async with aiofiles.open(filename, "wb") as file:
-                await file.write(buffer.getvalue())
-
-        try:
-            await self._multipart_upload(filename)
-            await aiofiles.os.remove(filename)
-        except FileNotFoundError:
-            pass
-        except Exception as e:
-            logger.error(f"Failed to upload recording: {e}")
+        # Handle end of audio
+        if end_of_audio:
+            try:
+                await self._multipart_upload(self._audio_filename)
+                await aiofiles.os.remove(self._audio_filename)
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                logger.error(f"Failed to upload recording: {e}")
 
     def _get_output_filename(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

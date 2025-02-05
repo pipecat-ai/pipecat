@@ -80,7 +80,7 @@ class AudioBufferProcessor(FrameProcessor):
         self._reset_recording()
 
     async def stop_recording(self):
-        await self._call_on_audio_data_handler()
+        await self._call_on_audio_data_handler(end_of_audio=True)
         self._recording = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -106,20 +106,20 @@ class AudioBufferProcessor(FrameProcessor):
             self._last_bot_frame_at = time.time()
 
         if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
-            await self._call_on_audio_data_handler()
+            await self._call_on_audio_data_handler(end_of_audio=False)
 
         if isinstance(frame, (CancelFrame, EndFrame)):
             await self.stop_recording()
 
         await self.push_frame(frame, direction)
 
-    async def _call_on_audio_data_handler(self):
+    async def _call_on_audio_data_handler(self, end_of_audio: bool):
         if not self.has_audio() or not self._recording:
             return
 
         merged_audio = self.merge_audio_buffers()
         await self._call_event_handler(
-            "on_audio_data", merged_audio, self._sample_rate, self._num_channels
+            "on_audio_data", merged_audio, self._sample_rate, self._num_channels, end_of_audio
         )
         self._reset_audio_buffers()
 
