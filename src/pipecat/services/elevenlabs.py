@@ -114,6 +114,9 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
             return "pcm_24000"
         case 44100:
             return "pcm_44100"
+    logger.warning(
+        f"ElevenLabsTTSService: No output format available for {sample_rate} sample rate"
+    )
     return "pcm_16000"
 
 
