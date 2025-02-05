@@ -5,7 +5,7 @@
 #
 
 import asyncio
-from typing import AsyncIterable, Iterable, List
+from typing import Any, AsyncIterable, Dict, Iterable, List
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
@@ -40,16 +40,17 @@ HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 5
 class PipelineParams(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    allow_interruptions: bool = False
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
-    allow_interruptions: bool = False
     enable_heartbeats: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
-    send_initial_empty_metrics: bool = True
-    report_only_initial_ttfb: bool = False
-    observers: List[BaseObserver] = []
     heartbeats_period_secs: float = HEARTBEAT_SECONDS
+    observers: List[BaseObserver] = []
+    report_only_initial_ttfb: bool = False
+    send_initial_empty_metrics: bool = True
+    start_metadata: Dict[str, Any] = {}
 
 
 class PipelineTaskSource(FrameProcessor):
@@ -278,13 +279,14 @@ class PipelineTask(BaseTask):
             clock=self._clock,
             task_manager=self._task_manager,
             allow_interruptions=self._params.allow_interruptions,
-            enable_metrics=self._params.enable_metrics,
-            enable_usage_metrics=self._params.enable_usage_metrics,
-            report_only_initial_ttfb=self._params.report_only_initial_ttfb,
-            observer=self._observer,
             audio_in_sample_rate=self._params.audio_in_sample_rate,
             audio_out_sample_rate=self._params.audio_out_sample_rate,
+            enable_metrics=self._params.enable_metrics,
+            enable_usage_metrics=self._params.enable_usage_metrics,
+            observer=self._observer,
+            report_only_initial_ttfb=self._params.report_only_initial_ttfb,
         )
+        start_frame.metadata = self._params.start_metadata
         await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
 
         if self._params.enable_metrics and self._params.send_initial_empty_metrics:
