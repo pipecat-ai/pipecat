@@ -8,14 +8,30 @@ import audioop
 
 import numpy as np
 import pyloudnorm as pyln
-import resampy
+import soxr
+
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
+from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
+
+
+def create_default_resampler(**kwargs) -> BaseAudioResampler:
+    return SOXRAudioResampler(**kwargs)
 
 
 def resample_audio(audio: bytes, original_rate: int, target_rate: int) -> bytes:
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.warn(
+            "'resample_audio()' is deprecated, use 'create_default_resampler()' instead.",
+            DeprecationWarning,
+        )
+
     if original_rate == target_rate:
         return audio
     audio_data = np.frombuffer(audio, dtype=np.int16)
-    resampled_audio = resampy.resample(audio_data, original_rate, target_rate)
+    resampled_audio = soxr.resample(audio_data, original_rate, target_rate)
     return resampled_audio.astype(np.int16).tobytes()
 
 
@@ -75,21 +91,45 @@ def exp_smoothing(value: float, prev_value: float, factor: float) -> float:
     return prev_value + factor * (value - prev_value)
 
 
-def ulaw_to_pcm(ulaw_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
+async def ulaw_to_pcm(
+    ulaw_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler
+):
     # Convert μ-law to PCM
     in_pcm_bytes = audioop.ulaw2lin(ulaw_bytes, 2)
 
     # Resample
-    out_pcm_bytes = resample_audio(in_pcm_bytes, in_sample_rate, out_sample_rate)
+    out_pcm_bytes = await resampler.resample(in_pcm_bytes, in_rate, out_rate)
 
     return out_pcm_bytes
 
 
-def pcm_to_ulaw(pcm_bytes: bytes, in_sample_rate: int, out_sample_rate: int):
+async def pcm_to_ulaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler):
     # Resample
-    in_pcm_bytes = resample_audio(pcm_bytes, in_sample_rate, out_sample_rate)
+    in_pcm_bytes = await resampler.resample(pcm_bytes, in_rate, out_rate)
 
     # Convert PCM to μ-law
-    ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)
+    out_ulaw_bytes = audioop.lin2ulaw(in_pcm_bytes, 2)
 
-    return ulaw_bytes
+    return out_ulaw_bytes
+
+
+async def alaw_to_pcm(
+    alaw_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler
+) -> bytes:
+    # Convert a-law to PCM
+    in_pcm_bytes = audioop.alaw2lin(alaw_bytes, 2)
+
+    # Resample
+    out_pcm_bytes = await resampler.resample(in_pcm_bytes, in_rate, out_rate)
+
+    return out_pcm_bytes
+
+
+async def pcm_to_alaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: BaseAudioResampler):
+    # Resample
+    in_pcm_bytes = await resampler.resample(pcm_bytes, in_rate, out_rate)
+
+    # Convert PCM to μ-law
+    out_alaw_bytes = audioop.lin2alaw(in_pcm_bytes, 2)
+
+    return out_alaw_bytes

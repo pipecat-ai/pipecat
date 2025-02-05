@@ -44,9 +44,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.google import GoogleLLMContext, GoogleLLMService
 from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.sync.event_notifier import EventNotifier
@@ -440,11 +438,11 @@ class CompletenessCheck(FrameProcessor):
 
         if isinstance(frame, UserStartedSpeakingFrame):
             if self._idle_task:
-                self._idle_task.cancel()
+                await self.cancel_task(self._idle_task)
         elif isinstance(frame, TextFrame) and frame.text.startswith("YES"):
             logger.debug("Completeness check YES")
             if self._idle_task:
-                self._idle_task.cancel()
+                await self.cancel_task(self._idle_task)
             await self.push_frame(UserStoppedSpeakingFrame())
             await self._audio_accumulator.reset()
             await self._notifier.notify()
@@ -457,7 +455,9 @@ class CompletenessCheck(FrameProcessor):
                 else:
                     # logger.debug("!!! CompletenessCheck idle wait START")
                     self._wakeup_time = time.time() + self.wait_time
-                    self._idle_task = self.get_event_loop().create_task(self._idle_task_handler())
+                    self._idle_task = self.create_task(self._idle_task_handler())
+        else:
+            await self.push_frame(frame, direction)
 
     async def _idle_task_handler(self):
         try:
@@ -599,11 +599,10 @@ class OutputGate(FrameProcessor):
 
     async def _start(self):
         self._frames_buffer = []
-        self._gate_task = self.get_event_loop().create_task(self._gate_task_handler())
+        self._gate_task = self.create_task(self._gate_task_handler())
 
     async def _stop(self):
-        self._gate_task.cancel()
-        await self._gate_task
+        await self.cancel_task(self._gate_task)
 
     async def _gate_task_handler(self):
         while True:

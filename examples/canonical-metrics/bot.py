@@ -124,17 +124,20 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
+            await audio_buffer_processor.start_recording()
             await transport.capture_participant_transcription(participant["id"])
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         @transport.event_handler("on_call_state_updated")
         async def on_call_state_updated(transport, state):
             if state == "left":
+                # Here we don't want to cancel, we just want to finish sending
+                # whatever is queued, so we use an EndFrame().
                 await task.queue_frame(EndFrame())
 
         runner = PipelineRunner()

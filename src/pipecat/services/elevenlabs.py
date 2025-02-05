@@ -44,10 +44,14 @@ except ModuleNotFoundError as e:
 
 ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
 
+# Models that support language codes
+# The following models are excluded as they don't support language codes:
+# - eleven_flash_v2
+# - eleven_turbo_v2
+# - eleven_multilingual_v2
 ELEVENLABS_MULTILINGUAL_MODELS = {
-    "eleven_turbo_v2_5",
-    "eleven_multilingual_v2",
     "eleven_flash_v2_5",
+    "eleven_turbo_v2_5",
 }
 
 
@@ -136,7 +140,7 @@ def calculate_word_times(
 
 class ElevenLabsTTSService(WordTTSService, WebsocketService):
     class InputParams(BaseModel):
-        language: Optional[Language] = Language.EN
+        language: Optional[Language] = None
         optimize_streaming_latency: Optional[str] = None
         stability: Optional[float] = None
         similarity_boost: Optional[float] = None
@@ -196,7 +200,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
             "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
@@ -298,20 +302,16 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.get_event_loop().create_task(
-            self._receive_task_handler(self.push_error)
-        )
-        self._keepalive_task = self.get_event_loop().create_task(self._keepalive_task_handler())
+        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+        self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
         if self._receive_task:
-            self._receive_task.cancel()
-            await self._receive_task
+            await self.cancel_task(self._receive_task)
             self._receive_task = None
 
         if self._keepalive_task:
-            self._keepalive_task.cancel()
-            await self._keepalive_task
+            await self.cancel_task(self._keepalive_task)
             self._keepalive_task = None
 
         await self._disconnect_websocket()
@@ -330,14 +330,16 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
 
             # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
             language = self._settings["language"]
-            if model in ELEVENLABS_MULTILINGUAL_MODELS:
+            if model in ELEVENLABS_MULTILINGUAL_MODELS and language is not None:
                 url += f"&language_code={language}"
-            else:
+                logger.debug(f"Using language code: {language}")
+            elif language is not None:
                 logger.warning(
                     f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
                 )
 
-            self._websocket = await websockets.connect(url)
+            # Set max websocket message size to 16MB for large audio responses
+            self._websocket = await websockets.connect(url, max_size=16 * 1024 * 1024)
 
             # According to ElevenLabs, we should always start with a single space.
             msg: Dict[str, Any] = {
@@ -382,13 +384,8 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
 
     async def _keepalive_task_handler(self):
         while True:
-            try:
-                await asyncio.sleep(10)
-                await self._send_text("")
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"{self} exception: {e}")
+            await asyncio.sleep(10)
+            await self._send_text("")
 
     async def _send_text(self, text: str):
         if self._websocket:
@@ -436,7 +433,7 @@ class ElevenLabsHttpTTSService(TTSService):
     """
 
     class InputParams(BaseModel):
-        language: Optional[Language] = Language.EN
+        language: Optional[Language] = None
         optimize_streaming_latency: Optional[int] = None
         stability: Optional[float] = None
         similarity_boost: Optional[float] = None
@@ -467,7 +464,7 @@ class ElevenLabsHttpTTSService(TTSService):
             "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
-            else "en",
+            else None,
             "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
@@ -524,16 +521,22 @@ class ElevenLabsHttpTTSService(TTSService):
 
         url = f"{self._base_url}/v1/text-to-speech/{self._voice_id}/stream"
 
-        payload = {
+        payload: Dict[str, Union[str, Dict[str, Union[float, bool]]]] = {
             "text": text,
             "model_id": self._model_name,
         }
 
         if self._voice_settings:
-            payload["voice_settings"] = json.dumps(self._voice_settings)
+            payload["voice_settings"] = self._voice_settings
 
-        if self._settings["language"]:
-            payload["language_code"] = self._settings["language"]
+        language = self._settings["language"]
+        if self._model_name in ELEVENLABS_MULTILINGUAL_MODELS and language:
+            payload["language_code"] = language
+            logger.debug(f"Using language code: {language}")
+        elif language:
+            logger.warning(
+                f"Language code [{language}] not applied. Language codes can only be used with multilingual models: {', '.join(sorted(ELEVENLABS_MULTILINGUAL_MODELS))}"
+            )
 
         headers = {
             "xi-api-key": self._api_key,

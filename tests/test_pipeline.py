@@ -1,116 +1,94 @@
+#
+# Copyright (c) 2024-2025 Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import asyncio
 import unittest
-from unittest.mock import Mock
 
-from pipecat.frames.frames import EndFrame, TextFrame
+from pipecat.frames.frames import EndFrame, HeartbeatFrame, TextFrame
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.aggregators.sentence import SentenceAggregator
+from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameProcessor
-from pipecat.processors.text_transformer import StatelessTextTransformer
+from pipecat.tests.utils import HeartbeatsObserver, run_test
 
 
-class TestDailyPipeline(unittest.IsolatedAsyncioTestCase):
-    @unittest.skip("FIXME: This test is failing")
-    async def test_pipeline_simple(self):
-        aggregator = SentenceAggregator()
+class TestPipeline(unittest.IsolatedAsyncioTestCase):
+    async def test_pipeline_single(self):
+        pipeline = Pipeline([IdentityFilter()])
 
-        outgoing_queue = asyncio.Queue()
-        incoming_queue = asyncio.Queue()
-        pipeline = Pipeline([aggregator], incoming_queue, outgoing_queue)
+        frames_to_send = [TextFrame(text="Hello from Pipecat!")]
+        expected_returned_frames = [TextFrame]
+        await run_test(pipeline, frames_to_send, expected_returned_frames)
 
-        await incoming_queue.put(TextFrame("Hello, "))
-        await incoming_queue.put(TextFrame("world."))
-        await incoming_queue.put(EndFrame())
+    async def test_pipeline_multiple(self):
+        identity1 = IdentityFilter()
+        identity2 = IdentityFilter()
+        identity3 = IdentityFilter()
 
-        await pipeline.run_pipeline()
+        pipeline = Pipeline([identity1, identity2, identity3])
 
-        self.assertEqual(await outgoing_queue.get(), TextFrame("Hello, world."))
-        self.assertIsInstance(await outgoing_queue.get(), EndFrame)
+        frames_to_send = [TextFrame(text="Hello from Pipecat!")]
+        expected_returned_frames = [TextFrame]
+        await run_test(pipeline, frames_to_send, expected_returned_frames)
 
-    @unittest.skip("FIXME: This test is failing")
-    async def test_pipeline_multiple_stages(self):
-        sentence_aggregator = SentenceAggregator()
-        to_upper = StatelessTextTransformer(lambda x: x.upper())
-        add_space = StatelessTextTransformer(lambda x: x + " ")
 
-        outgoing_queue = asyncio.Queue()
-        incoming_queue = asyncio.Queue()
-        pipeline = Pipeline(
-            [add_space, sentence_aggregator, to_upper], incoming_queue, outgoing_queue
+class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
+    async def test_parallel_single(self):
+        pipeline = ParallelPipeline([IdentityFilter()])
+
+        frames_to_send = [TextFrame(text="Hello from Pipecat!")]
+        expected_returned_frames = [TextFrame]
+        await run_test(pipeline, frames_to_send, expected_returned_frames)
+
+    async def test_parallel_multiple(self):
+        """Should only passthrough one instance of TextFrame."""
+        pipeline = ParallelPipeline([IdentityFilter()], [IdentityFilter()])
+
+        frames_to_send = [TextFrame(text="Hello from Pipecat!")]
+        expected_returned_frames = [TextFrame]
+        await run_test(pipeline, frames_to_send, expected_returned_frames)
+
+
+class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
+    async def test_task_single(self):
+        pipeline = Pipeline([IdentityFilter()])
+        task = PipelineTask(pipeline)
+        task.set_event_loop(asyncio.get_event_loop())
+
+        await task.queue_frame(TextFrame(text="Hello!"))
+        await task.queue_frames([TextFrame(text="Bye!"), EndFrame()])
+        await task.run()
+        assert task.has_finished()
+
+    async def test_task_heartbeats(self):
+        heartbeats_counter = 0
+
+        async def heartbeat_received(processor: FrameProcessor, heartbeat: HeartbeatFrame):
+            nonlocal heartbeats_counter
+            heartbeats_counter += 1
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        heartbeats_observer = HeartbeatsObserver(
+            target=identity, heartbeat_callback=heartbeat_received
         )
-
-        sentence = "Hello, world. It's me, a pipeline."
-        for c in sentence:
-            await incoming_queue.put(TextFrame(c))
-        await incoming_queue.put(EndFrame())
-
-        await pipeline.run_pipeline()
-
-        self.assertEqual(await outgoing_queue.get(), TextFrame("H E L L O ,   W O R L D ."))
-        self.assertEqual(
-            await outgoing_queue.get(),
-            TextFrame("   I T ' S   M E ,   A   P I P E L I N E ."),
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                enable_heartbeats=True, heartbeats_period_secs=0.2, observers=[heartbeats_observer]
+            ),
         )
-        # leftover little bit because of the spacing
-        self.assertEqual(
-            await outgoing_queue.get(),
-            TextFrame(" "),
-        )
-        self.assertIsInstance(await outgoing_queue.get(), EndFrame)
+        task.set_event_loop(asyncio.get_event_loop())
 
+        expected_heartbeats = 1.0 / 0.2
 
-class TestLogFrame(unittest.TestCase):
-    class MockProcessor(FrameProcessor):
-        def __init__(self, name):
-            self.name = name
-
-        def __str__(self):
-            return self.name
-
-    def setUp(self):
-        self.processor1 = self.MockProcessor("processor1")
-        self.processor2 = self.MockProcessor("processor2")
-        self.pipeline = Pipeline(processors=[self.processor1, self.processor2])
-        self.pipeline._name = "MyClass"
-        self.pipeline._logger = Mock()
-
-    @unittest.skip("FIXME: This test is failing")
-    def test_log_frame_from_source(self):
-        frame = Mock(__class__=Mock(__name__="MyFrame"))
-        self.pipeline._log_frame(frame, depth=1)
-        self.pipeline._logger.debug.assert_called_once_with(
-            "MyClass  source -> MyFrame -> processor1"
-        )
-
-    @unittest.skip("FIXME: This test is failing")
-    def test_log_frame_to_sink(self):
-        frame = Mock(__class__=Mock(__name__="MyFrame"))
-        self.pipeline._log_frame(frame, depth=3)
-        self.pipeline._logger.debug.assert_called_once_with(
-            "MyClass      processor2 -> MyFrame -> sink"
-        )
-
-    @unittest.skip("FIXME: This test is failing")
-    def test_log_frame_repeated_log(self):
-        frame = Mock(__class__=Mock(__name__="MyFrame"))
-        self.pipeline._log_frame(frame, depth=2)
-        self.pipeline._logger.debug.assert_called_once_with(
-            "MyClass    processor1 -> MyFrame -> processor2"
-        )
-        self.pipeline._log_frame(frame, depth=2)
-        self.pipeline._logger.debug.assert_called_with("MyClass    ... repeated")
-
-    @unittest.skip("FIXME: This test is failing")
-    def test_log_frame_reset_repeated_log(self):
-        frame1 = Mock(__class__=Mock(__name__="MyFrame1"))
-        frame2 = Mock(__class__=Mock(__name__="MyFrame2"))
-        self.pipeline._log_frame(frame1, depth=2)
-        self.pipeline._logger.debug.assert_called_once_with(
-            "MyClass    processor1 -> MyFrame1 -> processor2"
-        )
-        self.pipeline._log_frame(frame1, depth=2)
-        self.pipeline._logger.debug.assert_called_with("MyClass    ... repeated")
-        self.pipeline._log_frame(frame2, depth=2)
-        self.pipeline._logger.debug.assert_called_with(
-            "MyClass    processor1 -> MyFrame2 -> processor2"
-        )
+        await task.queue_frame(TextFrame(text="Hello!"))
+        try:
+            await asyncio.wait_for(task.run(), timeout=1.0)
+        except asyncio.TimeoutError:
+            pass
+        assert heartbeats_counter == expected_heartbeats

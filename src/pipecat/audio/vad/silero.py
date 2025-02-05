@@ -159,5 +159,5 @@ class SileroVADAnalyzer(VADAnalyzer):
             return new_confidence
         except Exception as e:
             # This comes from an empty audio array
-            logger.exception(f"Error analyzing audio with Silero VAD: {e}")
+            logger.error(f"Error analyzing audio with Silero VAD: {e}")
             return 0

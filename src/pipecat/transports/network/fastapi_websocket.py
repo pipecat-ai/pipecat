@@ -16,6 +16,8 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
@@ -68,11 +70,17 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def start(self, frame: StartFrame):
         await super().start(frame)
         if self._params.session_timeout:
-            self._monitor_websocket_task = self.get_event_loop().create_task(
-                self._monitor_websocket()
-            )
+            self._monitor_websocket_task = self.create_task(self._monitor_websocket())
         await self._callbacks.on_client_connected(self._websocket)
-        self._receive_task = self.get_event_loop().create_task(self._receive_messages())
+        self._receive_task = self.create_task(self._receive_messages())
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self.cancel_task(self._receive_task)
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self.cancel_task(self._receive_task)
 
     def _iter_data(self) -> typing.AsyncIterator[bytes | str]:
         if self._params.serializer.type == FrameSerializerType.BINARY:
@@ -81,26 +89,26 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
             return self._websocket.iter_text()
 
     async def _receive_messages(self):
-        async for message in self._iter_data():
-            frame = self._params.serializer.deserialize(message)
+        try:
+            async for message in self._iter_data():
+                frame = await self._params.serializer.deserialize(message)
 
-            if not frame:
-                continue
+                if not frame:
+                    continue
 
-            if isinstance(frame, InputAudioRawFrame):
-                await self.push_audio_frame(frame)
-            else:
-                await self.push_frame(frame)
+                if isinstance(frame, InputAudioRawFrame):
+                    await self.push_audio_frame(frame)
+                else:
+                    await self.push_frame(frame)
+        except Exception as e:
+            logger.error(f"{self} exception receiving data (class: {e.__class__.__name__})")
 
         await self._callbacks.on_client_disconnected(self._websocket)
 
     async def _monitor_websocket(self):
         """Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event."""
-        try:
-            await asyncio.sleep(self._params.session_timeout)
-            await self._callbacks.on_session_timeout(self._websocket)
-        except asyncio.CancelledError:
-            logger.info(f"Monitoring task cancelled for: {self._websocket}")
+        await asyncio.sleep(self._params.session_timeout)
+        await self._callbacks.on_session_timeout(self._websocket)
 
 
 class FastAPIWebsocketOutputTransport(BaseOutputTransport):
@@ -154,9 +162,12 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         await self._write_audio_sleep()
 
     async def _write_frame(self, frame: Frame):
-        payload = self._params.serializer.serialize(frame)
-        if payload and self._websocket.client_state == WebSocketState.CONNECTED:
-            await self._send_data(payload)
+        try:
+            payload = await self._params.serializer.serialize(frame)
+            if payload and self._websocket.client_state == WebSocketState.CONNECTED:
+                await self._send_data(payload)
+        except Exception as e:
+            logger.error(f"{self} exception sending data (class: {e.__class__.__name__})")
 
     def _send_data(self, data: str | bytes):
         if self._params.serializer.type == FrameSerializerType.BINARY:
@@ -182,9 +193,8 @@ class FastAPIWebsocketTransport(BaseTransport):
         params: FastAPIWebsocketParams,
         input_name: str | None = None,
         output_name: str | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
     ):
-        super().__init__(input_name=input_name, output_name=output_name, loop=loop)
+        super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 
         self._callbacks = FastAPIWebsocketCallbacks(

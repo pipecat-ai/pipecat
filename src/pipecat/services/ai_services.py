@@ -8,7 +8,7 @@ import asyncio
 import io
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Tuple
 
 from loguru import logger
 
@@ -69,7 +69,7 @@ class AIService(FrameProcessor):
     async def cancel(self, frame: CancelFrame):
         pass
 
-    async def _update_settings(self, settings: Dict[str, Any]):
+    async def _update_settings(self, settings: Mapping[str, Any]):
         from pipecat.services.openai_realtime_beta.events import (
             SessionProperties,
         )
@@ -208,6 +208,10 @@ class TTSService(AIService):
         push_stop_frames: bool = False,
         # if push_stop_frames is True, wait for this idle period before pushing TTSStoppedFrame
         stop_frame_timeout_s: float = 1.0,
+        # if True, TTSService will push silence audio frames after TTSStoppedFrame
+        push_silence_after_stop: bool = False,
+        # if push_silence_after_stop is True, send this amount of audio silence
+        silence_time_s: float = 2.0,
         # TTS output sample rate
         sample_rate: int = 24000,
         text_filter: Optional[BaseTextFilter] = None,
@@ -218,6 +222,8 @@ class TTSService(AIService):
         self._push_text_frames: bool = push_text_frames
         self._push_stop_frames: bool = push_stop_frames
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
+        self._push_silence_after_stop: bool = push_silence_after_stop
+        self._silence_time_s: float = silence_time_s
         self._sample_rate: int = sample_rate
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
@@ -253,23 +259,21 @@ class TTSService(AIService):
     async def start(self, frame: StartFrame):
         await super().start(frame)
         if self._push_stop_frames:
-            self._stop_frame_task = self.get_event_loop().create_task(self._stop_frame_handler())
+            self._stop_frame_task = self.create_task(self._stop_frame_handler())
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
         if self._stop_frame_task:
-            self._stop_frame_task.cancel()
-            await self._stop_frame_task
+            await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         if self._stop_frame_task:
-            self._stop_frame_task.cancel()
-            await self._stop_frame_task
+            await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
 
-    async def _update_settings(self, settings: Dict[str, Any]):
+    async def _update_settings(self, settings: Mapping[str, Any]):
         for key, value in settings.items():
             if key in self._settings:
                 logger.info(f"Updating TTS setting {key} to: [{value}]")
@@ -316,6 +320,16 @@ class TTSService(AIService):
             await self.push_frame(frame, direction)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        if self._push_silence_after_stop and isinstance(frame, TTSStoppedFrame):
+            silence_num_bytes = int(self._silence_time_s * self.sample_rate * 2)  # 16-bit
+            await self.push_frame(
+                TTSAudioRawFrame(
+                    audio=b"\x00" * silence_num_bytes,
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                )
+            )
+
         await super().push_frame(frame, direction)
 
         if self._push_stop_frames and (
@@ -364,23 +378,20 @@ class TTSService(AIService):
             await self.push_frame(TTSTextFrame(text))
 
     async def _stop_frame_handler(self):
-        try:
-            has_started = False
-            while True:
-                try:
-                    frame = await asyncio.wait_for(
-                        self._stop_frame_queue.get(), self._stop_frame_timeout_s
-                    )
-                    if isinstance(frame, TTSStartedFrame):
-                        has_started = True
-                    elif isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
-                        has_started = False
-                except asyncio.TimeoutError:
-                    if has_started:
-                        await self.push_frame(TTSStoppedFrame())
-                        has_started = False
-        except asyncio.CancelledError:
-            pass
+        has_started = False
+        while True:
+            try:
+                frame = await asyncio.wait_for(
+                    self._stop_frame_queue.get(), self._stop_frame_timeout_s
+                )
+                if isinstance(frame, TTSStartedFrame):
+                    has_started = True
+                elif isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+                    has_started = False
+            except asyncio.TimeoutError:
+                if has_started:
+                    await self.push_frame(TTSStoppedFrame())
+                    has_started = False
 
 
 class WordTTSService(TTSService):
@@ -388,7 +399,7 @@ class WordTTSService(TTSService):
         super().__init__(**kwargs)
         self._initial_word_timestamp = -1
         self._words_queue = asyncio.Queue()
-        self._words_task = self.get_event_loop().create_task(self._words_task_handler())
+        self._words_task = None
 
     def start_word_timestamps(self):
         if self._initial_word_timestamp == -1:
@@ -400,6 +411,10 @@ class WordTTSService(TTSService):
     async def add_word_timestamps(self, word_times: List[Tuple[str, float]]):
         for word, timestamp in word_times:
             await self._words_queue.put((word, seconds_to_nanoseconds(timestamp)))
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        await self._create_words_task()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -419,37 +434,34 @@ class WordTTSService(TTSService):
         await super()._handle_interruption(frame, direction)
         self.reset_word_timestamps()
 
+    async def _create_words_task(self):
+        self._words_task = self.create_task(self._words_task_handler())
+
     async def _stop_words_task(self):
         if self._words_task:
-            self._words_task.cancel()
-            await self._words_task
+            await self.cancel_task(self._words_task)
             self._words_task = None
 
     async def _words_task_handler(self):
         last_pts = 0
         while True:
-            try:
-                (word, timestamp) = await self._words_queue.get()
-                if word == "Reset" and timestamp == 0:
-                    self.reset_word_timestamps()
-                    frame = None
-                elif word == "LLMFullResponseEndFrame" and timestamp == 0:
-                    frame = LLMFullResponseEndFrame()
-                    frame.pts = last_pts
-                elif word == "TTSStoppedFrame" and timestamp == 0:
-                    frame = TTSStoppedFrame()
-                    frame.pts = last_pts
-                else:
-                    frame = TTSTextFrame(word)
-                    frame.pts = self._initial_word_timestamp + timestamp
-                if frame:
-                    last_pts = frame.pts
-                    await self.push_frame(frame)
-                self._words_queue.task_done()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.exception(f"{self} exception: {e}")
+            (word, timestamp) = await self._words_queue.get()
+            if word == "Reset" and timestamp == 0:
+                self.reset_word_timestamps()
+                frame = None
+            elif word == "LLMFullResponseEndFrame" and timestamp == 0:
+                frame = LLMFullResponseEndFrame()
+                frame.pts = last_pts
+            elif word == "TTSStoppedFrame" and timestamp == 0:
+                frame = TTSStoppedFrame()
+                frame.pts = last_pts
+            else:
+                frame = TTSTextFrame(word)
+                frame.pts = self._initial_word_timestamp + timestamp
+            if frame:
+                last_pts = frame.pts
+                await self.push_frame(frame)
+            self._words_queue.task_done()
 
 
 class STTService(AIService):
@@ -479,7 +491,7 @@ class STTService(AIService):
         """Returns transcript as a string"""
         pass
 
-    async def _update_settings(self, settings: Dict[str, Any]):
+    async def _update_settings(self, settings: Mapping[str, Any]):
         logger.info(f"Updating STT settings: {self._settings}")
         for key, value in settings.items():
             if key in self._settings:

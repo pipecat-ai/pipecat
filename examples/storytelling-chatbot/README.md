@@ -7,7 +7,7 @@
 This example shows how to build a voice-driven interactive storytelling experience.
 It periodically prompts the user for input for a 'choose your own adventure' style experience.
 
-We add visual elements to the story by generating images at lightning speed using Fal.
+We use Gemini 2.0 for creating the story and image prompts, and we add visual elements to the story by generating images using Google's Imagen.
 
 
 ---
@@ -18,7 +18,7 @@ We add visual elements to the story by generating images at lightning speed usin
 
 Transcribes inbound participant voice media to text.
 
-**OpenAI (GPT4) - LLM**
+**Google Gemini 2.0 - LLM**
 
 Our creative writer LLM. You can see the context used to prompt it [here](src/prompts.py)
 
@@ -26,9 +26,9 @@ Our creative writer LLM. You can see the context used to prompt it [here](src/pr
 
 Converts and streams the LLM response from text to audio
 
-**Fal.ai - Image Generation**
+**Google Imagen - Image Generation**
 
-Adds pictures to our story (really fast!) Prompting is quite key for style consistency, so we task the LLM to turn each story page into a short image prompt.
+Adds pictures to our story. Prompting is quite key for style consistency, so we task the LLM to turn each story page into a short image prompt.
 
 ---
 
@@ -66,7 +66,7 @@ The build UI files can be found in `frontend/out`
 
 Start the API / bot manager:
 
-`python src/bot_runner.py`
+`python src/bot_runner.py --host localhost`
 
 If you'd like to run a custom domain or port:
 
