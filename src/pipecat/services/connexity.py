@@ -283,7 +283,7 @@ class ConnexityDailyMetricsService(ConnexityInterface):
         call_id: str,
         assistant_id: str,
         api_key: str,
-        api_url: str = "https://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/links",
+        api_url: str = "http://localhost:8080/process/blackbox/links",
         assistant_speaks_first: bool = True,
         daily_api_key: str,
         room_url: str,
@@ -301,8 +301,14 @@ class ConnexityDailyMetricsService(ConnexityInterface):
         self._room_url = room_url
 
     async def stop(self, frame: EndFrame):
-        await super().stop(frame)
+        print("END FRAME RECEIVED", flush=True)
         await self.send_audio_url_to_connexity(self._get_daily_recording(self._room_url))
+        await super().stop(frame)
+
+    async def cancel(self, frame: CancelFrame):
+        print("CANCEL FRAME RECEIVED", flush=True)
+        await self.send_audio_url_to_connexity(await self._get_daily_recording(self._room_url))
+        await super().cancel(frame)
 
     async def _get_daily_recording(self, room_url):
         import requests
