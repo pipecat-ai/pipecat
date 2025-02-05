@@ -165,7 +165,7 @@ class StoryProcessor(FrameProcessor):
             await self.push_frame(frame)
             # Send an app message to the UI
             await self.push_frame(DailyTransportMessageFrame(CUE_USER_TURN))
-            # await self.push_frame(sounds["listening"])
+            await self.push_frame(sounds["listening"])
 
         # Anything that is not a TextFrame pass through
         else:

@@ -100,10 +100,6 @@ async def main(room_url, token=None):
         runner = PipelineRunner()
 
         logger.debug("Waiting for participant...")
-        fl = FrameLogger("Into parallel pipeline", "cyan")
-        fl2 = FrameLogger("Out of parallel pipeline", "red")
-        fl3 = FrameLogger("out of LLM service", "green")
-        fl4 = FrameLogger("out of tts", "magenta")
         main_pipeline = Pipeline(
             [
                 transport.input(),
@@ -111,12 +107,6 @@ async def main(room_url, token=None):
                 llm_service,
                 story_processor,
                 image_processor,
-                # fl,
-                # SyncParallelPipeline(
-                #     [tts_service],  # Audio pipeline
-                #     [image_processor],  # Image pipeline
-                # ),
-                # fl2,
                 tts_service,
                 transport.output(),
                 StoryBreakReinsertProcessor(),
@@ -142,7 +132,6 @@ async def main(room_url, token=None):
                     images["book1"],
                     context_aggregator.user().get_context_frame(),
                     DailyTransportMessageFrame(CUE_USER_TURN),
-                    # sounds["listening"],
                     images["book2"],
                 ]
             )
