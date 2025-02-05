@@ -186,7 +186,6 @@ class PerplexityLLMService(OpenAILLMService):
         system_messages = [msg for msg in messages if msg["role"] == "system"]
         other_messages = [msg for msg in messages if msg["role"] != "system"]
 
-
         if not other_messages:
             return system_messages + [{"role": "user", "content": "Let's begin the conversation."}]
 
