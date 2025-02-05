@@ -101,7 +101,7 @@ class WebsocketClientSession:
             if self._websocket:
                 await self._websocket.send(message)
         except Exception as e:
-            logger.error(f"{self} exception sending data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
 
     async def _client_task_handler(self):
         try:
@@ -109,7 +109,7 @@ class WebsocketClientSession:
             async for message in self._websocket:
                 await self._callbacks.on_message(self._websocket, message)
         except Exception as e:
-            logger.error(f"{self} exception receiving data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
         await self._callbacks.on_disconnected(self._websocket)
 
