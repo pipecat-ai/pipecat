@@ -12,7 +12,6 @@ from pypdf import PdfReader
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -171,7 +170,7 @@ Your task is to help the user understand and learn from this article in 2 senten
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

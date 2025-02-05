@@ -33,6 +33,19 @@ class DailyRoomSipParams(BaseModel):
     num_endpoints: int = 1
 
 
+class RecordingsBucketConfig(BaseModel):
+    """Configuration for storing Daily recordings in a custom S3 bucket.
+
+    Refer to the Daily API documentation for more information:
+    https://docs.daily.co/guides/products/live-streaming-recording/storing-recordings-in-a-custom-s3-bucket
+    """
+
+    bucket_name: str
+    bucket_region: str
+    assume_role_arn: str
+    allow_api_access: bool = False
+
+
 class DailyRoomProperties(BaseModel, extra="allow"):
     """Properties for configuring a Daily room.
 
@@ -43,6 +56,8 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         enable_emoji_reactions: Whether emoji reactions are enabled
         eject_at_room_exp: Whether to remove participants when room expires
         enable_dialout: Whether SIP dial-out is enabled
+        enable_recording: Recording settings ('cloud', 'local', 'raw-tracks')
+        geo: Geographic region for room
         max_participants: Maximum number of participants allowed in the room
         sip: SIP configuration parameters
         sip_uri: SIP URI information returned by Daily
@@ -57,7 +72,10 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     enable_emoji_reactions: bool = False
     eject_at_room_exp: bool = True
     enable_dialout: Optional[bool] = None
+    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
+    geo: Optional[str] = None
     max_participants: Optional[int] = None
+    recordings_bucket: Optional[RecordingsBucketConfig] = None
     sip: Optional[DailyRoomSipParams] = None
     sip_uri: Optional[dict] = None
     start_video_off: bool = False
@@ -111,6 +129,84 @@ class DailyRoomObject(BaseModel):
     config: DailyRoomProperties
 
 
+class DailyMeetingTokenProperties(BaseModel):
+    """Properties for configuring a Daily meeting token.
+
+    Refer to the Daily API documentation for more information:
+    https://docs.daily.co/reference/rest-api/meeting-tokens/create-meeting-token#properties
+    """
+
+    room_name: Optional[str] = Field(
+        default=None,
+        description="The room for which this token is valid. If not set, the token is valid for all rooms in your domain. You should always set room_name if using this token to control meeting access.",
+    )
+
+    eject_at_token_exp: Optional[bool] = Field(
+        default=None,
+        description="If `true`, the user will be ejected from the room when the token expires. Defaults to `false`.",
+    )
+    eject_after_elapsed: Optional[int] = Field(
+        default=None,
+        description="The number of seconds after which the user will be ejected from the room. If not provided, the user will not be ejected based on elapsed time.",
+    )
+
+    nbf: Optional[int] = Field(
+        default=None,
+        description="Not before. This is a unix timestamp (seconds since the epoch.) Users cannot join a meeting in with this token before this time.",
+    )
+
+    exp: Optional[int] = Field(
+        default=None,
+        description="Expiration time (unix timestamp in seconds). We strongly recommend setting this value for security. If not set, the token will not expire. Refer docs for more info.",
+    )
+    is_owner: Optional[bool] = Field(
+        default=None,
+        description="If `true`, the token will grant owner privileges in the room. Defaults to `false`.",
+    )
+    user_name: Optional[str] = Field(
+        default=None,
+        description="The name of the user. This will be added to the token payload.",
+    )
+    user_id: Optional[str] = Field(
+        default=None,
+        description="A unique identifier for the user. This will be added to the token payload.",
+    )
+    enable_screenshare: Optional[bool] = Field(
+        default=None,
+        description="If `true`, the user will be able to share their screen. Defaults to `true`.",
+    )
+    start_video_off: Optional[bool] = Field(
+        default=None,
+        description="If `true`, the user's video will be turned off when they join the room. Defaults to `false`.",
+    )
+    start_audio_off: Optional[bool] = Field(
+        default=None,
+        description="If `true`, the user's audio will be turned off when they join the room. Defaults to `false`.",
+    )
+    enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = Field(
+        default=None,
+        description="Recording settings for the token. Must be one of `cloud`, `local` or `raw-tracks`.",
+    )
+    enable_prejoin_ui: Optional[bool] = Field(
+        default=None,
+        description="If `true`, the user will see the prejoin UI before joining the room.",
+    )
+    start_cloud_recording: Optional[bool] = Field(
+        default=None,
+        description="Start cloud recording when the user joins the room. This can be used to always record and archive meetings, for example in a customer support context.",
+    )
+
+
+class DailyMeetingTokenParams(BaseModel):
+    """Parameters for creating a Daily meeting token.
+
+    Refer to the Daily API documentation for more information:
+    https://docs.daily.co/reference/rest-api/meeting-tokens/create-meeting-token#body-params
+    """
+
+    properties: DailyMeetingTokenProperties = Field(default_factory=DailyMeetingTokenProperties)
+
+
 class DailyRESTHelper:
     """Helper class for interacting with Daily's REST API.
 
@@ -129,6 +225,7 @@ class DailyRESTHelper:
         daily_api_url: str = "https://api.daily.co/v1",
         aiohttp_session: aiohttp.ClientSession,
     ):
+        """Initialize the Daily REST helper."""
         self.daily_api_key = daily_api_key
         self.daily_api_url = daily_api_url
         self.aiohttp_session = aiohttp_session
@@ -169,7 +266,7 @@ class DailyRESTHelper:
             Exception: If room creation fails or response is invalid
         """
         headers = {"Authorization": f"Bearer {self.daily_api_key}"}
-        json = {**params.model_dump(exclude_none=True)}
+        json = params.model_dump(exclude_none=True)
         async with self.aiohttp_session.post(
             f"{self.daily_api_url}/rooms", headers=headers, json=json
         ) as r:
@@ -187,7 +284,11 @@ class DailyRESTHelper:
         return room
 
     async def get_token(
-        self, room_url: str, expiry_time: float = 60 * 60, owner: bool = True
+        self,
+        room_url: str,
+        expiry_time: float = 60 * 60,
+        owner: bool = True,
+        params: Optional[DailyMeetingTokenParams] = None,
     ) -> str:
         """Generate a meeting token for user to join a Daily room.
 
@@ -195,6 +296,9 @@ class DailyRESTHelper:
             room_url: Daily room URL
             expiry_time: Token validity duration in seconds (default: 1 hour)
             owner: Whether token has owner privileges
+            params: Optional additional token properties. Note that room_name,
+                exp, and is_owner will be set based on the other function
+                parameters regardless of values in params.
 
         Returns:
             str: Meeting token
@@ -207,12 +311,25 @@ class DailyRESTHelper:
                 "No Daily room specified. You must specify a Daily room in order a token to be generated."
             )
 
-        expiration: float = time.time() + expiry_time
+        expiration: int = int(time.time() + expiry_time)
 
         room_name = self.get_name_from_url(room_url)
 
         headers = {"Authorization": f"Bearer {self.daily_api_key}"}
-        json = {"properties": {"room_name": room_name, "is_owner": owner, "exp": expiration}}
+
+        if params is None:
+            params = DailyMeetingTokenParams(
+                properties=DailyMeetingTokenProperties(
+                    room_name=room_name, is_owner=owner, exp=expiration
+                )
+            )
+        else:
+            params.properties.room_name = room_name
+            params.properties.exp = expiration
+            params.properties.is_owner = owner
+
+        json = params.model_dump(exclude_none=True)
+
         async with self.aiohttp_session.post(
             f"{self.daily_api_url}/meeting-tokens", headers=headers, json=json
         ) as r:

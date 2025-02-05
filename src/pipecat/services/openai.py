@@ -116,6 +116,8 @@ class BaseOpenAILLMService(LLMService):
         model: str,
         api_key=None,
         base_url=None,
+        organization=None,
+        project=None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -131,12 +133,16 @@ class BaseOpenAILLMService(LLMService):
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
         self.set_model_name(model)
-        self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
+        self._client = self.create_client(
+            api_key=api_key, base_url=base_url, organization=organization, project=project, **kwargs
+        )
 
-    def create_client(self, api_key=None, base_url=None, **kwargs):
+    def create_client(self, api_key=None, base_url=None, organization=None, project=None, **kwargs):
         return AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
+            organization=organization,
+            project=project,
             http_client=DefaultAsyncHttpxClient(
                 limits=httpx.Limits(
                     max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
@@ -221,7 +227,7 @@ class BaseOpenAILLMService(LLMService):
                 )
                 await self.start_llm_usage_metrics(tokens)
 
-            if len(chunk.choices) == 0:
+            if chunk.choices is None or len(chunk.choices) == 0:
                 continue
 
             await self.stop_ttfb_metrics()

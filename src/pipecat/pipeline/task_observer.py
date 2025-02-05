@@ -12,6 +12,8 @@ from attr import dataclass
 from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.utils import obj_count, obj_id
 
 
 @dataclass
@@ -53,14 +55,29 @@ class TaskObserver(BaseObserver):
 
     """
 
-    def __init__(self, observers: List[BaseObserver] = []):
-        self._proxies: List[Proxy] = self._create_proxies(observers)
+    def __init__(self, *, observers: List[BaseObserver] = [], task_manager: TaskManager):
+        self._id: int = obj_id()
+        self._name: str = f"{self.__class__.__name__}#{obj_count(self)}"
+        self._observers = observers
+        self._task_manager = task_manager
+        self._proxies: List[Proxy] = []
+
+    @property
+    def id(self) -> int:
+        return self._id
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    async def start(self):
+        """Starts all proxy observer tasks."""
+        self._proxies = self._create_proxies(self._observers)
 
     async def stop(self):
         """Stops all proxy observer tasks."""
         for proxy in self._proxies:
-            proxy.task.cancel()
-            await proxy.task
+            await self._task_manager.cancel_task(proxy.task)
 
     async def on_push_frame(
         self,
@@ -81,17 +98,20 @@ class TaskObserver(BaseObserver):
         proxies = []
         for observer in observers:
             queue = asyncio.Queue()
-            task = asyncio.create_task(self._proxy_task_handler(queue, observer))
+            task = self._task_manager.create_task(
+                self._proxy_task_handler(queue, observer),
+                f"{self}::{observer.__class__.__name__}::_proxy_task_handler",
+            )
             proxy = Proxy(queue=queue, task=task, observer=observer)
             proxies.append(proxy)
         return proxies
 
     async def _proxy_task_handler(self, queue: asyncio.Queue, observer: BaseObserver):
         while True:
-            try:
-                data = await queue.get()
-                await observer.on_push_frame(
-                    data.src, data.dst, data.frame, data.direction, data.timestamp
-                )
-            except asyncio.CancelledError:
-                break
+            data = await queue.get()
+            await observer.on_push_frame(
+                data.src, data.dst, data.frame, data.direction, data.timestamp
+            )
+
+    def __str__(self):
+        return self.name

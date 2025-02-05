@@ -32,7 +32,8 @@ dependencies = [
     "protobuf~=5.29.3",
     "pydantic~=2.10.5",
     "pyloudnorm~=0.1.1",
-    "resampy~=0.4.3"
+    "resampy~=0.4.3",
+    "soxr~=0.5.0"
 ]
 
 [project.urls]
@@ -54,7 +55,7 @@ elevenlabs = [ "websockets~=13.1" ]
 fal = [ "fal-client~=0.5.6" ]
 fish = [ "ormsgpack~=1.7.0", "websockets~=13.1" ]
 gladia = [ "websockets~=13.1" ]
-google = [ "google-generativeai~=0.8.3", "google-cloud-texttospeech~=2.24.0" ]
+google = [ "google-generativeai~=0.8.3", "google-cloud-texttospeech~=2.24.0", "google-genai~=0.7.0" ]
 grok = [ "openai~=1.59.6" ]
 groq = [ "openai~=1.59.6" ]
 gstreamer = [ "pygobject~=3.50.0" ]
@@ -85,7 +86,13 @@ openrouter = [ "openai~=1.59.6" ]
 where = ["src"]
 
 [tool.pytest.ini_options]
+addopts = "--verbose"
+testpaths = ["tests"]
 pythonpath = ["src"]
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore:'audioop' is deprecated:DeprecationWarning",
+]
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"

@@ -4,17 +4,23 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import List
+from typing import List, Optional
+
+from loguru import logger
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
+    CancelFrame,
+    EndFrame,
     Frame,
-    OpenAILLMContextAssistantTimestampFrame,
+    StartInterruptionFrame,
     TranscriptionFrame,
     TranscriptionMessage,
     TranscriptionUpdateFrame,
+    TTSTextFrame,
 )
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.time import time_now_iso8601
 
 
 class BaseTranscriptProcessor(FrameProcessor):
@@ -64,66 +70,53 @@ class UserTranscriptProcessor(BaseTranscriptProcessor):
 
 
 class AssistantTranscriptProcessor(BaseTranscriptProcessor):
-    """Processes assistant LLM context frames into timestamped conversation messages."""
+    """Processes assistant TTS text frames into timestamped conversation messages.
+
+    This processor aggregates TTS text frames into complete utterances and emits them as
+    transcript messages. Utterances are completed when:
+    - The bot stops speaking (BotStoppedSpeakingFrame)
+    - The bot is interrupted (StartInterruptionFrame)
+    - The pipeline ends (EndFrame)
+
+    Attributes:
+        _current_text_parts: List of text fragments being aggregated for current utterance
+        _aggregation_start_time: Timestamp when the current utterance began
+    """
 
     def __init__(self, **kwargs):
-        """Initialize processor with empty message stores."""
+        """Initialize processor with aggregation state."""
         super().__init__(**kwargs)
-        self._pending_assistant_messages: List[TranscriptionMessage] = []
+        self._current_text_parts: List[str] = []
+        self._aggregation_start_time: Optional[str] | None = None
 
-    def _extract_messages(self, messages: List[dict]) -> List[TranscriptionMessage]:
-        """Extract assistant messages from the OpenAI standard message format.
+    async def _emit_aggregated_text(self):
+        """Emit aggregated text as a transcript message."""
+        if self._current_text_parts and self._aggregation_start_time:
+            content = " ".join(self._current_text_parts).strip()
+            if content:
+                logger.debug(f"Emitting aggregated assistant message: {content}")
+                message = TranscriptionMessage(
+                    role="assistant",
+                    content=content,
+                    timestamp=self._aggregation_start_time,
+                )
+                await self._emit_update([message])
+            else:
+                logger.debug("No content to emit after stripping whitespace")
 
-        Args:
-            messages: List of messages in OpenAI format, which can be either:
-                - Simple format: {"role": "user", "content": "Hello"}
-                - Content list: {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
-
-        Returns:
-            List[TranscriptionMessage]: Normalized conversation messages
-        """
-        result = []
-        for msg in messages:
-            if msg["role"] != "assistant":
-                continue
-
-            content = msg.get("content")
-            if isinstance(content, str):
-                if content:
-                    result.append(TranscriptionMessage(role="assistant", content=content))
-            elif isinstance(content, list):
-                text_parts = []
-                for part in content:
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        text_parts.append(part["text"])
-
-                if text_parts:
-                    result.append(
-                        TranscriptionMessage(role="assistant", content=" ".join(text_parts))
-                    )
-
-        return result
-
-    def _find_new_messages(self, current: List[TranscriptionMessage]) -> List[TranscriptionMessage]:
-        """Find unprocessed messages from current list.
-
-        Args:
-            current: List of current messages
-
-        Returns:
-            List[TranscriptionMessage]: New messages not yet processed
-        """
-        if not self._processed_messages:
-            return current
-
-        processed_len = len(self._processed_messages)
-        if len(current) <= processed_len:
-            return []
-
-        return current[processed_len:]
+            # Reset aggregation state
+            self._current_text_parts = []
+            self._aggregation_start_time = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames into assistant conversation messages.
+
+        Handles different frame types:
+        - TTSTextFrame: Aggregates text for current utterance
+        - BotStoppedSpeakingFrame: Completes current utterance
+        - StartInterruptionFrame: Completes current utterance due to interruption
+        - EndFrame: Completes current utterance at pipeline end
+        - CancelFrame: Completes current utterance due to cancellation
 
         Args:
             frame: Input frame to process
@@ -131,22 +124,20 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, OpenAILLMContextFrame):
-            standard_messages = []
-            for msg in frame.context.messages:
-                converted = frame.context.to_standard_messages(msg)
-                standard_messages.extend(converted)
+        if isinstance(frame, TTSTextFrame):
+            # Start timestamp on first text part
+            if not self._aggregation_start_time:
+                self._aggregation_start_time = time_now_iso8601()
 
-            current_messages = self._extract_messages(standard_messages)
-            new_messages = self._find_new_messages(current_messages)
-            self._pending_assistant_messages.extend(new_messages)
+            self._current_text_parts.append(frame.text)
 
-        elif isinstance(frame, OpenAILLMContextAssistantTimestampFrame):
-            if self._pending_assistant_messages:
-                for msg in self._pending_assistant_messages:
-                    msg.timestamp = frame.timestamp
-                await self._emit_update(self._pending_assistant_messages)
-                self._pending_assistant_messages = []
+        elif isinstance(frame, (BotStoppedSpeakingFrame, StartInterruptionFrame, CancelFrame)):
+            # Emit accumulated text when bot finishes speaking or is interrupted
+            await self._emit_aggregated_text()
+
+        elif isinstance(frame, EndFrame):
+            # Emit any remaining text when pipeline ends
+            await self._emit_aggregated_text()
 
         await self.push_frame(frame, direction)
 
@@ -170,8 +161,8 @@ class TranscriptProcessor:
                 llm,
                 tts,
                 transport.output(),
+                transcript.assistant_tts(),     # Assistant transcripts
                 context_aggregator.assistant(),
-                transcript.assistant(),         # Assistant transcripts
             ]
         )
 

@@ -182,9 +182,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         self._audio_input_paused = start_audio_paused
         self._video_input_paused = start_video_paused
+        self._context = None
         self._websocket = None
         self._receive_task = None
-        self._context = None
+        self._transcribe_audio_task = None
+        self._transcribe_model_audio_task = None
+        self._transcribe_audio_queue = asyncio.Queue()
+        self._transcribe_model_audio_queue = asyncio.Queue()
 
         self._disconnecting = False
         self._api_session_ready = False
@@ -244,6 +248,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        await self._connect()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -275,7 +280,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             )
             await self.send_client_event(evt)
         if self._transcribe_user_audio and self._context:
-            asyncio.create_task(self._handle_transcribe_user_audio(audio, self._context))
+            await self._transcribe_audio_queue.put(audio)
 
     async def _handle_transcribe_user_audio(self, audio, context):
         text = await self._transcribe_audio(audio, context)
@@ -288,6 +293,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
 
     async def _handle_transcribe_model_audio(self, audio, context):
+        # Early return if modalities are not set to audio.
+        if self._settings["modalities"] != GeminiMultimodalModalities.AUDIO:
+            return
+
         text = await self._transcribe_audio(audio, context)
         logger.debug(f"[Transcription:model] {text}")
         # We add user messages directly to the context. We don't do that for assistant messages,
@@ -377,17 +386,21 @@ class GeminiMultimodalLiveLLMService(LLMService):
         await self._ws_send(event.model_dump(exclude_none=True))
 
     async def _connect(self):
+        if self._websocket:
+            # Here we assume that if we have a websocket, we are connected. We
+            # handle disconnections in the send/recv code paths.
+            return
+
         logger.info("Connecting to Gemini service")
         try:
-            if self._websocket:
-                # Here we assume that if we have a websocket, we are connected. We
-                # handle disconnections in the send/recv code paths.
-                return
-
             uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self.api_key}"
             logger.info(f"Connecting to {uri}")
             self._websocket = await websockets.connect(uri=uri)
-            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+            self._receive_task = self.create_task(self._receive_task_handler())
+            self._transcribe_audio_task = self.create_task(self._transcribe_audio_handler())
+            self._transcribe_model_audio_task = self.create_task(
+                self._transcribe_model_audio_handler()
+            )
             config = events.Config.model_validate(
                 {
                     "setup": {
@@ -437,12 +450,14 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._websocket.close()
                 self._websocket = None
             if self._receive_task:
-                self._receive_task.cancel()
-                try:
-                    await asyncio.wait_for(self._receive_task, timeout=1.0)
-                except asyncio.TimeoutError:
-                    logger.warning("Timed out waiting for receive task to finish")
+                await self.cancel_task(self._receive_task, timeout=1.0)
                 self._receive_task = None
+            if self._transcribe_audio_task:
+                await self.cancel_task(self._transcribe_audio_task)
+                self._transcribe_audio_task = None
+            if self._transcribe_model_audio_task:
+                await self.cancel_task(self._transcribe_model_audio_task)
+                self._transcribe_model_audio_task = None
             self._disconnecting = False
         except Exception as e:
             logger.error(f"{self} error disconnecting: {e}")
@@ -450,9 +465,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def _ws_send(self, message):
         # logger.debug(f"Sending message to websocket: {message}")
         try:
-            if not self._websocket:
-                await self._connect()
-            await self._websocket.send(json.dumps(message))
+            if self._websocket:
+                await self._websocket.send(json.dumps(message))
         except Exception as e:
             if self._disconnecting:
                 return
@@ -469,32 +483,35 @@ class GeminiMultimodalLiveLLMService(LLMService):
     #
 
     async def _receive_task_handler(self):
-        try:
-            async for message in self._websocket:
-                evt = events.parse_server_event(message)
-                # logger.debug(f"Received event: {message[:500]}")
-                # logger.debug(f"Received event: {evt}")
+        async for message in self._websocket:
+            evt = events.parse_server_event(message)
+            # logger.debug(f"Received event: {message[:500]}")
+            # logger.debug(f"Received event: {evt}")
 
-                if evt.setupComplete:
-                    await self._handle_evt_setup_complete(evt)
-                elif evt.serverContent and evt.serverContent.modelTurn:
-                    await self._handle_evt_model_turn(evt)
-                elif evt.serverContent and evt.serverContent.turnComplete:
-                    await self._handle_evt_turn_complete(evt)
-                elif evt.toolCall:
-                    await self._handle_evt_tool_call(evt)
+            if evt.setupComplete:
+                await self._handle_evt_setup_complete(evt)
+            elif evt.serverContent and evt.serverContent.modelTurn:
+                await self._handle_evt_model_turn(evt)
+            elif evt.serverContent and evt.serverContent.turnComplete:
+                await self._handle_evt_turn_complete(evt)
+            elif evt.toolCall:
+                await self._handle_evt_tool_call(evt)
+            elif False:  # !!! todo: error events?
+                await self._handle_evt_error(evt)
+                # errors are fatal, so exit the receive loop
+                return
+            else:
+                pass
 
-                elif False:  # !!! todo: error events?
-                    await self._handle_evt_error(evt)
-                    # errors are fatal, so exit the receive loop
-                    return
+    async def _transcribe_audio_handler(self):
+        while True:
+            audio = await self._transcribe_audio_queue.get()
+            await self._handle_transcribe_user_audio(audio, self._context)
 
-                else:
-                    pass
-        except asyncio.CancelledError:
-            logger.debug("websocket receive task cancelled")
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
+    async def _transcribe_model_audio_handler(self):
+        while True:
+            audio = await self._transcribe_model_audio_queue.get()
+            await self._handle_transcribe_model_audio(audio, self._context)
 
     #
     #
@@ -675,7 +692,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_text_buffer = ""
 
         if audio and self._transcribe_model_audio and self._context:
-            asyncio.create_task(self._handle_transcribe_model_audio(audio, self._context))
+            await self._transcribe_model_audio_queue.put(audio)
         elif text:
             await self.push_frame(LLMFullResponseEndFrame())
 

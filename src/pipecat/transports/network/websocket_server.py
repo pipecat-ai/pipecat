@@ -71,17 +71,16 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        self._server_task = self.get_event_loop().create_task(self._server_task_handler())
+        self._server_task = self.create_task(self._server_task_handler())
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
         self._stop_server_event.set()
-        await self._server_task
+        await self.wait_for_task(self._server_task)
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
-        self._stop_server_event.set()
-        await self._server_task
+        await self.cancel_task(self._server_task)
 
     async def _server_task_handler(self):
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
@@ -101,19 +100,22 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
         # Create a task to monitor the websocket connection
         if self._params.session_timeout:
-            self.get_event_loop().create_task(self._monitor_websocket(websocket))
+            self.create_task(self._monitor_websocket(websocket))
 
         # Handle incoming messages
-        async for message in websocket:
-            frame = self._params.serializer.deserialize(message)
+        try:
+            async for message in websocket:
+                frame = await self._params.serializer.deserialize(message)
 
-            if not frame:
-                continue
+                if not frame:
+                    continue
 
-            if isinstance(frame, InputAudioRawFrame):
-                await self.push_audio_frame(frame)
-            else:
-                await self.push_frame(frame)
+                if isinstance(frame, InputAudioRawFrame):
+                    await self.push_audio_frame(frame)
+                else:
+                    await self.push_frame(frame)
+        except Exception as e:
+            logger.error(f"{self} exception receiving data (class: {e.__class__.__name__})")
 
         # Notify disconnection
         await self._callbacks.on_client_disconnected(websocket)
@@ -131,6 +133,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
                 await self._callbacks.on_session_timeout(websocket)
         except asyncio.CancelledError:
             logger.info(f"Monitoring task cancelled for: {websocket.remote_address}")
+            raise
 
 
 class WebsocketServerOutputTransport(BaseOutputTransport):
@@ -140,8 +143,6 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         self._params = params
 
         self._websocket: websockets.WebSocketServerProtocol | None = None
-
-        self._websocket_audio_buffer = bytes()
 
         self._send_interval = (self._audio_chunk_size / self._params.audio_out_sample_rate) / 2
         self._next_send_time = 0
@@ -187,15 +188,16 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
         await self._write_frame(frame)
 
-        self._websocket_audio_buffer = bytes()
-
         # Simulate audio playback with a sleep.
         await self._write_audio_sleep()
 
     async def _write_frame(self, frame: Frame):
-        payload = self._params.serializer.serialize(frame)
-        if payload and self._websocket:
-            await self._websocket.send(payload)
+        try:
+            payload = await self._params.serializer.serialize(frame)
+            if payload and self._websocket:
+                await self._websocket.send(payload)
+        except Exception as e:
+            logger.error(f"{self} exception sending data (class: {e.__class__.__name__})")
 
     async def _write_audio_sleep(self):
         # Simulate a clock.
