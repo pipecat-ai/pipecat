@@ -110,6 +110,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Improved Unit Test `run_test()` to use `PipelineTask` and
+  `PipelineRunner`. There's now also some control around `StartFrame` and
+  `EndFrame`. The `EndTaskFrame` has been removed since it doesn't seem
+  necessary with this new approach.
+
 - Updated `twilio-chatbot` with a few new features: use 8000 sample rate and
   avoid resampling, a new client useful for stress testing and testing locally
   without the need to make phone calls. Also, added audio recording on both the
