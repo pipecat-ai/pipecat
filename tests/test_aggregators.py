@@ -31,7 +31,11 @@ class TestSentenceAggregator(unittest.IsolatedAsyncioTestCase):
 
         expected_returned_frames = [TextFrame, TextFrame, TextFrame]
 
-        (received_down, _) = await run_test(aggregator, frames_to_send, expected_returned_frames)
+        (received_down, _) = await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
         assert received_down[-3].text == "Hello, world. "
         assert received_down[-2].text == "How are you? "
         assert received_down[-1].text == "I am fine! "
@@ -66,5 +70,7 @@ class TestGatedAggregator(unittest.IsolatedAsyncioTestCase):
         ]
 
         (received_down, _) = await run_test(
-            gated_aggregator, frames_to_send, expected_returned_frames
+            gated_aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
         )
