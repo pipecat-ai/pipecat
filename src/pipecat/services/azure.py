@@ -529,25 +529,32 @@ class AzureBaseTTSService(TTSService):
 class AzureTTSService(AzureBaseTTSService):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._speech_config = None
+        self._speech_synthesizer = None
+        self._audio_queue = asyncio.Queue()
 
-        speech_config = SpeechConfig(
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        # Now self.sample_rate is properly initialized
+        self._speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
             speech_recognition_language=self._settings["language"],
         )
-        speech_config.set_speech_synthesis_output_format(
+        self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )
-        speech_config.set_service_property(
+        self._speech_config.set_service_property(
             "synthesizer.synthesis.connection.synthesisConnectionImpl",
             "websocket",
             ServicePropertyChannel.UriQueryParameter,
         )
 
-        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+        self._speech_synthesizer = SpeechSynthesizer(
+            speech_config=self._speech_config, audio_config=None
+        )
 
         # Set up event handlers
-        self._audio_queue = asyncio.Queue()
         self._speech_synthesizer.synthesizing.connect(self._handle_synthesizing)
         self._speech_synthesizer.synthesis_completed.connect(self._handle_completed)
         self._speech_synthesizer.synthesis_canceled.connect(self._handle_canceled)
@@ -604,17 +611,22 @@ class AzureTTSService(AzureBaseTTSService):
 class AzureHttpTTSService(AzureBaseTTSService):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._speech_config = None
+        self._speech_synthesizer = None
 
-        speech_config = SpeechConfig(
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        self._speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
             speech_recognition_language=self._settings["language"],
         )
-        speech_config.set_speech_synthesis_output_format(
+        self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )
-
-        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+        self._speech_synthesizer = SpeechSynthesizer(
+            speech_config=self._speech_config, audio_config=None
+        )
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
