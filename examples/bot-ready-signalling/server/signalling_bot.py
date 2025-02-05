@@ -17,7 +17,7 @@ from runner import configure
 from pipecat.frames.frames import AudioRawFrame, EndFrame, OutputAudioRawFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -31,16 +31,15 @@ logger.add(sys.stderr, level="DEBUG")
 class SilenceFrame(OutputAudioRawFrame):
     def __init__(
         self,
-        audio: bytes = None,
-        sample_rate: int = 16000,
-        num_channels: int = 1,
-        duration: float = 0.1,
+        *,
+        sample_rate: int,
+        duration: float,
     ):
         # Initialize the parent class with the silent frame's data
         super().__init__(
-            audio=self.create_silent_audio_frame(sample_rate, num_channels, duration).audio,
+            audio=self.create_silent_audio_frame(sample_rate, 1, duration).audio,
             sample_rate=sample_rate,
-            num_channels=num_channels,
+            num_channels=1,
         )
 
     @staticmethod
@@ -80,7 +79,10 @@ async def main():
                 return
             await task.queue_frames(
                 [
-                    SilenceFrame(duration=0.5),
+                    SilenceFrame(
+                        sample_rate=task.params.audio_out_sample_rate,
+                        duration=0.5,
+                    ),
                     TTSSpeakFrame(f"Hello there, how are you doing today ?"),
                     EndFrame(),
                 ]

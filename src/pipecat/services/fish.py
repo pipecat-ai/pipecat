@@ -56,7 +56,7 @@ class FishAudioTTSService(TTSService, WebsocketService):
         api_key: str,
         model: str,  # This is the reference_id
         output_format: FishAudioOutputFormat = "pcm",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -70,7 +70,7 @@ class FishAudioTTSService(TTSService, WebsocketService):
         self._started = False
 
         self._settings = {
-            "sample_rate": sample_rate,
+            "sample_rate": 0,
             "latency": params.latency,
             "format": output_format,
             "prosody": {
@@ -92,6 +92,7 @@ class FishAudioTTSService(TTSService, WebsocketService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        self._settings["sample_rate"] = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -157,9 +158,7 @@ class FishAudioTTSService(TTSService, WebsocketService):
                             audio_data = msg.get("audio")
                             # Only process larger chunks to remove msgpack overhead
                             if audio_data and len(audio_data) > 1024:
-                                frame = TTSAudioRawFrame(
-                                    audio_data, self._settings["sample_rate"], 1
-                                )
+                                frame = TTSAudioRawFrame(audio_data, self.sample_rate, 1)
                                 await self.push_frame(frame)
                                 await self.stop_ttfb_metrics()
                                 continue

@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     OpenAILLMContextAssistantTimestampFrame,
+    StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -412,20 +413,24 @@ class OpenAITTSService(TTSService):
     The service returns PCM-encoded audio at the specified sample rate.
     """
 
+    OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
+
     def __init__(
         self,
         *,
-        api_key: str | None = None,
+        api_key: Optional[str] = None,
         voice: str = "alloy",
         model: Literal["tts-1", "tts-1-hd"] = "tts-1",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         **kwargs,
     ):
+        if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
+            logger.warning(
+                f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
+                f"Current rate of {self.sample_rate}Hz may cause issues."
+            )
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        self._settings = {
-            "sample_rate": sample_rate,
-        }
         self.set_model_name(model)
         self.set_voice(voice)
 
@@ -437,6 +442,14 @@ class OpenAITTSService(TTSService):
     async def set_model(self, model: str):
         logger.info(f"Switching TTS model to: [{model}]")
         self.set_model_name(model)
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        if self.sample_rate != self.OPENAI_SAMPLE_RATE:
+            logger.warning(
+                f"OpenAI TTS requires {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
+                f"Current rate of {self.sample_rate}Hz may cause issues."
+            )
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -465,7 +478,7 @@ class OpenAITTSService(TTSService):
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                         yield frame
                 yield TTSStoppedFrame()
         except BadRequestError as e:

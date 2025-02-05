@@ -38,8 +38,6 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-DESIRED_SAMPLE_RATE = 16000
-
 
 def generate_token(room_name: str, participant_name: str, api_key: str, api_secret: str) -> str:
     token = api.AccessToken(api_key, api_secret)
@@ -114,11 +112,8 @@ async def main():
             token=token,
             room_name=room_name,
             params=LiveKitParams(
-                audio_in_channels=1,
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                audio_in_sample_rate=DESIRED_SAMPLE_RATE,
-                audio_out_sample_rate=DESIRED_SAMPLE_RATE,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_enabled=True,
                 vad_audio_passthrough=True,
@@ -128,7 +123,6 @@ async def main():
         stt = DeepgramSTTService(
             api_key=os.getenv("DEEPGRAM_API_KEY"),
             live_options=LiveOptions(
-                sample_rate=DESIRED_SAMPLE_RATE,
                 vad_events=True,
             ),
         )
@@ -138,7 +132,6 @@ async def main():
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
-            sample_rate=DESIRED_SAMPLE_RATE,
         )
 
         messages = [
