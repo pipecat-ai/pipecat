@@ -16,6 +16,7 @@ from pipecat.processors.audio import audio_buffer_processor
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AIService
+from twilio.rest import Client
 
 
 class ConnexityInterface(AIService):
@@ -107,6 +108,73 @@ class ConnexityInterface(AIService):
                     print(f"Data sent successfully: {response.status}")
 
 
+class ConnexityTwilioMetricsService(ConnexityInterface):
+    """Initialize a CanonicalAudioProcessor instance.
+
+    This class uses an AudioBufferProcessor to get the conversation audio and
+    uploads it to Canonical Voice API for audio processing.
+
+    Args:
+        call_id (str): Your unique identifier for the call. This is used to match the call in the Canonical Voice system to the call in your system.
+        assistant_id (str): Identifier for the AI assistant. This can be whatever you want, it's intended for you convenience so you can distinguish
+        between different assistants and a grouping mechanism for calls.
+        assistant_speaks_first (bool, optional): Indicates if the assistant speaks first in the conversation. Defaults to True.
+        output_dir (str, optional): Directory to save temporary audio files. Defaults to "recordings".
+
+    Attributes:
+        call_id (str): Stores the unique call identifier.
+        assistant (str): Stores the assistant identifier.
+        assistant_speaks_first (bool): Indicates whether the assistant speaks first.
+        output_dir (str): Directory path for saving temporary audio files.
+
+    The constructor also ensures that the output directory exists.
+    """
+
+    def __init__(
+        self,
+        *,
+        call_id: str,
+        assistant_id: str,
+        api_key: str,
+        api_url: str = "https://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/links",
+        assistant_speaks_first: bool = True,
+        twilio_account_id: str,
+        twilio_auth_token: str,
+        **kwargs,
+    ):
+        super().__init__(call_id=call_id,
+                         assistant_id=assistant_id,
+                         api_key=api_key,
+                         api_url=api_url,
+                         assistant_speaks_first=assistant_speaks_first,
+                         **kwargs)
+        self._audio_buffer_processor = audio_buffer_processor
+        self._api_url = api_url
+        self.twilio_account_id = twilio_account_id
+        self.twilio_auth_token = twilio_auth_token
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self.send_audio_url_to_connexity(await self._get_twilio_recording())
+
+    async def _get_twilio_recording(self):
+        client = Client(
+            self.twilio_account_id, self.twilio_auth_token
+        )
+        i = 0
+        recording = None
+
+        while not recording:
+            i += 1
+            recording = client.recordings.list(call_sid=self._call_id)
+            if recording:
+                recording_url = f"https://api.twilio.com/2010-04-01/Accounts/{self.twilio_account_id}/Recordings/{recording[0].sid}.wav"
+                return recording_url
+            await sleep(3)
+            if i == 3:
+                return None
+
+
 class ConnexityLocalMetricsService(ConnexityInterface):
     """
     Maintains an in-memory WAV file for the entire call and uploads it
@@ -140,7 +208,7 @@ class ConnexityLocalMetricsService(ConnexityInterface):
         call_id: str,
         assistant_id: str,
         api_key: str,
-        api_url: str = "http://localhost:8080/process/blackbox/file/pipecat",
+        api_url: str = "http://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/file/pipecat",
         assistant_speaks_first: bool = True,
         **kwargs,
     ):
@@ -298,7 +366,7 @@ class ConnexityDailyMetricsService(ConnexityInterface):
         call_id: str,
         assistant_id: str,
         api_key: str,
-        api_url: str = "http://localhost:8080/process/blackbox/links",
+        api_url: str = "http://connexity-gateway-owzhcfagkq-uc.a.run.app/process/blackbox/links",
         assistant_speaks_first: bool = True,
         daily_api_key: str,
         room_url: str,
