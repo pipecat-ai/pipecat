@@ -16,7 +16,6 @@ from uuid import uuid4
 
 import aiofiles
 import aiohttp
-from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -44,7 +43,6 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 DEFAULT_CLIENT_DURATION = 30
-SAMPLE_RATE = 8000
 
 
 async def download_twiml(server_url: str) -> str:
@@ -92,15 +90,10 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
         params=WebsocketClientParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            audio_out_sample_rate=SAMPLE_RATE,
             add_wav_header=False,
-            serializer=TwilioFrameSerializer(
-                stream_sid, params=TwilioFrameSerializer.InputParams(sample_rate=SAMPLE_RATE)
-            ),
+            serializer=TwilioFrameSerializer(stream_sid),
             vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(
-                params=VADParams(stop_secs=1.5), sample_rate=SAMPLE_RATE
-            ),
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=1.5)),
             vad_audio_passthrough=True,
         ),
     )
@@ -110,14 +103,12 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
     # We let the audio passthrough so we can record the conversation.
     stt = DeepgramSTTService(
         api_key=os.getenv("DEEPGRAM_API_KEY"),
-        live_options=LiveOptions(sample_rate=SAMPLE_RATE),
         audio_passthrough=True,
     )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="e13cae5c-ec59-4f71-b0a6-266df3c9bb8e",  # Madame Mischief
-        sample_rate=SAMPLE_RATE,
         push_silence_after_stop=True,
     )
 
@@ -133,7 +124,7 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
 
     # NOTE: Watch out! This will save all the conversation in memory. You can
     # pass `buffer_size` to get periodic callbacks.
-    audiobuffer = AudioBufferProcessor(sample_rate=SAMPLE_RATE)
+    audiobuffer = AudioBufferProcessor()
 
     pipeline = Pipeline(
         [
@@ -148,7 +139,12 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
         ]
     )
 
-    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            audio_in_sample_rate=8000, audio_out_sample_rate=8000, allow_interruptions=True
+        ),
+    )
 
     @transport.event_handler("on_connected")
     async def on_connected(transport: WebsocketClientTransport, client):

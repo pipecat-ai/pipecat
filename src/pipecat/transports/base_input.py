@@ -35,6 +35,9 @@ class BaseInputTransport(FrameProcessor):
 
         self._params = params
 
+        # Input sample rate. It will be initialized on StartFrame.
+        self._sample_rate = 0
+
         # We read audio from a single queue one at a time and we then run VAD in
         # a thread. Therefore, only one thread should be necessary.
         self._executor = ThreadPoolExecutor(max_workers=1)
@@ -43,10 +46,23 @@ class BaseInputTransport(FrameProcessor):
         # if passthrough is enabled.
         self._audio_task = None
 
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
+    @property
+    def vad_analyzer(self) -> VADAnalyzer | None:
+        return self._params.vad_analyzer
+
     async def start(self, frame: StartFrame):
+        self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
+
+        # Configure VAD analyzer.
+        if self._params.vad_enabled and self._params.vad_analyzer:
+            self._params.vad_analyzer.set_sample_rate(self._sample_rate)
         # Start audio filter.
         if self._params.audio_in_filter:
-            await self._params.audio_in_filter.start(self._params.audio_in_sample_rate)
+            await self._params.audio_in_filter.start(self._sample_rate)
         # Create audio input queue and task if needed.
         if self._params.audio_in_enabled or self._params.vad_enabled:
             self._audio_in_queue = asyncio.Queue()
@@ -66,9 +82,6 @@ class BaseInputTransport(FrameProcessor):
         if self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             await self.cancel_task(self._audio_task)
             self._audio_task = None
-
-    def vad_analyzer(self) -> VADAnalyzer | None:
-        return self._params.vad_analyzer
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
         if self._params.audio_in_enabled or self._params.vad_enabled:
@@ -104,9 +117,8 @@ class BaseInputTransport(FrameProcessor):
             await self.push_frame(frame, direction)
             await self.stop(frame)
         elif isinstance(frame, VADParamsUpdateFrame):
-            vad_analyzer = self.vad_analyzer()
-            if vad_analyzer:
-                vad_analyzer.set_params(frame.params)
+            if self.vad_analyzer:
+                self.vad_analyzer.set_params(frame.params)
         elif isinstance(frame, FilterUpdateSettingsFrame) and self._params.audio_in_filter:
             await self._params.audio_in_filter.process_frame(frame)
         # Other frames
@@ -140,11 +152,10 @@ class BaseInputTransport(FrameProcessor):
 
     async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
         state = VADState.QUIET
-        vad_analyzer = self.vad_analyzer()
-        if vad_analyzer:
+        if self.vad_analyzer:
             logger.trace(f"{self}: analyzing VAD on {audio_frame}")
             state = await self.get_event_loop().run_in_executor(
-                self._executor, vad_analyzer.analyze_audio, audio_frame.audio
+                self._executor, self.vad_analyzer.analyze_audio, audio_frame.audio
             )
             logger.trace(f"{self}: done analyzing VAD on {audio_frame}")
         return state
