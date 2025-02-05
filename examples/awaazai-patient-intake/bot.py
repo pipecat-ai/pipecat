@@ -1,10 +1,3 @@
-#
-# Copyright (c) 2024–2025, Daily
-#
-# SPDX-License-Identifier: BSD 2-Clause License
-#
-
-import asyncio
 import os
 import sys
 import wave
@@ -12,7 +5,6 @@ import wave
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 from deepgram import LiveOptions
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import OutputAudioRawFrame

@@ -20,14 +20,15 @@ Language: Python
 AI Model: OpenAI's GPT-4
 Text-to-Speech: Cartesia TTS Service
 Audio Processing: Silero VAD (Voice Activity Detection)
-Real-time Communication: Daily.co API
+Real-time Communication: AwaazAI websocket
 
 ## Key Components
 
 IntakeProcessor: Manages the conversation flow and information gathering process.
-DailyTransport: Handles real-time audio communication.
+AwaazAISerializer: Handles encoding and decoding of messages from and to AwaazAI telephony websocket
 CartesiaTTSService: Converts text responses to speech.
 OpenAILLMService: Processes natural language and generates appropriate responses.
+DeepgramSTTService: Converts speech response to text
 Pipeline: Orchestrates the flow of information between different components.
 
 How It Works
@@ -56,13 +57,13 @@ cp env.example .env # and add your credentials
 python server.py
 ```
 
-Then, visit `http://localhost:7860/` in your browser to start a chatbot session.
+Then, originate call from AwaazAI platform which connects to the server or give a call to mobile number provided by AwaazAI with the integrated agent
 
 ## Build and test the Docker image
 
 ```
 docker build -t chatbot .
-docker run --env-file .env -p 7860:7860 chatbot
+docker run --env-file .env -p 8765:8765 chatbot
 ```
 ## Cartesia best practices
 
