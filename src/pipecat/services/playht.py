@@ -352,6 +352,7 @@ class PlayHTHttpTTSService(TTSService):
             api_key=self._api_key,
         )
         self._settings = {
+            "sample_rate": sample_rate,
             "language": self.language_to_service_language(params.language)
             if params.language
             else "english",
@@ -363,6 +364,11 @@ class PlayHTHttpTTSService(TTSService):
         self.set_model_name(voice_engine)
         self.set_voice(voice_url)
 
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        self._settings["sample_rate"] = self.sample_rate
+
+    def _create_options(self) -> TTSOptions:
         language_str = self._settings["language"]
         playht_language = None
         if language_str:
@@ -372,10 +378,10 @@ class PlayHTHttpTTSService(TTSService):
                     playht_language = lang
                     break
 
-        self._options = TTSOptions(
+        return TTSOptions(
             voice=self._voice_id,
             language=playht_language,
-            sample_rate=self.sample_rate,
+            sample_rate=self._settings["sample_rate"],
             format=self._settings["format"],
             speed=self._settings["speed"],
             seed=self._settings["seed"],
@@ -391,13 +397,14 @@ class PlayHTHttpTTSService(TTSService):
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
+            options = self._create_options()
             b = bytearray()
             in_header = True
 
             await self.start_ttfb_metrics()
 
             playht_gen = self._client.tts(
-                text, voice_engine=self._settings["voice_engine"], options=self._options
+                text, voice_engine=self._settings["voice_engine"], options=options
             )
 
             await self.start_tts_usage_metrics(text)
