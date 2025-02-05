@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new `start_metadata` field to `PipelineParams`. The provided metadata
+  will be set to the initial `StartFrame` being pushed from the `PipelineTask`.
+
 - Added new fields to `PipelineParams` to control audio input and output sample
   rates for the whole pipeline. This allows controlling sample rates from a
   single place instead of having to specify sample rates in each
