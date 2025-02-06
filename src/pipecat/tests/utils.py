@@ -5,10 +5,7 @@
 #
 
 import asyncio
-import sys
 from typing import Any, Awaitable, Callable, Dict, Sequence, Tuple
-
-from loguru import logger
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -21,9 +18,6 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-logger.remove(0)
-logger.add(sys.stderr, level="TRACE")
 
 
 class HeartbeatsObserver(BaseObserver):
