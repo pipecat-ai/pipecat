@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `SentryMetrics` issue that was preventing any metrics to be sent to
+  Sentry and also was preventing from metrics frames to be pushed to the pipeline.
+
 - Fixed an issue in `BaseOutputTransport` where incoming audio would not be
   resampled to the desired output sample rate.
 
@@ -21,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Use `gemini-2.0-flash-001` as the default model for `GoogleLLMSerivce`.
+
+### Other
+
+- Added a new `sentry-metrics` example.
 
 ## [0.0.55] - 2025-02-05
 
