@@ -8,7 +8,7 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, EndTaskFrame
+from pipecat.frames.frames import EndTaskFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -99,14 +99,14 @@ async def main(
             - **ASSUME IT IS A VOICEMAIL. DO NOT WAIT FOR MORE CONFIRMATION.**
 
             #### **Step 2: Leave a Voicemail Message**
-            - Immediately say:  
+            - Immediately say:
             *"Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."*
             - **IMMEDIATELY AFTER LEAVING THE MESSAGE, CALL `terminate_call`.**
             - **DO NOT SPEAK AFTER CALLING `terminate_call`.**
             - **FAILURE TO CALL `terminate_call` IMMEDIATELY IS A MISTAKE.**
 
             #### **Step 3: If Speaking to a Human**
-            - If the call is answered by a human, say:  
+            - If the call is answered by a human, say:
             *"Oh, hello! I'm a friendly chatbot. Is there anything I can help you with?"*
             - Keep responses **brief and helpful**.
             - If the user no longer needs assistance, **call `terminate_call` immediately.**

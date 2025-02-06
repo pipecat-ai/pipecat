@@ -82,7 +82,6 @@ async def main():
             # English
             #
             voice_id="cgSgspJ2msm6clMCkdW9",
-            aiohttp_session=session,
             #
             # Spanish
             #
