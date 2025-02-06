@@ -150,6 +150,10 @@ async def main(room_url, token=None):
         await runner.run(main_task)
 
 
+async def bot(data, daily_room, daily_token):
+    await main(daily_room, daily_token)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Daily Storyteller Bot")
     parser.add_argument("-u", type=str, help="Room URL")

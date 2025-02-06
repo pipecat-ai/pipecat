@@ -27,22 +27,26 @@ export default function Call() {
 
     // Create a new room for the story session
     try {
-      const response = await fetch("/", {
+      console.log("POSTing to /api")
+      const response = await fetch("/api", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          "createDailyRoom": true
+        })
       });
 
-      const { room_url, token } = await response.json();
-
+      const {dailyRoom, dailyToken} = await response.json();
+      console.log({dailyRoom, dailyToken})
       // Keep a reference to the room url for later
-      setRoom(room_url);
+      setRoom(dailyRoom);
 
       // Join the WebRTC session
       await daily.join({
-        url: room_url,
-        token,
+        url: dailyRoom,
+        token: dailyToken,
         videoSource: false,
         startAudioOff: true,
       });

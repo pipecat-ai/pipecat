@@ -127,8 +127,8 @@ async def start_bot(request: Request) -> JSONResponse:
 
     return JSONResponse(
         {
-            "room_url": room.url,
-            "token": user_token,
+            "dailyRoom": room.url,
+            "dailyToken": user_token,
         }
     )
 
