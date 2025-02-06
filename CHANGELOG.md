@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and should be set manually from the serializer constructor if a different
   value is needed.
 
+### Changed
+
+- Use `gemini-2.0-flash-001` as the default model for `GoogleLLMSerivce`.
+
 ## [0.0.55] - 2025-02-05
 
 ### Added
