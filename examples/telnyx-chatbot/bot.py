@@ -11,14 +11,13 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.serializers.telnyx import TelnyxFrameSerializer
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.elevenlabs import ElevenLabsTTSService, Language
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,
@@ -31,7 +30,12 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def run_bot(websocket_client, stream_id, outbound_encoding, inbound_encoding):
+async def run_bot(
+    websocket_client,
+    stream_id: str,
+    outbound_encoding: str,
+    inbound_encoding: str,
+):
     transport = FastAPIWebsocketTransport(
         websocket=websocket_client,
         params=FastAPIWebsocketParams(
@@ -48,11 +52,9 @@ async def run_bot(websocket_client, stream_id, outbound_encoding, inbound_encodi
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY"),
-        voice_id="CwhRBWXzGAHq8TQ4Fs17",
-        output_format="pcm_24000",
-        params=ElevenLabsTTSService.InputParams(language=Language.EN),
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
     )
 
     messages = [
@@ -77,7 +79,14 @@ async def run_bot(websocket_client, stream_id, outbound_encoding, inbound_encodi
         ]
     )
 
-    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            audio_in_sample_rate=8000,
+            audio_out_sample_rate=8000,
+            allow_interruptions=True,
+        ),
+    )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -87,7 +96,7 @@ async def run_bot(websocket_client, stream_id, outbound_encoding, inbound_encodi
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        await task.queue_frames([EndFrame()])
+        await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)
 

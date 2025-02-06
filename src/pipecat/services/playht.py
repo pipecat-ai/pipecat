@@ -113,7 +113,7 @@ class PlayHTTTSService(TTSService, WebsocketService):
         user_id: str,
         voice_url: str,
         voice_engine: str = "Play3.0-mini",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         output_format: str = "wav",
         params: InputParams = InputParams(),
         **kwargs,
@@ -132,7 +132,6 @@ class PlayHTTTSService(TTSService, WebsocketService):
         self._request_id = None
 
         self._settings = {
-            "sample_rate": sample_rate,
             "language": self.language_to_service_language(params.language)
             if params.language
             else "english",
@@ -250,7 +249,7 @@ class PlayHTTTSService(TTSService, WebsocketService):
                 if message.startswith(b"RIFF"):
                     continue
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(message, self._settings["sample_rate"], 1)
+                frame = TTSAudioRawFrame(message, self.sample_rate, 1)
                 await self.push_frame(frame)
             else:
                 logger.debug(f"Received text message: {message}")
@@ -301,7 +300,7 @@ class PlayHTTTSService(TTSService, WebsocketService):
                 "voice": self._voice_id,
                 "voice_engine": self._settings["voice_engine"],
                 "output_format": self._settings["output_format"],
-                "sample_rate": self._settings["sample_rate"],
+                "sample_rate": self.sample_rate,
                 "language": self._settings["language"],
                 "speed": self._settings["speed"],
                 "seed": self._settings["seed"],
@@ -339,7 +338,7 @@ class PlayHTHttpTTSService(TTSService):
         user_id: str,
         voice_url: str,
         voice_engine: str = "Play3.0-mini-http",  # Options: Play3.0-mini-http, Play3.0-mini-ws
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -353,7 +352,6 @@ class PlayHTHttpTTSService(TTSService):
             api_key=self._api_key,
         )
         self._settings = {
-            "sample_rate": sample_rate,
             "language": self.language_to_service_language(params.language)
             if params.language
             else "english",
@@ -365,6 +363,11 @@ class PlayHTHttpTTSService(TTSService):
         self.set_model_name(voice_engine)
         self.set_voice(voice_url)
 
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        self._settings["sample_rate"] = self.sample_rate
+
+    def _create_options(self) -> TTSOptions:
         language_str = self._settings["language"]
         playht_language = None
         if language_str:
@@ -374,10 +377,10 @@ class PlayHTHttpTTSService(TTSService):
                     playht_language = lang
                     break
 
-        self._options = TTSOptions(
+        return TTSOptions(
             voice=self._voice_id,
             language=playht_language,
-            sample_rate=self._settings["sample_rate"],
+            sample_rate=self.sample_rate,
             format=self._settings["format"],
             speed=self._settings["speed"],
             seed=self._settings["seed"],
@@ -393,13 +396,14 @@ class PlayHTHttpTTSService(TTSService):
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
+            options = self._create_options()
             b = bytearray()
             in_header = True
 
             await self.start_ttfb_metrics()
 
             playht_gen = self._client.tts(
-                text, voice_engine=self._settings["voice_engine"], options=self._options
+                text, voice_engine=self._settings["voice_engine"], options=options
             )
 
             await self.start_tts_usage_metrics(text)
@@ -422,7 +426,7 @@ class PlayHTHttpTTSService(TTSService):
                 else:
                     if len(chunk):
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                         yield frame
             yield TTSStoppedFrame()
         except Exception as e:

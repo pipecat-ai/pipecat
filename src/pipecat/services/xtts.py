@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, Optional
 
 import aiohttp
 from loguru import logger
@@ -76,7 +76,7 @@ class XTTSService(TTSService):
         base_url: str,
         aiohttp_session: aiohttp.ClientSession,
         language: Language = Language.EN,
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -164,18 +164,18 @@ class XTTSService(TTSService):
 
                         # XTTS uses 24000 so we need to resample to our desired rate.
                         resampled_audio = await self._resampler.resample(
-                            bytes(process_data), 24000, self._sample_rate
+                            bytes(process_data), 24000, self.sample_rate
                         )
                         # Create the frame with the resampled audio
-                        frame = TTSAudioRawFrame(resampled_audio, self._sample_rate, 1)
+                        frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
                         yield frame
 
             # Process any remaining data in the buffer.
             if len(buffer) > 0:
                 resampled_audio = await self._resampler.resample(
-                    bytes(buffer), 24000, self._sample_rate
+                    bytes(buffer), 24000, self.sample_rate
                 )
-                frame = TTSAudioRawFrame(resampled_audio, self._sample_rate, 1)
+                frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
                 yield frame
 
             yield TTSStoppedFrame()

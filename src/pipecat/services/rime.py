@@ -34,7 +34,7 @@ class RimeHttpTTSService(TTSService):
         api_key: str,
         voice_id: str = "eva",
         model: str = "mist",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -43,7 +43,6 @@ class RimeHttpTTSService(TTSService):
         self._api_key = api_key
         self._base_url = "https://users.rime.ai/v1/rime-tts"
         self._settings = {
-            "samplingRate": sample_rate,
             "speedAlpha": params.speed_alpha,
             "reduceLatency": params.reduce_latency,
             "pauseBetweenBrackets": params.pause_between_brackets,
@@ -71,6 +70,7 @@ class RimeHttpTTSService(TTSService):
         payload["text"] = text
         payload["speaker"] = self._voice_id
         payload["modelId"] = self._model_name
+        payload["samplingRate"] = self.sample_rate
 
         try:
             await self.start_ttfb_metrics()
@@ -96,7 +96,7 @@ class RimeHttpTTSService(TTSService):
                             first_chunk = False
 
                         if chunk:
-                            frame = TTSAudioRawFrame(chunk, self._settings["samplingRate"], 1)
+                            frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                             yield frame
 
             yield TTSStoppedFrame()
