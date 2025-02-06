@@ -130,17 +130,18 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def _handle_interruptions(self, frame: Frame):
-        if self.interruptions_allowed:
+        if isinstance(frame, UserStartedSpeakingFrame):
+            logger.debug("User started speaking")
             # Make sure we notify about interruptions quickly out-of-band.
-            if isinstance(frame, UserStartedSpeakingFrame):
-                logger.debug("User started speaking")
+            if self.interruptions_allowed:
                 await self._start_interruption()
                 # Push an out-of-band frame (i.e. not using the ordered push
                 # frame task) to stop everything, specially at the output
                 # transport.
                 await self.push_frame(StartInterruptionFrame())
-            elif isinstance(frame, UserStoppedSpeakingFrame):
-                logger.debug("User stopped speaking")
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            logger.debug("User stopped speaking")
+            if self.interruptions_allowed:
                 await self._stop_interruption()
                 await self.push_frame(StopInterruptionFrame())
 
