@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and should be set manually from the serializer constructor if a different
   value is needed.
 
+- Fixed an issue causing test import to fail due to `logger.remove`.
+
 ### Changed
 
 - Use `gemini-2.0-flash-001` as the default model for `GoogleLLMSerivce`.

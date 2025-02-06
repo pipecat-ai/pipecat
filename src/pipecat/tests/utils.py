@@ -22,7 +22,8 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-logger.remove(0)
+if logger._core.handlers:
+    logger.remove(0)
 logger.add(sys.stderr, level="TRACE")
 
 
