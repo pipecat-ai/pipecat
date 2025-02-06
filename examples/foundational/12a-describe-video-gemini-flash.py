@@ -72,9 +72,7 @@ async def main():
 
         vision_aggregator = VisionImageFrameAggregator()
 
-        google = GoogleLLMService(
-            model="gemini-1.5-flash-latest", api_key=os.getenv("GOOGLE_API_KEY")
-        )
+        google = GoogleLLMService(model="gemini-2.0-flash-001", api_key=os.getenv("GOOGLE_API_KEY"))
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),

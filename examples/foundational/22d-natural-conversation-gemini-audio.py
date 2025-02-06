@@ -55,13 +55,9 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-# TRANSCRIBER_MODEL = "gemini-1.5-flash-latest"
-# CLASSIFIER_MODEL = "gemini-1.5-flash-latest"
-# CONVERSATION_MODEL = "gemini-1.5-flash-latest"
-
-TRANSCRIBER_MODEL = "gemini-2.0-flash-exp"
-CLASSIFIER_MODEL = "gemini-2.0-flash-exp"
-CONVERSATION_MODEL = "gemini-2.0-flash-exp"
+TRANSCRIBER_MODEL = "gemini-2.0-flash-001"
+CLASSIFIER_MODEL = "gemini-2.0-flash-001"
+CONVERSATION_MODEL = "gemini-2.0-flash-001"
 
 transcriber_system_instruction = """You are an audio transcriber. You are receiving audio from a user. Your job is to
 transcribe the input audio to text exactly as it was said by the user.
