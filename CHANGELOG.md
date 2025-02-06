@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed an issue with the `TwilioFrameSerializer` where
-  `frame.audio_out_sample_rate` was incorrectly used in place of
-  `frame.audio_in_sample_rate`.
+- Fixed an issue with the `TwilioFrameSerializer` and `TelnyxFrameSerializer`
+  where `frame.audio_out_sample_rate` was incorrectly used in place of
+  `frame.audio_in_sample_rate`, which caused audio input detection to fail when
+  using different input and output sample rates.
 
 ## [0.0.55] - 2025-02-05
 
