@@ -31,7 +31,7 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 
 class TelnyxFrameSerializer(FrameSerializer):
     class InputParams(BaseModel):
-        telnyx_sample_rate: Optional[int] = None  # Default Telnyx rate (8kHz)
+        telnyx_sample_rate: int = 8000  # Default Telnyx rate (8kHz)
         sample_rate: Optional[int] = None  # Pipeline input rate
         inbound_encoding: str = "PCMU"
         outbound_encoding: str = "PCMU"
@@ -48,7 +48,7 @@ class TelnyxFrameSerializer(FrameSerializer):
         params.inbound_encoding = inbound_encoding
         self._params = params
 
-        self._telnyx_sample_rate = 0  # Fixed rate for Telnyx (8kHz)
+        self._telnyx_sample_rate = self._params.telnyx_sample_rate
         self._sample_rate = 0  # Pipeline input rate
 
         self._resampler = create_default_resampler()
@@ -58,8 +58,6 @@ class TelnyxFrameSerializer(FrameSerializer):
         return FrameSerializerType.TEXT
 
     async def setup(self, frame: StartFrame):
-        # Configure rates for input path: Telnyx (8kHz encoded) -> Pipeline (PCM)
-        self._telnyx_sample_rate = self._params.telnyx_sample_rate or frame.audio_in_sample_rate
         self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
