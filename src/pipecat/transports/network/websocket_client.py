@@ -59,7 +59,7 @@ class WebsocketClientSession:
 
         self._task_manager: Optional[TaskManager] = None
 
-        self._websocket: websockets.WebSocketClientProtocol | None = None
+        self._websocket: Optional[websockets.WebSocketClientProtocol] = None
 
     @property
     def task_manager(self) -> TaskManager:
@@ -240,8 +240,8 @@ class WebsocketClientTransport(BaseTransport):
         )
 
         self._session = WebsocketClientSession(uri, params, callbacks, self.name)
-        self._input: WebsocketClientInputTransport | None = None
-        self._output: WebsocketClientOutputTransport | None = None
+        self._input: Optional[WebsocketClientInputTransport] = None
+        self._output: Optional[WebsocketClientOutputTransport] = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.

@@ -40,12 +40,12 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class LiveKitTransportMessageFrame(TransportMessageFrame):
-    participant_id: str | None = None
+    participant_id: Optional[str] = None
 
 
 @dataclass
 class LiveKitTransportMessageUrgentFrame(TransportMessageUrgentFrame):
-    participant_id: str | None = None
+    participant_id: Optional[str] = None
 
 
 class LiveKitParams(TransportParams):
@@ -79,12 +79,12 @@ class LiveKitTransportClient:
         self._params = params
         self._callbacks = callbacks
         self._transport_name = transport_name
-        self._room: rtc.Room | None = None
+        self._room: Optional[rtc.Room] = None
         self._participant_id: str = ""
         self._connected = False
         self._disconnect_counter = 0
-        self._audio_source: rtc.AudioSource | None = None
-        self._audio_track: rtc.LocalAudioTrack | None = None
+        self._audio_source: Optional[rtc.AudioSource] = None
+        self._audio_track: Optional[rtc.LocalAudioTrack] = None
         self._audio_tracks = {}
         self._audio_queue = asyncio.Queue()
         self._other_participant_has_joined = False
@@ -172,7 +172,7 @@ class LiveKitTransportClient:
         logger.info(f"Disconnected from {self._room_name}")
         await self._callbacks.on_disconnected()
 
-    async def send_data(self, data: bytes, participant_id: str | None = None):
+    async def send_data(self, data: bytes, participant_id: Optional[str] = None):
         if not self._connected:
             return
 
@@ -349,11 +349,11 @@ class LiveKitInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._audio_in_task = None
-        self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
+        self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
         self._resampler = create_default_resampler()
 
     @property
-    def vad_analyzer(self) -> VADAnalyzer | None:
+    def vad_analyzer(self) -> Optional[VADAnalyzer]:
         return self._vad_analyzer
 
     async def start(self, frame: StartFrame):
@@ -463,8 +463,8 @@ class LiveKitTransport(BaseTransport):
         token: str,
         room_name: str,
         params: LiveKitParams = LiveKitParams(),
-        input_name: str | None = None,
-        output_name: str | None = None,
+        input_name: Optional[str] = None,
+        output_name: Optional[str] = None,
     ):
         super().__init__(input_name=input_name, output_name=output_name)
 
@@ -483,8 +483,8 @@ class LiveKitTransport(BaseTransport):
         self._client = LiveKitTransportClient(
             url, token, room_name, self._params, callbacks, self.name
         )
-        self._input: LiveKitInputTransport | None = None
-        self._output: LiveKitOutputTransport | None = None
+        self._input: Optional[LiveKitInputTransport] = None
+        self._output: Optional[LiveKitOutputTransport] = None
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -562,12 +562,12 @@ class LiveKitTransport(BaseTransport):
             await self._input.push_app_message(data.decode(), participant_id)
         await self._call_event_handler("on_data_received", data, participant_id)
 
-    async def send_message(self, message: str, participant_id: str | None = None):
+    async def send_message(self, message: str, participant_id: Optional[str] = None):
         if self._output:
             frame = LiveKitTransportMessageFrame(message=message, participant_id=participant_id)
             await self._output.send_message(frame)
 
-    async def send_message_urgent(self, message: str, participant_id: str | None = None):
+    async def send_message_urgent(self, message: str, participant_id: Optional[str] = None):
         if self._output:
             frame = LiveKitTransportMessageUrgentFrame(
                 message=message, participant_id=participant_id

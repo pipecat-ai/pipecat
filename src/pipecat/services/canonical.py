@@ -9,7 +9,7 @@ import os
 import uuid
 import wave
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import aiohttp
 from loguru import logger
@@ -69,7 +69,7 @@ class CanonicalMetricsService(AIService):
         api_url: str = "https://voiceapp.canonical.chat/api/v1",
         assistant_speaks_first: bool = True,
         output_dir: str = "recordings",
-        context: OpenAILLMContext | None = None,
+        context: Optional[OpenAILLMContext] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)

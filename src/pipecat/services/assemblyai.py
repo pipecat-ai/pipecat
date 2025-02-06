@@ -46,7 +46,7 @@ class AssemblyAISTTService(STTService):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         aai.settings.api_key = api_key
-        self._transcriber: aai.RealtimeTranscriber | None = None
+        self._transcriber: Optional[aai.RealtimeTranscriber] = None
 
         self._settings = {
             "encoding": encoding,
