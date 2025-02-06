@@ -13,9 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resampled to the desired output sample rate.
 
 - Fixed an issue with the `TwilioFrameSerializer` and `TelnyxFrameSerializer`
-  where `frame.audio_out_sample_rate` was incorrectly used in place of
-  `frame.audio_in_sample_rate`, which caused audio input detection to fail when
-  using different input and output sample rates.
+  where `twilio_sample_rate` and `telnyx_sample_rate` were incorrectly
+  initialized to `audio_in_sample_rate`. Those values currently default to 8000
+  and should be set manually from the serializer constructor if a different
+  value is needed.
 
 ## [0.0.55] - 2025-02-05
 
