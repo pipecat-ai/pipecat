@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `TkLocalTransport` and `LocalAudioTransport` issues that was causing
+  errors on cleanup.
+
 - Fixed an issue that was causing `tests.utils` import to fail because of
   logging setup.
 
