@@ -20,7 +20,7 @@ Language: Python
 AI Model: OpenAI's GPT-4
 Text-to-Speech: Cartesia TTS Service
 Audio Processing: Silero VAD (Voice Activity Detection)
-Real-time Communication: AwaazAI websocket
+Real-time Communication: [Awaaz AI](https://awaaz.ai) websocket
 
 ## Key Components
 
