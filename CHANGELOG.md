@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that was causing `tests.utils` import to fail because of
+  logging setup.
+
 - Fixed a `SentryMetrics` issue that was preventing any metrics to be sent to
   Sentry and also was preventing from metrics frames to be pushed to the pipeline.
 
