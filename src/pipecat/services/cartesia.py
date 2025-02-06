@@ -43,7 +43,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_cartesia_language(language: Language) -> str | None:
+def language_to_cartesia_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.DE: "de",
         Language.EN: "en",
@@ -143,7 +143,7 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
         await super().set_model(model)
         logger.info(f"Switching TTS model to: [{model}]")
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_cartesia_language(language)
 
     def _build_msg(
@@ -358,7 +358,7 @@ class CartesiaHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_cartesia_language(language)
 
     async def start(self, frame: StartFrame):

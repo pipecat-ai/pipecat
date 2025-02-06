@@ -41,7 +41,7 @@ class TransportParams(BaseModel):
     audio_in_filter: Optional[BaseAudioFilter] = None
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
-    vad_analyzer: VADAnalyzer | None = None
+    vad_analyzer: Optional[VADAnalyzer] = None
 
 
 class BaseTransport(ABC):

@@ -8,7 +8,7 @@ import asyncio
 import io
 import time
 import wave
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -39,7 +39,7 @@ except ModuleNotFoundError as e:
 class WebsocketServerParams(TransportParams):
     add_wav_header: bool = False
     serializer: FrameSerializer
-    session_timeout: int | None = None
+    session_timeout: Optional[int] = None
 
 
 class WebsocketServerCallbacks(BaseModel):
@@ -64,7 +64,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
         self._params = params
         self._callbacks = callbacks
 
-        self._websocket: websockets.WebSocketServerProtocol | None = None
+        self._websocket: Optional[websockets.WebSocketServerProtocol] = None
 
         self._server_task = None
 
@@ -158,7 +158,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
         self._params = params
 
-        self._websocket: websockets.WebSocketServerProtocol | None = None
+        self._websocket: Optional[websockets.WebSocketServerProtocol] = None
 
         # write_raw_audio_frames() is called quickly, as soon as we get audio
         # (e.g. from the TTS), and since this is just a network connection we
@@ -168,7 +168,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         self._send_interval = 0
         self._next_send_time = 0
 
-    async def set_client_connection(self, websocket: websockets.WebSocketServerProtocol | None):
+    async def set_client_connection(self, websocket: Optional[websockets.WebSocketServerProtocol]):
         if self._websocket:
             await self._websocket.close()
             logger.warning("Only one client allowed, using new connection")
@@ -242,8 +242,8 @@ class WebsocketServerTransport(BaseTransport):
         params: WebsocketServerParams,
         host: str = "localhost",
         port: int = 8765,
-        input_name: str | None = None,
-        output_name: str | None = None,
+        input_name: Optional[str] = None,
+        output_name: Optional[str] = None,
     ):
         super().__init__(input_name=input_name, output_name=output_name)
         self._host = host
@@ -255,9 +255,9 @@ class WebsocketServerTransport(BaseTransport):
             on_client_disconnected=self._on_client_disconnected,
             on_session_timeout=self._on_session_timeout,
         )
-        self._input: WebsocketServerInputTransport | None = None
-        self._output: WebsocketServerOutputTransport | None = None
-        self._websocket: websockets.WebSocketServerProtocol | None = None
+        self._input: Optional[WebsocketServerInputTransport] = None
+        self._output: Optional[WebsocketServerOutputTransport] = None
+        self._websocket: Optional[websockets.WebSocketServerProtocol] = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.

@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import os
 import sys
+from typing import Optional
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -42,7 +43,7 @@ async def main(
     callId: str,
     callDomain: str,
     detect_voicemail: bool,
-    dialout_number: str | None,
+    dialout_number: Optional[str],
 ):
     # dialin_settings are only needed if Daily's SIP URI is used
     # If you are handling this via Twilio, Telnyx, set this to None

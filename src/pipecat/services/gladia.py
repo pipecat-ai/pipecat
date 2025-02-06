@@ -34,7 +34,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_gladia_language(language: Language) -> str | None:
+def language_to_gladia_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.AF: "af",
         Language.AM: "am",
@@ -173,7 +173,7 @@ class GladiaSTTService(STTService):
         }
         self._confidence = confidence
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_gladia_language(language)
 
     async def start(self, frame: StartFrame):
