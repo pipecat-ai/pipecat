@@ -140,7 +140,7 @@ class LLMService(AIService):
         self._start_callbacks = {}
 
     # TODO-CB: callback function type
-    def register_function(self, function_name: str | None, callback, start_callback=None):
+    def register_function(self, function_name: Optional[str], callback, start_callback=None):
         # Registering a function with the function_name set to None will run that callback
         # for all functions
         self._callbacks[function_name] = callback
@@ -148,7 +148,7 @@ class LLMService(AIService):
         if start_callback:
             self._start_callbacks[function_name] = start_callback
 
-    def unregister_function(self, function_name: str | None):
+    def unregister_function(self, function_name: Optional[str]):
         del self._callbacks[function_name]
         if self._start_callbacks[function_name]:
             del self._start_callbacks[function_name]
@@ -190,7 +190,7 @@ class LLMService(AIService):
         elif None in self._start_callbacks.keys():
             return await self._start_callbacks[None](function_name, self, context)
 
-    async def request_image_frame(self, user_id: str, *, text_content: str | None = None):
+    async def request_image_frame(self, user_id: str, *, text_content: Optional[str] = None):
         await self.push_frame(
             UserImageRequestFrame(user_id=user_id, context=text_content), FrameDirection.UPSTREAM
         )
@@ -254,7 +254,7 @@ class TTSService(AIService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         pass
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return Language(language)
 
     async def update_setting(self, key: str, value: Any):
@@ -352,7 +352,7 @@ class TTSService(AIService):
         await self.push_frame(frame, direction)
 
     async def _process_text_frame(self, frame: TextFrame):
-        text: str | None = None
+        text: Optional[str] = None
         if not self._aggregate_sentences:
             text = frame.text
         else:

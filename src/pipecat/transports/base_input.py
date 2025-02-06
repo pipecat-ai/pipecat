@@ -6,6 +6,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 from loguru import logger
 
@@ -51,7 +52,7 @@ class BaseInputTransport(FrameProcessor):
         return self._sample_rate
 
     @property
-    def vad_analyzer(self) -> VADAnalyzer | None:
+    def vad_analyzer(self) -> Optional[VADAnalyzer]:
         return self._params.vad_analyzer
 
     async def start(self, frame: StartFrame):
