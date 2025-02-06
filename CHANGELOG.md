@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `RimeTTSService`, a new `WordTTSService`. Updated the foundational
+  example `07q-interruptible-rime.py` to use `RimeTTSService`.
+
 - Added support for Groq's Whisper API through the new `GroqSTTService` and
   OpenAI's Whisper API through the new `OpenAISTTService`. Introduced a new
   base class `BaseWhisperSTTService` to handle common Whisper API
