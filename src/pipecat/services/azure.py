@@ -57,7 +57,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_azure_language(language: Language) -> str | None:
+def language_to_azure_language(language: Language) -> Optional[str]:
     language_map = {
         # Afrikaans
         Language.AF: "af-ZA",
@@ -477,7 +477,7 @@ class AzureBaseTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_azure_language(language)
 
     def _construct_ssml(self, text: str) -> str:

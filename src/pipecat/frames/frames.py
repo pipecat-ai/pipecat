@@ -48,7 +48,7 @@ class KeypadEntry(str, Enum):
     STAR = "*"
 
 
-def format_pts(pts: int | None):
+def format_pts(pts: Optional[int]):
     return nanoseconds_to_str(pts) if pts else None
 
 
@@ -126,7 +126,7 @@ class ImageRawFrame:
 
     image: bytes
     size: Tuple[int, int]
-    format: str | None
+    format: Optional[str]
 
 
 #
@@ -176,7 +176,7 @@ class URLImageRawFrame(OutputImageRawFrame):
 
     """
 
-    url: str | None
+    url: Optional[str]
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -235,7 +235,7 @@ class TranscriptionFrame(TextFrame):
 
     user_id: str
     timestamp: str
-    language: Language | None = None
+    language: Optional[Language] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -250,7 +250,7 @@ class InterimTranscriptionFrame(TextFrame):
     text: str
     user_id: str
     timestamp: str
-    language: Language | None = None
+    language: Optional[Language] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -272,7 +272,7 @@ class TranscriptionMessage:
 
     role: Literal["user", "assistant"]
     content: str
-    timestamp: str | None = None
+    timestamp: Optional[str] = None
 
 
 @dataclass
@@ -674,7 +674,7 @@ class UserImageRawFrame(InputImageRawFrame):
 class VisionImageRawFrame(InputImageRawFrame):
     """An image with an associated text to ask for a description of it."""
 
-    text: str | None
+    text: Optional[str]
 
     def __str__(self):
         pts = format_pts(self.pts)

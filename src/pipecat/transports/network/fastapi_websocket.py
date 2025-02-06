@@ -10,7 +10,7 @@ import io
 import time
 import typing
 import wave
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -44,7 +44,7 @@ except ModuleNotFoundError as e:
 class FastAPIWebsocketParams(TransportParams):
     add_wav_header: bool = False
     serializer: FrameSerializer
-    session_timeout: int | None = None
+    session_timeout: Optional[int] = None
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -202,8 +202,8 @@ class FastAPIWebsocketTransport(BaseTransport):
         self,
         websocket: WebSocket,
         params: FastAPIWebsocketParams,
-        input_name: str | None = None,
-        output_name: str | None = None,
+        input_name: Optional[str] = None,
+        output_name: Optional[str] = None,
     ):
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params

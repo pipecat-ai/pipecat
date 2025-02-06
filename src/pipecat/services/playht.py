@@ -46,7 +46,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_playht_language(language: Language) -> str | None:
+def language_to_playht_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.AF: "afrikans",
         Language.AM: "amharic",
@@ -146,7 +146,7 @@ class PlayHTTTSService(TTSService, WebsocketService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_playht_language(language)
 
     async def start(self, frame: StartFrame):
@@ -389,7 +389,7 @@ class PlayHTHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_playht_language(language)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:

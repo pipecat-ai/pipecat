@@ -62,12 +62,12 @@ VAD_RESET_PERIOD_MS = 2000
 
 @dataclass
 class DailyTransportMessageFrame(TransportMessageFrame):
-    participant_id: str | None = None
+    participant_id: Optional[str] = None
 
 
 @dataclass
 class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
-    participant_id: str | None = None
+    participant_id: Optional[str] = None
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -175,7 +175,7 @@ class DailyTransportClient(EventHandler):
     def __init__(
         self,
         room_url: str,
-        token: str | None,
+        token: Optional[str],
         bot_name: str,
         params: DailyParams,
         callbacks: DailyCallbacks,
@@ -188,7 +188,7 @@ class DailyTransportClient(EventHandler):
             Daily.init()
 
         self._room_url: str = room_url
-        self._token: str | None = token
+        self._token: Optional[str] = token
         self._bot_name: str = bot_name
         self._params: DailyParams = params
         self._callbacks = callbacks
@@ -226,9 +226,9 @@ class DailyTransportClient(EventHandler):
         self._in_sample_rate = 0
         self._out_sample_rate = 0
 
-        self._camera: VirtualCameraDevice | None = None
-        self._mic: VirtualMicrophoneDevice | None = None
-        self._speaker: VirtualSpeakerDevice | None = None
+        self._camera: Optional[VirtualCameraDevice] = None
+        self._mic: Optional[VirtualMicrophoneDevice] = None
+        self._speaker: Optional[VirtualSpeakerDevice] = None
 
     def _camera_name(self):
         return f"camera-{self}"
@@ -257,7 +257,7 @@ class DailyTransportClient(EventHandler):
         )
         await future
 
-    async def read_next_audio_frame(self) -> InputAudioRawFrame | None:
+    async def read_next_audio_frame(self) -> Optional[InputAudioRawFrame]:
         if not self._speaker:
             return None
 
@@ -542,7 +542,7 @@ class DailyTransportClient(EventHandler):
         self._client.stop_recording(stream_id, completion=completion_callback(future))
         await future
 
-    async def send_prebuilt_chat_message(self, message: str, user_name: str | None = None):
+    async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
         if not self._joined:
             return
 
@@ -723,10 +723,10 @@ class DailyInputTransport(BaseInputTransport):
         # internally to be processed.
         self._audio_in_task = None
 
-        self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
+        self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
 
     @property
-    def vad_analyzer(self) -> VADAnalyzer | None:
+    def vad_analyzer(self) -> Optional[VADAnalyzer]:
         return self._vad_analyzer
 
     async def start(self, frame: StartFrame):
@@ -891,11 +891,11 @@ class DailyTransport(BaseTransport):
     def __init__(
         self,
         room_url: str,
-        token: str | None,
+        token: Optional[str],
         bot_name: str,
         params: DailyParams = DailyParams(),
-        input_name: str | None = None,
-        output_name: str | None = None,
+        input_name: Optional[str] = None,
+        output_name: Optional[str] = None,
     ):
         super().__init__(input_name=input_name, output_name=output_name)
 
@@ -926,8 +926,8 @@ class DailyTransport(BaseTransport):
         self._params = params
 
         self._client = DailyTransportClient(room_url, token, bot_name, params, callbacks, self.name)
-        self._input: DailyInputTransport | None = None
-        self._output: DailyOutputTransport | None = None
+        self._input: Optional[DailyInputTransport] = None
+        self._output: Optional[DailyOutputTransport] = None
 
         self._other_participant_has_joined = False
 
@@ -1014,7 +1014,7 @@ class DailyTransport(BaseTransport):
     async def stop_recording(self, stream_id=None):
         await self._client.stop_recording(stream_id)
 
-    async def send_prebuilt_chat_message(self, message: str, user_name: str | None = None):
+    async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
         """Sends a chat message to Daily's Prebuilt main room.
 
         Args:

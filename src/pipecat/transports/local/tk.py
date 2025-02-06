@@ -7,6 +7,7 @@
 import asyncio
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 import numpy as np
 from loguru import logger
@@ -145,8 +146,8 @@ class TkLocalTransport(BaseTransport):
         self._params = params
         self._pyaudio = pyaudio.PyAudio()
 
-        self._input: TkInputTransport | None = None
-        self._output: TkOutputTransport | None = None
+        self._input: Optional[TkInputTransport] = None
+        self._output: Optional[TkOutputTransport] = None
 
     #
     # BaseTransport

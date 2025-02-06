@@ -8,7 +8,7 @@
 
 import asyncio
 from enum import Enum
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 import numpy as np
 from loguru import logger
@@ -53,7 +53,7 @@ class WhisperSTTService(SegmentedSTTService):
         self._compute_type = compute_type
         self.set_model_name(model if isinstance(model, str) else model.value)
         self._no_speech_prob = no_speech_prob
-        self._model: WhisperModel | None = None
+        self._model: Optional[WhisperModel] = None
         self._load()
 
     def can_generate_metrics(self) -> bool:

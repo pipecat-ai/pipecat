@@ -326,9 +326,9 @@ class AnthropicLLMService(LLMService):
 class AnthropicLLMContext(OpenAILLMContext):
     def __init__(
         self,
-        messages: list[dict] | None = None,
-        tools: list[dict] | None = None,
-        tool_choice: dict | None = None,
+        messages: Optional[List[dict]] = None,
+        tools: Optional[List[dict]] = None,
+        tool_choice: Optional[dict] = None,
         *,
         system: Union[str, NotGiven] = NOT_GIVEN,
     ):
