@@ -13,6 +13,7 @@ from typing import AsyncGenerator, List
 from loguru import logger
 from PIL import Image
 
+from pipecat.audio.utils import create_default_resampler
 from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import (
     BotSpeakingFrame,
@@ -59,6 +60,7 @@ class BaseOutputTransport(FrameProcessor):
 
         # Output sample rate. It will be initialized on StartFrame.
         self._sample_rate = 0
+        self._resampler = create_default_resampler()
 
         # Chunk size that will be written. It will be computed on StartFrame
         self._audio_chunk_size = 0
@@ -188,12 +190,18 @@ class BaseOutputTransport(FrameProcessor):
         if not self._params.audio_out_enabled:
             return
 
+        # We might need to resample if incoming audio doesn't match the
+        # transport sample rate.
+        resampled = await self._resampler.resample(
+            frame.audio, frame.sample_rate, self._sample_rate
+        )
+
         cls = type(frame)
-        self._audio_buffer.extend(frame.audio)
+        self._audio_buffer.extend(resampled)
         while len(self._audio_buffer) >= self._audio_chunk_size:
             chunk = cls(
                 bytes(self._audio_buffer[: self._audio_chunk_size]),
-                sample_rate=frame.sample_rate,
+                sample_rate=self._sample_rate,
                 num_channels=frame.num_channels,
             )
             await self._sink_queue.put(chunk)
