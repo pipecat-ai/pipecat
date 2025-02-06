@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `BaseOutputTransport` where incoming audio would not be
+  resampled to the desired output sample rate.
+
 - Fixed an issue with the `TwilioFrameSerializer` and `TelnyxFrameSerializer`
   where `frame.audio_out_sample_rate` was incorrectly used in place of
   `frame.audio_in_sample_rate`, which caused audio input detection to fail when
