@@ -101,12 +101,12 @@ HIGH PRIORITY SIGNALS:
 
 Examples:
 # Complete Wh-question
-[{"role": "assistant", "content": "I can help you learn."}, 
+[{"role": "assistant", "content": "I can help you learn."},
  {"role": "user", "content": "What's the fastest way to learn Spanish"}]
 Output: YES
 
 # Complete Yes/No question despite STT error
-[{"role": "assistant", "content": "I know about planets."}, 
+[{"role": "assistant", "content": "I know about planets."},
  {"role": "user", "content": "Is is Jupiter the biggest planet"}]
 Output: YES
 
@@ -118,12 +118,12 @@ Output: YES
 
 Examples:
 # Direct instruction
-[{"role": "assistant", "content": "I can explain many topics."}, 
+[{"role": "assistant", "content": "I can explain many topics."},
  {"role": "user", "content": "Tell me about black holes"}]
 Output: YES
 
 # Action demand
-[{"role": "assistant", "content": "I can help with math."}, 
+[{"role": "assistant", "content": "I can help with math."},
  {"role": "user", "content": "Solve this equation x plus 5 equals 12"}]
 Output: YES
 
@@ -134,12 +134,12 @@ Output: YES
 
 Examples:
 # Specific answer
-[{"role": "assistant", "content": "What's your favorite color?"}, 
+[{"role": "assistant", "content": "What's your favorite color?"},
  {"role": "user", "content": "I really like blue"}]
 Output: YES
 
 # Option selection
-[{"role": "assistant", "content": "Would you prefer morning or evening?"}, 
+[{"role": "assistant", "content": "Would you prefer morning or evening?"},
  {"role": "user", "content": "Morning"}]
 Output: YES
 
@@ -153,17 +153,17 @@ MEDIUM PRIORITY SIGNALS:
 
 Examples:
 # Self-correction reaching completion
-[{"role": "assistant", "content": "What would you like to know?"}, 
+[{"role": "assistant", "content": "What would you like to know?"},
  {"role": "user", "content": "Tell me about... no wait, explain how rainbows form"}]
 Output: YES
 
 # Topic change with complete thought
-[{"role": "assistant", "content": "The weather is nice today."}, 
+[{"role": "assistant", "content": "The weather is nice today."},
  {"role": "user", "content": "Actually can you tell me who invented the telephone"}]
 Output: YES
 
 # Mid-sentence completion
-[{"role": "assistant", "content": "Hello I'm ready."}, 
+[{"role": "assistant", "content": "Hello I'm ready."},
  {"role": "user", "content": "What's the capital of? France"}]
 Output: YES
 
@@ -175,12 +175,12 @@ Output: YES
 
 Examples:
 # Acknowledgment
-[{"role": "assistant", "content": "Should we talk about history?"}, 
+[{"role": "assistant", "content": "Should we talk about history?"},
  {"role": "user", "content": "Sure"}]
 Output: YES
 
 # Disagreement with completion
-[{"role": "assistant", "content": "Is that what you meant?"}, 
+[{"role": "assistant", "content": "Is that what you meant?"},
  {"role": "user", "content": "No not really"}]
 Output: YES
 
@@ -194,12 +194,12 @@ LOW PRIORITY SIGNALS:
 
 Examples:
 # Word repetition but complete
-[{"role": "assistant", "content": "I can help with that."}, 
+[{"role": "assistant", "content": "I can help with that."},
  {"role": "user", "content": "What what is the time right now"}]
 Output: YES
 
 # Missing punctuation but complete
-[{"role": "assistant", "content": "I can explain that."}, 
+[{"role": "assistant", "content": "I can explain that."},
  {"role": "user", "content": "Please tell me how computers work"}]
 Output: YES
 
@@ -211,12 +211,12 @@ Output: YES
 
 Examples:
 # Filler words but complete
-[{"role": "assistant", "content": "What would you like to know?"}, 
+[{"role": "assistant", "content": "What would you like to know?"},
  {"role": "user", "content": "Um uh how do airplanes fly"}]
 Output: YES
 
 # Thinking pause but incomplete
-[{"role": "assistant", "content": "I can explain anything."}, 
+[{"role": "assistant", "content": "I can explain anything."},
  {"role": "user", "content": "Well um I want to know about the"}]
 Output: NO
 
@@ -241,17 +241,17 @@ DECISION RULES:
 
 Examples:
 # Incomplete despite corrections
-[{"role": "assistant", "content": "What would you like to know about?"}, 
+[{"role": "assistant", "content": "What would you like to know about?"},
  {"role": "user", "content": "Can you tell me about"}]
 Output: NO
 
 # Complete despite multiple artifacts
-[{"role": "assistant", "content": "I can help you learn."}, 
+[{"role": "assistant", "content": "I can help you learn."},
  {"role": "user", "content": "How do you I mean what's the best way to learn programming"}]
 Output: YES
 
 # Trailing off incomplete
-[{"role": "assistant", "content": "I can explain anything."}, 
+[{"role": "assistant", "content": "I can explain anything."},
  {"role": "user", "content": "I was wondering if you could tell me why"}]
 Output: NO
 """
@@ -328,12 +328,14 @@ class CompletenessCheck(FrameProcessor):
             await self._notifier.notify()
         elif isinstance(frame, TextFrame) and frame.text == "NO":
             logger.debug("!!! Completeness check NO")
+        else:
+            await self.push_frame(frame, direction)
 
 
 class OutputGate(FrameProcessor):
-    def __init__(self, notifier: BaseNotifier, **kwargs):
+    def __init__(self, *, notifier: BaseNotifier, start_open: bool = False, **kwargs):
         super().__init__(**kwargs)
-        self._gate_open = False
+        self._gate_open = start_open
         self._frames_buffer = []
         self._notifier = notifier
 
@@ -371,11 +373,10 @@ class OutputGate(FrameProcessor):
 
     async def _start(self):
         self._frames_buffer = []
-        self._gate_task = self.get_event_loop().create_task(self._gate_task_handler())
+        self._gate_task = self.create_task(self._gate_task_handler())
 
     async def _stop(self):
-        self._gate_task.cancel()
-        await self._gate_task
+        await self.cancel_task(self._gate_task)
 
     async def _gate_task_handler(self):
         while True:
@@ -460,7 +461,9 @@ async def main():
         # sentence, this will wake up the notifier if that happens.
         user_idle = UserIdleProcessor(callback=user_idle_notifier, timeout=5.0)
 
-        bot_output_gate = OutputGate(notifier=notifier)
+        # We start with the gate open because we send an initial context frame
+        # to start the conversation.
+        bot_output_gate = OutputGate(notifier=notifier, start_open=True)
 
         async def block_user_stopped_speaking(frame):
             return not isinstance(frame, UserStoppedSpeakingFrame)

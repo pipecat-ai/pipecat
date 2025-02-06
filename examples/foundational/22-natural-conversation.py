@@ -104,8 +104,11 @@ async def main():
         )
 
         # This processor keeps the last context and will let it through once the
-        # notifier is woken up.
-        gated_context_aggregator = GatedOpenAILLMContextAggregator(notifier)
+        # notifier is woken up. We start with the gate open because we send an
+        # initial context frame to start the conversation.
+        gated_context_aggregator = GatedOpenAILLMContextAggregator(
+            notifier=notifier, start_open=True
+        )
 
         # Notify if the user hasn't said anything.
         async def user_idle_notifier(frame):

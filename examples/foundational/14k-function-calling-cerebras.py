@@ -15,6 +15,7 @@ from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -30,11 +31,8 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def start_fetch_weather(function_name, llm, context):
-    # note: we can't push a frame to the LLM here. the bot
-    # can interrupt itself and/or cause audio overlapping glitches.
-    # possible question for Aleix and Chad about what the right way
-    # to trigger speech is, now, with the new queues/async/sync refactors.
-    # await llm.push_frame(TextFrame("Let me check on that."))
+    """Push a frame to the LLM; this is handy when the LLM response might take a while."""
+    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
     logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
 
 
@@ -95,7 +93,7 @@ async def main():
         messages = [
             {
                 "role": "system",
-                "content": """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. 
+                "content": """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
 
 You have one functions available:
 

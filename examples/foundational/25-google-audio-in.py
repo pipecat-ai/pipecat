@@ -212,7 +212,7 @@ class InputTranscriptionFrameEmitter(FrameProcessor):
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self.push_frame(LLMDemoTranscriptionFrame(text=self._aggregation.strip()))
             self._aggregation = ""
-        elif isinstance(frame, MetricsFrame):
+        else:
             await self.push_frame(frame, direction)
 
 

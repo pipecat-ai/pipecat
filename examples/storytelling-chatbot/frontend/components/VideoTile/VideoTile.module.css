@@ -6,8 +6,8 @@
 
 .videoTile{
     @apply bg-gray-950;
-    width: 560px;
-    height: 560px;
+    width: 760px;
+    height: 760px;
     mask-image: url('/alpha-mask.gif');
     mask-size: cover;
     mask-repeat: no-repeat;

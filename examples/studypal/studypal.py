@@ -12,7 +12,6 @@ from pypdf import PdfReader
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -113,7 +112,6 @@ async def main():
             token,
             "studypal",
             DailyParams(
-                audio_out_sample_rate=44100,
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
@@ -125,7 +123,6 @@ async def main():
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id=os.getenv("CARTESIA_VOICE_ID", "4d2fd738-3b3d-4368-957a-bb4805275bd9"),
             # British Narration Lady: 4d2fd738-3b3d-4368-957a-bb4805275bd9
-            sample_rate=44100,
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
@@ -156,7 +153,12 @@ Your task is to help the user understand and learn from this article in 2 senten
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
+        task = PipelineTask(
+            pipeline,
+            PipelineParams(
+                audio_out_sample_rate=44100, allow_interruptions=True, enable_metrics=True
+            ),
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
@@ -171,7 +173,7 @@ Your task is to help the user understand and learn from this article in 2 senten
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

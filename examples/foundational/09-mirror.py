@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -61,7 +61,6 @@ async def main():
             "Test",
             DailyParams(
                 audio_in_enabled=True,
-                audio_in_sample_rate=24000,
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_is_live=True,
@@ -78,7 +77,9 @@ async def main():
 
         runner = PipelineRunner()
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(
+            pipeline, PipelineParams(audio_in_sample_rate=24000, audio_out_sample_rate=24000)
+        )
 
         await runner.run(task)
 

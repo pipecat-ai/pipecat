@@ -2,7 +2,7 @@
  <img alt="pipecat" width="300px" height="auto" src="https://raw.githubusercontent.com/pipecat-ai/pipecat/main/pipecat.png">
 </div></h1>
 
-[![PyPI](https://img.shields.io/pypi/v/pipecat-ai)](https://pypi.org/project/pipecat-ai) [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai) [![Discord](https://img.shields.io/discord/1239284677165056021)](https://discord.gg/pipecat) <a href="https://app.commanddash.io/agent/github_pipecat-ai_pipecat"><img src="https://img.shields.io/badge/AI-Code%20Agent-EB9FDA"></a>
+[![PyPI](https://img.shields.io/pypi/v/pipecat-ai)](https://pypi.org/project/pipecat-ai) ![Tests](https://github.com/pipecat-ai/pipecat/actions/workflows/tests.yaml/badge.svg) [![Docs](https://img.shields.io/badge/Documentation-blue)](https://docs.pipecat.ai) [![Discord](https://img.shields.io/discord/1239284677165056021)](https://discord.gg/pipecat) <a href="https://app.commanddash.io/agent/github_pipecat-ai_pipecat"><img src="https://img.shields.io/badge/AI-Code%20Agent-EB9FDA"></a>
 
 Pipecat is an open source Python framework for building voice and multimodal conversational agents. It handles the complex orchestration of AI services, network transport, audio processing, and multimodal interactions, letting you focus on creating engaging experiences.
 
@@ -53,13 +53,7 @@ To keep things lightweight, only the core framework is included by default. If y
 pip install "pipecat-ai[option,...]"
 ```
 
-Or you can install all of them with:
-
-```shell
-pip install "pipecat-ai[all]"
-```
-
-Available options include:
+### Available services
 
 | Category            | Services                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Install Command Example                 |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
@@ -87,7 +81,7 @@ Here is a very basic Pipecat bot that greets a user when they join a real-time s
 ```python
 import asyncio
 
-from pipecat.frames.frames import EndFrame, TextFrame
+from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.pipeline.runner import PipelineRunner
@@ -128,7 +122,7 @@ async def main():
   # Register an event handler to exit the application when the user leaves.
   @transport.event_handler("on_participant_left")
   async def on_participant_left(transport, participant, reason):
-    await task.queue_frame(EndFrame())
+    await task.cancel()
 
   # Run the pipeline task
   await runner.run(task)
@@ -195,7 +189,7 @@ pip install "path_to_this_repo[option,...]"
 From the root directory, run:
 
 ```shell
-pytest --doctest-modules --ignore-glob="*to_be_updated*" --ignore-glob=*pipeline_source* src tests
+pytest
 ```
 
 ## Setting up your editor

@@ -1,0 +1,4 @@
+python-dotenv
+fastapi[all]
+uvicorn
+pipecat-ai[daily,google,deepgram,cartesia,silero,openai]

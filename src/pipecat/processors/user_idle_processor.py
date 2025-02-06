@@ -5,7 +5,8 @@
 #
 
 import asyncio
-from typing import Awaitable, Callable
+import inspect
+from typing import Awaitable, Callable, Union
 
 from pipecat.frames.frames import (
     BotSpeakingFrame,
@@ -25,11 +26,23 @@ class UserIdleProcessor(FrameProcessor):
     or BotSpeaking).
 
     Args:
-        callback: Function to call when user is idle
+        callback: Function to call when user is idle. Can be either:
+            - Basic callback(processor) -> None
+            - Retry callback(processor, retry_count) -> bool
+              Return True to continue monitoring for idle events,
+              Return False to stop the idle monitoring task
         timeout: Seconds to wait before considering user idle
         **kwargs: Additional arguments passed to FrameProcessor
 
     Example:
+        # Retry callback:
+        async def handle_idle(processor: "UserIdleProcessor", retry_count: int) -> bool:
+            if retry_count < 3:
+                await send_reminder("Are you still there?")
+                return True
+            return False
+
+        # Basic callback:
         async def handle_idle(processor: "UserIdleProcessor") -> None:
             await send_reminder("Are you still there?")
 
@@ -42,34 +55,68 @@ class UserIdleProcessor(FrameProcessor):
     def __init__(
         self,
         *,
-        callback: Callable[["UserIdleProcessor"], Awaitable[None]],
+        callback: Union[
+            Callable[["UserIdleProcessor"], Awaitable[None]],  # Basic
+            Callable[["UserIdleProcessor", int], Awaitable[bool]],  # Retry
+        ],
         timeout: float,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._callback = callback
+        self._callback = self._wrap_callback(callback)
         self._timeout = timeout
+        self._retry_count = 0
         self._interrupted = False
         self._conversation_started = False
         self._idle_task = None
         self._idle_event = asyncio.Event()
 
-    def _create_idle_task(self):
-        """Create the idle task if it hasn't been created yet."""
-        if self._idle_task is None:
-            self._idle_task = self.get_event_loop().create_task(self._idle_task_handler())
+    def _wrap_callback(
+        self,
+        callback: Union[
+            Callable[["UserIdleProcessor"], Awaitable[None]],
+            Callable[["UserIdleProcessor", int], Awaitable[bool]],
+        ],
+    ) -> Callable[["UserIdleProcessor", int], Awaitable[bool]]:
+        """Wraps callback to support both basic and retry signatures.
 
-    async def _stop(self):
+        Args:
+            callback: The callback function to wrap.
+
+        Returns:
+            A wrapped callback that returns bool to indicate whether to continue monitoring.
+        """
+        sig = inspect.signature(callback)
+        param_count = len(sig.parameters)
+
+        async def wrapper(processor: "UserIdleProcessor", retry_count: int) -> bool:
+            if param_count == 1:
+                # Basic callback
+                await callback(processor)  # type: ignore
+                return True
+            else:
+                # Retry callback
+                return await callback(processor, retry_count)  # type: ignore
+
+        return wrapper
+
+    def _create_idle_task(self) -> None:
+        """Creates the idle task if it hasn't been created yet."""
+        if self._idle_task is None:
+            self._idle_task = self.create_task(self._idle_task_handler())
+
+    @property
+    def retry_count(self) -> int:
+        """Returns the current retry count."""
+        return self._retry_count
+
+    async def _stop(self) -> None:
         """Stops and cleans up the idle monitoring task."""
         if self._idle_task is not None:
-            self._idle_task.cancel()
-            try:
-                await self._idle_task
-            except asyncio.CancelledError:
-                pass  # Expected when task is cancelled
+            await self.cancel_task(self._idle_task)
             self._idle_task = None
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         """Processes incoming frames and manages idle monitoring state.
 
         Args:
@@ -98,6 +145,7 @@ class UserIdleProcessor(FrameProcessor):
         if self._conversation_started:
             # We shouldn't call the idle callback if the user or the bot are speaking
             if isinstance(frame, UserStartedSpeakingFrame):
+                self._retry_count = 0  # Reset retry count when user speaks
                 self._interrupted = True
                 self._idle_event.set()
             elif isinstance(frame, UserStoppedSpeakingFrame):
@@ -106,23 +154,26 @@ class UserIdleProcessor(FrameProcessor):
             elif isinstance(frame, BotSpeakingFrame):
                 self._idle_event.set()
 
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         """Cleans up resources when processor is shutting down."""
+        await super().cleanup()
         if self._idle_task:  # Only stop if task exists
             await self._stop()
 
-    async def _idle_task_handler(self):
+    async def _idle_task_handler(self) -> None:
         """Monitors for idle timeout and triggers callbacks.
 
-        Runs in a loop until cancelled.
+        Runs in a loop until cancelled or callback indicates completion.
         """
         while True:
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 if not self._interrupted:
-                    await self._callback(self)
-            except asyncio.CancelledError:
-                break
+                    self._retry_count += 1
+                    should_continue = await self._callback(self, self._retry_count)
+                    if not should_continue:
+                        await self._stop()
+                        break
             finally:
                 self._idle_event.clear()

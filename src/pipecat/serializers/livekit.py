@@ -25,7 +25,7 @@ class LivekitFrameSerializer(FrameSerializer):
     def type(self) -> FrameSerializerType:
         return FrameSerializerType.BINARY
 
-    def serialize(self, frame: Frame) -> str | bytes | None:
+    async def serialize(self, frame: Frame) -> str | bytes | None:
         if not isinstance(frame, OutputAudioRawFrame):
             return None
         audio_frame = AudioFrame(
@@ -36,7 +36,7 @@ class LivekitFrameSerializer(FrameSerializer):
         )
         return pickle.dumps(audio_frame)
 
-    def deserialize(self, data: str | bytes) -> Frame | None:
+    async def deserialize(self, data: str | bytes) -> Frame | None:
         audio_frame: AudioFrame = pickle.loads(data)["frame"]
         return InputAudioRawFrame(
             audio=bytes(audio_frame.data),

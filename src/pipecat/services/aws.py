@@ -10,7 +10,7 @@ from typing import AsyncGenerator, Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import resample_audio
+from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -124,7 +124,7 @@ class PollyTTSService(TTSService):
         aws_session_token: Optional[str] = None,
         region: Optional[str] = None,
         voice_id: str = "Joanna",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -138,7 +138,6 @@ class PollyTTSService(TTSService):
             region_name=region,
         )
         self._settings = {
-            "sample_rate": sample_rate,
             "engine": params.engine,
             "language": self.language_to_service_language(params.language)
             if params.language
@@ -147,6 +146,8 @@ class PollyTTSService(TTSService):
             "rate": params.rate,
             "volume": params.volume,
         }
+
+        self._resampler = create_default_resampler()
 
         self.set_voice(voice_id)
 
@@ -193,8 +194,7 @@ class PollyTTSService(TTSService):
             response = self._polly_client.synthesize_speech(**args)
             if "AudioStream" in response:
                 audio_data = response["AudioStream"].read()
-                resampled = resample_audio(audio_data, 16000, self._settings["sample_rate"])
-                return resampled
+                return audio_data
             return None
 
         logger.debug(f"Generating TTS: [{text}]")
@@ -225,6 +225,8 @@ class PollyTTSService(TTSService):
                 yield None
                 return
 
+            audio_data = await self._resampler.resample(audio_data, 16000, self.sample_rate)
+
             await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()
@@ -234,7 +236,7 @@ class PollyTTSService(TTSService):
                 chunk = audio_data[i : i + chunk_size]
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
-                    frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                    frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                     yield frame
 
             yield TTSStoppedFrame()
