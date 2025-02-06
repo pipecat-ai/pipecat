@@ -883,14 +883,13 @@ class GoogleTTSService(TTSService):
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
         voice_id: str = "en-US-Neural2-A",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = {
-            "sample_rate": sample_rate,
             "pitch": params.pitch,
             "rate": params.rate,
             "volume": params.volume,
@@ -996,7 +995,7 @@ class GoogleTTSService(TTSService):
             )
             audio_config = texttospeech_v1.AudioConfig(
                 audio_encoding=texttospeech_v1.AudioEncoding.LINEAR16,
-                sample_rate_hertz=self._settings["sample_rate"],
+                sample_rate_hertz=self.sample_rate,
             )
 
             request = texttospeech_v1.SynthesizeSpeechRequest(
@@ -1019,7 +1018,7 @@ class GoogleTTSService(TTSService):
                 if not chunk:
                     break
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                 yield frame
                 await asyncio.sleep(0)  # Allow other tasks to run
 

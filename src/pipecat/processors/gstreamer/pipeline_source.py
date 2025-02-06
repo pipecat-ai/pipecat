@@ -5,6 +5,7 @@
 #
 
 import asyncio
+from typing import Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -38,7 +39,7 @@ class GStreamerPipelineSource(FrameProcessor):
     class OutputParams(BaseModel):
         video_width: int = 1280
         video_height: int = 720
-        audio_sample_rate: int = 24000
+        audio_sample_rate: Optional[int] = None
         audio_channels: int = 1
         clock_sync: bool = True
 
@@ -46,6 +47,7 @@ class GStreamerPipelineSource(FrameProcessor):
         super().__init__(**kwargs)
 
         self._out_params = out_params
+        self._sample_rate = 0
 
         Gst.init()
 
@@ -90,6 +92,7 @@ class GStreamerPipelineSource(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def _start(self, frame: StartFrame):
+        self._sample_rate = self._out_params.audio_sample_rate or frame.audio_out_sample_rate
         self._player.set_state(Gst.State.PLAYING)
 
     async def _stop(self, frame: EndFrame):
@@ -122,7 +125,7 @@ class GStreamerPipelineSource(FrameProcessor):
         audioresample = Gst.ElementFactory.make("audioresample", None)
         audiocapsfilter = Gst.ElementFactory.make("capsfilter", None)
         audiocaps = Gst.Caps.from_string(
-            f"audio/x-raw,format=S16LE,rate={self._out_params.audio_sample_rate},channels={self._out_params.audio_channels},layout=interleaved"
+            f"audio/x-raw,format=S16LE,rate={self._sample_rate},channels={self._out_params.audio_channels},layout=interleaved"
         )
         audiocapsfilter.set_property("caps", audiocaps)
         appsink_audio = Gst.ElementFactory.make("appsink", None)
@@ -188,7 +191,7 @@ class GStreamerPipelineSource(FrameProcessor):
         (_, info) = buffer.map(Gst.MapFlags.READ)
         frame = OutputAudioRawFrame(
             audio=info.data,
-            sample_rate=self._out_params.audio_sample_rate,
+            sample_rate=self._sample_rate,
             num_channels=self._out_params.audio_channels,
         )
         asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
