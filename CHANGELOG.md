@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Use `gemini-2.0-flash-001` as the default model for `GoogleLLMSerivce`.
 
+### Other
+
+- Added a new `sentry-metrics` example.
+
 ## [0.0.55] - 2025-02-05
 
 ### Added
