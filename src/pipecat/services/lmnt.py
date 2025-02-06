@@ -5,7 +5,7 @@
 #
 
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -66,7 +66,7 @@ class LmntTTSService(TTSService, WebsocketService):
         *,
         api_key: str,
         voice_id: str,
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         language: Language = Language.EN,
         **kwargs,
     ):
@@ -81,7 +81,6 @@ class LmntTTSService(TTSService, WebsocketService):
         self._api_key = api_key
         self._voice_id = voice_id
         self._settings = {
-            "sample_rate": sample_rate,
             "language": self.language_to_service_language(language),
             "format": "raw",  # Use raw format for direct PCM data
         }
@@ -113,16 +112,13 @@ class LmntTTSService(TTSService, WebsocketService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.get_event_loop().create_task(
-            self._receive_task_handler(self.push_error)
-        )
+        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
         await self._disconnect_websocket()
 
         if self._receive_task:
-            self._receive_task.cancel()
-            await self._receive_task
+            await self.cancel_task(self._receive_task)
             self._receive_task = None
 
     async def _connect_websocket(self):
@@ -135,7 +131,7 @@ class LmntTTSService(TTSService, WebsocketService):
                 "X-API-Key": self._api_key,
                 "voice": self._voice_id,
                 "format": self._settings["format"],
-                "sample_rate": self._settings["sample_rate"],
+                "sample_rate": self.sample_rate,
                 "language": self._settings["language"],
             }
 
@@ -178,7 +174,7 @@ class LmntTTSService(TTSService, WebsocketService):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
                     audio=message,
-                    sample_rate=self._settings["sample_rate"],
+                    sample_rate=self.sample_rate,
                     num_channels=1,
                 )
                 await self.push_frame(frame)

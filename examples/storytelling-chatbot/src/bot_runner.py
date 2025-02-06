@@ -114,7 +114,7 @@ async def start_bot(request: Request) -> JSONResponse:
     else:
         try:
             subprocess.Popen(
-                [f"python3 -m bot -u {room.url} -t {token}"],
+                [f"python -m bot -u {room.url} -t {token}"],
                 shell=True,
                 bufsize=1,
                 cwd=os.path.dirname(os.path.abspath(__file__)),
@@ -175,7 +175,7 @@ async def virtualize_bot(room_url: str, token: str):
             image = data[0]["config"]["image"]
 
         # Machine configuration
-        cmd = f"python3 src/bot.py -u {room_url} -t {token}"
+        cmd = f"python src/bot.py -u {room_url} -t {token}"
         cmd = cmd.split()
         worker_props = {
             "config": {
@@ -215,9 +215,8 @@ async def virtualize_bot(room_url: str, token: str):
 if __name__ == "__main__":
     # Check environment variables
     required_env_vars = [
-        "OPENAI_API_KEY",
+        "GOOGLE_API_KEY",
         "DAILY_API_KEY",
-        "FAL_KEY",
         "ELEVENLABS_VOICE_ID",
         "ELEVENLABS_API_KEY",
     ]

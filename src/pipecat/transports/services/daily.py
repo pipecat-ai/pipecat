@@ -46,6 +46,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.asyncio import TaskManager
 
 try:
     from daily import CallClient, Daily, EventHandler
@@ -70,11 +71,11 @@ class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
-    def __init__(self, *, sample_rate=16000, num_channels=1, params: VADParams = VADParams()):
-        super().__init__(sample_rate=sample_rate, num_channels=num_channels, params=params)
+    def __init__(self, *, sample_rate: Optional[int] = None, params: VADParams = VADParams()):
+        super().__init__(sample_rate=sample_rate, params=params)
 
         self._webrtc_vad = Daily.create_native_vad(
-            reset_period_ms=VAD_RESET_PERIOD_MS, sample_rate=sample_rate, channels=num_channels
+            reset_period_ms=VAD_RESET_PERIOD_MS, sample_rate=self.sample_rate, channels=1
         )
         logger.debug("Loaded native WebRTC VAD")
 
@@ -139,7 +140,6 @@ class DailyCallbacks(BaseModel):
     on_dialout_stopped: Callable[[Any], Awaitable[None]]
     on_dialout_error: Callable[[Any], Awaitable[None]]
     on_dialout_warning: Callable[[Any], Awaitable[None]]
-    on_first_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
@@ -179,7 +179,7 @@ class DailyTransportClient(EventHandler):
         bot_name: str,
         params: DailyParams,
         callbacks: DailyCallbacks,
-        loop: asyncio.AbstractEventLoop,
+        transport_name: str,
     ):
         super().__init__()
 
@@ -192,16 +192,18 @@ class DailyTransportClient(EventHandler):
         self._bot_name: str = bot_name
         self._params: DailyParams = params
         self._callbacks = callbacks
-        self._loop = loop
+        self._transport_name = transport_name
 
         self._participant_id: str = ""
         self._video_renderers = {}
         self._transcription_ids = []
         self._transcription_status = None
-        self._other_participant_has_joined = False
 
         self._joined = False
+        self._joined_event = asyncio.Event()
         self._leave_counter = 0
+
+        self._task_manager: Optional[TaskManager] = None
 
         # We use the executor to cleanup the client. We just do it from one
         # place, so only one thread is really needed.
@@ -218,35 +220,15 @@ class DailyTransportClient(EventHandler):
         # future) we will deadlock because completions use event handlers (which
         # are holding the GIL).
         self._callback_queue = asyncio.Queue()
-        self._callback_task = self._loop.create_task(self._callback_task_handler())
+        self._callback_task = None
+
+        # Input and ouput sample rates. They will be initialize on setup().
+        self._in_sample_rate = 0
+        self._out_sample_rate = 0
 
         self._camera: VirtualCameraDevice | None = None
-        if self._params.camera_out_enabled:
-            self._camera = Daily.create_camera_device(
-                self._camera_name(),
-                width=self._params.camera_out_width,
-                height=self._params.camera_out_height,
-                color_format=self._params.camera_out_color_format,
-            )
-
         self._mic: VirtualMicrophoneDevice | None = None
-        if self._params.audio_out_enabled:
-            self._mic = Daily.create_microphone_device(
-                self._mic_name(),
-                sample_rate=self._params.audio_out_sample_rate,
-                channels=self._params.audio_out_channels,
-                non_blocking=True,
-            )
-
         self._speaker: VirtualSpeakerDevice | None = None
-        if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._speaker = Daily.create_speaker_device(
-                self._speaker_name(),
-                sample_rate=self._params.audio_in_sample_rate,
-                channels=self._params.audio_in_channels,
-                non_blocking=True,
-            )
-            Daily.select_speaker_device(self._speaker_name())
 
     def _camera_name(self):
         return f"camera-{self}"
@@ -261,9 +243,6 @@ class DailyTransportClient(EventHandler):
     def participant_id(self) -> str:
         return self._participant_id
 
-    def set_callbacks(self, callbacks: DailyCallbacks):
-        self._callbacks = callbacks
-
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         if not self._joined:
             return
@@ -272,7 +251,7 @@ class DailyTransportClient(EventHandler):
         if isinstance(frame, (DailyTransportMessageFrame, DailyTransportMessageUrgentFrame)):
             participant_id = frame.participant_id
 
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.send_app_message(
             frame.message, participant_id, completion=completion_callback(future)
         )
@@ -282,11 +261,11 @@ class DailyTransportClient(EventHandler):
         if not self._speaker:
             return None
 
-        sample_rate = self._params.audio_in_sample_rate
+        sample_rate = self._in_sample_rate
         num_channels = self._params.audio_in_channels
         num_frames = int(sample_rate / 100) * 2  # 20ms of audio
 
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._speaker.read_frames(num_frames, completion=completion_callback(future))
         audio = await future
 
@@ -305,7 +284,7 @@ class DailyTransportClient(EventHandler):
         if not self._mic:
             return None
 
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._mic.write_frames(frames, completion=completion_callback(future))
         await future
 
@@ -314,6 +293,42 @@ class DailyTransportClient(EventHandler):
             return None
 
         self._camera.write_frame(frame.image)
+
+    async def setup(self, frame: StartFrame):
+        self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
+        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
+
+        if self._params.camera_out_enabled and not self._camera:
+            self._camera = Daily.create_camera_device(
+                self._camera_name(),
+                width=self._params.camera_out_width,
+                height=self._params.camera_out_height,
+                color_format=self._params.camera_out_color_format,
+            )
+
+        if self._params.audio_out_enabled and not self._mic:
+            self._mic = Daily.create_microphone_device(
+                self._mic_name(),
+                sample_rate=self._out_sample_rate,
+                channels=self._params.audio_out_channels,
+                non_blocking=True,
+            )
+
+        if (self._params.audio_in_enabled or self._params.vad_enabled) and not self._speaker:
+            self._speaker = Daily.create_speaker_device(
+                self._speaker_name(),
+                sample_rate=self._in_sample_rate,
+                channels=self._params.audio_in_channels,
+                non_blocking=True,
+            )
+            Daily.select_speaker_device(self._speaker_name())
+
+        if not self._task_manager:
+            self._task_manager = frame.task_manager
+            self._callback_task = self._task_manager.create_task(
+                self._callback_task_handler(),
+                f"{self}::callback_task",
+            )
 
     async def join(self):
         # Transport already joined, ignore.
@@ -346,6 +361,8 @@ class DailyTransportClient(EventHandler):
                     await self._start_transcription()
 
                 await self._callbacks.on_joined(data)
+
+                self._joined_event.set()
             else:
                 error_msg = f"Error joining {self._room_url}: {error}"
                 logger.error(error_msg)
@@ -362,7 +379,7 @@ class DailyTransportClient(EventHandler):
 
         logger.info(f"Enabling transcription with settings {self._params.transcription_settings}")
 
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.start_transcription(
             settings=self._params.transcription_settings.model_dump(exclude_none=True),
             completion=completion_callback(future),
@@ -373,7 +390,7 @@ class DailyTransportClient(EventHandler):
             return
 
     async def _join(self):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
 
         self._client.join(
             self._room_url,
@@ -434,6 +451,7 @@ class DailyTransportClient(EventHandler):
             return
 
         self._joined = False
+        self._joined_event.clear()
 
         logger.info(f"Leaving {self._room_url}")
 
@@ -457,23 +475,24 @@ class DailyTransportClient(EventHandler):
     async def _stop_transcription(self):
         if not self._token:
             return
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.stop_transcription(completion=completion_callback(future))
         error = await future
         if error:
             logger.error(f"Unable to stop transcription: {error}")
 
     async def _leave(self):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
         return await asyncio.wait_for(future, timeout=10)
 
     async def cleanup(self):
-        self._callback_task.cancel()
-        await self._callback_task
+        if self._callback_task and self._task_manager:
+            await self._task_manager.cancel_task(self._callback_task)
+            self._callback_task = None
         # Make sure we don't block the event loop in case `client.release()`
         # takes extra time.
-        await self._loop.run_in_executor(self._executor, self._cleanup)
+        await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
 
     def _cleanup(self):
         if self._client:
@@ -487,39 +506,39 @@ class DailyTransportClient(EventHandler):
         return self._client.participant_counts()
 
     async def start_dialout(self, settings):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.start_dialout(settings, completion=completion_callback(future))
         await future
 
     async def stop_dialout(self, participant_id):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.stop_dialout(participant_id, completion=completion_callback(future))
         await future
 
     async def send_dtmf(self, settings):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.send_dtmf(settings, completion=completion_callback(future))
         await future
 
     async def sip_call_transfer(self, settings):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.sip_call_transfer(settings, completion=completion_callback(future))
         await future
 
     async def sip_refer(self, settings):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.sip_refer(settings, completion=completion_callback(future))
         await future
 
     async def start_recording(self, streaming_settings, stream_id, force_new):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.start_recording(
             streaming_settings, stream_id, force_new, completion=completion_callback(future)
         )
         await future
 
     async def stop_recording(self, stream_id):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.stop_recording(stream_id, completion=completion_callback(future))
         await future
 
@@ -527,7 +546,7 @@ class DailyTransportClient(EventHandler):
         if not self._joined:
             return
 
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.send_prebuilt_chat_message(
             message, user_name=user_name, completion=completion_callback(future)
         )
@@ -564,14 +583,14 @@ class DailyTransportClient(EventHandler):
         )
 
     async def update_transcription(self, participants=None, instance_id=None):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.update_transcription(
             participants, instance_id, completion=completion_callback(future)
         )
         await future
 
     async def update_subscriptions(self, participant_settings=None, profile_settings=None):
-        future = self._loop.create_future()
+        future = self._get_event_loop().create_future()
         self._client.update_subscriptions(
             participant_settings=participant_settings,
             profile_settings=profile_settings,
@@ -621,19 +640,9 @@ class DailyTransportClient(EventHandler):
         self._call_async_callback(self._callbacks.on_dialout_warning, data)
 
     def on_participant_joined(self, participant):
-        id = participant["id"]
-        logger.info(f"Participant joined {id}")
-
-        if not self._other_participant_has_joined:
-            self._other_participant_has_joined = True
-            self._call_async_callback(self._callbacks.on_first_participant_joined, participant)
-
         self._call_async_callback(self._callbacks.on_participant_joined, participant)
 
     def on_participant_left(self, participant, reason):
-        id = participant["id"]
-        logger.info(f"Participant left {id}")
-
         self._call_async_callback(self._callbacks.on_participant_left, participant, reason)
 
     def on_participant_updated(self, participant):
@@ -681,17 +690,24 @@ class DailyTransportClient(EventHandler):
 
     def _call_async_callback(self, callback, *args):
         future = asyncio.run_coroutine_threadsafe(
-            self._callback_queue.put((callback, *args)), self._loop
+            self._callback_queue.put((callback, *args)), self._get_event_loop()
         )
         future.result()
 
     async def _callback_task_handler(self):
         while True:
-            try:
-                (callback, *args) = await self._callback_queue.get()
-                await callback(*args)
-            except asyncio.CancelledError:
-                break
+            # Wait to process any callback until we are joined.
+            await self._joined_event.wait()
+            (callback, *args) = await self._callback_queue.get()
+            await callback(*args)
+
+    def _get_event_loop(self) -> asyncio.AbstractEventLoop:
+        if not self._task_manager:
+            raise Exception(f"{self}: missing task manager (pipeline not started?)")
+        return self._task_manager.get_event_loop()
+
+    def __str__(self):
+        return f"{self._transport_name}::DailyTransportClient"
 
 
 class DailyInputTransport(BaseInputTransport):
@@ -699,6 +715,7 @@ class DailyInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
 
         self._client = client
+        self._params = params
 
         self._video_renderers = {}
 
@@ -707,21 +724,25 @@ class DailyInputTransport(BaseInputTransport):
         self._audio_in_task = None
 
         self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
-        if params.vad_enabled and not params.vad_analyzer:
-            self._vad_analyzer = WebRTCVADAnalyzer(
-                sample_rate=self._params.audio_in_sample_rate,
-                num_channels=self._params.audio_in_channels,
-            )
+
+    @property
+    def vad_analyzer(self) -> VADAnalyzer | None:
+        return self._vad_analyzer
 
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
+        # Setup client.
+        await self._client.setup(frame)
         # Join the room.
         await self._client.join()
+        # Inialize WebRTC VAD if needed.
+        if self._params.vad_enabled and not self._params.vad_analyzer:
+            self._vad_analyzer = WebRTCVADAnalyzer(sample_rate=self.sample_rate)
         # Create audio task. It reads audio frames from Daily and push them
         # internally for VAD processing.
         if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_task = self.get_event_loop().create_task(self._audio_in_task_handler())
+            self._audio_in_task = self.create_task(self._audio_in_task_handler())
 
     async def stop(self, frame: EndFrame):
         # Parent stop.
@@ -730,8 +751,7 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.leave()
         # Stop audio thread.
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
-            self._audio_in_task.cancel()
-            await self._audio_in_task
+            await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
 
     async def cancel(self, frame: CancelFrame):
@@ -741,16 +761,12 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.leave()
         # Stop audio thread.
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
-            self._audio_in_task.cancel()
-            await self._audio_in_task
+            await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
 
     async def cleanup(self):
         await super().cleanup()
         await self._client.cleanup()
-
-    def vad_analyzer(self) -> VADAnalyzer | None:
-        return self._vad_analyzer
 
     #
     # FrameProcessor
@@ -779,12 +795,9 @@ class DailyInputTransport(BaseInputTransport):
 
     async def _audio_in_task_handler(self):
         while True:
-            try:
-                frame = await self._client.read_next_audio_frame()
-                if frame:
-                    await self.push_audio_frame(frame)
-            except asyncio.CancelledError:
-                break
+            frame = await self._client.read_next_audio_frame()
+            if frame:
+                await self.push_audio_frame(frame)
 
     #
     # Camera in
@@ -843,6 +856,8 @@ class DailyOutputTransport(BaseOutputTransport):
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
+        # Setup client.
+        await self._client.setup(frame)
         # Join the room.
         await self._client.join()
 
@@ -881,9 +896,8 @@ class DailyTransport(BaseTransport):
         params: DailyParams = DailyParams(),
         input_name: str | None = None,
         output_name: str | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
     ):
-        super().__init__(input_name=input_name, output_name=output_name, loop=loop)
+        super().__init__(input_name=input_name, output_name=output_name)
 
         callbacks = DailyCallbacks(
             on_joined=self._on_joined,
@@ -901,7 +915,6 @@ class DailyTransport(BaseTransport):
             on_dialout_stopped=self._on_dialout_stopped,
             on_dialout_error=self._on_dialout_error,
             on_dialout_warning=self._on_dialout_warning,
-            on_first_participant_joined=self._on_first_participant_joined,
             on_participant_joined=self._on_participant_joined,
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
@@ -912,11 +925,11 @@ class DailyTransport(BaseTransport):
         )
         self._params = params
 
-        self._client = DailyTransportClient(
-            room_url, token, bot_name, params, callbacks, self._loop
-        )
+        self._client = DailyTransportClient(room_url, token, bot_name, params, callbacks, self.name)
         self._input: DailyInputTransport | None = None
         self._output: DailyOutputTransport | None = None
+
+        self._other_participant_has_joined = False
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
@@ -1047,7 +1060,7 @@ class DailyTransport(BaseTransport):
             await self._output.push_error(error_frame)
         else:
             logger.error("Both input and output are None while trying to push error")
-            raise RuntimeError("No valid input or output channel to push error")
+            raise Exception("No valid input or output channel to push error")
 
     async def _on_app_message(self, message: Any, sender: str):
         if self._input:
@@ -1124,16 +1137,22 @@ class DailyTransport(BaseTransport):
         await self._call_event_handler("on_dialout_warning", data)
 
     async def _on_participant_joined(self, participant):
+        id = participant["id"]
+        logger.info(f"Participant joined {id}")
+
+        if not self._other_participant_has_joined:
+            self._other_participant_has_joined = True
+            await self._call_event_handler("on_first_participant_joined", participant)
+
         await self._call_event_handler("on_participant_joined", participant)
 
     async def _on_participant_left(self, participant, reason):
+        id = participant["id"]
+        logger.info(f"Participant left {id}")
         await self._call_event_handler("on_participant_left", participant, reason)
 
     async def _on_participant_updated(self, participant):
         await self._call_event_handler("on_participant_updated", participant)
-
-    async def _on_first_participant_joined(self, participant):
-        await self._call_event_handler("on_first_participant_joined", participant)
 
     async def _on_transcription_message(self, message):
         await self._call_event_handler("on_transcription_message", message)

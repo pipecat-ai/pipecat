@@ -1,3 +1,10 @@
+#
+# Copyright (c) 2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+import argparse
 import json
 
 import uvicorn
@@ -32,8 +39,16 @@ async def websocket_endpoint(websocket: WebSocket):
     print(call_data, flush=True)
     stream_sid = call_data["start"]["streamSid"]
     print("WebSocket connection accepted")
-    await run_bot(websocket, stream_sid)
+    await run_bot(websocket, stream_sid, app.state.testing)
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Pipecat Twilio Chatbot Server")
+    parser.add_argument(
+        "-t", "--test", action="store_true", default=False, help="set the server in testing mode"
+    )
+    args, _ = parser.parse_known_args()
+
+    app.state.testing = args.test
+
     uvicorn.run(app, host="0.0.0.0", port=8765)

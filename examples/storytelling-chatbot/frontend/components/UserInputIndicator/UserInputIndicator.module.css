@@ -43,25 +43,8 @@
     transition: opacity 0.5s ease; 
 }
 
-
-@keyframes pulse {
-    0% {
-        outline-width: 6px;
-        @apply  outline-teal-500/10; 
-    }
-    50% {
-        outline-width: 24px;
-        @apply  outline-teal-500/50; 
-    }
-    100% {
-        outline-width: 6px;
-        @apply  outline-teal-500/10; 
-    }
-}
-
 .micIconActive{
     @apply bg-teal-950 border-teal-500 outline-teal-500/20;
-    animation: pulse 2s infinite ease-in-out;
 }
 
 .micIconActive svg{
