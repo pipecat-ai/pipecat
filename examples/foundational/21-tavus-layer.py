@@ -88,6 +88,10 @@ async def main():
         task = PipelineTask(
             pipeline,
             PipelineParams(
+                # We just use 16000 because that's what Tavus is expecting and
+                # we avoid resampling.
+                audio_in_sample_rate=16000,
+                audio_out_sample_rate=16000,
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,

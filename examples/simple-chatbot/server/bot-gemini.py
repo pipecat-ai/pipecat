@@ -121,8 +121,6 @@ async def main():
             token,
             "Chatbot",
             DailyParams(
-                audio_in_sample_rate=16000,
-                audio_out_sample_rate=24000,
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,
