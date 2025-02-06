@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Improved foundational examples 22b, 22c, and 22d to support function calling.
+  With these base examples, `FunctionCallInProgressFrame` and
+  `FunctionCallResultFrame` will no longer be blocked by the gates.
+
 ### Fixed
 
 - Fixed a `SentryMetrics` issue that was preventing any metrics to be sent to
