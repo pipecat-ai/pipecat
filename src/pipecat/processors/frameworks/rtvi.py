@@ -812,6 +812,15 @@ class RTVIProcessor(FrameProcessor):
         self._register_event_handler("on_client_ready")
 
     def observer(self) -> RTVIObserver:
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'RTVI.observer()' is deprecated, instantiate an 'RTVIObserver' directly instead.",
+                DeprecationWarning,
+            )
+
         return RTVIObserver(self)
 
     def register_action(self, action: RTVIAction):
