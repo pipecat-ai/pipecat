@@ -65,13 +65,13 @@ class ConnexityInterface(AIService):
 
 
 class ConnexityLocalMetricsService(ConnexityInterface):
-    """Initialize a CanonicalAudioProcessor instance.
+    """Initialize a ConnexityLocalMetricsService instance.
 
     This class uses an AudioBufferProcessor to get the conversation audio and
-    uploads it to Canonical Voice API for audio processing.
+    uploads it to Connexity Voice API for audio processing.
 
     Args:
-        call_id (str): Your unique identifier for the call. This is used to match the call in the Canonical Voice system to the call in your system.
+        call_id (str): Your unique identifier for the call. This is used to match the call in the Connexity Voice system to the call in your system.
         assistant_id (str): Identifier for the AI assistant. This can be whatever you want, it's intended for you convenience so you can distinguish
         between different assistants and a grouping mechanism for calls.
         assistant_speaks_first (bool, optional): Indicates if the assistant speaks first in the conversation. Defaults to True.
@@ -195,13 +195,13 @@ class ConnexityLocalMetricsService(ConnexityInterface):
 
 
 class ConnexityTwilioMetricsService(ConnexityInterface):
-    """Initialize a CanonicalAudioProcessor instance.
+    """Initialize a ConnexityTwilioMetricsService instance.
 
     This class uses an AudioBufferProcessor to get the conversation audio and
-    uploads it to Canonical Voice API for audio processing.
+    uploads it to Connexity Voice API for audio processing.
 
     Args:
-        call_id (str): Your unique identifier for the call. This is used to match the call in the Canonical Voice system to the call in your system.
+        call_id (str): Your unique identifier for the call. This is used to match the call in the Connexity Voice system to the call in your system.
         assistant_id (str): Identifier for the AI assistant. This can be whatever you want, it's intended for you convenience so you can distinguish
         between different assistants and a grouping mechanism for calls.
         assistant_speaks_first (bool, optional): Indicates if the assistant speaks first in the conversation. Defaults to True.
@@ -262,13 +262,13 @@ class ConnexityTwilioMetricsService(ConnexityInterface):
 
 
 class ConnexityDailyMetricsService(ConnexityInterface):
-    """Initialize a CanonicalAudioProcessor instance.
+    """Initialize a ConnexityDailyMetricsService instance.
 
     This class uses an AudioBufferProcessor to get the conversation audio and
-    uploads it to Canonical Voice API for audio processing.
+    uploads it to Connexity Voice API for audio processing.
 
     Args:
-        call_id (str): Your unique identifier for the call. This is used to match the call in the Canonical Voice system to the call in your system.
+        call_id (str): Your unique identifier for the call. This is used to match the call in the Connexity Voice system to the call in your system.
         assistant_id (str): Identifier for the AI assistant. This can be whatever you want, it's intended for you convenience so you can distinguish
         between different assistants and a grouping mechanism for calls.
         assistant_speaks_first (bool, optional): Indicates if the assistant speaks first in the conversation. Defaults to True.
