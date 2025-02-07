@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `RTVI.observer()` is now deprecated, instantiate an `RTVIObserver` directly
+  instead.
+
 - All RTVI frame processors (e.g. `RTVISpeakingProcessor`,
   `RTVIBotLLMProcessor`) are now deprecated, instantiate an `RTVIObserver`
   instead.
