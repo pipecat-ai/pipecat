@@ -6,8 +6,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import Annotated, Optional
-from typing_extensions import Doc
+from typing import  Optional
 
 from loguru import logger
 
