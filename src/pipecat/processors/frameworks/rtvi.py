@@ -384,6 +384,15 @@ class RTVISpeakingProcessor(RTVIFrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'RTVISpeakingProcessor' is deprecated, use an 'RTVIObserver' instead.",
+                DeprecationWarning,
+            )
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -419,6 +428,15 @@ class RTVIUserTranscriptionProcessor(RTVIFrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'RTVIUserTranscriptionProcessor' is deprecated, use an 'RTVIObserver' instead.",
+                DeprecationWarning,
+            )
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -450,6 +468,15 @@ class RTVIUserLLMTextProcessor(RTVIFrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'RTVIUserLLMTextProcessor' is deprecated, use an 'RTVIObserver' instead.",
+                DeprecationWarning,
+            )
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -477,6 +504,15 @@ class RTVIBotTranscriptionProcessor(RTVIFrameProcessor):
         super().__init__()
         self._aggregation = ""
 
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'RTVIBotTranscriptionProcessor' is deprecated, use an 'RTVIObserver' instead.",
+                DeprecationWarning,
+            )
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -500,6 +536,15 @@ class RTVIBotLLMProcessor(RTVIFrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'RTVIBotLLMProcessor' is deprecated, use an 'RTVIObserver' instead.",
+                DeprecationWarning,
+            )
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -518,6 +563,15 @@ class RTVIBotTTSProcessor(RTVIFrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'RTVIBotTTSProcessor' is deprecated, use an 'RTVIObserver' instead.",
+                DeprecationWarning,
+            )
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -535,6 +589,15 @@ class RTVIBotTTSProcessor(RTVIFrameProcessor):
 class RTVIMetricsProcessor(RTVIFrameProcessor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'RTVIMetricsProcessor' is deprecated, use an 'RTVIObserver' instead.",
+                DeprecationWarning,
+            )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RTVIObserver` doesn't handle `LLMSearchResponseFrame` frames anymore. For
   now, to handle those frames you need to create a `GoogleRTVIObserver` instead.
 
+### Deprecated
+
+- All RTVI frame processors (e.g. `RTVISpeakingProcessor`,
+  `RTVIBotLLMProcessor`) are now deprecated, instantiate an `RTVIObserver`
+  instead.
+
 ## [0.0.56] - 2025-02-06
 
 ### Changed
