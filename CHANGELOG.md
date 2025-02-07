@@ -5,6 +5,42 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.56] - 2025-02-06
+
+### Changed
+
+- Improved foundational examples 22b, 22c, and 22d to support function calling.
+  With these base examples, `FunctionCallInProgressFrame` and
+  `FunctionCallResultFrame` will no longer be blocked by the gates.
+
+### Fixed
+
+- Fixed a `TkLocalTransport` and `LocalAudioTransport` issues that was causing
+  errors on cleanup.
+
+- Fixed an issue that was causing `tests.utils` import to fail because of
+  logging setup.
+
+- Fixed a `SentryMetrics` issue that was preventing any metrics to be sent to
+  Sentry and also was preventing from metrics frames to be pushed to the pipeline.
+
+- Fixed an issue in `BaseOutputTransport` where incoming audio would not be
+  resampled to the desired output sample rate.
+
+- Fixed an issue with the `TwilioFrameSerializer` and `TelnyxFrameSerializer`
+  where `twilio_sample_rate` and `telnyx_sample_rate` were incorrectly
+  initialized to `audio_in_sample_rate`. Those values currently default to 8000
+  and should be set manually from the serializer constructor if a different
+  value is needed.
+
+### Changed
+
+- Use `gemini-2.0-flash-001` as the default model for `GoogleLLMSerivce`.
+
+### Other
+
+- Added a new `sentry-metrics` example.
+
 ## [0.0.55] - 2025-02-05
 
 ### Added

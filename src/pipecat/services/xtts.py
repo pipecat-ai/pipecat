@@ -29,7 +29,7 @@ from pipecat.transcriptions.language import Language
 # https://github.com/coqui-ai/xtts-streaming-server
 
 
-def language_to_xtts_language(language: Language) -> str | None:
+def language_to_xtts_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.CS: "cs",
         Language.DE: "de",
@@ -86,7 +86,7 @@ class XTTSService(TTSService):
             "base_url": base_url,
         }
         self.set_voice(voice_id)
-        self._studio_speakers: Dict[str, Any] | None = None
+        self._studio_speakers: Optional[Dict[str, Any]] = None
         self._aiohttp_session = aiohttp_session
 
         self._resampler = create_default_resampler()
@@ -94,7 +94,7 @@ class XTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_xtts_language(language)
 
     async def start(self, frame: StartFrame):

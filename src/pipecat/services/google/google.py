@@ -63,7 +63,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_google_language(language: Language) -> str | None:
+def language_to_google_language(language: Language) -> Optional[str]:
     language_map = {
         # Afrikaans
         Language.AF: "af-ZA",
@@ -346,9 +346,9 @@ class GoogleContextAggregatorPair:
 class GoogleLLMContext(OpenAILLMContext):
     def __init__(
         self,
-        messages: list[dict] | None = None,
-        tools: list[dict] | None = None,
-        tool_choice: dict | None = None,
+        messages: Optional[List[dict]] = None,
+        tools: Optional[List[dict]] = None,
+        tool_choice: Optional[dict] = None,
     ):
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self.system_message = None
@@ -639,7 +639,7 @@ class GoogleLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gemini-1.5-flash-latest",
+        model: str = "gemini-2.0-flash-001",
         params: InputParams = InputParams(),
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
@@ -926,7 +926,7 @@ class GoogleTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_google_language(language)
 
     def _construct_ssml(self, text: str) -> str:

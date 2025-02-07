@@ -27,15 +27,15 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 
 class TwilioFrameSerializer(FrameSerializer):
     class InputParams(BaseModel):
-        twilio_sample_rate: Optional[int] = None
-        sample_rate: Optional[int] = None
+        twilio_sample_rate: int = 8000  # Default Twilio rate (8kHz)
+        sample_rate: Optional[int] = None  # Pipeline input rate
 
     def __init__(self, stream_sid: str, params: InputParams = InputParams()):
         self._stream_sid = stream_sid
         self._params = params
 
-        self._twilio_sample_rate = 0
-        self._sample_rate = 0
+        self._twilio_sample_rate = self._params.twilio_sample_rate
+        self._sample_rate = 0  # Pipeline input rate
 
         self._resampler = create_default_resampler()
 
@@ -44,8 +44,7 @@ class TwilioFrameSerializer(FrameSerializer):
         return FrameSerializerType.TEXT
 
     async def setup(self, frame: StartFrame):
-        self._twilio_sample_rate = self._params.twilio_sample_rate or frame.audio_in_sample_rate
-        self._sample_rate = self._params.sample_rate or frame.audio_out_sample_rate
+        self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         if isinstance(frame, StartInterruptionFrame):
@@ -54,6 +53,7 @@ class TwilioFrameSerializer(FrameSerializer):
         elif isinstance(frame, AudioRawFrame):
             data = frame.audio
 
+            # Output: Convert PCM at frame's rate to 8kHz μ-law for Twilio
             serialized_data = await pcm_to_ulaw(
                 data, frame.sample_rate, self._twilio_sample_rate, self._resampler
             )
@@ -75,6 +75,7 @@ class TwilioFrameSerializer(FrameSerializer):
             payload_base64 = message["media"]["payload"]
             payload = base64.b64decode(payload_base64)
 
+            # Input: Convert Twilio's 8kHz μ-law to PCM at pipeline input rate
             deserialized_data = await ulaw_to_pcm(
                 payload, self._twilio_sample_rate, self._sample_rate, self._resampler
             )

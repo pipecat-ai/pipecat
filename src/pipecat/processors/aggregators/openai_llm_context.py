@@ -51,7 +51,7 @@ class CustomEncoder(json.JSONEncoder):
 class OpenAILLMContext:
     def __init__(
         self,
-        messages: List[ChatCompletionMessageParam] | None = None,
+        messages: Optional[List[ChatCompletionMessageParam]] = None,
         tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN,
         tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN,
     ):

@@ -19,7 +19,7 @@ class PipelineRunner:
     def __init__(
         self,
         *,
-        name: str | None = None,
+        name: Optional[str] = None,
         handle_sigint: bool = True,
         force_gc: bool = False,
         loop: Optional[asyncio.AbstractEventLoop] = None,

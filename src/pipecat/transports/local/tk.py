@@ -7,6 +7,7 @@
 import asyncio
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 import numpy as np
 from loguru import logger
@@ -60,9 +61,6 @@ class TkInputTransport(BaseInputTransport):
         await super().cleanup()
         if self._in_stream:
             self._in_stream.stop_stream()
-            # This is not very pretty (taken from PyAudio docs).
-            while self._in_stream.is_active():
-                await asyncio.sleep(0.1)
             self._in_stream.close()
 
     def _audio_in_callback(self, in_data, frame_count, time_info, status):
@@ -112,9 +110,6 @@ class TkOutputTransport(BaseOutputTransport):
         await super().cleanup()
         if self._out_stream:
             self._out_stream.stop_stream()
-            # This is not very pretty (taken from PyAudio docs).
-            while self._out_stream.is_active():
-                await asyncio.sleep(0.1)
             self._out_stream.close()
 
     async def write_raw_audio_frames(self, frames: bytes):
@@ -145,8 +140,8 @@ class TkLocalTransport(BaseTransport):
         self._params = params
         self._pyaudio = pyaudio.PyAudio()
 
-        self._input: TkInputTransport | None = None
-        self._output: TkOutputTransport | None = None
+        self._input: Optional[TkInputTransport] = None
+        self._output: Optional[TkOutputTransport] = None
 
     #
     # BaseTransport

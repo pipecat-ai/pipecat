@@ -6,6 +6,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 from loguru import logger
 
@@ -52,9 +53,6 @@ class LocalAudioInputTransport(BaseInputTransport):
         await super().cleanup()
         if self._in_stream:
             self._in_stream.stop_stream()
-            # This is not very pretty (taken from PyAudio docs).
-            while self._in_stream.is_active():
-                await asyncio.sleep(0.1)
             self._in_stream.close()
             self._in_stream = None
 
@@ -98,9 +96,6 @@ class LocalAudioOutputTransport(BaseOutputTransport):
         await super().cleanup()
         if self._out_stream:
             self._out_stream.stop_stream()
-            # This is not very pretty (taken from PyAudio docs).
-            while self._out_stream.is_active():
-                await asyncio.sleep(0.1)
             self._out_stream.close()
 
     async def write_raw_audio_frames(self, frames: bytes):
@@ -116,8 +111,8 @@ class LocalAudioTransport(BaseTransport):
         self._params = params
         self._pyaudio = pyaudio.PyAudio()
 
-        self._input: LocalAudioInputTransport | None = None
-        self._output: LocalAudioOutputTransport | None = None
+        self._input: Optional[LocalAudioInputTransport] = None
+        self._output: Optional[LocalAudioOutputTransport] = None
 
     #
     # BaseTransport
