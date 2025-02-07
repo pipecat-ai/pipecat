@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import List, Type
+from typing import List, Optional, Type
 
 from pipecat.frames.frames import (
     Frame,
@@ -37,7 +37,7 @@ class LLMResponseAggregator(FrameProcessor):
         start_frame,
         end_frame,
         accumulator_frame: Type[TextFrame],
-        interim_accumulator_frame: Type[TextFrame] | None = None,
+        interim_accumulator_frame: Optional[Type[TextFrame]] = None,
         handle_interruptions: bool = False,
         expect_stripped_words: bool = True,  # if True, need to add spaces between words
     ):

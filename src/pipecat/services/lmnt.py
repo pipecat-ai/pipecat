@@ -5,7 +5,7 @@
 #
 
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -36,7 +36,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_lmnt_language(language: Language) -> str | None:
+def language_to_lmnt_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.DE: "de",
         Language.EN: "en",
@@ -66,7 +66,7 @@ class LmntTTSService(TTSService, WebsocketService):
         *,
         api_key: str,
         voice_id: str,
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         language: Language = Language.EN,
         **kwargs,
     ):
@@ -81,7 +81,6 @@ class LmntTTSService(TTSService, WebsocketService):
         self._api_key = api_key
         self._voice_id = voice_id
         self._settings = {
-            "sample_rate": sample_rate,
             "language": self.language_to_service_language(language),
             "format": "raw",  # Use raw format for direct PCM data
         }
@@ -90,7 +89,7 @@ class LmntTTSService(TTSService, WebsocketService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_lmnt_language(language)
 
     async def start(self, frame: StartFrame):
@@ -132,7 +131,7 @@ class LmntTTSService(TTSService, WebsocketService):
                 "X-API-Key": self._api_key,
                 "voice": self._voice_id,
                 "format": self._settings["format"],
-                "sample_rate": self._settings["sample_rate"],
+                "sample_rate": self.sample_rate,
                 "language": self._settings["language"],
             }
 
@@ -175,7 +174,7 @@ class LmntTTSService(TTSService, WebsocketService):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
                     audio=message,
-                    sample_rate=self._settings["sample_rate"],
+                    sample_rate=self.sample_rate,
                     num_channels=1,
                 )
                 await self.push_frame(frame)

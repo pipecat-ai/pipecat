@@ -16,9 +16,10 @@ class GatedOpenAILLMContextAggregator(FrameProcessor):
 
     """
 
-    def __init__(self, notifier: BaseNotifier, **kwargs):
+    def __init__(self, *, notifier: BaseNotifier, start_open: bool = False, **kwargs):
         super().__init__(**kwargs)
         self._notifier = notifier
+        self._start_open = start_open
         self._last_context_frame = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -31,7 +32,11 @@ class GatedOpenAILLMContextAggregator(FrameProcessor):
             await self._stop()
             await self.push_frame(frame)
         elif isinstance(frame, OpenAILLMContextFrame):
-            self._last_context_frame = frame
+            if self._start_open:
+                self._start_open = False
+                await self.push_frame(frame, direction)
+            else:
+                self._last_context_frame = frame
         else:
             await self.push_frame(frame, direction)
 

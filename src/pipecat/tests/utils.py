@@ -5,24 +5,19 @@
 #
 
 import asyncio
-from dataclasses import dataclass
-from typing import Awaitable, Callable, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, Sequence, Tuple
 
-from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
-    ControlFrame,
+    EndFrame,
     Frame,
     HeartbeatFrame,
     StartFrame,
 )
 from pipecat.observers.base_observer import BaseObserver
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio import TaskManager
-
-
-@dataclass
-class EndTestFrame(ControlFrame):
-    pass
 
 
 class HeartbeatsObserver(BaseObserver):
@@ -48,54 +43,58 @@ class HeartbeatsObserver(BaseObserver):
 
 
 class QueuedFrameProcessor(FrameProcessor):
-    def __init__(self, queue: asyncio.Queue, ignore_start: bool = True):
+    def __init__(
+        self, queue: asyncio.Queue, queue_direction: FrameDirection, ignore_start: bool = True
+    ):
         super().__init__()
         self._queue = queue
+        self._queue_direction = queue_direction
         self._ignore_start = ignore_start
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if self._ignore_start and isinstance(frame, StartFrame):
-            await self.push_frame(frame, direction)
-        else:
-            await self._queue.put(frame)
-            await self.push_frame(frame, direction)
+        if direction == self._queue_direction:
+            if not isinstance(frame, StartFrame) or not self._ignore_start:
+                await self._queue.put(frame)
+        await self.push_frame(frame, direction)
 
 
 async def run_test(
     processor: FrameProcessor,
+    *,
     frames_to_send: Sequence[Frame],
     expected_down_frames: Sequence[type],
     expected_up_frames: Sequence[type] = [],
+    ignore_start: bool = True,
+    start_metadata: Dict[str, Any] = {},
+    send_end_frame: bool = True,
 ) -> Tuple[Sequence[Frame], Sequence[Frame]]:
     received_up = asyncio.Queue()
     received_down = asyncio.Queue()
-    source = QueuedFrameProcessor(received_up)
-    sink = QueuedFrameProcessor(received_down)
+    source = QueuedFrameProcessor(received_up, FrameDirection.UPSTREAM, ignore_start)
+    sink = QueuedFrameProcessor(received_down, FrameDirection.DOWNSTREAM, ignore_start)
 
-    source.link(processor)
-    processor.link(sink)
+    pipeline = Pipeline([source, processor, sink])
 
-    task_manager = TaskManager()
-    task_manager.set_event_loop(asyncio.get_event_loop())
-    await source.queue_frame(StartFrame(clock=SystemClock(), task_manager=task_manager))
+    task = PipelineTask(pipeline, params=PipelineParams(start_metadata=start_metadata))
 
     for frame in frames_to_send:
-        await processor.process_frame(frame, FrameDirection.DOWNSTREAM)
+        await task.queue_frame(frame)
 
-    await processor.queue_frame(EndTestFrame())
-    await processor.queue_frame(EndTestFrame(), FrameDirection.UPSTREAM)
+    if send_end_frame:
+        await task.queue_frame(EndFrame())
+
+    runner = PipelineRunner()
+    await runner.run(task)
 
     #
     # Down frames
     #
     received_down_frames: Sequence[Frame] = []
-    running = True
-    while running:
+    while not received_down.empty():
         frame = await received_down.get()
-        running = not isinstance(frame, EndTestFrame)
-        if running:
+        if not isinstance(frame, EndFrame) or not send_end_frame:
             received_down_frames.append(frame)
 
     print("received DOWN frames =", received_down_frames)
@@ -109,12 +108,9 @@ async def run_test(
     # Up frames
     #
     received_up_frames: Sequence[Frame] = []
-    running = True
-    while running:
+    while not received_up.empty():
         frame = await received_up.get()
-        running = not isinstance(frame, EndTestFrame)
-        if running:
-            received_up_frames.append(frame)
+        received_up_frames.append(frame)
 
     print("received UP frames =", received_up_frames)
 

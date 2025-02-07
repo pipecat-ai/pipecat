@@ -43,7 +43,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_cartesia_language(language: Language) -> str | None:
+def language_to_cartesia_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.DE: "de",
         Language.EN: "en",
@@ -89,7 +89,7 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
         cartesia_version: str = "2024-06-10",
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str = "sonic",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: InputParams = InputParams(),
@@ -121,7 +121,7 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
             "output_format": {
                 "container": container,
                 "encoding": encoding,
-                "sample_rate": sample_rate,
+                "sample_rate": 0,
             },
             "language": self.language_to_service_language(params.language)
             if params.language
@@ -143,7 +143,7 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
         await super().set_model(model)
         logger.info(f"Switching TTS model to: [{model}]")
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_cartesia_language(language)
 
     def _build_msg(
@@ -174,6 +174,7 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        self._settings["output_format"]["sample_rate"] = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -262,7 +263,7 @@ class CartesiaTTSService(WordTTSService, WebsocketService):
                 self.start_word_timestamps()
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["data"]),
-                    sample_rate=self._settings["output_format"]["sample_rate"],
+                    sample_rate=self.sample_rate,
                     num_channels=1,
                 )
                 await self.push_frame(frame)
@@ -328,7 +329,7 @@ class CartesiaHttpTTSService(TTSService):
         voice_id: str,
         model: str = "sonic",
         base_url: str = "https://api.cartesia.ai",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: InputParams = InputParams(),
@@ -341,7 +342,7 @@ class CartesiaHttpTTSService(TTSService):
             "output_format": {
                 "container": container,
                 "encoding": encoding,
-                "sample_rate": sample_rate,
+                "sample_rate": 0,
             },
             "language": self.language_to_service_language(params.language)
             if params.language
@@ -357,8 +358,12 @@ class CartesiaHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_cartesia_language(language)
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        self._settings["output_format"]["sample_rate"] = self.sample_rate
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -394,9 +399,7 @@ class CartesiaHttpTTSService(TTSService):
             )
 
             frame = TTSAudioRawFrame(
-                audio=output["audio"],
-                sample_rate=self._settings["output_format"]["sample_rate"],
-                num_channels=1,
+                audio=output["audio"], sample_rate=self.sample_rate, num_channels=1
             )
             yield frame
         except Exception as e:

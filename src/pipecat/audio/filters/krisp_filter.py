@@ -20,6 +20,22 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+class KrispProcessorManager:
+    """
+    Ensures that only one KrispAudioProcessor instance exists for the entire program.
+    """
+
+    _krisp_instance = None
+
+    @classmethod
+    def get_processor(cls, sample_rate: int, sample_type: str, channels: int, model_path: str):
+        if cls._krisp_instance is None:
+            cls._krisp_instance = KrispAudioProcessor(
+                sample_rate, sample_type, channels, model_path
+            )
+        return cls._krisp_instance
+
+
 class KrispFilter(BaseAudioFilter):
     def __init__(
         self, sample_type: str = "PCM_16", channels: int = 1, model_path: str = None
@@ -48,7 +64,7 @@ class KrispFilter(BaseAudioFilter):
 
     async def start(self, sample_rate: int):
         self._sample_rate = sample_rate
-        self._krisp_processor = KrispAudioProcessor(
+        self._krisp_processor = KrispProcessorManager.get_processor(
             self._sample_rate, self._sample_type, self._channels, self._model_path
         )
 

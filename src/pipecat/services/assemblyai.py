@@ -5,7 +5,7 @@
 #
 
 import asyncio
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -38,20 +38,17 @@ class AssemblyAISTTService(STTService):
         self,
         *,
         api_key: str,
-        sample_rate: int = 16000,
+        sample_rate: Optional[int] = None,
         encoding: AudioEncoding = AudioEncoding("pcm_s16le"),
         language=Language.EN,  # Only English is supported for Realtime
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         aai.settings.api_key = api_key
-        self._transcriber: aai.RealtimeTranscriber | None = None
-        # Store reference to the main event loop for use in callback functions
-        self._loop = asyncio.get_event_loop()
+        self._transcriber: Optional[aai.RealtimeTranscriber] = None
 
         self._settings = {
-            "sample_rate": sample_rate,
             "encoding": encoding,
             "language": language,
         }
@@ -121,7 +118,7 @@ class AssemblyAISTTService(STTService):
 
             # Schedule the coroutine to run in the main event loop
             # This is necessary because this callback runs in a different thread
-            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self._loop)
+            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
 
         def on_error(error: aai.RealtimeError):
             """Callback for handling errors from AssemblyAI.
@@ -131,14 +128,16 @@ class AssemblyAISTTService(STTService):
             """
             logger.error(f"{self}: An error occurred: {error}")
             # Schedule the coroutine to run in the main event loop
-            asyncio.run_coroutine_threadsafe(self.push_frame(ErrorFrame(str(error))), self._loop)
+            asyncio.run_coroutine_threadsafe(
+                self.push_frame(ErrorFrame(str(error))), self.get_event_loop()
+            )
 
         def on_close():
             """Callback for when the connection to AssemblyAI is closed."""
             logger.info(f"{self}: Disconnected from AssemblyAI")
 
         self._transcriber = aai.RealtimeTranscriber(
-            sample_rate=self._settings["sample_rate"],
+            sample_rate=self.sample_rate,
             encoding=self._settings["encoding"],
             on_data=on_data,
             on_error=on_error,

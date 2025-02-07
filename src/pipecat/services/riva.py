@@ -49,7 +49,7 @@ class FastPitchTTSService(TTSService):
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
         voice_id: str = "English-US.Female-1",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         function_id: str = "0149dedb-2be8-4195-b9a0-e57e0e14f972",
         params: InputParams = InputParams(),
         **kwargs,
@@ -57,7 +57,6 @@ class FastPitchTTSService(TTSService):
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key
         self._voice_id = voice_id
-        self._sample_rate = sample_rate
         self._language_code = params.language
         self._quality = params.quality
 
@@ -87,7 +86,7 @@ class FastPitchTTSService(TTSService):
                     text,
                     self._voice_id,
                     self._language_code,
-                    sample_rate_hz=self._sample_rate,
+                    sample_rate_hz=self.sample_rate,
                     audio_prompt_file=None,
                     quality=self._quality,
                     custom_dictionary={},
@@ -114,7 +113,7 @@ class FastPitchTTSService(TTSService):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
                     audio=resp.audio,
-                    sample_rate=self._sample_rate,
+                    sample_rate=self.sample_rate,
                     num_channels=1,
                 )
                 yield frame
@@ -136,10 +135,11 @@ class ParakeetSTTService(STTService):
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
         function_id: str = "1598d209-5e27-4d3c-8079-4751568b1081",
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key
         self._profanity_filter = False
         self._automatic_punctuation = False
@@ -154,7 +154,6 @@ class ParakeetSTTService(STTService):
         self._stop_history_eou = -1
         self._stop_threshold_eou = -1.0
         self._custom_configuration = ""
-        self._sample_rate: int = 16000
 
         self.set_model_name("parakeet-ctc-1.1b-asr")
 
@@ -166,6 +165,14 @@ class ParakeetSTTService(STTService):
 
         self._asr_service = riva.client.ASRService(auth)
 
+        self._queue = asyncio.Queue()
+
+    def can_generate_metrics(self) -> bool:
+        return False
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+
         config = riva.client.StreamingRecognitionConfig(
             config=riva.client.RecognitionConfig(
                 encoding=riva.client.AudioEncoding.LINEAR_PCM,
@@ -175,14 +182,16 @@ class ParakeetSTTService(STTService):
                 profanity_filter=self._profanity_filter,
                 enable_automatic_punctuation=self._automatic_punctuation,
                 verbatim_transcripts=not self._no_verbatim_transcripts,
-                sample_rate_hertz=self._sample_rate,
+                sample_rate_hertz=self.sample_rate,
                 audio_channel_count=1,
             ),
             interim_results=True,
         )
+
         riva.client.add_word_boosting_to_config(
             config, self._boosted_lm_words, self._boosted_lm_score
         )
+
         riva.client.add_endpoint_parameters_to_config(
             config,
             self._start_history,
@@ -193,15 +202,9 @@ class ParakeetSTTService(STTService):
             self._stop_threshold_eou,
         )
         riva.client.add_custom_configuration_to_config(config, self._custom_configuration)
+
         self._config = config
 
-        self._queue = asyncio.Queue()
-
-    def can_generate_metrics(self) -> bool:
-        return False
-
-    async def start(self, frame: StartFrame):
-        await super().start(frame)
         self._thread_task = self.create_task(self._thread_task_handler())
         self._response_task = self.create_task(self._response_task_handler())
         self._response_queue = asyncio.Queue()

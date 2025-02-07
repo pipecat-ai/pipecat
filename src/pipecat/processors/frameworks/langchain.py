@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Union
+from typing import Optional, Union
 
 from loguru import logger
 
@@ -30,7 +30,7 @@ class LangchainProcessor(FrameProcessor):
         super().__init__()
         self._chain = chain
         self._transcript_key = transcript_key
-        self._participant_id: str | None = None
+        self._participant_id: Optional[str] = None
 
     def set_participant_id(self, participant_id: str):
         self._participant_id = participant_id

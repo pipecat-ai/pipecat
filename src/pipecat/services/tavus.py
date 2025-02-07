@@ -12,7 +12,7 @@ import base64
 import aiohttp
 from loguru import logger
 
-from pipecat.audio.utils import resample_audio
+from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -46,6 +46,8 @@ class TavusVideoService(AIService):
         self._session = session
 
         self._conversation_id: str
+
+        self._resampler = create_default_resampler()
 
     async def initialize(self) -> str:
         url = "https://tavusapi.com/v2/conversations"
@@ -89,12 +91,10 @@ class TavusVideoService(AIService):
         async with self._session.post(url, headers=headers) as r:
             r.raise_for_status()
 
-    async def _encode_audio_and_send(
-        self, audio: bytes, original_sample_rate: int, done: bool
-    ) -> None:
+    async def _encode_audio_and_send(self, audio: bytes, in_rate: int, done: bool) -> None:
         """Encodes audio to base64 and sends it to Tavus"""
         if not done:
-            audio = resample_audio(audio, original_sample_rate, 16000)
+            audio = await self._resampler.resample(audio, in_rate, 16000)
         audio_base64 = base64.b64encode(audio).decode("utf-8")
         logger.trace(f"{self}: sending {len(audio)} bytes")
         await self._send_audio_message(audio_base64, done=done)

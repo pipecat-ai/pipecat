@@ -12,6 +12,7 @@ import time
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -19,6 +20,8 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     LLMMessagesFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -26,6 +29,7 @@ from pipecat.frames.frames import (
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
+    TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -333,9 +337,9 @@ class CompletenessCheck(FrameProcessor):
 
 
 class OutputGate(FrameProcessor):
-    def __init__(self, notifier: BaseNotifier, **kwargs):
+    def __init__(self, *, notifier: BaseNotifier, start_open: bool = False, **kwargs):
         super().__init__(**kwargs)
-        self._gate_open = False
+        self._gate_open = start_open
         self._frames_buffer = []
         self._notifier = notifier
 
@@ -357,6 +361,11 @@ class OutputGate(FrameProcessor):
             if isinstance(frame, StartInterruptionFrame):
                 self._frames_buffer = []
                 self.close_gate()
+            await self.push_frame(frame, direction)
+            return
+
+        # Don't block function call frames
+        if isinstance(frame, (FunctionCallInProgressFrame, FunctionCallResultFrame)):
             await self.push_frame(frame, direction)
             return
 
@@ -388,6 +397,16 @@ class OutputGate(FrameProcessor):
                 self._frames_buffer = []
             except asyncio.CancelledError:
                 break
+
+
+async def start_fetch_weather(function_name, llm, context):
+    """Push a frame to the LLM; this is handy when the LLM response might take a while."""
+    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
+    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
+
+
+async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
+    await result_callback({"conditions": "nice", "temperature": "75"})
 
 
 async def main():
@@ -426,6 +445,34 @@ async def main():
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o",
         )
+        # Register a function_name of None to get all functions
+        # sent to the same callback with an additional function_name parameter.
+        llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
+
+        tools = [
+            ChatCompletionToolParam(
+                type="function",
+                function={
+                    "name": "get_current_weather",
+                    "description": "Get the current weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {
+                                "type": "string",
+                                "description": "The city and state, e.g. San Francisco, CA",
+                            },
+                            "format": {
+                                "type": "string",
+                                "enum": ["celsius", "fahrenheit"],
+                                "description": "The temperature unit to use. Infer this from the users location.",
+                            },
+                        },
+                        "required": ["location", "format"],
+                    },
+                },
+            )
+        ]
 
         messages = [
             {
@@ -434,7 +481,7 @@ async def main():
             },
         ]
 
-        context = OpenAILLMContext(messages)
+        context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
         # We have instructed the LLM to return 'YES' if it thinks the user
@@ -461,7 +508,9 @@ async def main():
         # sentence, this will wake up the notifier if that happens.
         user_idle = UserIdleProcessor(callback=user_idle_notifier, timeout=5.0)
 
-        bot_output_gate = OutputGate(notifier=notifier)
+        # We start with the gate open because we send an initial context frame
+        # to start the conversation.
+        bot_output_gate = OutputGate(notifier=notifier, start_open=True)
 
         async def block_user_stopped_speaking(frame):
             return not isinstance(frame, UserStoppedSpeakingFrame)
@@ -472,6 +521,8 @@ async def main():
                 or isinstance(frame, LLMMessagesFrame)
                 or isinstance(frame, StartInterruptionFrame)
                 or isinstance(frame, StopInterruptionFrame)
+                or isinstance(frame, FunctionCallInProgressFrame)
+                or isinstance(frame, FunctionCallResultFrame)
             )
 
         pipeline = Pipeline(
