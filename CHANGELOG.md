@@ -5,9 +5,27 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `RTVIObserver` doesn't handle `LLMSearchResponseFrame` frames anymore. For
+  now, to handle those frames you need to create a `GoogleRTVIObserver` instead.
+
+### Deprecated
+
+- `RTVI.observer()` is now deprecated, instantiate an `RTVIObserver` directly
+  instead.
+
+- All RTVI frame processors (e.g. `RTVISpeakingProcessor`,
+  `RTVIBotLLMProcessor`) are now deprecated, instantiate an `RTVIObserver`
+  instead.
+
 ## [0.0.56] - 2025-02-06
 
 ### Changed
+
+- Use `gemini-2.0-flash-001` as the default model for `GoogleLLMSerivce`.
 
 - Improved foundational examples 22b, 22c, and 22d to support function calling.
   With these base examples, `FunctionCallInProgressFrame` and
@@ -32,10 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   initialized to `audio_in_sample_rate`. Those values currently default to 8000
   and should be set manually from the serializer constructor if a different
   value is needed.
-
-### Changed
-
-- Use `gemini-2.0-flash-001` as the default model for `GoogleLLMSerivce`.
 
 ### Other
 
@@ -119,7 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AudioBufferProcessor.reset_audio_buffers()` has been removed, use
   `AudioBufferProcessor.start_recording()` and
-  ``AudioBufferProcessor.stop_recording()` instead.
+  `AudioBufferProcessor.stop_recording()` instead.
 
 ### Fixed
 
