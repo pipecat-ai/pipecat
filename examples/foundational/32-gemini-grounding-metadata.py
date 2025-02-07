@@ -89,6 +89,7 @@ async def main():
             api_key=os.getenv("GOOGLE_API_KEY"),
             system_instruction=system_instruction,
             tools=tools,
+            model="gemini-1.5-flash-002",
         )
 
         context = OpenAILLMContext(
