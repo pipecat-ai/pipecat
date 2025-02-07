@@ -27,6 +27,9 @@ class RTVIBotLLMSearchResponseMessage(BaseModel):
 
 
 class GoogleRTVIObserver(RTVIObserver):
+    def __init__(self, rtvi: FrameProcessor):
+        super().__init__(rtvi)
+
     async def on_push_frame(
         self,
         src: FrameProcessor,
