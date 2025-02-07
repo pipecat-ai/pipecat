@@ -115,7 +115,7 @@ class RimeTTSService(WordTTSService, WebsocketService):
             "speaker": voice_id,
             "modelId": model,
             "audioFormat": "pcm",
-            "samplingRate": sample_rate,
+            "samplingRate": 0,
             "lang": self.language_to_service_language(params.language)
             if params.language
             else "eng",
@@ -184,8 +184,7 @@ class RimeTTSService(WordTTSService, WebsocketService):
     async def _connect_websocket(self):
         """Connect to Rime websocket API with configured settings."""
         try:
-            settings = {k: str(v) for k, v in self._settings.items() if v is not None}
-            params = "&".join(f"{k}={v}" for k, v in settings.items())
+            params = "&".join(f"{k}={v}" for k, v in self._settings.items())
             url = f"{self._url}?{params}"
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self._websocket = await websockets.connect(url, extra_headers=headers)
@@ -221,12 +220,43 @@ class RimeTTSService(WordTTSService, WebsocketService):
             self._started = False
             self._context_id = None
 
-    async def _receive_messages(self):
-        """Process incoming websocket messages.
+    def _calculate_word_times(self, words: list, starts: list, ends: list) -> list:
+        """Calculate word timing pairs with proper spacing and punctuation.
 
-        Handles audio chunks and word timestamps, maintaining proper timing and
-        text alignment for the current context.
+        Args:
+            words: List of words from Rime.
+            starts: List of start times for each word.
+            ends: List of end times for each word.
+
+        Returns:
+            List of (word, timestamp) pairs with proper spacing and timing.
         """
+        word_pairs = []
+        for i, (word, start_time, end_time) in enumerate(zip(words, starts, ends)):
+            if not word.strip():
+                continue
+
+            # Adjust timing by adding cumulative time
+            adjusted_start = start_time + self._cumulative_time
+
+            # Handle spacing and punctuation
+            is_punctuation = bool(word.strip(",.!?") == "")
+            if is_punctuation:
+                # Append punctuation to previous word
+                if word_pairs:
+                    prev_word, prev_time = word_pairs[-1]
+                    word_pairs[-1] = (prev_word + word, prev_time)
+            else:
+                # Add space between words (not before punctuation)
+                needs_space = word_pairs and not words[i - 1].strip(",.!?") == ""
+                if needs_space:
+                    word = " " + word
+                word_pairs.append((word, adjusted_start))
+
+        return word_pairs
+
+    async def _receive_messages(self):
+        """Process incoming websocket messages."""
         async for message in self._get_websocket():
             msg = json.loads(message)
             if not msg or msg["contextId"] != self._context_id:
@@ -251,28 +281,8 @@ class RimeTTSService(WordTTSService, WebsocketService):
                 ends = timestamps.get("end", [])
 
                 if words and starts:
-                    word_pairs = []
-                    for i, (word, start_time, end_time) in enumerate(zip(words, starts, ends)):
-                        if not word.strip():
-                            continue
-
-                        # Adjust timing by adding cumulative time
-                        adjusted_start = start_time + self._cumulative_time
-
-                        # Handle spacing and punctuation
-                        is_punctuation = bool(word.strip(",.!?") == "")
-                        if is_punctuation:
-                            # Append punctuation to previous word
-                            if word_pairs:
-                                prev_word, prev_time = word_pairs[-1]
-                                word_pairs[-1] = (prev_word + word, prev_time)
-                        else:
-                            # Add space between words (not before punctuation)
-                            needs_space = word_pairs and not words[i - 1].strip(",.!?") == ""
-                            if needs_space:
-                                word = " " + word
-                            word_pairs.append((word, adjusted_start))
-
+                    # Calculate word timing pairs
+                    word_pairs = self._calculate_word_times(words, starts, ends)
                     if word_pairs:
                         await self.add_word_timestamps(word_pairs)
                         self._cumulative_time = ends[-1] + self._cumulative_time
