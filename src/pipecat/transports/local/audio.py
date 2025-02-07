@@ -26,10 +26,9 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
-
 class LocalTransportParams(TransportParams):
-    input_device_index: Annotated[int, Doc("Index of the input device for local audio")] = 0
-    output_device_index: Annotated[int, Doc("Index of the output device for local audio")] = 0
+    input_device_index: int = 0
+    output_device_index: int = 0
 
 class LocalAudioInputTransport(BaseInputTransport):
     _params: LocalTransportParams
