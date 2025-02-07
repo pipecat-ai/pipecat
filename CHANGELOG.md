@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `RimeHttpTTSService` now uses the `mistv2` model by default.
+
 - Improved error handling in `AzureTTSService` to properly detect and log
   synthesis cancellation errors.
 

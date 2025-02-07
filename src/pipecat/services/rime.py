@@ -361,7 +361,7 @@ class RimeHttpTTSService(TTSService):
         *,
         api_key: str,
         voice_id: str = "eva",
-        model: str = "mist",
+        model: str = "mistv2",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
