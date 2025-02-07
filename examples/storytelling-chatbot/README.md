@@ -74,6 +74,8 @@ If you'd like to run a custom domain or port:
 
 ➡️ Open the host URL in your browser `http://localhost:7860`
 
+If you've run previous versions of the demo, make sure to set `ENV=dev`, and remove the `RUN_AS_VM` line from the .env file.
+
 ---
 
 ## Improvements to make
