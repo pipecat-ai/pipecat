@@ -6,6 +6,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 from loguru import logger
 
@@ -28,35 +29,37 @@ except ModuleNotFoundError as e:
 class LocalAudioInputTransport(BaseInputTransport):
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
+        self._py_audio = py_audio
+        self._in_stream = None
+        self._sample_rate = 0
 
-        sample_rate = self._params.audio_in_sample_rate
-        num_frames = int(sample_rate / 100) * 2  # 20ms of audio
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
 
-        self._in_stream = py_audio.open(
-            format=py_audio.get_format_from_width(2),
-            channels=params.audio_in_channels,
-            rate=params.audio_in_sample_rate,
+        self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
+        num_frames = int(self._sample_rate / 100) * 2  # 20ms of audio
+
+        self._in_stream = self._py_audio.open(
+            format=self._py_audio.get_format_from_width(2),
+            channels=self._params.audio_in_channels,
+            rate=self._sample_rate,
             frames_per_buffer=num_frames,
             stream_callback=self._audio_in_callback,
             input=True,
         )
-
-    async def start(self, frame: StartFrame):
-        await super().start(frame)
         self._in_stream.start_stream()
 
     async def cleanup(self):
         await super().cleanup()
-        self._in_stream.stop_stream()
-        # This is not very pretty (taken from PyAudio docs).
-        while self._in_stream.is_active():
-            await asyncio.sleep(0.1)
-        self._in_stream.close()
+        if self._in_stream:
+            self._in_stream.stop_stream()
+            self._in_stream.close()
+            self._in_stream = None
 
     def _audio_in_callback(self, in_data, frame_count, time_info, status):
         frame = InputAudioRawFrame(
             audio=in_data,
-            sample_rate=self._params.audio_in_sample_rate,
+            sample_rate=self._sample_rate,
             num_channels=self._params.audio_in_channels,
         )
 
@@ -68,32 +71,38 @@ class LocalAudioInputTransport(BaseInputTransport):
 class LocalAudioOutputTransport(BaseOutputTransport):
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
+        self._py_audio = py_audio
+        self._out_stream = None
+        self._sample_rate = 0
 
         # We only write audio frames from a single task, so only one thread
         # should be necessary.
         self._executor = ThreadPoolExecutor(max_workers=1)
 
-        self._out_stream = py_audio.open(
-            format=py_audio.get_format_from_width(2),
-            channels=params.audio_out_channels,
-            rate=params.audio_out_sample_rate,
-            output=True,
-        )
-
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        self._sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
+
+        self._out_stream = self._py_audio.open(
+            format=self._py_audio.get_format_from_width(2),
+            channels=self._params.audio_out_channels,
+            rate=self._sample_rate,
+            output=True,
+        )
         self._out_stream.start_stream()
 
     async def cleanup(self):
         await super().cleanup()
-        self._out_stream.stop_stream()
-        # This is not very pretty (taken from PyAudio docs).
-        while self._out_stream.is_active():
-            await asyncio.sleep(0.1)
-        self._out_stream.close()
+        if self._out_stream:
+            self._out_stream.stop_stream()
+            self._out_stream.close()
 
     async def write_raw_audio_frames(self, frames: bytes):
-        await self.get_event_loop().run_in_executor(self._executor, self._out_stream.write, frames)
+        if self._out_stream:
+            await self.get_event_loop().run_in_executor(
+                self._executor, self._out_stream.write, frames
+            )
 
 
 class LocalAudioTransport(BaseTransport):
@@ -102,8 +111,8 @@ class LocalAudioTransport(BaseTransport):
         self._params = params
         self._pyaudio = pyaudio.PyAudio()
 
-        self._input: LocalAudioInputTransport | None = None
-        self._output: LocalAudioOutputTransport | None = None
+        self._input: Optional[LocalAudioInputTransport] = None
+        self._output: Optional[LocalAudioOutputTransport] = None
 
     #
     # BaseTransport

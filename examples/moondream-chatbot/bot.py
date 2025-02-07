@@ -106,8 +106,8 @@ class UserImageRequester(FrameProcessor):
                     UserImageRequestFrame(self.participant_id), FrameDirection.UPSTREAM
                 )
                 await self.push_frame(TextFrame("Describe the image in a short sentence."))
-        elif isinstance(frame, UserImageRawFrame):
-            await self.push_frame(frame)
+        else:
+            await self.push_frame(frame, direction)
 
 
 class TextFilterProcessor(FrameProcessor):

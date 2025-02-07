@@ -4,19 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import time
-
 from loguru import logger
 
 try:
     import sentry_sdk
-
-    sentry_available = sentry_sdk.is_initialized()
-    if not sentry_available:
-        logger.warning("Sentry SDK not initialized. Sentry features will be disabled.")
-except ImportError:
-    sentry_available = False
-    logger.warning("Sentry SDK not installed. Sentry features will be disabled.")
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use Sentry, you need to `pip install pipecat-ai[sentry]`.")
+    raise Exception(f"Missing module: {e}")
 
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 
@@ -24,41 +19,44 @@ from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMet
 class SentryMetrics(FrameProcessorMetrics):
     def __init__(self):
         super().__init__()
-        self._ttfb_metrics_span = None
-        self._processing_metrics_span = None
+        self._ttfb_metrics_tx = None
+        self._processing_metrics_tx = None
+        self._sentry_available = sentry_sdk.is_initialized()
+        if not self._sentry_available:
+            logger.warning("Sentry SDK not initialized. Sentry features will be disabled.")
 
     async def start_ttfb_metrics(self, report_only_initial_ttfb):
-        if self._should_report_ttfb:
-            self._start_ttfb_time = time.time()
-            if sentry_available:
-                self._ttfb_metrics_span = sentry_sdk.start_span(
-                    op="ttfb",
-                    description=f"TTFB for {self._processor_name()}",
-                    start_timestamp=self._start_ttfb_time,
-                )
-                logger.debug(
-                    f"Sentry Span ID: {self._ttfb_metrics_span.span_id} Description: {self._ttfb_metrics_span.description} started."
-                )
-            self._should_report_ttfb = not report_only_initial_ttfb
+        await super().start_ttfb_metrics(report_only_initial_ttfb)
 
-    async def stop_ttfb_metrics(self):
-        stop_time = time.time()
-        if sentry_available:
-            self._ttfb_metrics_span.finish(end_timestamp=stop_time)
-
-    async def start_processing_metrics(self):
-        self._start_processing_time = time.time()
-        if sentry_available:
-            self._processing_metrics_span = sentry_sdk.start_span(
-                op="processing",
-                description=f"Processing for {self._processor_name()}",
-                start_timestamp=self._start_processing_time,
+        if self._should_report_ttfb and self._sentry_available:
+            self._ttfb_metrics_tx = sentry_sdk.start_transaction(
+                op="ttfb",
+                name=f"TTFB for {self._processor_name()}",
             )
             logger.debug(
-                f"Sentry Span ID: {self._processing_metrics_span.span_id} Description: {self._processing_metrics_span.description} started."
+                f"Sentry transaction started (ID: {self._ttfb_metrics_tx.span_id} Name: {self._ttfb_metrics_tx.name})"
+            )
+
+    async def stop_ttfb_metrics(self):
+        await super().stop_ttfb_metrics()
+
+        if self._sentry_available and self._ttfb_metrics_tx:
+            self._ttfb_metrics_tx.finish()
+
+    async def start_processing_metrics(self):
+        await super().start_processing_metrics()
+
+        if self._sentry_available:
+            self._processing_metrics_tx = sentry_sdk.start_transaction(
+                op="processing",
+                name=f"Processing for {self._processor_name()}",
+            )
+            logger.debug(
+                f"Sentry transaction started (ID: {self._processing_metrics_tx.span_id} Name: {self._processing_metrics_tx.name})"
             )
 
     async def stop_processing_metrics(self):
-        stop_time = time.time()
-        if sentry_available:
-            self._processing_metrics_span.finish(end_timestamp=stop_time)
+        await super().stop_processing_metrics()
+
+        if self._sentry_available and self._processing_metrics_tx:
+            self._processing_metrics_tx.finish()

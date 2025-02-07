@@ -10,7 +10,7 @@ import io
 import time
 import typing
 import wave
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -44,7 +44,7 @@ except ModuleNotFoundError as e:
 class FastAPIWebsocketParams(TransportParams):
     add_wav_header: bool = False
     serializer: FrameSerializer
-    session_timeout: int | None = None
+    session_timeout: Optional[int] = None
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -69,6 +69,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        await self._params.serializer.setup(frame)
         if self._params.session_timeout:
             self._monitor_websocket_task = self.create_task(self._monitor_websocket())
         await self._callbacks.on_client_connected(self._websocket)
@@ -91,7 +92,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def _receive_messages(self):
         try:
             async for message in self._iter_data():
-                frame = self._params.serializer.deserialize(message)
+                frame = await self._params.serializer.deserialize(message)
 
                 if not frame:
                     continue
@@ -101,7 +102,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                 else:
                     await self.push_frame(frame)
         except Exception as e:
-            logger.error(f"{self} exception receiving data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
         await self._callbacks.on_client_disconnected(self._websocket)
 
@@ -118,8 +119,18 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._websocket = websocket
         self._params = params
 
-        self._send_interval = (self._audio_chunk_size / self._params.audio_out_sample_rate) / 2
+        # write_raw_audio_frames() is called quickly, as soon as we get audio
+        # (e.g. from the TTS), and since this is just a network connection we
+        # would be sending it to quickly. Instead, we want to block to emulate
+        # an audio device, this is what the send interval is. It will be
+        # computed on StartFrame.
+        self._send_interval = 0
         self._next_send_time = 0
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        await self._params.serializer.setup(frame)
+        self._send_interval = (self._audio_chunk_size / self.sample_rate) / 2
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -136,7 +147,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
         frame = OutputAudioRawFrame(
             audio=frames,
-            sample_rate=self._params.audio_out_sample_rate,
+            sample_rate=self.sample_rate,
             num_channels=self._params.audio_out_channels,
         )
 
@@ -163,11 +174,11 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
     async def _write_frame(self, frame: Frame):
         try:
-            payload = self._params.serializer.serialize(frame)
+            payload = await self._params.serializer.serialize(frame)
             if payload and self._websocket.client_state == WebSocketState.CONNECTED:
                 await self._send_data(payload)
         except Exception as e:
-            logger.error(f"{self} exception sending data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
 
     def _send_data(self, data: str | bytes):
         if self._params.serializer.type == FrameSerializerType.BINARY:
@@ -191,8 +202,8 @@ class FastAPIWebsocketTransport(BaseTransport):
         self,
         websocket: WebSocket,
         params: FastAPIWebsocketParams,
-        input_name: str | None = None,
-        output_name: str | None = None,
+        input_name: Optional[str] = None,
+        output_name: Optional[str] = None,
     ):
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params

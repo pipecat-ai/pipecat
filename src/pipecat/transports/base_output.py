@@ -13,6 +13,7 @@ from typing import AsyncGenerator, List
 from loguru import logger
 from PIL import Image
 
+from pipecat.audio.utils import create_default_resampler
 from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import (
     BotSpeakingFrame,
@@ -57,12 +58,12 @@ class BaseOutputTransport(FrameProcessor):
         # framerate.
         self._camera_images = None
 
-        # We will write 20ms audio at a time. If we receive long audio frames we
-        # will chunk them. This will help with interruption handling.
-        audio_bytes_10ms = (
-            int(self._params.audio_out_sample_rate / 100) * self._params.audio_out_channels * 2
-        )
-        self._audio_chunk_size = audio_bytes_10ms * 2
+        # Output sample rate. It will be initialized on StartFrame.
+        self._sample_rate = 0
+        self._resampler = create_default_resampler()
+
+        # Chunk size that will be written. It will be computed on StartFrame
+        self._audio_chunk_size = 0
         self._audio_buffer = bytearray()
 
         self._stopped_event = asyncio.Event()
@@ -70,10 +71,21 @@ class BaseOutputTransport(FrameProcessor):
         # Indicates if the bot is currently speaking.
         self._bot_speaking = False
 
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
     async def start(self, frame: StartFrame):
+        self._sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
+
+        # We will write 20ms audio at a time. If we receive long audio frames we
+        # will chunk them. This will help with interruption handling.
+        audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
+        self._audio_chunk_size = audio_bytes_10ms * 2
+
         # Start audio mixer.
         if self._params.audio_out_mixer:
-            await self._params.audio_out_mixer.start(self._params.audio_out_sample_rate)
+            await self._params.audio_out_mixer.start(self._sample_rate)
         self._create_camera_task()
         self._create_sink_tasks()
 
@@ -178,12 +190,18 @@ class BaseOutputTransport(FrameProcessor):
         if not self._params.audio_out_enabled:
             return
 
+        # We might need to resample if incoming audio doesn't match the
+        # transport sample rate.
+        resampled = await self._resampler.resample(
+            frame.audio, frame.sample_rate, self._sample_rate
+        )
+
         cls = type(frame)
-        self._audio_buffer.extend(frame.audio)
+        self._audio_buffer.extend(resampled)
         while len(self._audio_buffer) >= self._audio_chunk_size:
             chunk = cls(
                 bytes(self._audio_buffer[: self._audio_chunk_size]),
-                sample_rate=frame.sample_rate,
+                sample_rate=self._sample_rate,
                 num_channels=frame.num_channels,
             )
             await self._sink_queue.put(chunk)
@@ -298,7 +316,7 @@ class BaseOutputTransport(FrameProcessor):
                     # Generate an audio frame with only the mixer's part.
                     frame = OutputAudioRawFrame(
                         audio=await self._params.audio_out_mixer.mix(silence),
-                        sample_rate=self._params.audio_out_sample_rate,
+                        sample_rate=self._sample_rate,
                         num_channels=self._params.audio_out_channels,
                     )
                     yield frame

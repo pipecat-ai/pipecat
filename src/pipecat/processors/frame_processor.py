@@ -245,6 +245,9 @@ class FrameProcessor:
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        if not self._check_ready(frame):
+            return
+
         if isinstance(frame, SystemFrame):
             await self.__internal_push_frame(frame, direction)
         else:
@@ -318,6 +321,16 @@ class FrameProcessor:
             logger.exception(f"Uncaught exception in {self}: {e}")
             await self.push_error(ErrorFrame(str(e)))
             raise
+
+    def _check_ready(self, frame: Frame):
+        # If we are trying to push a frame but we still have no clock, it means
+        # we didn't process a StartFrame.
+        if not self._clock:
+            logger.error(
+                f"{self} not properly initialized, missing super().process_frame(frame, direction)?"
+            )
+            return False
+        return True
 
     def __create_input_task(self):
         if not self.__input_frame_task:

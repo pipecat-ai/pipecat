@@ -753,7 +753,7 @@ class RTVIProcessor(FrameProcessor):
         super().__init__(**kwargs)
         self._config = config
 
-        self._pipeline: FrameProcessor | None = None
+        self._pipeline: Optional[FrameProcessor] = None
 
         self._bot_ready = False
         self._client_ready = False
@@ -999,7 +999,7 @@ class RTVIProcessor(FrameProcessor):
         )
         await self.push_frame(frame)
 
-    async def _handle_action(self, request_id: str | None, data: RTVIActionRun):
+    async def _handle_action(self, request_id: Optional[str], data: RTVIActionRun):
         action_id = self._action_id(data.service, data.action)
         if action_id not in self._registered_actions:
             await self._send_error_response(request_id, f"Action {action_id} not registered")

@@ -59,7 +59,7 @@ class WebsocketClientSession:
 
         self._task_manager: Optional[TaskManager] = None
 
-        self._websocket: websockets.WebSocketClientProtocol | None = None
+        self._websocket: Optional[websockets.WebSocketClientProtocol] = None
 
     @property
     def task_manager(self) -> TaskManager:
@@ -101,7 +101,7 @@ class WebsocketClientSession:
             if self._websocket:
                 await self._websocket.send(message)
         except Exception as e:
-            logger.error(f"{self} exception sending data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
 
     async def _client_task_handler(self):
         try:
@@ -109,7 +109,7 @@ class WebsocketClientSession:
             async for message in self._websocket:
                 await self._callbacks.on_message(self._websocket, message)
         except Exception as e:
-            logger.error(f"{self} exception receiving data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
         await self._callbacks.on_disconnected(self._websocket)
 
@@ -126,6 +126,7 @@ class WebsocketClientInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        await self._params.serializer.setup(frame)
         await self._session.setup(frame)
         await self._session.connect()
 
@@ -138,7 +139,7 @@ class WebsocketClientInputTransport(BaseInputTransport):
         await self._session.disconnect()
 
     async def on_message(self, websocket, message):
-        frame = self._params.serializer.deserialize(message)
+        frame = await self._params.serializer.deserialize(message)
         if not frame:
             return
         if isinstance(frame, InputAudioRawFrame) and self._params.audio_in_enabled:
@@ -154,11 +155,18 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         self._session = session
         self._params = params
 
-        self._send_interval = (self._audio_chunk_size / self._params.audio_out_sample_rate) / 2
+        # write_raw_audio_frames() is called quickly, as soon as we get audio
+        # (e.g. from the TTS), and since this is just a network connection we
+        # would be sending it to quickly. Instead, we want to block to emulate
+        # an audio device, this is what the send interval is. It will be
+        # computed on StartFrame.
+        self._send_interval = 0
         self._next_send_time = 0
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        self._send_interval = (self._audio_chunk_size / self.sample_rate) / 2
+        await self._params.serializer.setup(frame)
         await self._session.setup(frame)
         await self._session.connect()
 
@@ -176,7 +184,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
     async def write_raw_audio_frames(self, frames: bytes):
         frame = OutputAudioRawFrame(
             audio=frames,
-            sample_rate=self._params.audio_out_sample_rate,
+            sample_rate=self.sample_rate,
             num_channels=self._params.audio_out_channels,
         )
 
@@ -200,7 +208,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         await self._write_audio_sleep()
 
     async def _write_frame(self, frame: Frame):
-        payload = self._params.serializer.serialize(frame)
+        payload = await self._params.serializer.serialize(frame)
         if payload:
             await self._session.send(payload)
 
@@ -232,8 +240,8 @@ class WebsocketClientTransport(BaseTransport):
         )
 
         self._session = WebsocketClientSession(uri, params, callbacks, self.name)
-        self._input: WebsocketClientInputTransport | None = None
-        self._output: WebsocketClientOutputTransport | None = None
+        self._input: Optional[WebsocketClientInputTransport] = None
+        self._output: Optional[WebsocketClientOutputTransport] = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.

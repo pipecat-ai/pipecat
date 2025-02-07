@@ -20,6 +20,8 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InputAudioRawFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -55,13 +57,9 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-# TRANSCRIBER_MODEL = "gemini-1.5-flash-latest"
-# CLASSIFIER_MODEL = "gemini-1.5-flash-latest"
-# CONVERSATION_MODEL = "gemini-1.5-flash-latest"
-
-TRANSCRIBER_MODEL = "gemini-2.0-flash-exp"
-CLASSIFIER_MODEL = "gemini-2.0-flash-exp"
-CONVERSATION_MODEL = "gemini-2.0-flash-exp"
+TRANSCRIBER_MODEL = "gemini-2.0-flash-001"
+CLASSIFIER_MODEL = "gemini-2.0-flash-001"
+CONVERSATION_MODEL = "gemini-2.0-flash-001"
 
 transcriber_system_instruction = """You are an audio transcriber. You are receiving audio from a user. Your job is to
 transcribe the input audio to text exactly as it was said by the user.
@@ -579,6 +577,11 @@ class OutputGate(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
+        # Don't block function call frames
+        if isinstance(frame, (FunctionCallInProgressFrame, FunctionCallResultFrame)):
+            await self.push_frame(frame, direction)
+            return
+
         # Ignore frames that are not following the direction of this gate.
         if direction != FrameDirection.DOWNSTREAM:
             await self.push_frame(frame, direction)
@@ -639,7 +642,6 @@ async def main():
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True,
-                audio_in_sample_rate=16000,
             ),
         )
 
@@ -677,12 +679,6 @@ async def main():
         context = OpenAILLMContext()
         context_aggregator = conversation_llm.create_context_aggregator(context)
 
-        # We have instructed the LLM to return 'True' if it thinks the user
-        # completed a sentence. So, if it's 'True' we will return true in this
-        # predicate which will wake up the notifier.
-        async def wake_check_filter(frame):
-            return frame.text == "True"
-
         # This is a notifier that we use to synchronize the two LLMs.
         notifier = EventNotifier()
 
@@ -698,14 +694,6 @@ async def main():
 
         async def block_user_stopped_speaking(frame):
             return not isinstance(frame, UserStoppedSpeakingFrame)
-
-        async def pass_only_llm_trigger_frames(frame):
-            return (
-                isinstance(frame, OpenAILLMContextFrame)
-                or isinstance(frame, LLMMessagesFrame)
-                or isinstance(frame, StartInterruptionFrame)
-                or isinstance(frame, StopInterruptionFrame)
-            )
 
         conversation_audio_context_assembler = ConversationAudioContextAssembler(context=context)
 

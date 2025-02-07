@@ -5,7 +5,7 @@
 #
 
 import asyncio
-from typing import AsyncIterable, Iterable, List
+from typing import Any, AsyncIterable, Dict, Iterable, List
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
@@ -38,23 +38,47 @@ HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 5
 
 
 class PipelineParams(BaseModel):
+    """Configuration parameters for pipeline execution.
+
+    Attributes:
+        allow_interruptions: Whether to allow pipeline interruptions.
+        audio_in_sample_rate: Input audio sample rate in Hz.
+        audio_out_sample_rate: Output audio sample rate in Hz.
+        enable_heartbeats: Whether to enable heartbeat monitoring.
+        enable_metrics: Whether to enable metrics collection.
+        enable_usage_metrics: Whether to enable usage metrics.
+        heartbeats_period_secs: Period between heartbeats in seconds.
+        observers: List of observers for monitoring pipeline execution.
+        report_only_initial_ttfb: Whether to report only initial time to first byte.
+        send_initial_empty_metrics: Whether to send initial empty metrics.
+        start_metadata: Additional metadata for pipeline start.
+    """
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     allow_interruptions: bool = False
+    audio_in_sample_rate: int = 16000
+    audio_out_sample_rate: int = 24000
     enable_heartbeats: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
-    send_initial_empty_metrics: bool = True
-    report_only_initial_ttfb: bool = False
-    observers: List[BaseObserver] = []
     heartbeats_period_secs: float = HEARTBEAT_SECONDS
+    observers: List[BaseObserver] = []
+    report_only_initial_ttfb: bool = False
+    send_initial_empty_metrics: bool = True
+    start_metadata: Dict[str, Any] = {}
 
 
 class PipelineTaskSource(FrameProcessor):
-    """This is the source processor that is linked at the beginning of the
+    """Source processor for pipeline tasks that handles frame routing.
+
+    This is the source processor that is linked at the beginning of the
     pipeline given to the pipeline task. It allows us to easily push frames
     downstream to the pipeline and also receive upstream frames coming from the
     pipeline.
+
+    Args:
+        up_queue: Queue for upstream frame processing.
 
     """
 
@@ -73,10 +97,14 @@ class PipelineTaskSource(FrameProcessor):
 
 
 class PipelineTaskSink(FrameProcessor):
-    """This is the sink processor that is linked at the end of the pipeline
+    """Sink processor for pipeline tasks that handles final frame processing.
+
+    This is the sink processor that is linked at the end of the pipeline
     given to the pipeline task. It allows us to receive downstream frames and
     act on them, for example, waiting to receive an EndFrame.
 
+    Args:
+        down_queue: Queue for downstream frame processing.
     """
 
     def __init__(self, down_queue: asyncio.Queue, **kwargs):
@@ -89,6 +117,14 @@ class PipelineTaskSink(FrameProcessor):
 
 
 class PipelineTask(BaseTask):
+    """Manages the execution of a pipeline, handling frame processing and task lifecycle.
+
+    Args:
+        pipeline: The pipeline to execute.
+        params: Configuration parameters for the pipeline.
+        clock: Clock implementation for timing operations.
+    """
+
     def __init__(
         self,
         pipeline: BasePipeline,
@@ -136,6 +172,11 @@ class PipelineTask(BaseTask):
         """Returns the name of this task."""
         return self._name
 
+    @property
+    def params(self) -> PipelineParams:
+        """Returns the pipeline parameters of this task."""
+        return self._params
+
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         self._task_manager.set_event_loop(loop)
 
@@ -155,9 +196,7 @@ class PipelineTask(BaseTask):
         await self.queue_frame(EndFrame())
 
     async def cancel(self):
-        """
-        Stops the running pipeline immediately.
-        """
+        """Stops the running pipeline immediately."""
         logger.debug(f"Canceling pipeline task {self}")
         # Make sure everything is cleaned up downstream. This is sent
         # out-of-band from the main streaming task which is what we want since
@@ -167,9 +206,7 @@ class PipelineTask(BaseTask):
         await self._task_manager.cancel_task(self._process_push_task)
 
     async def run(self):
-        """
-        Starts running the given pipeline.
-        """
+        """Starts and manages the pipeline execution until completion or cancellation."""
         if self.has_finished():
             return
         try:
@@ -187,14 +224,18 @@ class PipelineTask(BaseTask):
         self._finished = True
 
     async def queue_frame(self, frame: Frame):
-        """
-        Queue a frame to be pushed down the pipeline.
+        """Queue a single frame to be pushed down the pipeline.
+
+        Args:
+            frame: The frame to be processed.
         """
         await self._push_queue.put(frame)
 
     async def queue_frames(self, frames: Iterable[Frame] | AsyncIterable[Frame]):
-        """
-        Queues multiple frames to be pushed down the pipeline.
+        """Queues multiple frames to be pushed down the pipeline.
+
+        Args:
+            frames: An iterable or async iterable of frames to be processed.
         """
         if isinstance(frames, AsyncIterable):
             async for frame in frames:
@@ -271,11 +312,14 @@ class PipelineTask(BaseTask):
             clock=self._clock,
             task_manager=self._task_manager,
             allow_interruptions=self._params.allow_interruptions,
+            audio_in_sample_rate=self._params.audio_in_sample_rate,
+            audio_out_sample_rate=self._params.audio_out_sample_rate,
             enable_metrics=self._params.enable_metrics,
             enable_usage_metrics=self._params.enable_usage_metrics,
-            report_only_initial_ttfb=self._params.report_only_initial_ttfb,
             observer=self._observer,
+            report_only_initial_ttfb=self._params.report_only_initial_ttfb,
         )
+        start_frame.metadata = self._params.start_metadata
         await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
 
         if self._params.enable_metrics and self._params.send_initial_empty_metrics:
@@ -337,9 +381,7 @@ class PipelineTask(BaseTask):
             self._down_queue.task_done()
 
     async def _heartbeat_push_handler(self):
-        """
-        This tasks pushes a heartbeat frame every heartbeat period.
-        """
+        """This tasks pushes a heartbeat frame every heartbeat period."""
         while True:
             # Don't use `queue_frame()` because if an EndFrame is queued the
             # task will just stop waiting for the pipeline to finish not

@@ -55,7 +55,7 @@ ELEVENLABS_MULTILINGUAL_MODELS = {
 }
 
 
-def language_to_elevenlabs_language(language: Language) -> str | None:
+def language_to_elevenlabs_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.AR: "ar",
         Language.BG: "bg",
@@ -104,17 +104,20 @@ def language_to_elevenlabs_language(language: Language) -> str | None:
     return result
 
 
-def sample_rate_from_output_format(output_format: str) -> int:
-    match output_format:
-        case "pcm_16000":
-            return 16000
-        case "pcm_22050":
-            return 22050
-        case "pcm_24000":
-            return 24000
-        case "pcm_44100":
-            return 44100
-    return 16000
+def output_format_from_sample_rate(sample_rate: int) -> str:
+    match sample_rate:
+        case 16000:
+            return "pcm_16000"
+        case 22050:
+            return "pcm_22050"
+        case 24000:
+            return "pcm_24000"
+        case 44100:
+            return "pcm_44100"
+    logger.warning(
+        f"ElevenLabsTTSService: No output format available for {sample_rate} sample rate"
+    )
+    return "pcm_16000"
 
 
 def calculate_word_times(
@@ -165,7 +168,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         voice_id: str,
         model: str = "eleven_flash_v2_5",
         url: str = "wss://api.elevenlabs.io",
-        output_format: ElevenLabsOutputFormat = "pcm_24000",
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -189,7 +192,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             push_text_frames=False,
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
-            sample_rate=sample_rate_from_output_format(output_format),
+            sample_rate=sample_rate,
             **kwargs,
         )
         WebsocketService.__init__(self)
@@ -197,11 +200,9 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         self._api_key = api_key
         self._url = url
         self._settings = {
-            "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
             else None,
-            "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
             "similarity_boost": params.similarity_boost,
@@ -211,6 +212,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
+        self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
 
         # Indicates if we have sent TTSStartedFrame. It will reset to False when
@@ -221,7 +223,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_elevenlabs_language(language)
 
     def _set_voice_settings(self):
@@ -254,7 +256,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         await self._disconnect()
         await self._connect()
 
-    async def _update_settings(self, settings: Dict[str, Any]):
+    async def _update_settings(self, settings: Mapping[str, Any]):
         prev_voice = self._voice_id
         await super()._update_settings(settings)
         if not prev_voice == self._voice_id:
@@ -264,6 +266,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        self._output_format = output_format_from_sample_rate(self.sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -322,7 +325,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
 
             voice_id = self._voice_id
             model = self.model_name
-            output_format = self._settings["output_format"]
+            output_format = self._output_format
             url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}&auto_mode={self._settings['auto_mode']}"
 
             if self._settings["optimize_streaming_latency"]:
@@ -375,7 +378,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
                 self.start_word_timestamps()
 
                 audio = base64.b64decode(msg["audio"])
-                frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
+                frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
                 await self.push_frame(frame)
             if msg.get("alignment"):
                 word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
@@ -428,7 +431,7 @@ class ElevenLabsHttpTTSService(TTSService):
         aiohttp_session: aiohttp ClientSession
         model: Model ID (default: "eleven_flash_v2_5" for low latency)
         base_url: API base URL
-        output_format: Audio output format (PCM)
+        sample_rate: Output sample rate
         params: Additional parameters for voice configuration
     """
 
@@ -448,24 +451,21 @@ class ElevenLabsHttpTTSService(TTSService):
         aiohttp_session: aiohttp.ClientSession,
         model: str = "eleven_flash_v2_5",
         base_url: str = "https://api.elevenlabs.io",
-        output_format: ElevenLabsOutputFormat = "pcm_24000",
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(sample_rate=sample_rate_from_output_format(output_format), **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._base_url = base_url
-        self._output_format = output_format
         self._params = params
         self._session = aiohttp_session
 
         self._settings = {
-            "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
             else None,
-            "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
             "similarity_boost": params.similarity_boost,
@@ -474,6 +474,7 @@ class ElevenLabsHttpTTSService(TTSService):
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
+        self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
 
     def can_generate_metrics(self) -> bool:
@@ -507,6 +508,10 @@ class ElevenLabsHttpTTSService(TTSService):
                 )
 
         return voice_settings or None
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        self._output_format = output_format_from_sample_rate(self.sample_rate)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using ElevenLabs streaming API.
@@ -570,7 +575,7 @@ class ElevenLabsHttpTTSService(TTSService):
                 async for chunk in response.content:
                     if chunk:
                         await self.stop_ttfb_metrics()
-                        yield TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                        yield TTSAudioRawFrame(chunk, self.sample_rate, 1)
 
                 yield TTSStoppedFrame()
 

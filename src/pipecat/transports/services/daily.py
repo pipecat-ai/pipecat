@@ -62,22 +62,20 @@ VAD_RESET_PERIOD_MS = 2000
 
 @dataclass
 class DailyTransportMessageFrame(TransportMessageFrame):
-    participant_id: str | None = None
+    participant_id: Optional[str] = None
 
 
 @dataclass
 class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
-    participant_id: str | None = None
+    participant_id: Optional[str] = None
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
-    def __init__(self, *, sample_rate=16000, num_channels=1, params: VADParams = VADParams()):
-        super().__init__(sample_rate=sample_rate, num_channels=num_channels, params=params)
+    def __init__(self, *, sample_rate: Optional[int] = None, params: VADParams = VADParams()):
+        super().__init__(sample_rate=sample_rate, params=params)
 
         self._webrtc_vad = Daily.create_native_vad(
-            reset_period_ms=VAD_RESET_PERIOD_MS,
-            sample_rate=sample_rate,
-            channels=num_channels,
+            reset_period_ms=VAD_RESET_PERIOD_MS, sample_rate=self.sample_rate, channels=1
         )
         logger.debug("Loaded native WebRTC VAD")
 
@@ -177,7 +175,7 @@ class DailyTransportClient(EventHandler):
     def __init__(
         self,
         room_url: str,
-        token: str | None,
+        token: Optional[str],
         bot_name: str,
         params: DailyParams,
         callbacks: DailyCallbacks,
@@ -190,7 +188,7 @@ class DailyTransportClient(EventHandler):
             Daily.init()
 
         self._room_url: str = room_url
-        self._token: str | None = token
+        self._token: Optional[str] = token
         self._bot_name: str = bot_name
         self._params: DailyParams = params
         self._callbacks = callbacks
@@ -224,33 +222,13 @@ class DailyTransportClient(EventHandler):
         self._callback_queue = asyncio.Queue()
         self._callback_task = None
 
-        self._camera: VirtualCameraDevice | None = None
-        if self._params.camera_out_enabled:
-            self._camera = Daily.create_camera_device(
-                self._camera_name(),
-                width=self._params.camera_out_width,
-                height=self._params.camera_out_height,
-                color_format=self._params.camera_out_color_format,
-            )
+        # Input and ouput sample rates. They will be initialize on setup().
+        self._in_sample_rate = 0
+        self._out_sample_rate = 0
 
-        self._mic: VirtualMicrophoneDevice | None = None
-        if self._params.audio_out_enabled:
-            self._mic = Daily.create_microphone_device(
-                self._mic_name(),
-                sample_rate=self._params.audio_out_sample_rate,
-                channels=self._params.audio_out_channels,
-                non_blocking=True,
-            )
-
-        self._speaker: VirtualSpeakerDevice | None = None
-        if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._speaker = Daily.create_speaker_device(
-                self._speaker_name(),
-                sample_rate=self._params.audio_in_sample_rate,
-                channels=self._params.audio_in_channels,
-                non_blocking=True,
-            )
-            Daily.select_speaker_device(self._speaker_name())
+        self._camera: Optional[VirtualCameraDevice] = None
+        self._mic: Optional[VirtualMicrophoneDevice] = None
+        self._speaker: Optional[VirtualSpeakerDevice] = None
 
     def _camera_name(self):
         return f"camera-{self}"
@@ -279,11 +257,11 @@ class DailyTransportClient(EventHandler):
         )
         await future
 
-    async def read_next_audio_frame(self) -> InputAudioRawFrame | None:
+    async def read_next_audio_frame(self) -> Optional[InputAudioRawFrame]:
         if not self._speaker:
             return None
 
-        sample_rate = self._params.audio_in_sample_rate
+        sample_rate = self._in_sample_rate
         num_channels = self._params.audio_in_channels
         num_frames = int(sample_rate / 100) * 2  # 20ms of audio
 
@@ -317,6 +295,34 @@ class DailyTransportClient(EventHandler):
         self._camera.write_frame(frame.image)
 
     async def setup(self, frame: StartFrame):
+        self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
+        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
+
+        if self._params.camera_out_enabled and not self._camera:
+            self._camera = Daily.create_camera_device(
+                self._camera_name(),
+                width=self._params.camera_out_width,
+                height=self._params.camera_out_height,
+                color_format=self._params.camera_out_color_format,
+            )
+
+        if self._params.audio_out_enabled and not self._mic:
+            self._mic = Daily.create_microphone_device(
+                self._mic_name(),
+                sample_rate=self._out_sample_rate,
+                channels=self._params.audio_out_channels,
+                non_blocking=True,
+            )
+
+        if (self._params.audio_in_enabled or self._params.vad_enabled) and not self._speaker:
+            self._speaker = Daily.create_speaker_device(
+                self._speaker_name(),
+                sample_rate=self._in_sample_rate,
+                channels=self._params.audio_in_channels,
+                non_blocking=True,
+            )
+            Daily.select_speaker_device(self._speaker_name())
+
         if not self._task_manager:
             self._task_manager = frame.task_manager
             self._callback_task = self._task_manager.create_task(
@@ -545,7 +551,7 @@ class DailyTransportClient(EventHandler):
     async def capture_participant_audio(self, participant_id: str):
         await self.update_subscriptions({participant_id: {"media": {"microphone": "subscribed"}}})
 
-    async def send_prebuilt_chat_message(self, message: str, user_name: str | None = None):
+    async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
         if not self._joined:
             return
 
@@ -718,6 +724,7 @@ class DailyInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
 
         self._client = client
+        self._params = params
 
         self._video_renderers = {}
 
@@ -725,12 +732,11 @@ class DailyInputTransport(BaseInputTransport):
         # internally to be processed.
         self._audio_in_task = None
 
-        self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
-        if params.vad_enabled and not params.vad_analyzer:
-            self._vad_analyzer = WebRTCVADAnalyzer(
-                sample_rate=self._params.audio_in_sample_rate,
-                num_channels=self._params.audio_in_channels,
-            )
+        self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
+
+    @property
+    def vad_analyzer(self) -> Optional[VADAnalyzer]:
+        return self._vad_analyzer
 
     async def start(self, frame: StartFrame):
         # Parent start.
@@ -739,6 +745,9 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.setup(frame)
         # Join the room.
         await self._client.join()
+        # Inialize WebRTC VAD if needed.
+        if self._params.vad_enabled and not self._params.vad_analyzer:
+            self._vad_analyzer = WebRTCVADAnalyzer(sample_rate=self.sample_rate)
         # Create audio task. It reads audio frames from Daily and push them
         # internally for VAD processing.
         if self._params.audio_in_enabled or self._params.vad_enabled:
@@ -767,9 +776,6 @@ class DailyInputTransport(BaseInputTransport):
     async def cleanup(self):
         await super().cleanup()
         await self._client.cleanup()
-
-    def vad_analyzer(self) -> VADAnalyzer | None:
-        return self._vad_analyzer
 
     #
     # FrameProcessor
@@ -894,11 +900,11 @@ class DailyTransport(BaseTransport):
     def __init__(
         self,
         room_url: str,
-        token: str | None,
+        token: Optional[str],
         bot_name: str,
         params: DailyParams = DailyParams(),
-        input_name: str | None = None,
-        output_name: str | None = None,
+        input_name: Optional[str] = None,
+        output_name: Optional[str] = None,
     ):
         super().__init__(input_name=input_name, output_name=output_name)
 
@@ -929,8 +935,8 @@ class DailyTransport(BaseTransport):
         self._params = params
 
         self._client = DailyTransportClient(room_url, token, bot_name, params, callbacks, self.name)
-        self._input: DailyInputTransport | None = None
-        self._output: DailyOutputTransport | None = None
+        self._input: Optional[DailyInputTransport] = None
+        self._output: Optional[DailyOutputTransport] = None
 
         self._other_participant_has_joined = False
 
@@ -1019,7 +1025,7 @@ class DailyTransport(BaseTransport):
     async def update_subscription(self, participant_id):
         await self._client.capture_participant_audio(participant_id)
 
-    async def send_prebuilt_chat_message(self, message: str, user_name: str | None = None):
+    async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
         """Sends a chat message to Daily's Prebuilt main room.
 
         Args:

@@ -82,7 +82,6 @@ async def main():
             # English
             #
             voice_id="cgSgspJ2msm6clMCkdW9",
-            aiohttp_session=session,
             #
             # Spanish
             #
@@ -109,8 +108,9 @@ async def main():
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
-        # Save audio every 10 seconds.
-        audiobuffer = AudioBufferProcessor(buffer_size=480000)
+        # NOTE: Watch out! This will save all the conversation in memory. You
+        # can pass `buffer_size` to get periodic callbacks.
+        audiobuffer = AudioBufferProcessor()
 
         pipeline = Pipeline(
             [
@@ -132,6 +132,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
+            await audiobuffer.start_recording()
             await transport.capture_participant_transcription(participant["id"])
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 

@@ -140,7 +140,7 @@ class LLMService(AIService):
         self._start_callbacks = {}
 
     # TODO-CB: callback function type
-    def register_function(self, function_name: str | None, callback, start_callback=None):
+    def register_function(self, function_name: Optional[str], callback, start_callback=None):
         # Registering a function with the function_name set to None will run that callback
         # for all functions
         self._callbacks[function_name] = callback
@@ -148,7 +148,7 @@ class LLMService(AIService):
         if start_callback:
             self._start_callbacks[function_name] = start_callback
 
-    def unregister_function(self, function_name: str | None):
+    def unregister_function(self, function_name: Optional[str]):
         del self._callbacks[function_name]
         if self._start_callbacks[function_name]:
             del self._start_callbacks[function_name]
@@ -190,7 +190,7 @@ class LLMService(AIService):
         elif None in self._start_callbacks.keys():
             return await self._start_callbacks[None](function_name, self, context)
 
-    async def request_image_frame(self, user_id: str, *, text_content: str | None = None):
+    async def request_image_frame(self, user_id: str, *, text_content: Optional[str] = None):
         await self.push_frame(
             UserImageRequestFrame(user_id=user_id, context=text_content),
             FrameDirection.UPSTREAM,
@@ -214,7 +214,7 @@ class TTSService(AIService):
         # if push_silence_after_stop is True, send this amount of audio silence
         silence_time_s: float = 2.0,
         # TTS output sample rate
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         text_filter: Optional[BaseTextFilter] = None,
         **kwargs,
     ):
@@ -225,7 +225,8 @@ class TTSService(AIService):
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
         self._push_silence_after_stop: bool = push_silence_after_stop
         self._silence_time_s: float = silence_time_s
-        self._sample_rate: int = sample_rate
+        self._init_sample_rate = sample_rate
+        self._sample_rate = 0
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
         self._text_filter: Optional[BaseTextFilter] = text_filter
@@ -249,16 +250,20 @@ class TTSService(AIService):
     async def flush_audio(self):
         pass
 
-    def language_to_service_language(self, language: Language) -> str | None:
-        return Language(language)
-
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         pass
 
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        return Language(language)
+
+    async def update_setting(self, key: str, value: Any):
+        pass
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
         if self._push_stop_frames:
             self._stop_frame_task = self.create_task(self._stop_frame_handler())
 
@@ -348,7 +353,7 @@ class TTSService(AIService):
         await self.push_frame(frame, direction)
 
     async def _process_text_frame(self, frame: TextFrame):
-        text: str | None = None
+        text: Optional[str] = None
         if not self._aggregate_sentences:
             text = frame.text
         else:
@@ -471,9 +476,17 @@ class WordTTSService(TTSService):
 class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
-    def __init__(self, audio_passthrough=False, **kwargs):
+    def __init__(
+        self,
+        audio_passthrough=False,
+        # STT input sample rate
+        sample_rate: Optional[int] = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._audio_passthrough = audio_passthrough
+        self._init_sample_rate = sample_rate
+        self._sample_rate = 0
         self._settings: Dict[str, Any] = {}
         self._muted: bool = False
 
@@ -481,6 +494,10 @@ class STTService(AIService):
     def is_muted(self) -> bool:
         """Returns whether the STT service is currently muted."""
         return self._muted
+
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
 
     @abstractmethod
     async def set_model(self, model: str):
@@ -494,6 +511,10 @@ class STTService(AIService):
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Returns transcript as a string"""
         pass
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        self._sample_rate = self._init_sample_rate or frame.audio_in_sample_rate
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         logger.info(f"Updating STT settings: {self._settings}")
@@ -544,17 +565,15 @@ class SegmentedSTTService(STTService):
         min_volume: float = 0.6,
         max_silence_secs: float = 0.3,
         max_buffer_secs: float = 1.5,
-        sample_rate: int = 24000,
-        num_channels: int = 1,
+        sample_rate: Optional[int] = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
         self._min_volume = min_volume
         self._max_silence_secs = max_silence_secs
         self._max_buffer_secs = max_buffer_secs
-        self._sample_rate = sample_rate
-        self._num_channels = num_channels
-        (self._content, self._wave) = self._new_wave()
+        self._content = None
+        self._wave = None
         self._silence_num_frames = 0
         # Volume exponential smoothing
         self._smoothing_factor = 0.2
@@ -573,8 +592,8 @@ class SegmentedSTTService(STTService):
 
         # If buffer is not empty and we have enough data or there's been a long
         # silence, transcribe the audio gathered so far.
-        silence_secs = self._silence_num_frames / self._sample_rate
-        buffer_secs = self._wave.getnframes() / self._sample_rate
+        silence_secs = self._silence_num_frames / self.sample_rate
+        buffer_secs = self._wave.getnframes() / self.sample_rate
         if self._content.tell() > 0 and (
             buffer_secs > self._max_buffer_secs or silence_secs > self._max_silence_secs
         ):
@@ -584,18 +603,24 @@ class SegmentedSTTService(STTService):
             await self.process_generator(self.run_stt(self._content.read()))
             (self._content, self._wave) = self._new_wave()
 
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        (self._content, self._wave) = self._new_wave()
+
     async def stop(self, frame: EndFrame):
+        await super().stop(frame)
         self._wave.close()
 
     async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
         self._wave.close()
 
     def _new_wave(self):
         content = io.BytesIO()
         ww = wave.open(content, "wb")
         ww.setsampwidth(2)
-        ww.setnchannels(self._num_channels)
-        ww.setframerate(self._sample_rate)
+        ww.setnchannels(1)
+        ww.setframerate(self.sample_rate)
         return (content, ww)
 
     def _get_smoothed_volume(self, frame: AudioRawFrame) -> float:
