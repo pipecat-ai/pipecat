@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated foundation example `14f-function-calling-groq.py` to use
   `GroqSTTService` for transcription.
 
+- Updated `GroqLLMService` to use `llama-3.3-70b-versatile` as the default
+  model.
+
 - `RTVIObserver` doesn't handle `LLMSearchResponseFrame` frames anymore. For
   now, to handle those frames you need to create a `GoogleRTVIObserver` instead.
 

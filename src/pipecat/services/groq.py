@@ -22,7 +22,7 @@ class GroqLLMService(OpenAILLMService):
     Args:
         api_key (str): The API key for accessing Groq's API
         base_url (str, optional): The base URL for Groq API. Defaults to "https://api.groq.com/openai/v1"
-        model (str, optional): The model identifier to use. Defaults to "llama-3.1-70b-versatile"
+        model (str, optional): The model identifier to use. Defaults to "llama-3.3-70b-versatile"
         **kwargs: Additional keyword arguments passed to OpenAILLMService
     """
 
@@ -31,7 +31,7 @@ class GroqLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.groq.com/openai/v1",
-        model: str = "llama-3.1-70b-versatile",
+        model: str = "llama-3.3-70b-versatile",
         **kwargs,
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
