@@ -34,6 +34,7 @@ async def terminate_call(
     function_name, tool_call_id, args, llm: LLMService, context, result_callback
 ):
     """Function the bot can call to terminate the call upon completion of a voicemail message."""
+    logger.debug("Terminating call")
     await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
     await result_callback("Goodbye")
 
@@ -72,8 +73,8 @@ class SummaryFinished(FrameProcessor):
 async def main(
     room_url: str,
     token: str,
-    callId: str,
-    callDomain: str,
+    callId: str | None,
+    callDomain: str | None,
     detect_voicemail: bool,
     dialout_number: str | None,
     operator_number: str | None,
@@ -81,12 +82,14 @@ async def main(
     # dialin_settings are only needed if Daily's SIP URI is used
     # If you are handling this via Twilio, Telnyx, set this to None
     # and handle call-forwarding when on_dialin_ready fires.
+    dialin_settings = None
+    if callId and callDomain:
+        dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
 
     dial_operator_state = DialOperatorState()
 
     operator_session_id = None
 
-    dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
     transport = DailyTransport(
         room_url,
         token,
@@ -105,19 +108,20 @@ async def main(
     )
 
     async def dial_operator(
-        function_name,
-        tool_call_id,
-        args,
+        function_name: str,
+        tool_call_id: str,
+        args: dict,
         llm: LLMService,
-        transport: DailyTransport,
-        context,
-        result_callback,
-        operator_number,
+        context: dict,
+        result_callback: callable,
     ):
         """Function to dial out to an operator and add them to the call."""
-        dial_operator_state.set_operator_dialed()
-        await transport.start_dialout({"phoneNumber": operator_number})
-        await result_callback("I have dialed the operator")
+        if operator_number:
+            dial_operator_state.set_operator_dialed()
+            await transport.start_dialout({"phoneNumber": operator_number})
+            await result_callback("I have dialed the operator")
+        else:
+            await result_callback("No operator number configured")
 
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
@@ -126,7 +130,7 @@ async def main(
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
     llm.register_function("terminate_call", terminate_call)
-    llm.register_function("dial_operator", dial_operator(operator_number=operator_number))
+    llm.register_function("dial_operator", dial_operator)
     tools = [
         ChatCompletionToolParam(
             type="function",
@@ -190,11 +194,11 @@ async def main(
 
     summary_finished = SummaryFinished()
 
-    async def llm_on_filter() -> bool:
+    async def llm_on_filter(self) -> bool:
         should_speak = (
             not dial_operator_state.operator_connected or not summary_finished.summary_finished
         )
-        logger.debug(f"LLM filter check - should bot speak? {should_speak}")
+        # logger.debug(f"LLM filter check - should bot speak? {should_speak}")
         return should_speak
 
     pipeline = Pipeline(
@@ -225,10 +229,10 @@ async def main(
     # Register operator-related handlers regardless of initial dialout state
     # Register operator-related handlers
     @transport.event_handler("on_dialout_answered")
-    async def on_dialout_answered(transport, data):
+    async def on_dialout_connected(transport, data):
         nonlocal operator_session_id
         if dial_operator_state.dialed_operator and not dial_operator_state.operator_connected:
-            logger.debug(f"Operator answered: {data}")
+            logger.debug(f"Operator connected: {data}")
             operator_session_id = data["sessionId"]
 
             # Add the summary request to context
@@ -294,11 +298,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipecat Simple ChatBot")
     parser.add_argument("-u", type=str, help="Room URL")
     parser.add_argument("-t", type=str, help="Token")
-    parser.add_argument("-i", type=str, help="Call ID")
-    parser.add_argument("-d", type=str, help="Call Domain")
+    parser.add_argument("-i", type=str, help="Call ID", default=None)
+    parser.add_argument("-d", type=str, help="Call Domain", default=None)
     parser.add_argument("-v", action="store_true", help="Detect voicemail")
     parser.add_argument("-o", type=str, help="Dialout number", default=None)
     parser.add_argument("-op", type=str, help="Operator number", default=None)
     config = parser.parse_args()
+    print("++++ Config", config)
 
     asyncio.run(main(config.u, config.t, config.i, config.d, config.v, config.o, config.op))
