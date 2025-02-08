@@ -83,6 +83,6 @@ The project relies on:
 
 ---
 
-## Example improvemnts:
+## Example improvements:
 
 I plan to improve this example with local LLM calls and audio output.
