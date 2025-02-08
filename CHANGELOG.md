@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `OpenAISTTService` which brings OpenAI's hosted Whisper to Pipecat.
+
 ### Changed
+
+- Updated foundational example `07g-interruptible-openai.py` to use
+  `OpenAISTTService`.
 
 - `RTVIObserver` doesn't handle `LLMSearchResponseFrame` frames anymore. For
   now, to handle those frames you need to create a `GoogleRTVIObserver` instead.
