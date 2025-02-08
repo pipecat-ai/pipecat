@@ -30,7 +30,6 @@ from pipecat.frames.frames import (
     OpenAILLMContextAssistantTimestampFrame,
     StartFrame,
     StartInterruptionFrame,
-    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -52,9 +51,9 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import (
     ImageGenService,
     LLMService,
-    SegmentedSTTService,
     TTSService,
 )
+from pipecat.services.whisper_base import BaseWhisperSTTService, Transcription
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -65,7 +64,6 @@ try:
         BadRequestError,
         DefaultAsyncHttpxClient,
     )
-    from openai.types.audio import Transcription
     from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -398,16 +396,17 @@ class OpenAIImageGenService(ImageGenService):
             yield frame
 
 
-class OpenAISTTService(SegmentedSTTService):
-    """OpenAI Speech-to-Text (STT) service.
+class OpenAISTTService(BaseWhisperSTTService):
+    """OpenAI Whisper speech-to-text service.
 
-    This service uses OpenAI's Whisper API to convert audio to text.
+    Uses OpenAI's Whisper API to convert audio to text. Requires an OpenAI API key
+    set via the api_key parameter or OPENAI_API_KEY environment variable.
 
     Args:
         model: Whisper model to use. Defaults to "whisper-1".
         api_key: OpenAI API key. Defaults to None.
         base_url: API base URL. Defaults to None.
-        **kwargs: Additional arguments passed to SegmentedSTTService.
+        **kwargs: Additional arguments passed to BaseWhisperSTTService.
     """
 
     def __init__(
@@ -418,39 +417,12 @@ class OpenAISTTService(SegmentedSTTService):
         base_url: Optional[str] = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
-        self.set_model_name(model)
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        super().__init__(model=model, api_key=api_key, base_url=base_url, **kwargs)
 
-    async def set_model(self, model: str):
-        self.set_model_name(model)
-
-    def can_generate_metrics(self) -> bool:
-        return True
-
-    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        try:
-            await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
-
-            response: Transcription = await self._client.audio.transcriptions.create(
-                file=("audio.wav", audio, "audio/wav"), model=self.model_name
-            )
-
-            await self.stop_ttfb_metrics()
-            await self.stop_processing_metrics()
-
-            text = response.text.strip()
-
-            if text:
-                logger.debug(f"Transcription: [{text}]")
-                yield TranscriptionFrame(text, "", time_now_iso8601())
-            else:
-                logger.warning("Received empty transcription from API")
-
-        except Exception as e:
-            logger.exception(f"Exception during transcription: {e}")
-            yield ErrorFrame(f"Error during transcription: {str(e)}")
+    async def _transcribe(self, audio: bytes) -> Transcription:
+        return await self._client.audio.transcriptions.create(
+            file=("audio.wav", audio, "audio/wav"), model=self.model_name
+        )
 
 
 class OpenAITTSService(TTSService):
