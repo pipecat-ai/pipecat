@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings
 from textual.app import App, ComposeResult
 from textual.containers import Container
-from textual.widgets import Header, Footer, Label, ListView, ListItem, Select
+from textual.widgets import Footer, Header, Label, ListItem, ListView, Select
 from textual.widgets.option_list import Option
 
 # ─── DATA MODELS ───────────────────────────────────────────────────────────────
