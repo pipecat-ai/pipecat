@@ -14,7 +14,8 @@ from pipecat.frames.frames import InputAudioRawFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
-from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.base_transport import TransportParams, BaseTransport
+
 
 try:
     import pyaudio
@@ -116,7 +117,7 @@ class LocalAudioOutputTransport(BaseOutputTransport):
             )
 
 
-class LocalAudioTransport(LocalTransportParams):
+class LocalAudioTransport(BaseTransport):
     def __init__(self, params: LocalTransportParams):
         super().__init__()
         self._params = params
