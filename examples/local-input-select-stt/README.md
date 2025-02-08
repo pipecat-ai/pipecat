@@ -1,6 +1,3 @@
-<div align="center">
- <img alt="pipecat" width="300px" height="auto" src="image.png">
-</div>
 
 # Pipecat Audio Transcription Example 🚀🎙️
 
