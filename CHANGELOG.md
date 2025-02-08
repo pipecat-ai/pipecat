@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `STTMuteFilter` constructor's `stt_service` parameter is now deprecated and
+  will be removed in a future version. The filter now manages mute state
+  internally instead of querying the STT service.
+
 - `RTVI.observer()` is now deprecated, instantiate an `RTVIObserver` directly
   instead.
 
