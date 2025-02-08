@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   base class `BaseWhisperSTTService` to handle common Whisper API
   functionality.
 
+- Added `PerplexityLLMService` for Perplexity NIM API integration, with an
+  OpenAI-compatible interface. Also, added foundational example
+  `14n-function-calling-perplexity.py`.
+
 ### Changed
 
 - Updated foundation example `14f-function-calling-groq.py` to use
