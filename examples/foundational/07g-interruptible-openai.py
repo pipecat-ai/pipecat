@@ -18,7 +18,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai import OpenAILLMService, OpenAITTSService
+from pipecat.services.openai import OpenAILLMService, OpenAISTTService, OpenAITTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -37,11 +37,21 @@ async def main():
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
-                transcription_enabled=True,
+                audio_out_sample_rate=24000,
+                transcription_enabled=False,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
         )
+
+        # You can use the OpenAI compatible API like Groq.
+        # stt = OpenAISTTService(
+        #     base_url="https://api.groq.com/openai/v1",
+        #     api_key="gsk_***",
+        #     model="whisper-large-v3",
+        # )
+        stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"), model="whisper-1")
 
         tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), voice="alloy")
 
@@ -60,6 +70,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                stt,  # STT
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
