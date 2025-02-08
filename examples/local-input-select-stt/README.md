@@ -1,7 +1,7 @@
 <div align="center">
  <img alt="pipecat" width="300px" height="auto" src="image.png">
 </div>
-```markdown
+
 # Pipecat Audio Transcription Example 🚀🎙️
 
 Welcome to the **Pipecat Audio Transcription Example**! 
