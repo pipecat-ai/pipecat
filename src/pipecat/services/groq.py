@@ -5,9 +5,12 @@
 #
 
 
+from typing import Optional
+
 from loguru import logger
 
 from pipecat.services.openai import OpenAILLMService
+from pipecat.services.whisper_base import BaseWhisperSTTService, Transcription
 
 
 class GroqLLMService(OpenAILLMService):
@@ -37,3 +40,33 @@ class GroqLLMService(OpenAILLMService):
         """Create OpenAI-compatible client for Groq API endpoint."""
         logger.debug(f"Creating Groq client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
+
+
+class GroqSTTService(BaseWhisperSTTService):
+    """Groq Whisper speech-to-text service.
+
+    Uses Groq's Whisper API to convert audio to text. Requires a Groq API key
+    set via the api_key parameter or GROQ_API_KEY environment variable.
+
+    Args:
+        model: Whisper model to use. Defaults to "whisper-large-v3-turbo".
+        api_key: Groq API key. Defaults to None.
+        base_url: API base URL. Defaults to "https://api.groq.com/openai/v1".
+        **kwargs: Additional arguments passed to BaseWhisperSTTService.
+
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str = "whisper-large-v3-turbo",
+        api_key: Optional[str] = None,
+        base_url: str = "https://api.groq.com/openai/v1",
+        **kwargs,
+    ):
+        super().__init__(model=model, api_key=api_key, base_url=base_url, **kwargs)
+
+    async def _transcribe(self, audio: bytes) -> Transcription:
+        return await self._client.audio.transcriptions.create(
+            file=("audio.wav", audio, "audio/wav"), model=self.model_name, response_format="json"
+        )
