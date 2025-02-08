@@ -14,8 +14,7 @@ from pipecat.frames.frames import InputAudioRawFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
-from pipecat.transports.base_transport import TransportParams, BaseTransport
-
+from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 try:
     import pyaudio
