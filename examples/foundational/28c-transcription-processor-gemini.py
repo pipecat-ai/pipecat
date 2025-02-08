@@ -156,8 +156,11 @@ async def main():
 
         # Create transcript processor and handler
         transcript = TranscriptProcessor()
-        transcript_handler = TranscriptHandler(output_db="example.db")  # Output to log only
+        # Select a TranscriptHandler output method
+        # Uncomment out only one of the following lines:
+        transcript_handler = TranscriptHandler()  # Output to log only
         # transcript_handler = TranscriptHandler(output_file="transcript.txt") # Output to file and log
+        # transcript_handler = TranscriptHandler(output_db="example.db")  # Output to SQLite DB and log
 
         pipeline = Pipeline(
             [
