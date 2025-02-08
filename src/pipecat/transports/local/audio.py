@@ -6,7 +6,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import  Optional
+from typing import Optional
 
 from loguru import logger
 
@@ -25,12 +25,15 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
+
 class LocalTransportParams(TransportParams):
     input_device_index: int = 0
     output_device_index: int = 0
 
+
 class LocalAudioInputTransport(BaseInputTransport):
     _params: LocalTransportParams
+
     def __init__(self, py_audio: pyaudio.PyAudio, params: LocalTransportParams):
         super().__init__(params)
         self._py_audio = py_audio
@@ -75,6 +78,7 @@ class LocalAudioInputTransport(BaseInputTransport):
 
 class LocalAudioOutputTransport(BaseOutputTransport):
     _params: LocalTransportParams
+
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
         self._py_audio = py_audio
