@@ -11,7 +11,6 @@ such as during function calls, bot speech, or custom conditions. It helps manage
 the STT service should be active or inactive during a conversation.
 """
 
-import warnings
 from dataclasses import dataclass
 from enum import Enum
 from typing import Awaitable, Callable, Optional
@@ -77,10 +76,14 @@ class STTMuteFilter(FrameProcessor):
         **kwargs: Additional arguments passed to parent class
     """
 
-    def __init__(self, config: STTMuteConfig, stt_service: Optional[STTService] = None, **kwargs):
+    def __init__(
+        self, *, config: STTMuteConfig, stt_service: Optional[STTService] = None, **kwargs
+    ):
         super().__init__(**kwargs)
         self._config = config
         if stt_service is not None:
+            import warnings
+
             warnings.warn(
                 "The stt_service parameter is deprecated and will be removed in a future version. "
                 "STTMuteFilter now manages mute state internally.",
