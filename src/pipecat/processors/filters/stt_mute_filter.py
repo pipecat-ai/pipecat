@@ -71,28 +71,40 @@ class STTMuteFilter(FrameProcessor):
     feature. When STT is muted, interruptions are automatically disabled.
 
     Args:
-        stt_service: Service handling speech-to-text functionality
         config: Configuration specifying muting strategies
+        stt_service: STT service instance (deprecated, will be removed in future version)
         **kwargs: Additional arguments passed to parent class
     """
 
-    def __init__(self, stt_service: STTService, config: STTMuteConfig, **kwargs):
+    def __init__(
+        self, *, config: STTMuteConfig, stt_service: Optional[STTService] = None, **kwargs
+    ):
         super().__init__(**kwargs)
-        self._stt_service = stt_service
         self._config = config
+        if stt_service is not None:
+            import warnings
+
+            warnings.warn(
+                "The stt_service parameter is deprecated and will be removed in a future version. "
+                "STTMuteFilter now manages mute state internally.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._first_speech_handled = False
         self._bot_is_speaking = False
         self._function_call_in_progress = False
+        self._is_muted = False
 
     @property
     def is_muted(self) -> bool:
         """Returns whether STT is currently muted."""
-        return self._stt_service.is_muted
+        return self._is_muted
 
     async def _handle_mute_state(self, should_mute: bool):
         """Handles both STT muting and interruption control."""
         if should_mute != self.is_muted:
             logger.debug(f"STT {'muting' if should_mute else 'unmuting'}")
+            self._is_muted = should_mute
             await self.push_frame(STTMuteFrame(mute=should_mute))
 
     async def _should_mute(self) -> bool:
