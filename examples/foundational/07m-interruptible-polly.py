@@ -15,9 +15,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.aws.tts import PollyTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.aws import PollyTTSService, TranscribeSTTService
+from pipecat.services.openai import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -37,14 +37,11 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         ),
     )
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = TranscribeSTTService()
 
     tts = PollyTTSService(
-        api_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        region=os.getenv("AWS_REGION"),
         voice_id="Amy",
-        params=PollyTTSService.InputParams(engine="neural", language="en-GB", rate="1.05"),
+        params=PollyTTSService.InputParams(engine="standard", language=Language.EN_GB, rate="1.05"),
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
