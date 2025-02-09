@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added support for Groq's Whisper API through the new `GroqSTTService` and
+  OpenAI's Whisper API through the new `OpenAISTTService`. Introduced a new
+  base class `BaseWhisperSTTService` to handle common Whisper API
+  functionality.
+
 ### Changed
+
+- Updated foundation example `14f-function-calling-groq.py` to use
+  `GroqSTTService` for transcription.
+
+- Updated `GroqLLMService` to use `llama-3.3-70b-versatile` as the default
+  model.
 
 - `RTVIObserver` doesn't handle `LLMSearchResponseFrame` frames anymore. For
   now, to handle those frames you need to create a `GoogleRTVIObserver` instead.
