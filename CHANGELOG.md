@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Enhanced `WhisperSTTService` with full language support and improved model
+  documentation.
+
 - Updated foundation example `14f-function-calling-groq.py` to use
   `GroqSTTService` for transcription.
 
