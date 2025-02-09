@@ -53,7 +53,7 @@ from pipecat.services.ai_services import (
     LLMService,
     TTSService,
 )
-from pipecat.services.whisper_base import BaseWhisperSTTService, Transcription
+from pipecat.services.base_whisper import BaseWhisperSTTService, Transcription
 from pipecat.utils.time import time_now_iso8601
 
 try:

@@ -9,8 +9,8 @@ from typing import Optional
 
 from loguru import logger
 
+from pipecat.services.base_whisper import BaseWhisperSTTService, Transcription
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.whisper_base import BaseWhisperSTTService, Transcription
 
 
 class GroqLLMService(OpenAILLMService):
