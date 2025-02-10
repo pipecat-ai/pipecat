@@ -1536,6 +1536,7 @@ class GoogleSTTService(STTService):
             await self._connect()
 
     async def set_model(self, model: str):
+        """Update the service's recognition model."""
         await super().set_model(model)
         self._settings["model"] = model
         # Recreate stream with new model
@@ -1554,6 +1555,104 @@ class GoogleSTTService(STTService):
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._disconnect()
+
+    async def update_options(
+        self,
+        *,
+        language: Optional[Language] = None,
+        model: Optional[str] = None,
+        enable_automatic_punctuation: Optional[bool] = None,
+        enable_spoken_punctuation: Optional[bool] = None,
+        enable_spoken_emojis: Optional[bool] = None,
+        profanity_filter: Optional[bool] = None,
+        enable_word_time_offsets: Optional[bool] = None,
+        enable_word_confidence: Optional[bool] = None,
+        enable_interim_results: Optional[bool] = None,
+        enable_voice_activity_events: Optional[bool] = None,
+        location: Optional[str] = None,
+    ) -> None:
+        """Update service options dynamically.
+
+        Args:
+            language: New recognition language.
+            model: New recognition model.
+            enable_automatic_punctuation: Enable/disable automatic punctuation.
+            enable_spoken_punctuation: Enable/disable spoken punctuation.
+            enable_spoken_emojis: Enable/disable spoken emojis.
+            profanity_filter: Enable/disable profanity filter.
+            enable_word_time_offsets: Enable/disable word timing info.
+            enable_word_confidence: Enable/disable word confidence scores.
+            enable_interim_results: Enable/disable interim results.
+            enable_voice_activity_events: Enable/disable voice activity detection.
+            location: New Google Cloud location.
+
+        Note:
+            Changes that affect the streaming configuration will cause
+            the stream to be reconnected.
+        """
+        needs_reconnect = False
+
+        # Update settings with new values
+        if language is not None:
+            logger.debug(f"Updating language to: {language}")
+            self._settings["language_code"] = self.language_to_service_language(language)
+            needs_reconnect = True
+
+        if model is not None:
+            logger.debug(f"Updating model to: {model}")
+            self._settings["model"] = model
+            needs_reconnect = True
+
+        if enable_automatic_punctuation is not None:
+            logger.debug(f"Updating automatic punctuation to: {enable_automatic_punctuation}")
+            self._settings["enable_automatic_punctuation"] = enable_automatic_punctuation
+            needs_reconnect = True
+
+        if enable_spoken_punctuation is not None:
+            logger.debug(f"Updating spoken punctuation to: {enable_spoken_punctuation}")
+            self._settings["enable_spoken_punctuation"] = enable_spoken_punctuation
+            needs_reconnect = True
+
+        if enable_spoken_emojis is not None:
+            logger.debug(f"Updating spoken emojis to: {enable_spoken_emojis}")
+            self._settings["enable_spoken_emojis"] = enable_spoken_emojis
+            needs_reconnect = True
+
+        if profanity_filter is not None:
+            logger.debug(f"Updating profanity filter to: {profanity_filter}")
+            self._settings["profanity_filter"] = profanity_filter
+            needs_reconnect = True
+
+        if enable_word_time_offsets is not None:
+            logger.debug(f"Updating word time offsets to: {enable_word_time_offsets}")
+            self._settings["enable_word_time_offsets"] = enable_word_time_offsets
+            needs_reconnect = True
+
+        if enable_word_confidence is not None:
+            logger.debug(f"Updating word confidence to: {enable_word_confidence}")
+            self._settings["enable_word_confidence"] = enable_word_confidence
+            needs_reconnect = True
+
+        if enable_interim_results is not None:
+            logger.debug(f"Updating interim results to: {enable_interim_results}")
+            self._settings["enable_interim_results"] = enable_interim_results
+            needs_reconnect = True
+
+        if enable_voice_activity_events is not None:
+            logger.debug(f"Updating voice activity events to: {enable_voice_activity_events}")
+            self._settings["enable_voice_activity_events"] = enable_voice_activity_events
+            needs_reconnect = True
+
+        if location is not None:
+            logger.debug(f"Updating location to: {location}")
+            self._location = location
+            needs_reconnect = True
+
+        # Reconnect the stream if necessary
+        if needs_reconnect and self._streaming_task:
+            logger.debug("Reconnecting stream due to configuration changes")
+            await self._disconnect()
+            await self._connect()
 
     async def _connect(self):
         """Initialize streaming recognition config and stream."""
@@ -1605,7 +1704,7 @@ class GoogleSTTService(STTService):
     async def _request_generator(self):
         """Generates requests for the streaming recognize method."""
         recognizer_path = f"projects/{self._project_id}/locations/{self._location}/recognizers/_"
-        logger.debug(f"Using recognizer path: {recognizer_path}")
+        logger.trace(f"Using recognizer path: {recognizer_path}")
 
         try:
             # First, send the recognition config
