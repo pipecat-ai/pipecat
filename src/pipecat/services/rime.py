@@ -229,7 +229,7 @@ class RimeTTSService(WordTTSService, WebsocketService):
             ends: List of end times for each word.
 
         Returns:
-            List of (word, timestamp) pairs with proper spacing and timing.
+            List of (word, timestamp) pairs with proper timing.
         """
         word_pairs = []
         for i, (word, start_time, end_time) in enumerate(zip(words, starts, ends)):
@@ -239,18 +239,12 @@ class RimeTTSService(WordTTSService, WebsocketService):
             # Adjust timing by adding cumulative time
             adjusted_start = start_time + self._cumulative_time
 
-            # Handle spacing and punctuation
+            # Handle punctuation by appending to previous word
             is_punctuation = bool(word.strip(",.!?") == "")
-            if is_punctuation:
-                # Append punctuation to previous word
-                if word_pairs:
-                    prev_word, prev_time = word_pairs[-1]
-                    word_pairs[-1] = (prev_word + word, prev_time)
+            if is_punctuation and word_pairs:
+                prev_word, prev_time = word_pairs[-1]
+                word_pairs[-1] = (prev_word + word, prev_time)
             else:
-                # Add space between words (not before punctuation)
-                needs_space = word_pairs and not words[i - 1].strip(",.!?") == ""
-                if needs_space:
-                    word = " " + word
                 word_pairs.append((word, adjusted_start))
 
         return word_pairs
@@ -259,6 +253,7 @@ class RimeTTSService(WordTTSService, WebsocketService):
         """Process incoming websocket messages."""
         async for message in self._get_websocket():
             msg = json.loads(message)
+
             if not msg or msg["contextId"] != self._context_id:
                 continue
 
@@ -286,6 +281,7 @@ class RimeTTSService(WordTTSService, WebsocketService):
                     if word_pairs:
                         await self.add_word_timestamps(word_pairs)
                         self._cumulative_time = ends[-1] + self._cumulative_time
+                        logger.debug(f"Updated cumulative time to: {self._cumulative_time}")
 
             elif msg["type"] == "error":
                 logger.error(f"{self} error: {msg}")
