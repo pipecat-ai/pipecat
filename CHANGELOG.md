@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RTVIBotLLMProcessor`) are now deprecated, instantiate an `RTVIObserver`
   instead.
 
+### Fixed
+
+- Fixed an `RTVI` issue that was causing `bot-tts-text` messages to be sent
+  before being processed by the output transport.
+
 ## [0.0.56] - 2025-02-06
 
 ### Changed

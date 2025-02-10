@@ -58,6 +58,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.utils.string import match_endofsentence
 
 RTVI_PROTOCOL_VERSION = "0.3.0"
@@ -677,7 +678,9 @@ class RTVIObserver(BaseObserver):
             await self.push_transport_message_urgent(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame):
             await self.push_transport_message_urgent(RTVIBotTTSStoppedMessage())
-        elif isinstance(frame, TTSTextFrame):
+        # Make sure we only send TTSTextFrame pushed from the output transport
+        # (i.e. user hasn't itnerrupted).
+        elif isinstance(frame, TTSTextFrame) and isinstance(src, BaseOutputTransport):
             message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
             await self.push_transport_message_urgent(message)
         elif isinstance(frame, MetricsFrame):
