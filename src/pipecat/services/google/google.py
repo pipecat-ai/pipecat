@@ -932,7 +932,7 @@ class GoogleLLMContext(OpenAILLMContext):
 
 
 class GoogleLLMService(LLMService):
-    """This class implements inference with Google's AI models
+    """This class implements inference with Google's AI models.
 
     This service translates internally from OpenAILLMContext to the messages format
     expected by the Google AI model. We are using the OpenAILLMContext as a lingua
