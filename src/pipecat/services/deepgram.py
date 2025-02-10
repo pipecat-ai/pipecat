@@ -5,7 +5,7 @@
 #
 
 import asyncio
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -53,7 +53,7 @@ class DeepgramTTSService(TTSService):
         *,
         api_key: str,
         voice: str = "aura-helios-en",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         encoding: str = "linear16",
         **kwargs,
     ):
@@ -61,7 +61,6 @@ class DeepgramTTSService(TTSService):
 
         self._api_key = api_key
         self._settings = {
-            "sample_rate": sample_rate,
             "encoding": encoding,
         }
         self.set_voice(voice)
@@ -76,7 +75,7 @@ class DeepgramTTSService(TTSService):
         options = SpeakOptions(
             model=self._voice_id,
             encoding=self._settings["encoding"],
-            sample_rate=self._settings["sample_rate"],
+            sample_rate=self.sample_rate,
             container="none",
         )
 
@@ -104,9 +103,7 @@ class DeepgramTTSService(TTSService):
                 chunk = audio_buffer.read(chunk_size)
                 if not chunk:
                     break
-                frame = TTSAudioRawFrame(
-                    audio=chunk, sample_rate=self._settings["sample_rate"], num_channels=1
-                )
+                frame = TTSAudioRawFrame(audio=chunk, sample_rate=self.sample_rate, num_channels=1)
                 yield frame
 
                 yield TTSStoppedFrame()
@@ -122,15 +119,16 @@ class DeepgramSTTService(STTService):
         *,
         api_key: str,
         url: str = "",
-        live_options: LiveOptions = None,
+        sample_rate: Optional[int] = None,
+        live_options: Optional[LiveOptions] = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
+
         default_options = LiveOptions(
             encoding="linear16",
             language=Language.EN,
             model="nova-2-general",
-            sample_rate=16000,
             channels=1,
             interim_results=True,
             smart_format=True,
@@ -189,6 +187,7 @@ class DeepgramSTTService(STTService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        self._settings["sample_rate"] = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):

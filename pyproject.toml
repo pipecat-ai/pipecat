@@ -32,6 +32,7 @@ dependencies = [
     "protobuf~=5.29.3",
     "pydantic~=2.10.5",
     "pyloudnorm~=0.1.1",
+    "resampy~=0.4.3",
     "soxr~=0.5.0"
 ]
 
@@ -40,7 +41,7 @@ Source = "https://github.com/pipecat-ai/pipecat"
 Website = "https://pipecat.ai"
 
 [project.optional-dependencies]
-anthropic = [ "anthropic~=0.39.0" ]
+anthropic = [ "anthropic~=0.45.2" ]
 assemblyai = [ "assemblyai~=0.36.0" ]
 aws = [ "boto3~=1.35.99" ]
 azure = [ "azure-cognitiveservices-speech~=1.42.0", "openai~=1.59.6" ]
@@ -54,7 +55,7 @@ elevenlabs = [ "websockets~=13.1" ]
 fal = [ "fal-client~=0.5.6" ]
 fish = [ "ormsgpack~=1.7.0", "websockets~=13.1" ]
 gladia = [ "websockets~=13.1" ]
-google = [ "google-generativeai~=0.8.3", "google-cloud-texttospeech~=2.24.0" ]
+google = [ "google-generativeai~=0.8.3", "google-cloud-texttospeech~=2.24.0", "google-genai~=1.0.0" ]
 grok = [ "openai~=1.59.6" ]
 groq = [ "openai~=1.59.6" ]
 gstreamer = [ "pygobject~=3.50.0" ]
@@ -69,9 +70,11 @@ moondream = [ "einops~=0.8.0", "timm~=1.0.13", "transformers~=4.48.0" ]
 nim = [ "openai~=1.59.6" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 openai = [ "openai~=1.59.6", "websockets~=13.1", "python-deepcompare~=2.1.0" ]
-openpipe = [ "openpipe~=4.43.0" ]
+openpipe = [ "openpipe~=4.45.0" ]
+perplexity = [ "openai~=1.59.6" ]
 playht = [ "pyht~=0.1.6", "websockets~=13.1" ]
 riva = [ "nvidia-riva-client~=2.18.0" ]
+sentry = [ "sentry-sdk~=2.20.0" ]
 silero = [ "onnxruntime~=1.20.1" ]
 simli = [ "simli-ai~=0.1.10"]
 soundfile = [ "soundfile~=0.13.0" ]

@@ -49,12 +49,11 @@ class IdleFrameProcessor(FrameProcessor):
                     self._idle_event.set()
 
     async def cleanup(self):
-        self._idle_task.cancel()
-        await self._idle_task
+        await self.cancel_task(self._idle_task)
 
     def _create_idle_task(self):
         self._idle_event = asyncio.Event()
-        self._idle_task = self.get_event_loop().create_task(self._idle_task_handler())
+        self._idle_task = self.create_task(self._idle_task_handler())
 
     async def _idle_task_handler(self):
         while True:
@@ -62,7 +61,5 @@ class IdleFrameProcessor(FrameProcessor):
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 await self._callback(self)
-            except asyncio.CancelledError:
-                break
             finally:
                 self._idle_event.clear()

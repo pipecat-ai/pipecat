@@ -6,6 +6,7 @@
 
 import asyncio
 import os
+import sqlite3
 import sys
 from typing import List, Optional
 
@@ -15,11 +16,7 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import (
-    CancelFrame,
-    TranscriptionMessage,
-    TranscriptionUpdateFrame,
-)
+from pipecat.frames.frames import TranscriptionMessage, TranscriptionUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -48,22 +45,33 @@ class TranscriptHandler:
         output_file: Optional path to file where transcript is saved. If None, outputs to log only.
     """
 
-    def __init__(self, output_file: Optional[str] = None):
-        """Initialize handler with optional file output.
+    def __init__(self, output_file: Optional[str] = None, output_db: Optional[str] = None):
+        """Initialize handler with optional file or database output.
 
         Args:
             output_file: Path to output file. If None, outputs to log only.
         """
         self.messages: List[TranscriptionMessage] = []
         self.output_file: Optional[str] = output_file
+        self.output_db: Optional[str] = output_db
+
+        if self.output_db:
+            self.con = sqlite3.connect("example.db")
+            self.db = self.con.cursor()
+
+            table = self.db.execute("SELECT name FROM sqlite_master WHERE name='messages'")
+            if not (table.fetchone()):
+                self.db.execute(
+                    "CREATE TABLE messages(role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP )"
+                )
         logger.debug(
-            f"TranscriptHandler initialized {'with output_file=' + output_file if output_file else 'with log output only'}"
+            f"TranscriptHandler initialized; output file: {output_file}, output DB: {output_db}"
         )
 
     async def save_message(self, message: TranscriptionMessage):
         """Save a single transcript message.
 
-        Outputs the message to the log and optionally to a file.
+        Outputs the message to the log and optionally to a SQLite database or file.
 
         Args:
             message: The message to save
@@ -81,6 +89,14 @@ class TranscriptHandler:
                     f.write(line + "\n")
             except Exception as e:
                 logger.error(f"Error saving transcript message to file: {e}")
+
+        # and/or to a SQLite database
+        if self.output_db:
+            self.db.execute(
+                "INSERT INTO messages VALUES (?, ?, ?)",
+                (message.role, message.content, message.timestamp),
+            )
+            self.con.commit()
 
     async def on_transcript_update(
         self, processor: TranscriptProcessor, frame: TranscriptionUpdateFrame
@@ -140,8 +156,11 @@ async def main():
 
         # Create transcript processor and handler
         transcript = TranscriptProcessor()
+        # Select a TranscriptHandler output method
+        # Uncomment out only one of the following lines:
         transcript_handler = TranscriptHandler()  # Output to log only
         # transcript_handler = TranscriptHandler(output_file="transcript.txt") # Output to file and log
+        # transcript_handler = TranscriptHandler(output_db="example.db")  # Output to SQLite DB and log
 
         pipeline = Pipeline(
             [
@@ -180,7 +199,7 @@ async def main():
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             # Stop the pipeline immediately when the participant leaves
-            await task.queue_frame(CancelFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

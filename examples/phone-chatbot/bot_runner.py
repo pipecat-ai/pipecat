@@ -73,16 +73,22 @@ action using the Twilio Client library.
 """
 
 
-async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
+async def _create_daily_room(
+    room_url, callId, callDomain=None, dialoutNumber=None, vendor="daily", detect_voicemail=False
+):
     if not room_url:
-        params = DailyRoomParams(
-            properties=DailyRoomProperties(
-                # Note: these are the default values, except for the display name
-                sip=DailyRoomSipParams(
-                    display_name="dialin-user", video=False, sip_mode="dial-in", num_endpoints=1
-                )
+        # Create base properties with SIP settings
+        properties = DailyRoomProperties(
+            sip=DailyRoomSipParams(
+                display_name="dialin-user", video=False, sip_mode="dial-in", num_endpoints=1
             )
         )
+
+        # Only enable dialout if dialoutNumber is provided
+        if dialoutNumber:
+            properties.enable_dialout = True
+
+        params = DailyRoomParams(properties=properties)
 
         print(f"Creating new room...")
         room: DailyRoomObject = await daily_helpers["rest"].create_room(params=params)
@@ -90,7 +96,6 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     else:
         # Check passed room URL exist (we assume that it already has a sip set up!)
         try:
-            print(f"Joining existing room: {room_url}")
             room: DailyRoomObject = await daily_helpers["rest"].get_room_from_url(room_url)
         except Exception:
             raise HTTPException(status_code=500, detail=f"Room not found: {room_url}")
@@ -106,7 +111,9 @@ async def _create_daily_room(room_url, callId, callDomain=None, vendor="daily"):
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
     if vendor == "daily":
-        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain}"
+        bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain}{' -v' if detect_voicemail else ''}"
+        if dialoutNumber:
+            bot_proc += f" -o {dialoutNumber}"
     else:
         bot_proc = f"python3 -m bot_twilio -u {room.url} -t {token} -i {callId} -s {room.config.sip_endpoint}"
 
@@ -177,13 +184,18 @@ async def daily_start_bot(request: Request) -> JSONResponse:
         if "test" in data:
             # Pass through any webhook checks
             return JSONResponse({"test": True})
+        detect_voicemail = data.get("detectVoicemail", False)
         callId = data.get("callId", None)
         callDomain = data.get("callDomain", None)
+        dialoutNumber = data.get("dialoutNumber", None)
     except Exception:
-        raise HTTPException(status_code=500, detail="Missing properties 'callId' or 'callDomain'")
+        raise HTTPException(
+            status_code=500, detail="Missing properties 'callId', 'callDomain', or 'dialoutNumber'"
+        )
 
-    print(f"CallId: {callId}, CallDomain: {callDomain}")
-    room: DailyRoomObject = await _create_daily_room(room_url, callId, callDomain, "daily")
+    room: DailyRoomObject = await _create_daily_room(
+        room_url, callId, callDomain, dialoutNumber, "daily", detect_voicemail
+    )
 
     # Grab a token for the user to join with
     return JSONResponse({"room_url": room.url, "sipUri": room.config.sip_endpoint})

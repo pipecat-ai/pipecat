@@ -48,7 +48,7 @@ class AudioInputMessage(BaseModel):
     realtimeInput: RealtimeInput
 
     @classmethod
-    def from_raw_audio(cls, raw_audio: bytes, sample_rate=16000) -> "AudioInputMessage":
+    def from_raw_audio(cls, raw_audio: bytes, sample_rate: int) -> "AudioInputMessage":
         data = base64.b64encode(raw_audio).decode("utf-8")
         return cls(
             realtimeInput=RealtimeInput(

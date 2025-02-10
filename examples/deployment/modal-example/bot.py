@@ -5,6 +5,15 @@ import sys
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.openai import OpenAILLMService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
+
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -12,16 +21,6 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def main(room_url: str, token: str):
-    from pipecat.audio.vad.silero import SileroVADAnalyzer
-    from pipecat.frames.frames import EndFrame
-    from pipecat.pipeline.pipeline import Pipeline
-    from pipecat.pipeline.runner import PipelineRunner
-    from pipecat.pipeline.task import PipelineParams, PipelineTask
-    from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-    from pipecat.services.cartesia import CartesiaTTSService
-    from pipecat.services.openai import OpenAILLMService
-    from pipecat.transports.services.daily import DailyParams, DailyTransport
-
     transport = DailyTransport(
         room_url,
         token,
@@ -79,7 +78,7 @@ async def main(room_url: str, token: str):
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        await task.queue_frame(EndFrame())
+        await task.cancel()
 
     runner = PipelineRunner()
 

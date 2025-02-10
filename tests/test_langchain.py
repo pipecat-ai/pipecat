@@ -32,8 +32,7 @@ from pipecat.processors.frameworks.langchain import LangchainProcessor
 class TestLangchain(unittest.IsolatedAsyncioTestCase):
     class MockProcessor(FrameProcessor):
         def __init__(self, name):
-            super().__init__()
-            self.name = name
+            super().__init__(name=name)
             self.token: list[str] = []
             # Start collecting tokens when we see the start frame
             self.start_collecting = False

@@ -20,6 +20,8 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InputAudioRawFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -44,9 +46,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.google import GoogleLLMContext, GoogleLLMService
 from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.sync.event_notifier import EventNotifier
@@ -57,13 +57,9 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-# TRANSCRIBER_MODEL = "gemini-1.5-flash-latest"
-# CLASSIFIER_MODEL = "gemini-1.5-flash-latest"
-# CONVERSATION_MODEL = "gemini-1.5-flash-latest"
-
-TRANSCRIBER_MODEL = "gemini-2.0-flash-exp"
-CLASSIFIER_MODEL = "gemini-2.0-flash-exp"
-CONVERSATION_MODEL = "gemini-2.0-flash-exp"
+TRANSCRIBER_MODEL = "gemini-2.0-flash-001"
+CLASSIFIER_MODEL = "gemini-2.0-flash-001"
+CONVERSATION_MODEL = "gemini-2.0-flash-001"
 
 transcriber_system_instruction = """You are an audio transcriber. You are receiving audio from a user. Your job is to
 transcribe the input audio to text exactly as it was said by the user.
@@ -440,11 +436,11 @@ class CompletenessCheck(FrameProcessor):
 
         if isinstance(frame, UserStartedSpeakingFrame):
             if self._idle_task:
-                self._idle_task.cancel()
+                await self.cancel_task(self._idle_task)
         elif isinstance(frame, TextFrame) and frame.text.startswith("YES"):
             logger.debug("Completeness check YES")
             if self._idle_task:
-                self._idle_task.cancel()
+                await self.cancel_task(self._idle_task)
             await self.push_frame(UserStoppedSpeakingFrame())
             await self._audio_accumulator.reset()
             await self._notifier.notify()
@@ -457,7 +453,9 @@ class CompletenessCheck(FrameProcessor):
                 else:
                     # logger.debug("!!! CompletenessCheck idle wait START")
                     self._wakeup_time = time.time() + self.wait_time
-                    self._idle_task = self.get_event_loop().create_task(self._idle_task_handler())
+                    self._idle_task = self.create_task(self._idle_task_handler())
+        else:
+            await self.push_frame(frame, direction)
 
     async def _idle_task_handler(self):
         try:
@@ -579,6 +577,11 @@ class OutputGate(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
+        # Don't block function call frames
+        if isinstance(frame, (FunctionCallInProgressFrame, FunctionCallResultFrame)):
+            await self.push_frame(frame, direction)
+            return
+
         # Ignore frames that are not following the direction of this gate.
         if direction != FrameDirection.DOWNSTREAM:
             await self.push_frame(frame, direction)
@@ -599,11 +602,10 @@ class OutputGate(FrameProcessor):
 
     async def _start(self):
         self._frames_buffer = []
-        self._gate_task = self.get_event_loop().create_task(self._gate_task_handler())
+        self._gate_task = self.create_task(self._gate_task_handler())
 
     async def _stop(self):
-        self._gate_task.cancel()
-        await self._gate_task
+        await self.cancel_task(self._gate_task)
 
     async def _gate_task_handler(self):
         while True:
@@ -640,7 +642,6 @@ async def main():
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True,
-                audio_in_sample_rate=16000,
             ),
         )
 
@@ -678,12 +679,6 @@ async def main():
         context = OpenAILLMContext()
         context_aggregator = conversation_llm.create_context_aggregator(context)
 
-        # We have instructed the LLM to return 'True' if it thinks the user
-        # completed a sentence. So, if it's 'True' we will return true in this
-        # predicate which will wake up the notifier.
-        async def wake_check_filter(frame):
-            return frame.text == "True"
-
         # This is a notifier that we use to synchronize the two LLMs.
         notifier = EventNotifier()
 
@@ -699,14 +694,6 @@ async def main():
 
         async def block_user_stopped_speaking(frame):
             return not isinstance(frame, UserStoppedSpeakingFrame)
-
-        async def pass_only_llm_trigger_frames(frame):
-            return (
-                isinstance(frame, OpenAILLMContextFrame)
-                or isinstance(frame, LLMMessagesFrame)
-                or isinstance(frame, StartInterruptionFrame)
-                or isinstance(frame, StopInterruptionFrame)
-            )
 
         conversation_audio_context_assembler = ConversationAudioContextAssembler(context=context)
 

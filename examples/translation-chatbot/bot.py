@@ -16,7 +16,6 @@ from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
-    EndFrame,
     Frame,
     LLMMessagesFrame,
     TranscriptionFrame,
@@ -26,7 +25,6 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMFullResponseAggregator
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.transcript_processor import TranscriptProcessor
@@ -190,7 +188,7 @@ async def main():
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

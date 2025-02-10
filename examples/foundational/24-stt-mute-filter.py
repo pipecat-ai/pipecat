@@ -61,7 +61,6 @@ async def main():
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
         # Configure the mute processor with both strategies
         stt_mute_processor = STTMuteFilter(
-            stt_service=stt,
             config=STTMuteConfig(
                 strategies={STTMuteStrategy.FIRST_SPEECH, STTMuteStrategy.FUNCTION_CALL}
             ),

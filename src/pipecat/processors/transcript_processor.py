@@ -87,7 +87,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """Initialize processor with aggregation state."""
         super().__init__(**kwargs)
         self._current_text_parts: List[str] = []
-        self._aggregation_start_time: Optional[str] | None = None
+        self._aggregation_start_time: Optional[str] = None
 
     async def _emit_aggregated_text(self):
         """Emit aggregated text as a transcript message."""

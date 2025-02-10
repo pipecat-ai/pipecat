@@ -7,13 +7,13 @@
 import asyncio
 import unittest
 
-from pipecat.frames.frames import EndFrame, HeartbeatFrame, TextFrame
+from pipecat.frames.frames import EndFrame, HeartbeatFrame, StartFrame, TextFrame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameProcessor
-from tests.utils import HeartbeatsObserver, run_test
+from pipecat.tests.utils import HeartbeatsObserver, run_test
 
 
 class TestPipeline(unittest.IsolatedAsyncioTestCase):
@@ -22,7 +22,11 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [TextFrame(text="Hello from Pipecat!")]
         expected_returned_frames = [TextFrame]
-        await run_test(pipeline, frames_to_send, expected_returned_frames)
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
 
     async def test_pipeline_multiple(self):
         identity1 = IdentityFilter()
@@ -33,7 +37,25 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [TextFrame(text="Hello from Pipecat!")]
         expected_returned_frames = [TextFrame]
-        await run_test(pipeline, frames_to_send, expected_returned_frames)
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+    async def test_pipeline_start_metadata(self):
+        pipeline = Pipeline([IdentityFilter()])
+
+        frames_to_send = []
+        expected_returned_frames = [StartFrame]
+        (received_down, _) = await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+            ignore_start=False,
+            start_metadata={"foo": "bar"},
+        )
+        assert "foo" in received_down[-1].metadata
 
 
 class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
@@ -42,7 +64,11 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [TextFrame(text="Hello from Pipecat!")]
         expected_returned_frames = [TextFrame]
-        await run_test(pipeline, frames_to_send, expected_returned_frames)
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
 
     async def test_parallel_multiple(self):
         """Should only passthrough one instance of TextFrame."""
@@ -50,13 +76,18 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [TextFrame(text="Hello from Pipecat!")]
         expected_returned_frames = [TextFrame]
-        await run_test(pipeline, frames_to_send, expected_returned_frames)
+        await run_test(
+            pipeline,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
 
 
 class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
     async def test_task_single(self):
         pipeline = Pipeline([IdentityFilter()])
         task = PipelineTask(pipeline)
+        task.set_event_loop(asyncio.get_event_loop())
 
         await task.queue_frame(TextFrame(text="Hello!"))
         await task.queue_frames([TextFrame(text="Bye!"), EndFrame()])
@@ -78,9 +109,12 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         task = PipelineTask(
             pipeline,
             params=PipelineParams(
-                enable_heartbeats=True, heartbeats_period_secs=0.2, observers=[heartbeats_observer]
+                enable_heartbeats=True,
+                heartbeats_period_secs=0.2,
+                observers=[heartbeats_observer],
             ),
         )
+        task.set_event_loop(asyncio.get_event_loop())
 
         expected_heartbeats = 1.0 / 0.2
 

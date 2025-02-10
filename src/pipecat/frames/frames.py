@@ -6,12 +6,24 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Literal, Mapping, Optional, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+)
 
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio import TaskManager
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -36,7 +48,7 @@ class KeypadEntry(str, Enum):
     STAR = "*"
 
 
-def format_pts(pts: int | None):
+def format_pts(pts: Optional[int]):
     return nanoseconds_to_str(pts) if pts else None
 
 
@@ -47,11 +59,13 @@ class Frame:
     id: int = field(init=False)
     name: str = field(init=False)
     pts: Optional[int] = field(init=False)
+    metadata: Dict[str, Any] = field(init=False)
 
     def __post_init__(self):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
         self.pts: Optional[int] = None
+        self.metadata: Dict[str, Any] = {}
 
     def __str__(self):
         return self.name
@@ -112,7 +126,7 @@ class ImageRawFrame:
 
     image: bytes
     size: Tuple[int, int]
-    format: str | None
+    format: Optional[str]
 
 
 #
@@ -162,7 +176,7 @@ class URLImageRawFrame(OutputImageRawFrame):
 
     """
 
-    url: str | None
+    url: Optional[str]
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -221,7 +235,7 @@ class TranscriptionFrame(TextFrame):
 
     user_id: str
     timestamp: str
-    language: Language | None = None
+    language: Optional[Language] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -236,7 +250,7 @@ class InterimTranscriptionFrame(TextFrame):
     text: str
     user_id: str
     timestamp: str
-    language: Language | None = None
+    language: Optional[Language] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -258,7 +272,7 @@ class TranscriptionMessage:
 
     role: Literal["user", "assistant"]
     content: str
-    timestamp: str | None = None
+    timestamp: Optional[str] = None
 
 
 @dataclass
@@ -394,10 +408,24 @@ class TransportMessageFrame(DataFrame):
 
 
 @dataclass
-class InputDTMFFrame(DataFrame):
-    """A DTMF button input"""
+class DTMFFrame(DataFrame):
+    """A DTMF button frame"""
 
     button: KeypadEntry
+
+
+@dataclass
+class InputDTMFFrame(DTMFFrame):
+    """A DTMF button input"""
+
+    pass
+
+
+@dataclass
+class OutputDTMFFrame(DTMFFrame):
+    """A DTMF button output"""
+
+    pass
 
 
 #
@@ -410,11 +438,14 @@ class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
 
     clock: BaseClock
+    task_manager: TaskManager
+    audio_in_sample_rate: int = 16000
+    audio_out_sample_rate: int = 24000
     allow_interruptions: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
-    report_only_initial_ttfb: bool = False
     observer: Optional["BaseObserver"] = None
+    report_only_initial_ttfb: bool = False
 
 
 @dataclass
@@ -643,7 +674,7 @@ class UserImageRawFrame(InputImageRawFrame):
 class VisionImageRawFrame(InputImageRawFrame):
     """An image with an associated text to ask for a description of it."""
 
-    text: str | None
+    text: Optional[str]
 
     def __str__(self):
         pts = format_pts(self.pts)

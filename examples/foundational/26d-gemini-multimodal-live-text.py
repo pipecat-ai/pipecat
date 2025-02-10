@@ -15,7 +15,6 @@ from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -53,8 +52,6 @@ async def main():
             token,
             "Respond bot",
             DailyParams(
-                audio_in_sample_rate=16000,
-                audio_out_sample_rate=24000,
                 audio_out_enabled=True,
                 vad_enabled=True,
                 vad_audio_passthrough=True,
@@ -124,7 +121,7 @@ async def main():
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

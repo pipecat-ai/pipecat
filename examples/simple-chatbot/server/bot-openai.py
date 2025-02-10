@@ -31,7 +31,6 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
-    EndFrame,
     Frame,
     OutputImageRawFrame,
     SpriteFrame,
@@ -41,7 +40,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -203,7 +202,7 @@ async def main():
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
-                observers=[rtvi.observer()],
+                observers=[RTVIObserver(rtvi)],
             ),
         )
         await task.queue_frame(quiet_frame)
@@ -220,7 +219,7 @@ async def main():
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

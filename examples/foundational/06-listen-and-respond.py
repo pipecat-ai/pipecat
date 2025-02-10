@@ -14,7 +14,7 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, Frame, MetricsFrame
+from pipecat.frames.frames import Frame, MetricsFrame
 from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
     ProcessingMetricsData,
@@ -38,6 +38,8 @@ logger.add(sys.stderr, level="DEBUG")
 
 class MetricsLogger(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, MetricsFrame):
             for d in frame.data:
                 if isinstance(d, TTFBMetricsData):
@@ -115,7 +117,7 @@ async def main():
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

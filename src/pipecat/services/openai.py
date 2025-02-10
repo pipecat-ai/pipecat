@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     OpenAILLMContextAssistantTimestampFrame,
+    StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -47,7 +48,12 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
+from pipecat.services.ai_services import (
+    ImageGenService,
+    LLMService,
+    TTSService,
+)
+from pipecat.services.base_whisper import BaseWhisperSTTService, Transcription
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -116,6 +122,8 @@ class BaseOpenAILLMService(LLMService):
         model: str,
         api_key=None,
         base_url=None,
+        organization=None,
+        project=None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -132,12 +140,20 @@ class BaseOpenAILLMService(LLMService):
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
         self.set_model_name(model)
-        self._client = self.create_client(api_key=self._api_key, base_url=base_url, **kwargs)
+        self._client = self.create_client(
+            api_key=self._api_key,
+            base_url=base_url,
+            organization=organization,
+            project=project,
+            **kwargs,
+        )
 
-    def create_client(self, api_key=None, base_url=None, **kwargs):
+    def create_client(self, api_key=None, base_url=None, organization=None, project=None, **kwargs):
         return AsyncOpenAI(
             api_key=api_key or self._api_key,
             base_url=base_url,
+            organization=organization,
+            project=project,
             http_client=DefaultAsyncHttpxClient(
                 limits=httpx.Limits(
                     max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
@@ -386,6 +402,35 @@ class OpenAIImageGenService(ImageGenService):
             yield frame
 
 
+class OpenAISTTService(BaseWhisperSTTService):
+    """OpenAI Whisper speech-to-text service.
+
+    Uses OpenAI's Whisper API to convert audio to text. Requires an OpenAI API key
+    set via the api_key parameter or OPENAI_API_KEY environment variable.
+
+    Args:
+        model: Whisper model to use. Defaults to "whisper-1".
+        api_key: OpenAI API key. Defaults to None.
+        base_url: API base URL. Defaults to None.
+        **kwargs: Additional arguments passed to BaseWhisperSTTService.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str = "whisper-1",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        **kwargs,
+    ):
+        super().__init__(model=model, api_key=api_key, base_url=base_url, **kwargs)
+
+    async def _transcribe(self, audio: bytes) -> Transcription:
+        return await self._client.audio.transcriptions.create(
+            file=("audio.wav", audio, "audio/wav"), model=self.model_name
+        )
+
+
 class OpenAITTSService(TTSService):
     """OpenAI Text-to-Speech service that generates audio from text.
 
@@ -408,21 +453,25 @@ class OpenAITTSService(TTSService):
     The service returns PCM-encoded audio at the specified sample rate.
     """
 
+    OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
+
     def __init__(
         self,
         *,
-        api_key: str | None = None,
+        api_key: Optional[str] = None,
         voice: str = "alloy",
         model: Literal["tts-1", "tts-1-hd"] = "tts-1",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         **kwargs,
     ):
+        if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
+            logger.warning(
+                f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
+                f"Current rate of {self.sample_rate}Hz may cause issues."
+            )
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key
 
-        self._settings = {
-            "sample_rate": sample_rate,
-        }
         self.set_model_name(model)
         self.set_voice(voice)
 
@@ -434,6 +483,14 @@ class OpenAITTSService(TTSService):
     async def set_model(self, model: str):
         logger.info(f"Switching TTS model to: [{model}]")
         self.set_model_name(model)
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        if self.sample_rate != self.OPENAI_SAMPLE_RATE:
+            logger.warning(
+                f"OpenAI TTS requires {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
+                f"Current rate of {self.sample_rate}Hz may cause issues."
+            )
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
@@ -462,7 +519,7 @@ class OpenAITTSService(TTSService):
                 async for chunk in r.iter_bytes(8192):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                         yield frame
                 yield TTSStoppedFrame()
         except BadRequestError as e:
