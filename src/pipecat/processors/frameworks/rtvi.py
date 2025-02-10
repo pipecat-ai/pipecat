@@ -58,6 +58,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.utils.string import match_endofsentence
 
 RTVI_PROTOCOL_VERSION = "0.3.0"
@@ -632,10 +633,18 @@ class RTVIMetricsProcessor(RTVIFrameProcessor):
 
 
 class RTVIObserver(BaseObserver):
-    """This is a pipeline frame observer that is used to send RTVI server
-    messages to clients. The observer does not handle incoming RTVI client
-    messages, which is done by the RTVIProcessor.
+    """Pipeline frame observer for RTVI server message handling.
 
+    This observer monitors pipeline frames and converts them into appropriate RTVI messages
+    for client communication. It handles various frame types including speech events,
+    transcriptions, LLM responses, and TTS events.
+
+    Note:
+        This observer only handles outgoing messages. Incoming RTVI client messages
+        are handled by the RTVIProcessor.
+
+    Args:
+        rtvi (FrameProcessor): The RTVI processor to push frames to.
     """
 
     def __init__(self, rtvi: FrameProcessor):
@@ -652,10 +661,22 @@ class RTVIObserver(BaseObserver):
         direction: FrameDirection,
         timestamp: int,
     ):
+        """Process a frame being pushed through the pipeline.
+
+        Args:
+            src: Source processor pushing the frame
+            dst: Destination processor receiving the frame
+            frame: The frame being pushed
+            direction: Direction of frame flow in pipeline
+            timestamp: Time when frame was pushed
+        """
         # If we have already seen this frame, let's skip it.
         if frame.id in self._frames_seen:
             return
-        self._frames_seen.add(frame.id)
+
+        # This tells whether the frame is already processed. If false, we will try
+        # again the next time we see the frame.
+        mark_as_seen = True
 
         if isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame)):
             await self._handle_interruptions(frame)
@@ -678,12 +699,24 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, TTSStoppedFrame):
             await self.push_transport_message_urgent(RTVIBotTTSStoppedMessage())
         elif isinstance(frame, TTSTextFrame):
-            message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
-            await self.push_transport_message_urgent(message)
+            if isinstance(src, BaseOutputTransport):
+                message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
+                await self.push_transport_message_urgent(message)
+            else:
+                mark_as_seen = False
         elif isinstance(frame, MetricsFrame):
             await self._handle_metrics(frame)
 
+        if mark_as_seen:
+            self._frames_seen.add(frame.id)
+
     async def push_transport_message_urgent(self, model: BaseModel, exclude_none: bool = True):
+        """Push an urgent transport message to the RTVI processor.
+
+        Args:
+            model: The message model to send
+            exclude_none: Whether to exclude None values from the model dump
+        """
         frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
         await self._rtvi.push_frame(frame)
 
