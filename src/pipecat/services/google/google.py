@@ -75,7 +75,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_google_language(language: Language) -> Optional[str]:
+def language_to_google_tts_language(language: Language) -> Optional[str]:
     language_map = {
         # Afrikaans
         Language.AF: "af-ZA",
@@ -230,6 +230,305 @@ def language_to_google_language(language: Language) -> Optional[str]:
         # Vietnamese
         Language.VI: "vi-VN",
         Language.VI_VN: "vi-VN",
+    }
+
+    return language_map.get(language)
+
+
+def language_to_google_stt_language(language: Language) -> Optional[str]:
+    """Maps Language enum to Google Speech-to-Text V2 language codes.
+
+    Args:
+        language: Language enum value.
+
+    Returns:
+        Optional[str]: Google STT language code or None if not supported.
+    """
+    language_map = {
+        # Afrikaans
+        Language.AF: "af-ZA",
+        Language.AF_ZA: "af-ZA",
+        # Albanian
+        Language.SQ: "sq-AL",
+        Language.SQ_AL: "sq-AL",
+        # Amharic
+        Language.AM: "am-ET",
+        Language.AM_ET: "am-ET",
+        # Arabic
+        Language.AR: "ar-EG",  # Default to Egypt
+        Language.AR_AE: "ar-AE",
+        Language.AR_BH: "ar-BH",
+        Language.AR_DZ: "ar-DZ",
+        Language.AR_EG: "ar-EG",
+        Language.AR_IQ: "ar-IQ",
+        Language.AR_JO: "ar-JO",
+        Language.AR_KW: "ar-KW",
+        Language.AR_LB: "ar-LB",
+        Language.AR_MA: "ar-MA",
+        Language.AR_OM: "ar-OM",
+        Language.AR_QA: "ar-QA",
+        Language.AR_SA: "ar-SA",
+        Language.AR_SY: "ar-SY",
+        Language.AR_TN: "ar-TN",
+        Language.AR_YE: "ar-YE",
+        # Armenian
+        Language.HY: "hy-AM",
+        Language.HY_AM: "hy-AM",
+        # Azerbaijani
+        Language.AZ: "az-AZ",
+        Language.AZ_AZ: "az-AZ",
+        # Basque
+        Language.EU: "eu-ES",
+        Language.EU_ES: "eu-ES",
+        # Bengali
+        Language.BN: "bn-IN",  # Default to India
+        Language.BN_BD: "bn-BD",
+        Language.BN_IN: "bn-IN",
+        # Bosnian
+        Language.BS: "bs-BA",
+        Language.BS_BA: "bs-BA",
+        # Bulgarian
+        Language.BG: "bg-BG",
+        Language.BG_BG: "bg-BG",
+        # Burmese
+        Language.MY: "my-MM",
+        Language.MY_MM: "my-MM",
+        # Catalan
+        Language.CA: "ca-ES",
+        Language.CA_ES: "ca-ES",
+        # Chinese
+        Language.ZH: "cmn-Hans-CN",  # Default to Simplified Chinese
+        Language.ZH_CN: "cmn-Hans-CN",
+        Language.ZH_HK: "cmn-Hans-HK",
+        Language.ZH_TW: "cmn-Hant-TW",
+        Language.YUE: "yue-Hant-HK",  # Cantonese
+        Language.YUE_CN: "yue-Hant-HK",
+        # Croatian
+        Language.HR: "hr-HR",
+        Language.HR_HR: "hr-HR",
+        # Czech
+        Language.CS: "cs-CZ",
+        Language.CS_CZ: "cs-CZ",
+        # Danish
+        Language.DA: "da-DK",
+        Language.DA_DK: "da-DK",
+        # Dutch
+        Language.NL: "nl-NL",  # Default to Netherlands
+        Language.NL_BE: "nl-BE",
+        Language.NL_NL: "nl-NL",
+        # English
+        Language.EN: "en-US",  # Default to US
+        Language.EN_AU: "en-AU",
+        Language.EN_CA: "en-CA",
+        Language.EN_GB: "en-GB",
+        Language.EN_GH: "en-GH",
+        Language.EN_HK: "en-HK",
+        Language.EN_IN: "en-IN",
+        Language.EN_IE: "en-IE",
+        Language.EN_KE: "en-KE",
+        Language.EN_NG: "en-NG",
+        Language.EN_NZ: "en-NZ",
+        Language.EN_PH: "en-PH",
+        Language.EN_SG: "en-SG",
+        Language.EN_TZ: "en-TZ",
+        Language.EN_US: "en-US",
+        Language.EN_ZA: "en-ZA",
+        # Estonian
+        Language.ET: "et-EE",
+        Language.ET_EE: "et-EE",
+        # Filipino
+        Language.FIL: "fil-PH",
+        Language.FIL_PH: "fil-PH",
+        # Finnish
+        Language.FI: "fi-FI",
+        Language.FI_FI: "fi-FI",
+        # French
+        Language.FR: "fr-FR",  # Default to France
+        Language.FR_BE: "fr-BE",
+        Language.FR_CA: "fr-CA",
+        Language.FR_CH: "fr-CH",
+        Language.FR_FR: "fr-FR",
+        # Galician
+        Language.GL: "gl-ES",
+        Language.GL_ES: "gl-ES",
+        # Georgian
+        Language.KA: "ka-GE",
+        Language.KA_GE: "ka-GE",
+        # German
+        Language.DE: "de-DE",  # Default to Germany
+        Language.DE_AT: "de-AT",
+        Language.DE_CH: "de-CH",
+        Language.DE_DE: "de-DE",
+        # Greek
+        Language.EL: "el-GR",
+        Language.EL_GR: "el-GR",
+        # Gujarati
+        Language.GU: "gu-IN",
+        Language.GU_IN: "gu-IN",
+        # Hebrew
+        Language.HE: "iw-IL",
+        Language.HE_IL: "iw-IL",
+        # Hindi
+        Language.HI: "hi-IN",
+        Language.HI_IN: "hi-IN",
+        # Hungarian
+        Language.HU: "hu-HU",
+        Language.HU_HU: "hu-HU",
+        # Icelandic
+        Language.IS: "is-IS",
+        Language.IS_IS: "is-IS",
+        # Indonesian
+        Language.ID: "id-ID",
+        Language.ID_ID: "id-ID",
+        # Italian
+        Language.IT: "it-IT",
+        Language.IT_IT: "it-IT",
+        Language.IT_CH: "it-CH",
+        # Japanese
+        Language.JA: "ja-JP",
+        Language.JA_JP: "ja-JP",
+        # Javanese
+        Language.JV: "jv-ID",
+        Language.JV_ID: "jv-ID",
+        # Kannada
+        Language.KN: "kn-IN",
+        Language.KN_IN: "kn-IN",
+        # Kazakh
+        Language.KK: "kk-KZ",
+        Language.KK_KZ: "kk-KZ",
+        # Khmer
+        Language.KM: "km-KH",
+        Language.KM_KH: "km-KH",
+        # Korean
+        Language.KO: "ko-KR",
+        Language.KO_KR: "ko-KR",
+        # Lao
+        Language.LO: "lo-LA",
+        Language.LO_LA: "lo-LA",
+        # Latvian
+        Language.LV: "lv-LV",
+        Language.LV_LV: "lv-LV",
+        # Lithuanian
+        Language.LT: "lt-LT",
+        Language.LT_LT: "lt-LT",
+        # Macedonian
+        Language.MK: "mk-MK",
+        Language.MK_MK: "mk-MK",
+        # Malay
+        Language.MS: "ms-MY",
+        Language.MS_MY: "ms-MY",
+        # Malayalam
+        Language.ML: "ml-IN",
+        Language.ML_IN: "ml-IN",
+        # Marathi
+        Language.MR: "mr-IN",
+        Language.MR_IN: "mr-IN",
+        # Mongolian
+        Language.MN: "mn-MN",
+        Language.MN_MN: "mn-MN",
+        # Nepali
+        Language.NE: "ne-NP",
+        Language.NE_NP: "ne-NP",
+        # Norwegian
+        Language.NO: "no-NO",
+        Language.NB: "no-NO",
+        Language.NB_NO: "no-NO",
+        # Persian
+        Language.FA: "fa-IR",
+        Language.FA_IR: "fa-IR",
+        # Polish
+        Language.PL: "pl-PL",
+        Language.PL_PL: "pl-PL",
+        # Portuguese
+        Language.PT: "pt-PT",  # Default to Portugal
+        Language.PT_BR: "pt-BR",
+        Language.PT_PT: "pt-PT",
+        # Punjabi
+        Language.PA: "pa-Guru-IN",
+        Language.PA_IN: "pa-Guru-IN",
+        # Romanian
+        Language.RO: "ro-RO",
+        Language.RO_RO: "ro-RO",
+        # Russian
+        Language.RU: "ru-RU",
+        Language.RU_RU: "ru-RU",
+        # Serbian
+        Language.SR: "sr-RS",
+        Language.SR_RS: "sr-RS",
+        # Sinhala
+        Language.SI: "si-LK",
+        Language.SI_LK: "si-LK",
+        # Slovak
+        Language.SK: "sk-SK",
+        Language.SK_SK: "sk-SK",
+        # Slovenian
+        Language.SL: "sl-SI",
+        Language.SL_SI: "sl-SI",
+        # Spanish
+        Language.ES: "es-ES",  # Default to Spain
+        Language.ES_AR: "es-AR",
+        Language.ES_BO: "es-BO",
+        Language.ES_CL: "es-CL",
+        Language.ES_CO: "es-CO",
+        Language.ES_CR: "es-CR",
+        Language.ES_DO: "es-DO",
+        Language.ES_EC: "es-EC",
+        Language.ES_ES: "es-ES",
+        Language.ES_GT: "es-GT",
+        Language.ES_HN: "es-HN",
+        Language.ES_MX: "es-MX",
+        Language.ES_NI: "es-NI",
+        Language.ES_PA: "es-PA",
+        Language.ES_PE: "es-PE",
+        Language.ES_PR: "es-PR",
+        Language.ES_PY: "es-PY",
+        Language.ES_SV: "es-SV",
+        Language.ES_US: "es-US",
+        Language.ES_UY: "es-UY",
+        Language.ES_VE: "es-VE",
+        # Sundanese
+        Language.SU: "su-ID",
+        Language.SU_ID: "su-ID",
+        # Swahili
+        Language.SW: "sw-TZ",  # Default to Tanzania
+        Language.SW_KE: "sw-KE",
+        Language.SW_TZ: "sw-TZ",
+        # Swedish
+        Language.SV: "sv-SE",
+        Language.SV_SE: "sv-SE",
+        # Tamil
+        Language.TA: "ta-IN",  # Default to India
+        Language.TA_IN: "ta-IN",
+        Language.TA_MY: "ta-MY",
+        Language.TA_SG: "ta-SG",
+        Language.TA_LK: "ta-LK",
+        # Telugu
+        Language.TE: "te-IN",
+        Language.TE_IN: "te-IN",
+        # Thai
+        Language.TH: "th-TH",
+        Language.TH_TH: "th-TH",
+        # Turkish
+        Language.TR: "tr-TR",
+        Language.TR_TR: "tr-TR",
+        # Ukrainian
+        Language.UK: "uk-UA",
+        Language.UK_UA: "uk-UA",
+        # Urdu
+        Language.UR: "ur-IN",  # Default to India
+        Language.UR_IN: "ur-IN",
+        Language.UR_PK: "ur-PK",
+        # Uzbek
+        Language.UZ: "uz-UZ",
+        Language.UZ_UZ: "uz-UZ",
+        # Vietnamese
+        Language.VI: "vi-VN",
+        Language.VI_VN: "vi-VN",
+        # Xhosa
+        Language.XH: "xh-ZA",
+        # Zulu
+        Language.ZU: "zu-ZA",
+        Language.ZU_ZA: "zu-ZA",
     }
 
     return language_map.get(language)
@@ -939,7 +1238,7 @@ class GoogleTTSService(TTSService):
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
-        return language_to_google_language(language)
+        return language_to_google_tts_language(language)
 
     def _construct_ssml(self, text: str) -> str:
         ssml = "<speak>"
@@ -1163,7 +1462,9 @@ class GoogleSTTService(STTService):
         self._client = speech_v2.SpeechAsyncClient(credentials=creds)
 
         self._settings = {
-            "language_code": self.language_to_service_language(params.language or Language.EN_US),
+            "language_code": self.language_to_service_language(params.language)
+            if params.language
+            else "en-US",
             "model": params.model,
             "use_separate_recognition_per_channel": params.use_separate_recognition_per_channel,
             "enable_automatic_punctuation": params.enable_automatic_punctuation,
@@ -1177,8 +1478,8 @@ class GoogleSTTService(STTService):
         if recognition_config:
             self._settings.update(recognition_config)
 
-    def language_to_service_language(self, language: Language) -> str:
-        return str(language.value)
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        return language_to_google_stt_language(language)
 
     async def set_language(self, language: Language):
         logger.info(f"Switching STT language to: [{language}]")
@@ -1209,7 +1510,7 @@ class GoogleSTTService(STTService):
         await self._disconnect()
 
     async def _connect(self):
-        """Initialize streaming recognition config and stream"""
+        """Initialize streaming recognition config and stream."""
         logger.debug("Connecting to Google Speech-to-Text")
 
         # Create recognition config with explicit audio format
@@ -1237,7 +1538,7 @@ class GoogleSTTService(STTService):
         self._streaming_task = self.create_task(self._stream_audio())
 
     async def _disconnect(self):
-        """Clean up streaming recognition resources"""
+        """Clean up streaming recognition resources."""
         if self._streaming_task:
             logger.debug("Disconnecting from Google Speech-to-Text")
             # Send sentinel value to stop request generator
@@ -1281,7 +1582,7 @@ class GoogleSTTService(STTService):
             raise
 
     async def _stream_audio(self):
-        """Handle bi-directional streaming with Google STT"""
+        """Handle bi-directional streaming with Google STT."""
         try:
             # Start bi-directional streaming
             streaming_recognize = await self._client.streaming_recognize(
@@ -1299,14 +1600,14 @@ class GoogleSTTService(STTService):
             await self.push_frame(ErrorFrame(str(e)))
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Process an audio chunk for STT transcription"""
+        """Process an audio chunk for STT transcription."""
         if self._streaming_task:
             # Queue the audio data
             await self._request_queue.put(audio)
         yield None
 
     async def _process_responses(self, streaming_recognize):
-        """Process streaming recognition responses"""
+        """Process streaming recognition responses."""
         try:
             async for response in streaming_recognize:
                 if not response.results:
