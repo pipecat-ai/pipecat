@@ -54,6 +54,9 @@ class Language(StrEnum):
     AZ = "az"
     AZ_AZ = "az-AZ"
 
+    # Belarusian
+    BE = "be"
+
     # Bulgarian
     BG = "bg"
     BG_BG = "bg-BG"
@@ -263,6 +266,9 @@ class Language(StrEnum):
     # Mongolian
     MN = "mn"
     MN_MN = "mn-MN"
+
+    # Maori
+    MI = "mi"
 
     # Marathi
     MR = "mr"
