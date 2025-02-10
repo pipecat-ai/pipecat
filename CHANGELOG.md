@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Improved error handling in `AzureTTSService` to properly detect and log
+  synthesis cancellation errors.
+
 - Enhanced `WhisperSTTService` with full language support and improved model
   documentation.
 

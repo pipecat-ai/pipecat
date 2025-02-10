@@ -577,35 +577,43 @@ class AzureTTSService(AzureBaseTTSService):
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-            yield TTSStartedFrame()
+            if self._speech_synthesizer is None:
+                error_msg = "Speech synthesizer not initialized."
+                logger.error(error_msg)
+                yield ErrorFrame(error_msg)
+                return
 
-            ssml = self._construct_ssml(text)
+            try:
+                await self.start_ttfb_metrics()
+                yield TTSStartedFrame()
 
-            # Start synthesis
-            self._speech_synthesizer.speak_ssml_async(ssml)
+                ssml = self._construct_ssml(text)
+                self._speech_synthesizer.speak_ssml_async(ssml)
+                await self.start_tts_usage_metrics(text)
 
-            await self.start_tts_usage_metrics(text)
+                # Stream audio chunks as they arrive
+                while True:
+                    chunk = await self._audio_queue.get()
+                    if chunk is None:  # End of stream
+                        break
 
-            # Stream audio chunks as they arrive
-            while True:
-                chunk = await self._audio_queue.get()
-                if chunk is None:  # End of stream
-                    break
+                    await self.stop_ttfb_metrics()
+                    yield TTSAudioRawFrame(
+                        audio=chunk,
+                        sample_rate=self.sample_rate,
+                        num_channels=1,
+                    )
 
-                await self.stop_ttfb_metrics()
+                yield TTSStoppedFrame()
 
-                yield TTSAudioRawFrame(
-                    audio=chunk,
-                    sample_rate=self.sample_rate,
-                    num_channels=1,
-                )
-
-            yield TTSStoppedFrame()
+            except Exception as e:
+                logger.error(f"{self} error during synthesis: {e}")
+                yield TTSStoppedFrame()
+                # Could add reconnection logic here if needed
+                return
 
         except Exception as e:
-            logger.error(f"{self} error generating TTS: {e}")
-            yield ErrorFrame(f"{self} error: {str(e)}")
+            logger.error(f"{self} exception: {e}")
 
 
 class AzureHttpTTSService(AzureBaseTTSService):
