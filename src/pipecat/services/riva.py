@@ -65,7 +65,7 @@ class FastPitchTTSService(TTSService):
 
         metadata = [
             ["function-id", function_id],
-            ["authorization", f"Bearer {api_key}"],
+            ["authorization", f"Bearer {self._api_key}"],
         ]
         auth = riva.client.Auth(None, True, server, metadata)
 
@@ -159,7 +159,7 @@ class ParakeetSTTService(STTService):
 
         metadata = [
             ["function-id", function_id],
-            ["authorization", f"Bearer {api_key}"],
+            ["authorization", f"Bearer {self._api_key}"],
         ]
         auth = riva.client.Auth(None, True, server, metadata)
 

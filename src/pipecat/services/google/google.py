@@ -647,7 +647,8 @@ class GoogleLLMService(LLMService):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        gai.configure(api_key=api_key)
+        self._api_key = api_key
+        gai.configure(api_key=self._api_key)
         self.set_model_name(model)
         self._system_instruction = system_instruction
         self._create_client()
@@ -1046,9 +1047,10 @@ class GoogleImageGenService(ImageGenService):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self._api_key = api_key
         self.set_model_name(params.model)
         self._params = params
-        self._client = genai.Client(api_key=api_key)
+        self._client = genai.Client(api_key=self._api_key)
 
     def can_generate_metrics(self) -> bool:
         return True

@@ -38,7 +38,8 @@ class OpenRouterLLMService(OpenAILLMService):
             model=model,
             **kwargs,
         )
+        self._api_key = api_key
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         logger.debug(f"Creating OpenRouter client with api {base_url}")
-        return super().create_client(api_key, base_url, **kwargs)
+        return super().create_client(api_key or self._api_key, base_url, **kwargs)

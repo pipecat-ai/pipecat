@@ -45,11 +45,12 @@ class BaseWhisperSTTService(SegmentedSTTService):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self._api_key = api_key
         self.set_model_name(model)
-        self._client = self._create_client(api_key, base_url)
+        self._client = self._create_client(self._api_key, base_url)
 
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
-        return AsyncOpenAI(api_key=api_key, base_url=base_url)
+        return AsyncOpenAI(api_key=api_key or self._api_key, base_url=base_url)
 
     async def set_model(self, model: str):
         self.set_model_name(model)

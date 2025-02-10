@@ -59,11 +59,12 @@ class DeepgramTTSService(TTSService):
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
+        self._api_key = api_key
         self._settings = {
             "encoding": encoding,
         }
         self.set_voice(voice)
-        self._deepgram_client = DeepgramClient(api_key=api_key)
+        self._deepgram_client = DeepgramClient(api_key=self._api_key)
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -146,10 +147,11 @@ class DeepgramSTTService(STTService):
         ):
             merged_options.language = merged_options.language.value
 
+        self._api_key = api_key
         self._settings = merged_options.to_dict()
 
         self._client = DeepgramClient(
-            api_key,
+            self._api_key,
             config=DeepgramClientOptions(
                 url=url,
                 options={"keepalive": "true"},  # verbose=logging.DEBUG

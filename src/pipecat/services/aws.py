@@ -129,11 +129,12 @@ class PollyTTSService(TTSService):
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+        self._api_key = api_key
 
         self._polly_client = boto3.client(
             "polly",
             aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=api_key,
+            aws_secret_access_key=self._api_key,
             aws_session_token=aws_session_token,
             region_name=region,
         )

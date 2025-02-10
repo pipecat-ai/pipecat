@@ -40,14 +40,17 @@ from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
+from pipecat.utils.exceptions import APIKeyNotFoundError
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.time import seconds_to_nanoseconds
 
 
 class AIService(FrameProcessor):
-    def __init__(self, **kwargs):
+    def __init__(self, *, require_api_key: bool = True, **kwargs):
         super().__init__(**kwargs)
+        self._api_key: str = ""
+        self._require_api_key: bool = require_api_key
         self._model_name: str = ""
         self._settings: Dict[str, Any] = {}
         self._session_properties: Dict[str, Any] = {}
@@ -61,7 +64,11 @@ class AIService(FrameProcessor):
         self.set_core_metrics_data(MetricsData(processor=self.name, model=self._model_name))
 
     async def start(self, frame: StartFrame):
-        pass
+        if self._require_api_key and not self._api_key:
+            if self._api_key is None:
+                raise APIKeyNotFoundError(f"{self}: Error: api_key is None.")
+            else:
+                raise APIKeyNotFoundError(f"{self}: Error: api_key is not set.")
 
     async def stop(self, frame: EndFrame):
         pass

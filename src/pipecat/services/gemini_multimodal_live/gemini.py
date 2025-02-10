@@ -194,7 +194,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._api_session_ready = False
         self._run_llm_when_api_session_ready = False
 
-        self._transcriber = AudioTranscriber(api_key)
+        self._transcriber = AudioTranscriber(api_key=self._api_key)
         self._transcribe_user_audio = transcribe_user_audio
         self._transcribe_model_audio = transcribe_model_audio
         self._user_is_speaking = False
@@ -395,7 +395,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         logger.info("Connecting to Gemini service")
         try:
-            uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self.api_key}"
+            uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self._api_key}"
             logger.info(f"Connecting to {uri}")
             self._websocket = await websockets.connect(uri=uri)
             self._receive_task = self.create_task(self._receive_task_handler())

@@ -128,6 +128,7 @@ class BaseOpenAILLMService(LLMService):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self._api_key = api_key
         self._settings = {
             "frequency_penalty": params.frequency_penalty,
             "presence_penalty": params.presence_penalty,
@@ -140,12 +141,16 @@ class BaseOpenAILLMService(LLMService):
         }
         self.set_model_name(model)
         self._client = self.create_client(
-            api_key=api_key, base_url=base_url, organization=organization, project=project, **kwargs
+            api_key=self._api_key,
+            base_url=base_url,
+            organization=organization,
+            project=project,
+            **kwargs,
         )
 
     def create_client(self, api_key=None, base_url=None, organization=None, project=None, **kwargs):
         return AsyncOpenAI(
-            api_key=api_key,
+            api_key=api_key or self._api_key,
             base_url=base_url,
             organization=organization,
             project=project,
@@ -369,9 +374,10 @@ class OpenAIImageGenService(ImageGenService):
         model: str = "dall-e-3",
     ):
         super().__init__()
+        self._api_key = api_key
         self.set_model_name(model)
         self._image_size = image_size
-        self._client = AsyncOpenAI(api_key=api_key)
+        self._client = AsyncOpenAI(api_key=self._api_key)
         self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
@@ -464,11 +470,12 @@ class OpenAITTSService(TTSService):
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
         super().__init__(sample_rate=sample_rate, **kwargs)
+        self._api_key = api_key
 
         self.set_model_name(model)
         self.set_voice(voice)
 
-        self._client = AsyncOpenAI(api_key=api_key)
+        self._client = AsyncOpenAI(api_key=self._api_key)
 
     def can_generate_metrics(self) -> bool:
         return True
