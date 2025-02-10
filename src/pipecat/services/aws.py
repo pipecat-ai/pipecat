@@ -134,7 +134,7 @@ class PollyTTSService(TTSService):
         self._polly_client = boto3.client(
             "polly",
             aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=api_key,
+            aws_secret_access_key=self._api_key,
             aws_session_token=aws_session_token,
             region_name=region,
         )

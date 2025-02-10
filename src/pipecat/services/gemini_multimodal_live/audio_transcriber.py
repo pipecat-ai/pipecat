@@ -27,8 +27,8 @@ Rules:
 
 class AudioTranscriber:
     def __init__(self, api_key, model="gemini-2.0-flash-exp"):
-        gai.configure(api_key=api_key)
         self._api_key = api_key
+        gai.configure(api_key=self._api_key)
         self.model = model
 
         self._client = None

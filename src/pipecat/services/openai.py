@@ -132,11 +132,11 @@ class BaseOpenAILLMService(LLMService):
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
         self.set_model_name(model)
-        self._client = self.create_client(api_key=api_key, base_url=base_url, **kwargs)
+        self._client = self.create_client(api_key=self._api_key, base_url=base_url, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         return AsyncOpenAI(
-            api_key=api_key,
+            api_key=api_key or self._api_key,
             base_url=base_url,
             http_client=DefaultAsyncHttpxClient(
                 limits=httpx.Limits(
@@ -358,9 +358,10 @@ class OpenAIImageGenService(ImageGenService):
         model: str = "dall-e-3",
     ):
         super().__init__()
+        self._api_key = api_key
         self.set_model_name(model)
         self._image_size = image_size
-        self._client = AsyncOpenAI(api_key=api_key)
+        self._client = AsyncOpenAI(api_key=self._api_key)
         self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
@@ -425,7 +426,7 @@ class OpenAITTSService(TTSService):
         self.set_model_name(model)
         self.set_voice(voice)
 
-        self._client = AsyncOpenAI(api_key=api_key)
+        self._client = AsyncOpenAI(api_key=self._api_key)
 
     def can_generate_metrics(self) -> bool:
         return True

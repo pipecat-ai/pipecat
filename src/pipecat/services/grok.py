@@ -149,7 +149,7 @@ class GrokLLMService(OpenAILLMService):
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Grok API endpoint."""
         logger.debug(f"Creating Grok client with api {base_url}")
-        return super().create_client(api_key, base_url, **kwargs)
+        return super().create_client(self._api_key, base_url, **kwargs)
 
     async def _process_context(self, context: OpenAILLMContext):
         """Process a context through the LLM and accumulate token usage metrics.

@@ -355,7 +355,7 @@ class CartesiaHttpTTSService(TTSService):
         self.set_voice(voice_id)
         self.set_model_name(model)
 
-        self._client = AsyncCartesia(api_key=api_key, base_url=base_url)
+        self._client = AsyncCartesia(api_key=self._api_key, base_url=base_url)
 
     def can_generate_metrics(self) -> bool:
         return True

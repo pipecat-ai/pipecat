@@ -37,4 +37,4 @@ class TogetherLLMService(OpenAILLMService):
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Together.ai API endpoint."""
         logger.debug(f"Creating Together.ai client with api {base_url}")
-        return super().create_client(api_key, base_url, **kwargs)
+        return super().create_client(api_key or self._api_key, base_url, **kwargs)

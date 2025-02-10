@@ -190,7 +190,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._api_session_ready = False
         self._run_llm_when_api_session_ready = False
 
-        self._transcriber = AudioTranscriber(api_key)
+        self._transcriber = AudioTranscriber(api_key=self._api_key)
         self._transcribe_user_audio = transcribe_user_audio
         self._transcribe_model_audio = transcribe_model_audio
         self._user_is_speaking = False

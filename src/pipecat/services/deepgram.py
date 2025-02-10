@@ -65,7 +65,7 @@ class DeepgramTTSService(TTSService):
             "encoding": encoding,
         }
         self.set_voice(voice)
-        self._deepgram_client = DeepgramClient(api_key=api_key)
+        self._deepgram_client = DeepgramClient(api_key=self._api_key)
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -153,7 +153,7 @@ class DeepgramSTTService(STTService):
         self._settings = merged_options.to_dict()
 
         self._client = DeepgramClient(
-            api_key,
+            self._api_key,
             config=DeepgramClientOptions(
                 url=url,
                 options={"keepalive": "true"},  # verbose=logging.DEBUG

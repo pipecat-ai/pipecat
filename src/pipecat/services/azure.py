@@ -422,13 +422,13 @@ class AzureLLMService(OpenAILLMService):
         self._api_key = api_key
         self._endpoint = endpoint
         self._api_version = api_version
-        super().__init__(api_key=api_key, model=model, **kwargs)
+        super().__init__(api_key=self._api_key, model=model, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Azure OpenAI endpoint."""
         logger.debug(f"Creating Azure OpenAI client with endpoint {self._endpoint}")
         return AsyncAzureOpenAI(
-            api_key=api_key,
+            api_key=self._api_key,
             azure_endpoint=self._endpoint,
             api_version=self._api_version,
         )
@@ -658,7 +658,9 @@ class AzureSTTService(STTService):
     ):
         super().__init__(**kwargs)
 
-        speech_config = SpeechConfig(subscription=api_key, region=region)
+        self._api_key = api_key
+
+        speech_config = SpeechConfig(subscription=self._api_key, region=region)
         speech_config.speech_recognition_language = language
 
         stream_format = AudioStreamFormat(samples_per_second=sample_rate, channels=channels)

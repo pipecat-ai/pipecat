@@ -50,7 +50,7 @@ class OpenPipeLLMService(OpenAILLMService):
         openpipe_api_key = kwargs.get("openpipe_api_key") or ""
         openpipe_base_url = kwargs.get("openpipe_base_url") or ""
         client = OpenPipeAI(
-            api_key=api_key,
+            api_key=api_key or self._api_key,
             base_url=base_url,
             openpipe={"api_key": openpipe_api_key, "base_url": openpipe_base_url},
         )

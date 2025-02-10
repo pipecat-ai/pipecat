@@ -45,8 +45,8 @@ class AssemblyAISTTService(STTService):
     ):
         super().__init__(**kwargs)
 
-        aai.settings.api_key = api_key
         self._api_key = api_key
+        aai.settings.api_key = self._api_key
         self._transcriber: aai.RealtimeTranscriber | None = None
         # Store reference to the main event loop for use in callback functions
         self._loop = asyncio.get_event_loop()

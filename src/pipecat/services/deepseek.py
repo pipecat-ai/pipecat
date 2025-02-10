@@ -52,7 +52,7 @@ class DeepSeekLLMService(OpenAILLMService):
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for DeepSeek API endpoint."""
         logger.debug(f"Creating DeepSeek client with api {base_url}")
-        return super().create_client(api_key, base_url, **kwargs)
+        return super().create_client(self._api_key, base_url, **kwargs)
 
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]

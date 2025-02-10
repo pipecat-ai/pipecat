@@ -104,7 +104,7 @@ class AnthropicLLMService(LLMService):
         super().__init__(**kwargs)
         self._api_key = api_key
         self._client = client or AsyncAnthropic(
-            api_key=api_key
+            api_key=self._api_key
         )  # if the client is provided, use it and remove it, otherwise create a new one
         self.set_model_name(model)
         self._settings = {

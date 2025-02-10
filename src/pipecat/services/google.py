@@ -610,9 +610,9 @@ class GoogleLLMService(LLMService):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        gai.configure(api_key=api_key)
-        self.set_model_name(model)
         self._api_key = api_key
+        gai.configure(api_key=self._api_key)
+        self.set_model_name(model)
         self._system_instruction = system_instruction
         self._create_client()
         self._settings = {
