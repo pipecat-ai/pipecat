@@ -149,36 +149,40 @@ Sign up [here](https://dashboard.daily.co/u/signup) and [create a room](https://
 
 ## Hacking on the framework itself
 
-_Note that you may need to set up a virtual environment before following the instructions below. For instance, you might need to run the following from the root of the repo:_
+_Note: You may need to set up a virtual environment before following these instructions. From the root of the repo:_
 
 ```shell
 python3 -m venv venv
 source venv/bin/activate
 ```
 
-From the root of this repo, run the following:
+Install the development dependencies:
 
 ```shell
 pip install -r dev-requirements.txt
 ```
 
-This will install the necessary development dependencies. Also, make sure you install the git pre-commit hooks:
+Install the git pre-commit hooks (these help ensure your code follows project rules):
 
 ```shell
 pre-commit install
 ```
 
-The hooks will just save you time when you submit a PR by making sure your code follows the project rules.
-
-To use the package locally (e.g. to run sample files), run:
+Install the `pipecat-ai` package locally in editable mode:
 
 ```shell
-pip install --editable ".[option,...]"
+pip install -e .
 ```
 
-The `--editable` option makes sure you don't have to run `pip install` again and you can just edit the project files locally.
+The `-e` or `--editable` option allows you to modify the code without reinstalling.
 
-If you want to use this package from another directory, you can run:
+To include optional dependencies, add them to the install command. For example:
+
+```shell
+pip install -e ".[daily,deepgram,cartesia,openai,silero]"     # Updated for the services you're using
+```
+
+If you want to use this package from another directory:
 
 ```shell
 pip install "path_to_this_repo[option,...]"
