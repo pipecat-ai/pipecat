@@ -1418,9 +1418,11 @@ class GoogleSTTService(STTService):
         enable_automatic_punctuation: Optional[bool] = True
         enable_spoken_punctuation: Optional[bool] = False
         enable_spoken_emojis: Optional[bool] = False
-        profanity_filter: Optional[bool] = False
+        profanity_filter: Optional[bool] = True
         enable_word_time_offsets: Optional[bool] = False
         enable_word_confidence: Optional[bool] = False
+        enable_interim_results: Optional[bool] = True
+        enable_voice_activity_events: Optional[bool] = False
 
     def __init__(
         self,
@@ -1473,6 +1475,8 @@ class GoogleSTTService(STTService):
             "profanity_filter": params.profanity_filter,
             "enable_word_time_offsets": params.enable_word_time_offsets,
             "enable_word_confidence": params.enable_word_confidence,
+            "enable_interim_results": params.enable_interim_results,
+            "enable_voice_activity_events": params.enable_voice_activity_events,
         }
 
         if recognition_config:
@@ -1531,7 +1535,11 @@ class GoogleSTTService(STTService):
                     enable_word_time_offsets=self._settings["enable_word_time_offsets"],
                     enable_word_confidence=self._settings["enable_word_confidence"],
                 ),
-            )
+            ),
+            streaming_features=cloud_speech.StreamingRecognitionFeatures(
+                enable_voice_activity_events=self._settings["enable_voice_activity_events"],
+                interim_results=self._settings["enable_interim_results"],
+            ),
         )
 
         # Start the streaming task using task manager
