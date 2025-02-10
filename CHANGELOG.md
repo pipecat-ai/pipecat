@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that was causing `AudioBufferProcessor` to not record
+  synchronized audio.
+
 - Fixed an `RTVI` issue that was causing `bot-tts-text` messages to be sent
   before being processed by the output transport.
 
