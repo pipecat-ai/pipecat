@@ -10,6 +10,7 @@ from loguru import logger
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.ai_services import SegmentedSTTService
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -23,6 +24,82 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+def language_to_whisper_language(language: Language) -> Optional[str]:
+    """Language support for Whisper API.
+
+    Docs: https://platform.openai.com/docs/guides/speech-to-text#supported-languages
+    """
+    BASE_LANGUAGES = {
+        Language.AF: "af",
+        Language.AR: "ar",
+        Language.HY: "hy",
+        Language.AZ: "az",
+        Language.BE: "be",
+        Language.BS: "bs",
+        Language.BG: "bg",
+        Language.CA: "ca",
+        Language.ZH: "zh",
+        Language.HR: "hr",
+        Language.CS: "cs",
+        Language.DA: "da",
+        Language.NL: "nl",
+        Language.EN: "en",
+        Language.ET: "et",
+        Language.FI: "fi",
+        Language.FR: "fr",
+        Language.GL: "gl",
+        Language.DE: "de",
+        Language.EL: "el",
+        Language.HE: "he",
+        Language.HI: "hi",
+        Language.HU: "hu",
+        Language.IS: "is",
+        Language.ID: "id",
+        Language.IT: "it",
+        Language.JA: "ja",
+        Language.KN: "kn",
+        Language.KK: "kk",
+        Language.KO: "ko",
+        Language.LV: "lv",
+        Language.LT: "lt",
+        Language.MK: "mk",
+        Language.MS: "ms",
+        Language.MR: "mr",
+        Language.MI: "mi",
+        Language.NE: "ne",
+        Language.NO: "no",
+        Language.FA: "fa",
+        Language.PL: "pl",
+        Language.PT: "pt",
+        Language.RO: "ro",
+        Language.RU: "ru",
+        Language.SR: "sr",
+        Language.SK: "sk",
+        Language.SL: "sl",
+        Language.ES: "es",
+        Language.SW: "sw",
+        Language.SV: "sv",
+        Language.TL: "tl",
+        Language.TA: "ta",
+        Language.TH: "th",
+        Language.TR: "tr",
+        Language.UK: "uk",
+        Language.UR: "ur",
+        Language.VI: "vi",
+        Language.CY: "cy",
+    }
+
+    result = BASE_LANGUAGES.get(language)
+
+    # If not found in base languages, try to find the base language from a variant
+    if not result:
+        lang_str = str(language.value)
+        base_code = lang_str.split("-")[0].lower()
+        result = base_code if base_code in BASE_LANGUAGES.values() else None
+
+    return result
+
+
 class BaseWhisperSTTService(SegmentedSTTService):
     """Base class for Whisper-based speech-to-text services.
 
@@ -33,6 +110,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         model: Name of the Whisper model to use.
         api_key: Service API key. Defaults to None.
         base_url: Service API base URL. Defaults to None.
+        language: Language of the audio input. Defaults to English.
         **kwargs: Additional arguments passed to SegmentedSTTService.
     """
 
@@ -42,11 +120,13 @@ class BaseWhisperSTTService(SegmentedSTTService):
         model: str,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
+        language: Optional[Language] = Language.EN,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.set_model_name(model)
         self._client = self._create_client(api_key, base_url)
+        self._language = self.language_to_service_language(language or Language.EN)
 
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
@@ -56,6 +136,9 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
     def can_generate_metrics(self) -> bool:
         return True
+
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        return language_to_whisper_language(language)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         try:
