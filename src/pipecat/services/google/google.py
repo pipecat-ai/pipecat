@@ -1411,7 +1411,32 @@ class GoogleImageGenService(ImageGenService):
 
 
 class GoogleSTTService(STTService):
+    """Google Cloud Speech-to-Text V2 service implementation.
+
+    Provides real-time speech recognition using Google Cloud's Speech-to-Text V2 API
+    with streaming support. Handles audio transcription and optional voice activity detection.
+
+    Attributes:
+        InputParams: Configuration parameters for the STT service.
+    """
+
     class InputParams(BaseModel):
+        """Configuration parameters for Google Speech-to-Text.
+
+        Attributes:
+            language: Recognition language (defaults to US English).
+            model: Speech recognition model to use.
+            use_separate_recognition_per_channel: Process each audio channel separately.
+            enable_automatic_punctuation: Add punctuation to transcripts.
+            enable_spoken_punctuation: Include spoken punctuation in transcript.
+            enable_spoken_emojis: Include spoken emojis in transcript.
+            profanity_filter: Filter profanity from transcript.
+            enable_word_time_offsets: Include timing information for each word.
+            enable_word_confidence: Include confidence scores for each word.
+            enable_interim_results: Stream partial recognition results.
+            enable_voice_activity_events: Detect voice activity in audio.
+        """
+
         language: Optional[Language] = Language.EN_US
         model: Optional[str] = "latest_long"
         use_separate_recognition_per_channel: Optional[bool] = False
@@ -1430,11 +1455,24 @@ class GoogleSTTService(STTService):
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
         location: str = "global",
-        recognition_config: Optional[dict] = None,
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
+        """Initialize the Google STT service.
+
+        Args:
+            credentials: JSON string containing Google Cloud service account credentials.
+            credentials_path: Path to service account credentials JSON file.
+            location: Google Cloud location (e.g., "global", "us-central1").
+            sample_rate: Audio sample rate in Hertz.
+            params: Configuration parameters for the service.
+            **kwargs: Additional arguments passed to STTService.
+
+        Raises:
+            ValueError: If neither credentials nor credentials_path is provided.
+            ValueError: If project ID is not found in credentials.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._location = location
@@ -1459,8 +1497,6 @@ class GoogleSTTService(STTService):
         if not self._project_id:
             raise ValueError("Project ID not found in credentials")
 
-        logger.debug(f"Using project ID from credentials: {self._project_id}")
-
         self._client = speech_v2.SpeechAsyncClient(credentials=creds)
 
         self._settings = {
@@ -1479,13 +1515,19 @@ class GoogleSTTService(STTService):
             "enable_voice_activity_events": params.enable_voice_activity_events,
         }
 
-        if recognition_config:
-            self._settings.update(recognition_config)
-
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert Language enum to Google STT language code.
+
+        Args:
+            language: Language enum value.
+
+        Returns:
+            str: Google STT language code.
+        """
         return language_to_google_stt_language(language)
 
     async def set_language(self, language: Language):
+        """Update the service's recognition language."""
         logger.info(f"Switching STT language to: [{language}]")
         self._settings["language_code"] = self.language_to_service_language(language)
         # Recreate stream with new language
@@ -1542,7 +1584,6 @@ class GoogleSTTService(STTService):
             ),
         )
 
-        # Start the streaming task using task manager
         self._streaming_task = self.create_task(self._stream_audio())
 
     async def _disconnect(self):
