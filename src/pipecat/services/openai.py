@@ -180,7 +180,6 @@ class BaseOpenAILLMService(LLMService):
 
         # base64 encode any images
         for message in messages:
-            print(message)
             if message.get("mime_type") == "image/jpeg":
                 encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
                 text = message["content"]
