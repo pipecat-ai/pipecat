@@ -670,42 +670,45 @@ class RTVIObserver(BaseObserver):
             direction: Direction of frame flow in pipeline
             timestamp: Time when frame was pushed
         """
-        # Process TTSTextFrame only from output transport
-        if isinstance(frame, TTSTextFrame):
-            key = f"{frame.id}:{type(src).__name__}"
-            if isinstance(src, BaseOutputTransport) and key not in self._frames_seen:
-                self._frames_seen.add(key)
+        # If we have already seen this frame, let's skip it.
+        if frame.id in self._frames_seen:
+            return
+
+        # This tells whether the frame is already processed. If false, we will try
+        # again the next time we see the frame.
+        mark_as_seen = True
+
+        if isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame)):
+            await self._handle_interruptions(frame)
+        elif isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame)):
+            await self._handle_bot_speaking(frame)
+        elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
+            await self._handle_user_transcriptions(frame)
+        elif isinstance(frame, OpenAILLMContextFrame):
+            await self._handle_context(frame)
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            await self._push_bot_transcription()
+        elif isinstance(frame, LLMFullResponseStartFrame):
+            await self.push_transport_message_urgent(RTVIBotLLMStartedMessage())
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            await self.push_transport_message_urgent(RTVIBotLLMStoppedMessage())
+        elif isinstance(frame, LLMTextFrame):
+            await self._handle_llm_text_frame(frame)
+        elif isinstance(frame, TTSStartedFrame):
+            await self.push_transport_message_urgent(RTVIBotTTSStartedMessage())
+        elif isinstance(frame, TTSStoppedFrame):
+            await self.push_transport_message_urgent(RTVIBotTTSStoppedMessage())
+        elif isinstance(frame, TTSTextFrame):
+            if isinstance(src, BaseOutputTransport):
                 message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
                 await self.push_transport_message_urgent(message)
-        # Process first instance of frame seen
-        else:
-            # If we have already seen this frame, let's skip it.
-            if frame.id in self._frames_seen:
-                return
-            self._frames_seen.add(frame.id)
+            else:
+                mark_as_seen = False
+        elif isinstance(frame, MetricsFrame):
+            await self._handle_metrics(frame)
 
-            if isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame)):
-                await self._handle_interruptions(frame)
-            elif isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame)):
-                await self._handle_bot_speaking(frame)
-            elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
-                await self._handle_user_transcriptions(frame)
-            elif isinstance(frame, OpenAILLMContextFrame):
-                await self._handle_context(frame)
-            elif isinstance(frame, UserStartedSpeakingFrame):
-                await self._push_bot_transcription()
-            elif isinstance(frame, LLMFullResponseStartFrame):
-                await self.push_transport_message_urgent(RTVIBotLLMStartedMessage())
-            elif isinstance(frame, LLMFullResponseEndFrame):
-                await self.push_transport_message_urgent(RTVIBotLLMStoppedMessage())
-            elif isinstance(frame, LLMTextFrame):
-                await self._handle_llm_text_frame(frame)
-            elif isinstance(frame, TTSStartedFrame):
-                await self.push_transport_message_urgent(RTVIBotTTSStartedMessage())
-            elif isinstance(frame, TTSStoppedFrame):
-                await self.push_transport_message_urgent(RTVIBotTTSStoppedMessage())
-            elif isinstance(frame, MetricsFrame):
-                await self._handle_metrics(frame)
+        if mark_as_seen:
+            self._frames_seen.add(frame.id)
 
     async def push_transport_message_urgent(self, model: BaseModel, exclude_none: bool = True):
         """Push an urgent transport message to the RTVI processor.
