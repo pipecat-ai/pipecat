@@ -49,7 +49,7 @@ class FireworksLLMService(OpenAILLMService):
     def create_client(self, api_key=None, base_url=None, **kwargs):
         """Create OpenAI-compatible client for Fireworks API endpoint."""
         logger.debug(f"Creating Fireworks client with api {base_url}")
-        return super().create_client(self._api_key, base_url, **kwargs)
+        return super().create_client(api_key or self._api_key, base_url, **kwargs)
 
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]

@@ -428,7 +428,7 @@ class AzureLLMService(OpenAILLMService):
         """Create OpenAI-compatible client for Azure OpenAI endpoint."""
         logger.debug(f"Creating Azure OpenAI client with endpoint {self._endpoint}")
         return AsyncAzureOpenAI(
-            api_key=self._api_key,
+            api_key=api_key or self._api_key,
             azure_endpoint=self._endpoint,
             api_version=self._api_version,
         )
