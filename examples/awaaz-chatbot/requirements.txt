@@ -1,5 +1,5 @@
 python-dotenv
 fastapi[all]
 uvicorn
-pipecat-ai[daily,cartesia,openai,silero,deepgram]
+pipecat-ai[elevenlabs,openai,silero,deepgram]
 loguru
