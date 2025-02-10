@@ -79,12 +79,12 @@ python server.py
 1. **Build the Docker image**:
 
    ```sh
-   docker build -t awaaz-chatbot .
+   docker build -t awaazai-chatbot .
    ```
 
 2. **Run the Docker container**:
    ```sh
-   docker run -it --rm -p 8765:8765 awaaz-chatbot
+   docker run -it --rm -p 8765:8765 awaazai-chatbot
    ```
 
 The server will start on port 8765. Keep this running while you test with Twilio.
