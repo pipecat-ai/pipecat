@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for Google Cloud Speech-to-Text V2 through `GoogleSTTService`.
+
 - Added `RimeTTSService`, a new `WordTTSService`. Updated the foundational
   example `07q-interruptible-rime.py` to use `RimeTTSService`.
 
@@ -21,9 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenAI-compatible interface. Also, added foundational example
   `14n-function-calling-perplexity.py`.
 
-- Added `DailyTransport.update_remote_participants()`. This allows you to update remote participant's settings, like their permissions or which of their devices are enabled. Requires that the local participant have participant admin permission.
+- Added `DailyTransport.update_remote_participants()`. This allows you to
+  update remote participant's settings, like their permissions or which of
+  their devices are enabled. Requires that the local participant have
+  participant admin permission.
 
 ### Changed
+
+- Updated foundational example `07n-interruptible-google.py` to use all Google
+  services.
 
 - `RimeHttpTTSService` now uses the `mistv2` model by default.
 
@@ -40,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   model.
 
 - `RTVIObserver` doesn't handle `LLMSearchResponseFrame` frames anymore. For
-  now, to handle those frames you need to create a `GoogleRTVIObserver` instead.
+  now, to handle those frames you need to create a `GoogleRTVIObserver`
+  instead.
 
 ### Deprecated
 
@@ -63,8 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an `RTVI` issue that was causing `bot-tts-text` messages to be sent
   before being processed by the output transport.
 
-- Fixed an issue[#1192] in 11labs where we are trying to reconnect/disconnect the
-  websocket connection even when the connection is already closed.
+- Fixed an issue[#1192] in 11labs where we are trying to reconnect/disconnect
+  the websocket connection even when the connection is already closed.
 
 ## [0.0.56] - 2025-02-06
 
@@ -85,7 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   logging setup.
 
 - Fixed a `SentryMetrics` issue that was preventing any metrics to be sent to
-  Sentry and also was preventing from metrics frames to be pushed to the pipeline.
+  Sentry and also was preventing from metrics frames to be pushed to the
+  pipeline.
 
 - Fixed an issue in `BaseOutputTransport` where incoming audio would not be
   resampled to the desired output sample rate.
