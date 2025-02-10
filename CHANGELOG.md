@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RTVIBotLLMProcessor`) are now deprecated, instantiate an `RTVIObserver`
   instead.
 
+### Fixed
+
+- Fixed an issue[#1192] in 11labs where we are trying to reconnect/disconnect the
+  websocket connection even when the connection is already closed.
+
 ## [0.0.56] - 2025-02-06
 
 ### Changed
