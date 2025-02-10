@@ -392,6 +392,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
                 await self._send_text("")
             except websockets.ConnectionClosed as e:
                 logger.warning(f"{self} keepalive error: {e}")
+                break
 
     async def _send_text(self, text: str):
         if self._websocket:

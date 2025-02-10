@@ -87,6 +87,7 @@ class WebsocketService(ABC):
                 retry_count = 0  # Reset counter on successful message receive
             except websockets.ConnectionClosed as e:
                 logger.warning(f"{self} connection closed: {e}")
+                break
             except Exception as e:
                 retry_count += 1
                 if retry_count >= MAX_RETRIES:
