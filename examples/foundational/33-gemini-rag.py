@@ -3,6 +3,49 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+"""CrossFit Games 2025 Rulebook RAG Demo.
+
+This example demonstrates a Model-Assisted Generation (MAG) chatbot using Google's Gemini model.
+This example uses 2 Gemini models:
+- Gemini 2.0 Flash: This is the voice model that is used to generate the response.
+- Gemini 2.0 Flash Lite: This is the model that is used to answer questions about the CrossFit Games 2025 rulebook - information that isn't yet publicly
+indexed by Gemini (or any other LLM).
+
+How it works:
+- The voice model (Gemini 2.0 Flash) is configured to call a function whenever the user asks a question.
+- The function call is a tool call to the MAG model (Gemini 2.0 Flash Lite).
+- The MAG model generates a response based on the question. The MAG model has the entire contents of the CrossFit Games 2025 rulebook in it's context window.
+- The response is returned to the voice model (Gemini 2.0 Flash), which then generates the response to the user.
+
+Why this works:
+- Gemini 2.0 Flash is fast
+- Gemini 2.0 Flash Lite is faster
+- Gemini 2.0 Flash Lite has a large (1 million tokens) context window
+- IMPORTANT: The generated response from Gemini 2.0 Flash Lite is limited to 50 words or less and 64 tokens.
+You can see this in the RAG_PROMPT variable and the generation_config in the query_knowledge_base function.
+Long generations are slower and more expensive, in the world of Voice AI, we don't need long generations.
+
+Example questions to ask and compare to other RAG solutions:
+- What lenses are not allowed?
+- How many people can be on a team?
+- What do winning gyms get?
+- What happens if I skip a workout?
+- Can I switch my team members for the Games?
+- What happens if I start too early?
+
+Notes:
+- The RAG model is Gemini 2.0 Flash Lite.
+- The voice model is Gemini 2.0 Flash.
+- The RAG content is stored in the assets/rag-content.txt file.
+- The model for voice is Gemini 2.0 Flash, but can be easily switched to any other model.
+
+Customization options:
+- update assets/rag-content.txt with your own knowledge base
+- increase/decrease the RAG_MODEL's generation length
+- use a different voice model
+- play with the RAG_PROMPT
+- change the function calling logic
+"""
 
 import asyncio
 import json
@@ -34,8 +77,10 @@ video_participant_id = None
 
 
 def get_rag_content():
-    """Get the cache content from the file."""
-    with open("assets/rag-content.txt", "r") as f:
+    """Get the RAG content from the file."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    rag_content_path = os.path.join(script_dir, "assets", "rag-content.txt")
+    with open(rag_content_path, "r") as f:
         return f.read()
 
 
