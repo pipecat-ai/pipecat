@@ -124,7 +124,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         base_url: Optional[str] = None,
         language: Optional[Language] = Language.EN,
         prompt: Optional[str] = None,
-        temperature: float = 0.0,
+        temperature: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
