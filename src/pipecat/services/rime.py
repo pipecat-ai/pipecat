@@ -232,7 +232,7 @@ class RimeTTSService(WordTTSService, WebsocketService):
             List of (word, timestamp) pairs with proper timing.
         """
         word_pairs = []
-        for i, (word, start_time, end_time) in enumerate(zip(words, starts, ends)):
+        for i, (word, start_time, _) in enumerate(zip(words, starts, ends)):
             if not word.strip():
                 continue
 
