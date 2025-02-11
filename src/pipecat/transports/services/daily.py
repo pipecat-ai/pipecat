@@ -690,6 +690,13 @@ class DailyTransportClient(EventHandler):
         )
         await future
 
+    async def update_remote_participants(self, remote_participants: Mapping[str, Any] = None):
+        future = self._get_event_loop().create_future()
+        self._client.update_remote_participants(
+            remote_participants=remote_participants, completion=completion_callback(future)
+        )
+        await future
+
     #
     #
     # Daily (EventHandler)
@@ -1166,6 +1173,9 @@ class DailyTransport(BaseTransport):
         await self._client.update_subscriptions(
             participant_settings=participant_settings, profile_settings=profile_settings
         )
+
+    async def update_remote_participants(self, remote_participants: Mapping[str, Any] = None):
+        await self._client.update_remote_participants(remote_participants=remote_participants)
 
     async def _on_joined(self, data):
         await self._call_event_handler("on_joined", data)
