@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `MUTE_UNTIL_FIRST_BOT_COMPLETE` strategy to `STTMuteStrategy`. This
+  strategy starts muted and remains muted until the first bot speech completes,
+  ensuring the bot's first response cannot be interrupted. This complements the
+  existing `FIRST_SPEECH` strategy which only mutes during the first detected
+  bot speech.
+
 - Added support for Google Cloud Speech-to-Text V2 through `GoogleSTTService`.
 
 - Added `RimeTTSService`, a new `WordTTSService`. Updated the foundational
@@ -29,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   participant admin permission.
 
 ### Changed
+
+- Enhanced `STTMuteConfig` to validate strategy combinations, preventing
+  `MUTE_UNTIL_FIRST_BOT_COMPLETE` and `FIRST_SPEECH` from being used together
+  as they handle first bot speech differently.
 
 - Updated foundational example `07n-interruptible-google.py` to use all Google
   services.
