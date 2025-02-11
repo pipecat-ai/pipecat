@@ -14,11 +14,11 @@ import os
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Union
 
 from loguru import logger
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -1425,7 +1425,7 @@ class GoogleSTTService(STTService):
         """Configuration parameters for Google Speech-to-Text.
 
         Attributes:
-            language: Recognition language (defaults to US English).
+            languages: Single language or list of recognition languages. First language is primary.
             model: Speech recognition model to use.
             use_separate_recognition_per_channel: Process each audio channel separately.
             enable_automatic_punctuation: Add punctuation to transcripts.
@@ -1438,7 +1438,7 @@ class GoogleSTTService(STTService):
             enable_voice_activity_events: Detect voice activity in audio.
         """
 
-        language: Optional[Language] = Language.EN_US
+        languages: Union[Language, List[Language]] = Field(default_factory=lambda: [Language.EN_US])
         model: Optional[str] = "latest_long"
         use_separate_recognition_per_channel: Optional[bool] = False
         enable_automatic_punctuation: Optional[bool] = True
@@ -1449,6 +1449,19 @@ class GoogleSTTService(STTService):
         enable_word_confidence: Optional[bool] = False
         enable_interim_results: Optional[bool] = True
         enable_voice_activity_events: Optional[bool] = False
+
+        @field_validator("languages", mode="before")
+        @classmethod
+        def validate_languages(cls, v) -> List[Language]:
+            if isinstance(v, Language):
+                return [v]
+            return v
+
+        @property
+        def language_list(self) -> List[Language]:
+            """Get languages as a guaranteed list."""
+            assert isinstance(self.languages, list)
+            return self.languages
 
     def __init__(
         self,
@@ -1506,9 +1519,9 @@ class GoogleSTTService(STTService):
         self._client = speech_v2.SpeechAsyncClient(credentials=creds, client_options=client_options)
 
         self._settings = {
-            "language_code": self.language_to_service_language(params.language)
-            if params.language
-            else "en-US",
+            "language_codes": [
+                self.language_to_service_language(lang) for lang in params.language_list
+            ],
             "model": params.model,
             "use_separate_recognition_per_channel": params.use_separate_recognition_per_channel,
             "enable_automatic_punctuation": params.enable_automatic_punctuation,
@@ -1521,22 +1534,30 @@ class GoogleSTTService(STTService):
             "enable_voice_activity_events": params.enable_voice_activity_events,
         }
 
-    def language_to_service_language(self, language: Language) -> Optional[str]:
-        """Convert Language enum to Google STT language code.
+    def language_to_service_language(self, language: Language | List[Language]) -> str | List[str]:
+        """Convert Language enum(s) to Google STT language code(s).
 
         Args:
-            language: Language enum value.
+            language: Single Language enum or list of Language enums.
 
         Returns:
-            str: Google STT language code.
+            str | List[str]: Google STT language code(s).
         """
-        return language_to_google_stt_language(language)
+        if isinstance(language, list):
+            return [language_to_google_stt_language(lang) or "en-US" for lang in language]
+        return language_to_google_stt_language(language) or "en-US"
 
-    async def set_language(self, language: Language):
-        """Update the service's recognition language."""
-        logger.info(f"Switching STT language to: [{language}]")
-        self._settings["language_code"] = self.language_to_service_language(language)
-        # Recreate stream with new language
+    async def set_languages(self, languages: List[Language]):
+        """Update the service's recognition languages.
+
+        Args:
+            languages: List of languages for recognition. First language is primary.
+        """
+        logger.info(f"Switching STT languages to: {languages}")
+        self._settings["language_codes"] = [
+            self.language_to_service_language(lang) for lang in languages
+        ]
+        # Recreate stream with new languages
         if self._streaming_task:
             await self._disconnect()
             await self._connect()
@@ -1565,7 +1586,7 @@ class GoogleSTTService(STTService):
     async def update_options(
         self,
         *,
-        language: Optional[Language] = None,
+        languages: Optional[List[Language]] = None,
         model: Optional[str] = None,
         enable_automatic_punctuation: Optional[bool] = None,
         enable_spoken_punctuation: Optional[bool] = None,
@@ -1580,7 +1601,7 @@ class GoogleSTTService(STTService):
         """Update service options dynamically.
 
         Args:
-            language: New recognition language.
+            languages: New list of recongition languages.
             model: New recognition model.
             enable_automatic_punctuation: Enable/disable automatic punctuation.
             enable_spoken_punctuation: Enable/disable spoken punctuation.
@@ -1599,9 +1620,11 @@ class GoogleSTTService(STTService):
         needs_reconnect = False
 
         # Update settings with new values
-        if language is not None:
-            logger.debug(f"Updating language to: {language}")
-            self._settings["language_code"] = self.language_to_service_language(language)
+        if languages is not None:
+            logger.debug(f"Updating language to: {languages}")
+            self._settings["language_codes"] = [
+                self.language_to_service_language(lang) for lang in languages
+            ]
             needs_reconnect = True
 
         if model is not None:
@@ -1672,7 +1695,7 @@ class GoogleSTTService(STTService):
                     sample_rate_hertz=self.sample_rate,
                     audio_channel_count=1,
                 ),
-                language_codes=[self._settings["language_code"]],
+                language_codes=self._settings["language_codes"],
                 model=self._settings["model"],
                 features=cloud_speech.RecognitionFeatures(
                     enable_automatic_punctuation=self._settings["enable_automatic_punctuation"],
@@ -1775,16 +1798,17 @@ class GoogleSTTService(STTService):
                     if not transcript:
                         continue
 
+                    # Use the primary language (first in the list)
+                    primary_language = self._settings["language_codes"][0]
+
                     if result.is_final:
                         await self.push_frame(
-                            TranscriptionFrame(
-                                transcript, "", time_now_iso8601(), self._settings["language_code"]
-                            )
+                            TranscriptionFrame(transcript, "", time_now_iso8601(), primary_language)
                         )
                     else:
                         await self.push_frame(
                             InterimTranscriptionFrame(
-                                transcript, "", time_now_iso8601(), self._settings["language_code"]
+                                transcript, "", time_now_iso8601(), primary_language
                             )
                         )
 
