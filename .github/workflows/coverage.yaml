@@ -1,0 +1,54 @@
+name: coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "**"
+    paths-ignore:
+      - "docs/**"
+
+jobs:
+  coverage:
+    name: "Coverage"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Set up Python
+        id: setup_python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Cache virtual environment
+        uses: actions/cache@v3
+        with:
+          # We are hashing dev-requirements.txt and test-requirements.txt which
+          # contain all dependencies needed to run the tests.
+          key: venv-${{ runner.os }}-${{ steps.setup_python.outputs.python-version}}-${{ hashFiles('dev-requirements.txt') }}-${{ hashFiles('test-requirements.txt') }}
+          path: .venv
+      - name: Install system packages
+        id: install_system_packages
+        run: |
+          sudo apt-get install -y portaudio19-dev
+      - name: Setup virtual environment
+        run: |
+          python -m venv .venv
+      - name: Install basic Python dependencies
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r dev-requirements.txt -r test-requirements.txt
+      - name: Run tests with coverage
+        run: |
+          source .venv/bin/activate
+          coverage run
+          coverage xml
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: pipecat-ai/pipecat

@@ -112,3 +112,8 @@ select = [
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.coverage.run]
+command_line = "--module pytest"
+source = ["src"]
+omit = ["*/tests/*"]
