@@ -67,7 +67,7 @@ class GroqSTTService(BaseWhisperSTTService):
         base_url: str = "https://api.groq.com/openai/v1",
         language: Optional[Language] = Language.EN,
         prompt: Optional[str] = None,
-        temperature: float = 0.0,
+        temperature: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(
