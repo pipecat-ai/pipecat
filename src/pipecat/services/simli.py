@@ -41,7 +41,7 @@ class SimliVideoService(FrameProcessor):
 
         self._pipecat_resampler_event = asyncio.Event()
         self._pipecat_resampler: AudioResampler = None
-        self._simli_resampler = AudioResampler("s16", 1, 16000)
+        self._simli_resampler = AudioResampler("s16", "mono", 16000)
 
         self._audio_task: asyncio.Task = None
         self._video_task: asyncio.Task = None
