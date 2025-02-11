@@ -32,6 +32,10 @@ class AudioBufferProcessor(FrameProcessor):
     in the case of stereo the left channel will be used for the user's audio and
     the right channel for the bot.
 
+    Most of the time, user audio will be a continuous stream but it's possible
+    that in some cases only the spoken audio is sent. To accomodate for those
+    cases make sure to set `user_continuous_stream` accordingly.
+
     """
 
     def __init__(
@@ -40,6 +44,7 @@ class AudioBufferProcessor(FrameProcessor):
         sample_rate: Optional[int] = None,
         num_channels: int = 1,
         buffer_size: int = 0,
+        user_continuous_stream: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -47,10 +52,12 @@ class AudioBufferProcessor(FrameProcessor):
         self._sample_rate = 0
         self._num_channels = num_channels
         self._buffer_size = buffer_size
+        self._user_continuous_stream = user_continuous_stream
 
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
 
+        # Intermittent (non continous user stream variables)
         self._last_user_frame_at = 0
         self._last_bot_frame_at = 0
 
@@ -98,7 +105,40 @@ class AudioBufferProcessor(FrameProcessor):
         if isinstance(frame, StartFrame):
             self._update_sample_rate(frame)
 
-        if self._recording and isinstance(frame, InputAudioRawFrame):
+        if self._recording:
+            if self._user_continuous_stream:
+                await self._handle_continuous_stream(frame)
+            else:
+                await self._handle_intermittent_stream(frame)
+
+        if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
+            await self._call_on_audio_data_handler()
+
+        if isinstance(frame, (CancelFrame, EndFrame)):
+            await self.stop_recording()
+
+        await self.push_frame(frame, direction)
+
+    def _update_sample_rate(self, frame: StartFrame):
+        self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
+
+    async def _handle_continuous_stream(self, frame: Frame):
+        if isinstance(frame, InputAudioRawFrame):
+            # Add user audio.
+            resampled = await self._resample_audio(frame)
+            self._user_audio_buffer.extend(resampled)
+            # Sync the bot's buffer to the user's buffer by adding silence if needed
+            if len(self._user_audio_buffer) > len(self._bot_audio_buffer):
+                silence_size = len(self._user_audio_buffer) - len(self._bot_audio_buffer)
+                silence = b"\x00" * silence_size
+                self._bot_audio_buffer.extend(silence)
+        elif self._recording and isinstance(frame, OutputAudioRawFrame):
+            # Add bot audio.
+            resampled = await self._resample_audio(frame)
+            self._bot_audio_buffer.extend(resampled)
+
+    async def _handle_intermittent_stream(self, frame: Frame):
+        if isinstance(frame, InputAudioRawFrame):
             # Add silence if we need to.
             silence = self._compute_silence(self._last_user_frame_at)
             self._user_audio_buffer.extend(silence)
@@ -116,17 +156,6 @@ class AudioBufferProcessor(FrameProcessor):
             self._bot_audio_buffer.extend(resampled)
             # Save time of frame so we can compute silence.
             self._last_bot_frame_at = time.time()
-
-        if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
-            await self._call_on_audio_data_handler()
-
-        if isinstance(frame, (CancelFrame, EndFrame)):
-            await self.stop_recording()
-
-        await self.push_frame(frame, direction)
-
-    def _update_sample_rate(self, frame: StartFrame):
-        self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
 
     async def _call_on_audio_data_handler(self):
         if not self.has_audio() or not self._recording:
@@ -155,10 +184,9 @@ class AudioBufferProcessor(FrameProcessor):
 
     def _compute_silence(self, from_time: float) -> bytes:
         quiet_time = time.time() - from_time
-        # We should get audio frames very frequently. We pick 100ms because
-        # that's big enough, but it could be even a bit slower since we usually
-        # do 20ms audio frames.
-        if from_time == 0 or quiet_time < 0.1:
+        # We should get audio frames very frequently. We introduce silence only
+        # if there's a big enough gap of 1s.
+        if from_time == 0 or quiet_time < 1.0:
             return b""
         num_bytes = int(quiet_time * self._sample_rate) * 2
         silence = b"\x00" * num_bytes
