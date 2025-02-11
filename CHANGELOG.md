@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenAI-compatible interface. Also, added foundational example
   `14n-function-calling-perplexity.py`.
 
+- Added `DailyTransport.update_remote_participants()`. This allows you to update remote participant's settings, like their permissions or which of their devices are enabled. Requires that the local participant have participant admin permission.
+
 ### Changed
 
 - Improved error handling in `AzureTTSService` to properly detect and log
