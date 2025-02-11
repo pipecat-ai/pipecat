@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.5.0+cu124
+torchvision 
+torchaudio
+pipecat[whisper, openai]
+textual==1.0.0
+pydantic-settings==2.7.1
+pyaudio==0.2.14
