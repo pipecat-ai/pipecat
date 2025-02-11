@@ -45,7 +45,7 @@ async def main():
         )
 
         stt = GoogleSTTService(
-            params=GoogleSTTService.InputParams(language=Language.EN_US),
+            params=GoogleSTTService.InputParams(languages=Language.EN_US),
         )
 
         tts = GoogleTTSService(
