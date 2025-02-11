@@ -1,4 +1,5 @@
 build~=1.2.2
+coverage~=7.6.12
 grpcio-tools~=1.67.1
 pip-tools~=7.4.1
 pre-commit~=4.0.1
