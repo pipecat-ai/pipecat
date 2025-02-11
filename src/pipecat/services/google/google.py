@@ -61,6 +61,7 @@ try:
     import google.ai.generativelanguage as glm
     import google.generativeai as gai
     from google import genai
+    from google.api_core.client_options import ClientOptions
     from google.cloud import speech_v2, texttospeech_v1
     from google.cloud.speech_v2.types import cloud_speech
     from google.genai import types
@@ -1443,7 +1444,7 @@ class GoogleSTTService(STTService):
         enable_automatic_punctuation: Optional[bool] = True
         enable_spoken_punctuation: Optional[bool] = False
         enable_spoken_emojis: Optional[bool] = False
-        profanity_filter: Optional[bool] = True
+        profanity_filter: Optional[bool] = False
         enable_word_time_offsets: Optional[bool] = False
         enable_word_confidence: Optional[bool] = False
         enable_interim_results: Optional[bool] = True
@@ -1481,6 +1482,11 @@ class GoogleSTTService(STTService):
         self._request_queue = asyncio.Queue()
         self._streaming_task = None
 
+        # Configure client options based on location
+        client_options = None
+        if self._location != "global":
+            client_options = ClientOptions(api_endpoint=f"{self._location}-speech.googleapis.com")
+
         # Extract project ID and create client
         if credentials:
             json_account_info = json.loads(credentials)
@@ -1497,7 +1503,7 @@ class GoogleSTTService(STTService):
         if not self._project_id:
             raise ValueError("Project ID not found in credentials")
 
-        self._client = speech_v2.SpeechAsyncClient(credentials=creds)
+        self._client = speech_v2.SpeechAsyncClient(credentials=creds, client_options=client_options)
 
         self._settings = {
             "language_code": self.language_to_service_language(params.language)
