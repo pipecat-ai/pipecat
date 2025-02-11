@@ -116,7 +116,7 @@ class LocalAudioOutputTransport(BaseOutputTransport):
             )
 
 
-class LocalAudioTransport(LocalTransportParams):
+class LocalAudioTransport(BaseTransport):
     def __init__(self, params: LocalTransportParams):
         super().__init__()
         self._params = params
