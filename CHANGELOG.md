@@ -61,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue[#1192] in 11labs where we are trying to reconnect/disconnect the
   websocket connection even when the connection is already closed.
 
+- Fixed an issue where `has_regular_messages` condition was always been true in
+  `GoogleLLMContext` due to `Part` having `function_call` & `function_response` with
+  `None` values.
+
 ## [0.0.56] - 2025-02-06
 
 ### Changed
