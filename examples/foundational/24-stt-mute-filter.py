@@ -62,7 +62,10 @@ async def main():
         # Configure the mute processor with both strategies
         stt_mute_processor = STTMuteFilter(
             config=STTMuteConfig(
-                strategies={STTMuteStrategy.FIRST_SPEECH, STTMuteStrategy.FUNCTION_CALL}
+                strategies={
+                    STTMuteStrategy.MUTE_UNTIL_FIRST_BOT_COMPLETE,
+                    STTMuteStrategy.FUNCTION_CALL,
+                }
             ),
         )
 
