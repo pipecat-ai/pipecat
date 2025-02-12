@@ -115,10 +115,10 @@ class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         # We don't want to store any images in the context. Revisit this later when the API evolves.
         self._pending_image_frame_message = None
-        await super()._push_aggregation()
+        await super().push_aggregation()
 
 
 @dataclass

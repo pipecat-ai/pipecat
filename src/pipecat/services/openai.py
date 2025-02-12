@@ -614,7 +614,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                 del self._function_calls_in_progress[frame.tool_call_id]
                 self._function_call_result = frame
                 # TODO-CB: Kwin wants us to refactor this out of here but I REFUSE
-                await self._push_aggregation()
+                await self.push_aggregation()
             else:
                 logger.warning(
                     "FunctionCallResultFrame tool_call_id does not match any function call in progress"
@@ -622,9 +622,9 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                 self._function_call_result = None
         elif isinstance(frame, OpenAIImageMessageFrame):
             self._pending_image_frame_message = frame
-            await self._push_aggregation()
+            await self.push_aggregation()
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if not (
             self._aggregation or self._function_call_result or self._pending_image_frame_message
         ):
@@ -634,7 +634,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         properties: Optional[FunctionCallResultProperties] = None
 
         aggregation = self._aggregation
-        self._reset()
+        self.reset()
 
         try:
             if self._function_call_result:

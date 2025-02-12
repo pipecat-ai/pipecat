@@ -537,7 +537,7 @@ def language_to_google_stt_language(language: Language) -> Optional[str]:
 
 
 class GoogleUserContextAggregator(OpenAIUserContextAggregator):
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if len(self._aggregation) > 0:
             self._context.add_message(
                 glm.Content(role="user", parts=[glm.Part(text=self._aggregation)])
@@ -552,11 +552,11 @@ class GoogleUserContextAggregator(OpenAIUserContextAggregator):
             await self.push_frame(frame)
 
             # Reset our accumulator state.
-            self._reset()
+            self.reset()
 
 
 class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if not (
             self._aggregation or self._function_call_result or self._pending_image_frame_message
         ):
@@ -566,7 +566,7 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
         properties: Optional[FunctionCallResultProperties] = None
 
         aggregation = self._aggregation
-        self._reset()
+        self.reset()
 
         try:
             if self._function_call_result:
