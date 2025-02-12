@@ -21,11 +21,11 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([IdentityFilter()])
 
         frames_to_send = [TextFrame(text="Hello from Pipecat!")]
-        expected_returned_frames = [TextFrame]
+        expected_down_frames = [TextFrame]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
 
     async def test_pipeline_multiple(self):
@@ -36,22 +36,22 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([identity1, identity2, identity3])
 
         frames_to_send = [TextFrame(text="Hello from Pipecat!")]
-        expected_returned_frames = [TextFrame]
+        expected_down_frames = [TextFrame]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
 
     async def test_pipeline_start_metadata(self):
         pipeline = Pipeline([IdentityFilter()])
 
         frames_to_send = []
-        expected_returned_frames = [StartFrame]
+        expected_down_frames = [StartFrame]
         (received_down, _) = await run_test(
             pipeline,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
             ignore_start=False,
             start_metadata={"foo": "bar"},
         )
@@ -63,11 +63,11 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
         pipeline = ParallelPipeline([IdentityFilter()])
 
         frames_to_send = [TextFrame(text="Hello from Pipecat!")]
-        expected_returned_frames = [TextFrame]
+        expected_down_frames = [TextFrame]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
 
     async def test_parallel_multiple(self):
@@ -75,11 +75,11 @@ class TestParallelPipeline(unittest.IsolatedAsyncioTestCase):
         pipeline = ParallelPipeline([IdentityFilter()], [IdentityFilter()])
 
         frames_to_send = [TextFrame(text="Hello from Pipecat!")]
-        expected_returned_frames = [TextFrame]
+        expected_down_frames = [TextFrame]
         await run_test(
             pipeline,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
 
 

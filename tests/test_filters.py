@@ -25,11 +25,11 @@ class TestIdentifyFilter(unittest.IsolatedAsyncioTestCase):
     async def test_identity(self):
         filter = IdentityFilter()
         frames_to_send = [UserStartedSpeakingFrame(), UserStoppedSpeakingFrame()]
-        expected_returned_frames = [UserStartedSpeakingFrame, UserStoppedSpeakingFrame]
+        expected_down_frames = [UserStartedSpeakingFrame, UserStoppedSpeakingFrame]
         await run_test(
             filter,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
 
 
@@ -37,32 +37,32 @@ class TestFrameFilter(unittest.IsolatedAsyncioTestCase):
     async def test_text_frame(self):
         filter = FrameFilter(types=(TextFrame,))
         frames_to_send = [TextFrame(text="Hello Pipecat!")]
-        expected_returned_frames = [TextFrame]
+        expected_down_frames = [TextFrame]
         await run_test(
             filter,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
 
     async def test_end_frame(self):
         filter = FrameFilter(types=(EndFrame,))
         frames_to_send = [EndFrame()]
-        expected_returned_frames = [EndFrame]
+        expected_down_frames = [EndFrame]
         await run_test(
             filter,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
             send_end_frame=False,
         )
 
     async def test_system_frame(self):
         filter = FrameFilter(types=())
         frames_to_send = [UserStartedSpeakingFrame()]
-        expected_returned_frames = [UserStartedSpeakingFrame]
+        expected_down_frames = [UserStartedSpeakingFrame]
         await run_test(
             filter,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
 
 
@@ -73,11 +73,11 @@ class TestFunctionFilter(unittest.IsolatedAsyncioTestCase):
 
         filter = FunctionFilter(filter=passthrough)
         frames_to_send = [TextFrame(text="Hello Pipecat!")]
-        expected_returned_frames = [TextFrame]
+        expected_down_frames = [TextFrame]
         await run_test(
             filter,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
 
     async def test_no_passthrough(self):
@@ -86,11 +86,11 @@ class TestFunctionFilter(unittest.IsolatedAsyncioTestCase):
 
         filter = FunctionFilter(filter=no_passthrough)
         frames_to_send = [TextFrame(text="Hello Pipecat!")]
-        expected_returned_frames = []
+        expected_down_frames = []
         await run_test(
             filter,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
 
 
@@ -98,11 +98,11 @@ class TestWakeCheckFilter(unittest.IsolatedAsyncioTestCase):
     async def test_no_wake_word(self):
         filter = WakeCheckFilter(wake_phrases=["Hey, Pipecat"])
         frames_to_send = [TranscriptionFrame(user_id="test", text="Phrase 1", timestamp="")]
-        expected_returned_frames = []
+        expected_down_frames = []
         await run_test(
             filter,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
 
     async def test_wake_word(self):
@@ -111,10 +111,10 @@ class TestWakeCheckFilter(unittest.IsolatedAsyncioTestCase):
             TranscriptionFrame(user_id="test", text="Hey, Pipecat", timestamp=""),
             TranscriptionFrame(user_id="test", text="Phrase 1", timestamp=""),
         ]
-        expected_returned_frames = [TranscriptionFrame, TranscriptionFrame]
+        expected_down_frames = [TranscriptionFrame, TranscriptionFrame]
         (received_down, _) = await run_test(
             filter,
             frames_to_send=frames_to_send,
-            expected_down_frames=expected_returned_frames,
+            expected_down_frames=expected_down_frames,
         )
         assert received_down[-1].text == "Phrase 1"
