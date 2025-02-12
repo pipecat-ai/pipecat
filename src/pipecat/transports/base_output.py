@@ -14,7 +14,6 @@ from loguru import logger
 from PIL import Image
 
 from pipecat.audio.utils import create_default_resampler
-from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
@@ -37,6 +36,8 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import nanoseconds_to_seconds
+
+BOT_VAD_STOP_SECS = 0.3
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -321,15 +322,10 @@ class BaseOutputTransport(FrameProcessor):
                     )
                     yield frame
 
-        vad_stop_secs = (
-            self._params.vad_analyzer.params.stop_secs
-            if self._params.vad_analyzer
-            else VAD_STOP_SECS
-        )
         if self._params.audio_out_mixer:
-            return with_mixer(vad_stop_secs)
+            return with_mixer(BOT_VAD_STOP_SECS)
         else:
-            return without_mixer(vad_stop_secs)
+            return without_mixer(BOT_VAD_STOP_SECS)
 
     async def _sink_task_handler(self):
         async for frame in self._next_frame():

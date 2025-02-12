@@ -66,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that was causing `BotStoppedSpeakingFrame` to be generated too
+  late. This could then cause issues unblocking `STTMuteFilter` later than
+  desired.
+
 - Fixed an issue that was causing `AudioBufferProcessor` to not record
   synchronized audio.
 
