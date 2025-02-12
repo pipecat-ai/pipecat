@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `CartesiaTTSService` issue that could cause audio overlapping in some
+  cases.
+
 - Fixed an issue that was causing `AudioBufferProcessor` to not record
   synchronized audio.
 
