@@ -101,6 +101,7 @@ class Language(StrEnum):
     EN_AU = "en-AU"
     EN_CA = "en-CA"
     EN_GB = "en-GB"
+    EN_GH = "en-GH"
     EN_HK = "en-HK"
     EN_IE = "en-IE"
     EN_IN = "en-IN"
@@ -208,6 +209,7 @@ class Language(StrEnum):
     # Italian
     IT = "it"
     IT_IT = "it-IT"
+    IT_CH = "it-CH"
 
     # Inuktitut
     IU_CANS = "iu-Cans"
