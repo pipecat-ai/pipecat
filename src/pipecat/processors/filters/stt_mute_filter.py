@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
     STTMuteFrame,
@@ -108,7 +109,7 @@ class STTMuteFilter(FrameProcessor):
         self._first_speech_handled = False
         self._bot_is_speaking = False
         self._function_call_in_progress = False
-        self._is_muted = STTMuteStrategy.MUTE_UNTIL_FIRST_BOT_COMPLETE in self._config.strategies
+        self._is_muted = False  # Initialize as unmuted, will set state on StartFrame if needed
 
     @property
     def is_muted(self) -> bool:
@@ -154,6 +155,13 @@ class STTMuteFilter(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes incoming frames and manages muting state."""
         await super().process_frame(frame, direction)
+
+        # Handle initial state on StartFrame
+        if isinstance(frame, StartFrame):
+            # Check if we should start muted
+            should_mute = await self._should_mute()
+            if should_mute:
+                await self._handle_mute_state(True)
 
         # First determine if we need to change mute state
         should_mute = None
