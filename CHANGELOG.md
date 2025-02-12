@@ -5,9 +5,67 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added support for Groq's Whisper API through the new `GroqSTTService` and
+  OpenAI's Whisper API through the new `OpenAISTTService`. Introduced a new
+  base class `BaseWhisperSTTService` to handle common Whisper API
+  functionality.
+
+- Added `PerplexityLLMService` for Perplexity NIM API integration, with an
+  OpenAI-compatible interface. Also, added foundational example
+  `14n-function-calling-perplexity.py`.
+
+- Added `DailyTransport.update_remote_participants()`. This allows you to update remote participant's settings, like their permissions or which of their devices are enabled. Requires that the local participant have participant admin permission.
+
+### Changed
+
+- Improved error handling in `AzureTTSService` to properly detect and log
+  synthesis cancellation errors.
+
+- Enhanced `WhisperSTTService` with full language support and improved model
+  documentation.
+
+- Updated foundation example `14f-function-calling-groq.py` to use
+  `GroqSTTService` for transcription.
+
+- Updated `GroqLLMService` to use `llama-3.3-70b-versatile` as the default
+  model.
+
+- `RTVIObserver` doesn't handle `LLMSearchResponseFrame` frames anymore. For
+  now, to handle those frames you need to create a `GoogleRTVIObserver` instead.
+
+### Deprecated
+
+- `STTMuteFilter` constructor's `stt_service` parameter is now deprecated and
+  will be removed in a future version. The filter now manages mute state
+  internally instead of querying the STT service.
+
+- `RTVI.observer()` is now deprecated, instantiate an `RTVIObserver` directly
+  instead.
+
+- All RTVI frame processors (e.g. `RTVISpeakingProcessor`,
+  `RTVIBotLLMProcessor`) are now deprecated, instantiate an `RTVIObserver`
+  instead.
+
+### Fixed
+
+- Fixed an issue that was causing `AudioBufferProcessor` to not record
+  synchronized audio.
+
+- Fixed an `RTVI` issue that was causing `bot-tts-text` messages to be sent
+  before being processed by the output transport.
+
+- Fixed an issue[#1192] in 11labs where we are trying to reconnect/disconnect the
+  websocket connection even when the connection is already closed.
+
 ## [0.0.56] - 2025-02-06
 
 ### Changed
+
+- Use `gemini-2.0-flash-001` as the default model for `GoogleLLMSerivce`.
 
 - Improved foundational examples 22b, 22c, and 22d to support function calling.
   With these base examples, `FunctionCallInProgressFrame` and
@@ -32,10 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   initialized to `audio_in_sample_rate`. Those values currently default to 8000
   and should be set manually from the serializer constructor if a different
   value is needed.
-
-### Changed
-
-- Use `gemini-2.0-flash-001` as the default model for `GoogleLLMSerivce`.
 
 ### Other
 
@@ -119,7 +173,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AudioBufferProcessor.reset_audio_buffers()` has been removed, use
   `AudioBufferProcessor.start_recording()` and
-  ``AudioBufferProcessor.stop_recording()` instead.
+  `AudioBufferProcessor.stop_recording()` instead.
 
 ### Fixed
 

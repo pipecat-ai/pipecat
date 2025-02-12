@@ -26,8 +26,15 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+class LocalTransportParams(TransportParams):
+    input_device_index: int = 0
+    output_device_index: int = 0
+
+
 class LocalAudioInputTransport(BaseInputTransport):
-    def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
+    _params: LocalTransportParams
+
+    def __init__(self, py_audio: pyaudio.PyAudio, params: LocalTransportParams):
         super().__init__(params)
         self._py_audio = py_audio
         self._in_stream = None
@@ -46,6 +53,7 @@ class LocalAudioInputTransport(BaseInputTransport):
             frames_per_buffer=num_frames,
             stream_callback=self._audio_in_callback,
             input=True,
+            input_device_index=self._params.input_device_index,
         )
         self._in_stream.start_stream()
 
@@ -69,6 +77,8 @@ class LocalAudioInputTransport(BaseInputTransport):
 
 
 class LocalAudioOutputTransport(BaseOutputTransport):
+    _params: LocalTransportParams
+
     def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
         self._py_audio = py_audio
@@ -89,6 +99,7 @@ class LocalAudioOutputTransport(BaseOutputTransport):
             channels=self._params.audio_out_channels,
             rate=self._sample_rate,
             output=True,
+            output_device_index=self._params.output_device_index,
         )
         self._out_stream.start_stream()
 
@@ -106,7 +117,7 @@ class LocalAudioOutputTransport(BaseOutputTransport):
 
 
 class LocalAudioTransport(BaseTransport):
-    def __init__(self, params: TransportParams):
+    def __init__(self, params: LocalTransportParams):
         super().__init__()
         self._params = params
         self._pyaudio = pyaudio.PyAudio()

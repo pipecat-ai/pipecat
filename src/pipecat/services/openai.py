@@ -48,7 +48,13 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import ImageGenService, LLMService, TTSService
+from pipecat.services.ai_services import (
+    ImageGenService,
+    LLMService,
+    TTSService,
+)
+from pipecat.services.base_whisper import BaseWhisperSTTService, Transcription
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -391,6 +397,40 @@ class OpenAIImageGenService(ImageGenService):
             image = Image.open(image_stream)
             frame = URLImageRawFrame(image_url, image.tobytes(), image.size, image.format)
             yield frame
+
+
+class OpenAISTTService(BaseWhisperSTTService):
+    """OpenAI Whisper speech-to-text service.
+
+    Uses OpenAI's Whisper API to convert audio to text. Requires an OpenAI API key
+    set via the api_key parameter or OPENAI_API_KEY environment variable.
+
+    Args:
+        model: Whisper model to use. Defaults to "whisper-1".
+        api_key: OpenAI API key. Defaults to None.
+        base_url: API base URL. Defaults to None.
+        language: Language of the audio input. Defaults to English.
+        **kwargs: Additional arguments passed to BaseWhisperSTTService.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str = "whisper-1",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        language: Optional[Language] = Language.EN,
+        **kwargs,
+    ):
+        super().__init__(
+            model=model, api_key=api_key, base_url=base_url, language=language, **kwargs
+        )
+
+    async def _transcribe(self, audio: bytes) -> Transcription:
+        assert self._language is not None  # Assigned in the BaseWhisperSTTService class
+        return await self._client.audio.transcriptions.create(
+            file=("audio.wav", audio, "audio/wav"), model=self.model_name, language=self._language
+        )
 
 
 class OpenAITTSService(TTSService):

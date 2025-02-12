@@ -23,7 +23,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.google import GoogleLLMService, LLMSearchResponseFrame
+from pipecat.services.google import GoogleLLMService, GoogleRTVIObserver, LLMSearchResponseFrame
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
 
@@ -102,6 +102,7 @@ async def main():
 
         llm = GoogleLLMService(
             api_key=os.getenv("GOOGLE_API_KEY"),
+            model="gemini-1.5-flash-002",
             system_instruction=system_instruction,
             tools=tools,
         )
@@ -141,7 +142,7 @@ async def main():
             pipeline,
             PipelineParams(
                 allow_interruptions=True,
-                observers=[rtvi.observer()],
+                observers=[GoogleRTVIObserver(rtvi)],
             ),
         )
 
