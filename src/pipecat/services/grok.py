@@ -27,7 +27,7 @@ from pipecat.services.openai import (
 class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
     """Custom assistant context aggregator for Grok that handles empty content requirement."""
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if not (
             self._aggregation or self._function_call_result or self._pending_image_frame_message
         ):
@@ -37,7 +37,7 @@ class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
         properties: Optional[FunctionCallResultProperties] = None
 
         aggregation = self._aggregation
-        self._reset()
+        self.reset()
 
         try:
             if self._function_call_result:

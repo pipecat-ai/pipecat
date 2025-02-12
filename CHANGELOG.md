@@ -38,10 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenAI-compatible interface. Also, added foundational example
   `14n-function-calling-perplexity.py`.
 
-- Added `DailyTransport.update_remote_participants()`. This allows you to
-  update remote participant's settings, like their permissions or which of
-  their devices are enabled. Requires that the local participant have
-  participant admin permission.
+- Added `DailyTransport.update_remote_participants()`. This allows you to update
+  remote participant's settings, like their permissions or which of their
+  devices are enabled. Requires that the local participant have participant
+  admin permission.
 
 ### Changed
 
@@ -90,6 +90,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead.
 
 ### Fixed
+
+- Fixed multiple issue where user transcriptions where not being handled
+  properly. It was possible for short utterances to not trigger VAD which would
+  cause user transcriptions to be ignored. It was also possible for one or more
+  transcriptions to be generated after VAD in which case they would also be
+  ignored.
 
 - Fixed an issue that was causing `BotStoppedSpeakingFrame` to be generated too
   late. This could then cause issues unblocking `STTMuteFilter` later than
@@ -283,7 +289,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `enable_recording` and `geo` parameters to `DailyRoomProperties`.
 
-- Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings to a custom AWS bucket.
+- Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings
+  to a custom AWS bucket.
 
 ### Changed
 
