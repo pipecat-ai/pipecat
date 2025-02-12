@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import base64
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
@@ -13,9 +14,6 @@ from typing import Any, Awaitable, Callable, Mapping, Optional
 
 import aiohttp
 from daily import (
-    CallClient,
-    Daily,
-    EventHandler,
     VirtualCameraDevice,
     VirtualMicrophoneDevice,
     VirtualSpeakerDevice,
@@ -291,6 +289,7 @@ class DailyTransportClient(EventHandler):
         self._transcription_ids = []
         self._transcription_status = None
 
+        self._joining = False
         self._joined = False
         self._joined_event = asyncio.Event()
         self._leave_counter = 0
@@ -423,13 +422,14 @@ class DailyTransportClient(EventHandler):
             )
 
     async def join(self):
-        # Transport already joined, ignore.
-        if self._joined:
+        # Transport already joined or joining, ignore.
+        if self._joined or self._joining:
             # Increment leave counter if we already joined.
             self._leave_counter += 1
             return
 
         logger.info(f"Joining {self._room_url}")
+        self._joining = True
 
         # For performance reasons, never subscribe to video streams (unless a
         # video renderer is registered).
@@ -444,6 +444,7 @@ class DailyTransportClient(EventHandler):
 
             if not error:
                 self._joined = True
+                self._joining = False
                 # Increment leave counter if we successfully joined.
                 self._leave_counter += 1
 
@@ -462,6 +463,7 @@ class DailyTransportClient(EventHandler):
         except asyncio.TimeoutError:
             error_msg = f"Time out joining {self._room_url}"
             logger.error(error_msg)
+            self._joining = False
             await self._callbacks.on_error(error_msg)
 
     async def _start_transcription(self):
@@ -1198,7 +1200,22 @@ class DailyTransport(BaseTransport):
 
     async def _on_app_message(self, message: Any, sender: str):
         if self._input:
-            await self._input.push_app_message(message, sender)
+            if message["type"] in {"raw-audio", "raw-audio-batch"}:
+                data = message["data"]
+                audio_list = data.get(
+                    "base64AudioBatch", [data.get("base64Audio")]
+                )  # Ensure a list
+
+                for base64_audio in filter(None, audio_list):  # Filter out None values
+                    pcm_bytes = base64.b64decode(base64_audio)
+                    frame = InputAudioRawFrame(
+                        audio=pcm_bytes,
+                        sample_rate=data["sampleRate"],
+                        num_channels=data["numChannels"],
+                    )
+                    await self._input.push_audio_frame(frame)
+            else:
+                await self._input.push_app_message(message, sender)
         await self._call_event_handler("on_app_message", message, sender)
 
     async def _on_call_state_updated(self, state: str):
