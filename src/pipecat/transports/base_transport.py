@@ -39,6 +39,7 @@ class TransportParams(BaseModel):
     audio_in_sample_rate: Optional[int] = None
     audio_in_channels: int = 1
     audio_in_filter: Optional[BaseAudioFilter] = None
+    audio_in_stream_on_start: bool = True
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
     vad_analyzer: Optional[VADAnalyzer] = None
