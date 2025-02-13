@@ -4,9 +4,17 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import List, Optional, Type
+import asyncio
+import time
+from abc import abstractmethod
+from typing import List
 
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
+    CancelFrame,
+    EmulateUserStartedSpeakingFrame,
+    EmulateUserStoppedSpeakingFrame,
+    EndFrame,
     Frame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
@@ -15,6 +23,7 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
+    StartFrame,
     StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
@@ -28,121 +37,105 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
-class LLMResponseAggregator(FrameProcessor):
+class BaseLLMResponseAggregator(FrameProcessor):
+    """This is the base class for all LLM response aggregators. These
+    aggregators process incoming frames and aggregate content until they are
+    ready to push the aggregation. In the case of a user, an aggregation might
+    be a full transcription received from the STT service.
+
+    The LLM response aggregators also keep a store (e.g. a message list or an
+    LLM context) of the current conversation, that is, it stores the messages
+    said by the user or by the bot.
+
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    @property
+    @abstractmethod
+    def messages(self) -> List[dict]:
+        """Returns the messages from the current conversation."""
+        pass
+
+    @property
+    @abstractmethod
+    def role(self) -> str:
+        """Returns the role (e.g. user, assistant...) for this aggregator."""
+        pass
+
+    @abstractmethod
+    def add_messages(self, messages):
+        """Add the given messages to the conversation."""
+        pass
+
+    @abstractmethod
+    def set_messages(self, messages):
+        """Reset the conversation with the given messages."""
+        pass
+
+    @abstractmethod
+    def set_tools(self, tools):
+        """Set LLM tools to be used in the current conversation."""
+        pass
+
+    @abstractmethod
+    def reset(self):
+        """Reset the internals of this aggregator. This should not modify the
+        internal messages."""
+        pass
+
+    @abstractmethod
+    async def push_aggregation(self):
+        pass
+
+
+class LLMResponseAggregator(BaseLLMResponseAggregator):
+    """This is a base LLM aggregator that uses a simple list of messages to
+    store the conversation. It pushes `LLMMessagesFrame` as an aggregation
+    frame.
+
+    """
+
     def __init__(
         self,
         *,
         messages: List[dict],
-        role: str,
-        start_frame,
-        end_frame,
-        accumulator_frame: Type[TextFrame],
-        interim_accumulator_frame: Optional[Type[TextFrame]] = None,
-        handle_interruptions: bool = False,
-        expect_stripped_words: bool = True,  # if True, need to add spaces between words
+        role: str = "user",
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
 
         self._messages = messages
         self._role = role
-        self._start_frame = start_frame
-        self._end_frame = end_frame
-        self._accumulator_frame = accumulator_frame
-        self._interim_accumulator_frame = interim_accumulator_frame
-        self._handle_interruptions = handle_interruptions
-        self._expect_stripped_words = expect_stripped_words
 
-        # Reset our accumulator state.
-        self._reset()
+        self._aggregation = ""
+
+        self.reset()
 
     @property
-    def messages(self):
+    def messages(self) -> List[dict]:
         return self._messages
 
     @property
-    def role(self):
+    def role(self) -> str:
         return self._role
 
-    #
-    # Frame processor
-    #
+    def add_messages(self, messages):
+        self._messages.extend(messages)
 
-    # Use cases implemented:
-    #
-    # S: Start, E: End, T: Transcription, I: Interim, X: Text
-    #
-    #        S E -> None
-    #      S T E -> X
-    #    S I T E -> X
-    #    S I E T -> X
-    #  S I E I T -> X
-    #      S E T -> X
-    #    S E I T -> X
-    #
-    # The following case would not be supported:
-    #
-    #    S I E T1 I T2 -> X
-    #
-    # and T2 would be dropped.
+    def set_messages(self, messages):
+        self.reset()
+        self._messages.clear()
+        self._messages.extend(messages)
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
+    def set_tools(self, tools):
+        pass
 
-        send_aggregation = False
+    def reset(self):
+        self._aggregation = ""
 
-        if isinstance(frame, self._start_frame):
-            self._aggregation = ""
-            self._aggregating = True
-            self._seen_start_frame = True
-            self._seen_end_frame = False
-            self._seen_interim_results = False
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, self._end_frame):
-            self._seen_end_frame = True
-            self._seen_start_frame = False
-
-            # We might have received the end frame but we might still be
-            # aggregating (i.e. we have seen interim results but not the final
-            # text).
-            self._aggregating = self._seen_interim_results or len(self._aggregation) == 0
-
-            # Send the aggregation if we are not aggregating anymore (i.e. no
-            # more interim results received).
-            send_aggregation = not self._aggregating
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, self._accumulator_frame):
-            if self._aggregating:
-                if self._expect_stripped_words:
-                    self._aggregation += f" {frame.text}" if self._aggregation else frame.text
-                else:
-                    self._aggregation += frame.text
-                # We have recevied a complete sentence, so if we have seen the
-                # end frame and we were still aggregating, it means we should
-                # send the aggregation.
-                send_aggregation = self._seen_end_frame
-
-            # We just got our final result, so let's reset interim results.
-            self._seen_interim_results = False
-        elif self._interim_accumulator_frame and isinstance(frame, self._interim_accumulator_frame):
-            self._seen_interim_results = True
-        elif self._handle_interruptions and isinstance(frame, StartInterruptionFrame):
-            await self._push_aggregation()
-            # Reset anyways
-            self._reset()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, LLMMessagesAppendFrame):
-            self._add_messages(frame.messages)
-        elif isinstance(frame, LLMMessagesUpdateFrame):
-            self._set_messages(frame.messages)
-        elif isinstance(frame, LLMSetToolsFrame):
-            self._set_tools(frame.tools)
-        else:
-            await self.push_frame(frame, direction)
-
-        if send_aggregation:
-            await self._push_aggregation()
-
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if len(self._aggregation) > 0:
             self._messages.append({"role": self._role, "content": self._aggregation})
 
@@ -153,109 +146,27 @@ class LLMResponseAggregator(FrameProcessor):
             frame = LLMMessagesFrame(self._messages)
             await self.push_frame(frame)
 
-    # TODO-CB: Types
-    def _add_messages(self, messages):
-        self._messages.extend(messages)
 
-    def _set_messages(self, messages):
-        self._reset()
-        self._messages.clear()
-        self._messages.extend(messages)
+class LLMContextResponseAggregator(BaseLLMResponseAggregator):
+    """This is a base LLM aggregator that uses an LLM context to store the
+    conversation. It pushes `OpenAILLMContextFrame` as an aggregation frame.
 
-    def _set_tools(self, tools):
-        # noop in the base class
-        pass
-
-    def _reset(self):
-        self._aggregation = ""
-        self._aggregating = False
-        self._seen_start_frame = False
-        self._seen_end_frame = False
-        self._seen_interim_results = False
-
-
-class LLMAssistantResponseAggregator(LLMResponseAggregator):
-    def __init__(self, messages: List[dict] = []):
-        super().__init__(
-            messages=messages,
-            role="assistant",
-            start_frame=LLMFullResponseStartFrame,
-            end_frame=LLMFullResponseEndFrame,
-            accumulator_frame=TextFrame,
-            handle_interruptions=True,
-        )
-
-
-class LLMUserResponseAggregator(LLMResponseAggregator):
-    def __init__(self, messages: List[dict] = []):
-        super().__init__(
-            messages=messages,
-            role="user",
-            start_frame=UserStartedSpeakingFrame,
-            end_frame=UserStoppedSpeakingFrame,
-            accumulator_frame=TranscriptionFrame,
-            interim_accumulator_frame=InterimTranscriptionFrame,
-        )
-
-
-class LLMFullResponseAggregator(FrameProcessor):
-    """This class aggregates Text frames until it receives a
-    LLMFullResponseEndFrame, then emits the concatenated text as
-    a single text frame.
-
-    given the following frames:
-
-        TextFrame("Hello,")
-        TextFrame(" world.")
-        TextFrame(" I am")
-        TextFrame(" an LLM.")
-        LLMFullResponseEndFrame()]
-
-    this processor will yield nothing for the first 4 frames, then
-
-        TextFrame("Hello, world. I am an LLM.")
-        LLMFullResponseEndFrame()
-
-    when passed the last frame.
-
-    >>> async def print_frames(aggregator, frame):
-    ...     async for frame in aggregator.process_frame(frame):
-    ...         if isinstance(frame, TextFrame):
-    ...             print(frame.text)
-    ...         else:
-    ...             print(frame.__class__.__name__)
-
-    >>> aggregator = LLMFullResponseAggregator()
-    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello,")))
-    >>> asyncio.run(print_frames(aggregator, TextFrame(" world.")))
-    >>> asyncio.run(print_frames(aggregator, TextFrame(" I am")))
-    >>> asyncio.run(print_frames(aggregator, TextFrame(" an LLM.")))
-    >>> asyncio.run(print_frames(aggregator, LLMFullResponseEndFrame()))
-    Hello, world. I am an LLM.
-    LLMFullResponseEndFrame
     """
 
-    def __init__(self):
-        super().__init__()
-        self._aggregation = ""
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, TextFrame):
-            self._aggregation += frame.text
-        elif isinstance(frame, LLMFullResponseEndFrame):
-            await self.push_frame(TextFrame(self._aggregation))
-            await self.push_frame(frame)
-            self._aggregation = ""
-        else:
-            await self.push_frame(frame, direction)
-
-
-class LLMContextAggregator(LLMResponseAggregator):
-    def __init__(self, *, context: OpenAILLMContext, **kwargs):
+    def __init__(self, *, context: OpenAILLMContext, role: str, **kwargs):
         super().__init__(**kwargs)
         self._context = context
+        self._role = role
+
+        self._aggregation = ""
+
+    @property
+    def messages(self) -> List[dict]:
+        return self._context.get_messages()
+
+    @property
+    def role(self) -> str:
+        return self._role
 
     @property
     def context(self):
@@ -264,23 +175,25 @@ class LLMContextAggregator(LLMResponseAggregator):
     def get_context_frame(self) -> OpenAILLMContextFrame:
         return OpenAILLMContextFrame(context=self._context)
 
-    async def push_context_frame(self):
+    async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         frame = self.get_context_frame()
-        await self.push_frame(frame)
+        await self.push_frame(frame, direction)
 
-    # TODO-CB: Types
-    def _add_messages(self, messages):
+    def add_messages(self, messages):
         self._context.add_messages(messages)
 
-    def _set_messages(self, messages):
+    def set_messages(self, messages):
         self._context.set_messages(messages)
 
-    def _set_tools(self, tools: List):
+    def set_tools(self, tools: List):
         self._context.set_tools(tools)
 
-    async def _push_aggregation(self):
+    def reset(self):
+        self._aggregation = ""
+
+    async def push_aggregation(self):
         if len(self._aggregation) > 0:
-            self._context.add_message({"role": self._role, "content": self._aggregation})
+            self._context.add_message({"role": self.role, "content": self._aggregation})
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
@@ -290,31 +203,236 @@ class LLMContextAggregator(LLMResponseAggregator):
             await self.push_frame(frame)
 
             # Reset our accumulator state.
-            self._reset()
+            self.reset()
 
 
-class LLMAssistantContextAggregator(LLMContextAggregator):
-    def __init__(self, context: OpenAILLMContext, *, expect_stripped_words: bool = True):
-        super().__init__(
-            messages=[],
-            context=context,
-            role="assistant",
-            start_frame=LLMFullResponseStartFrame,
-            end_frame=LLMFullResponseEndFrame,
-            accumulator_frame=TextFrame,
-            handle_interruptions=True,
-            expect_stripped_words=expect_stripped_words,
-        )
+class LLMUserContextAggregator(LLMContextResponseAggregator):
+    """This is a user LLM aggregator that uses an LLM context to store the
+    conversation. It aggregates transcriptions from the STT service and it has
+    logic to handle multiple scenarios where transcriptions are received between
+    VAD events (`UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame`) or
+    even outside or no VAD events at all.
+
+    """
+
+    def __init__(
+        self,
+        context: OpenAILLMContext,
+        aggregation_timeout: float = 1.0,
+        bot_interruption_timeout: float = 2.0,
+        **kwargs,
+    ):
+        super().__init__(context=context, role="user", **kwargs)
+        self._aggregation_timeout = aggregation_timeout
+        self._bot_interruption_timeout = bot_interruption_timeout
+
+        self._seen_interim_results = False
+        self._user_speaking = False
+        self._last_user_speaking_time = 0
+        self._emulating_vad = False
+
+        self._aggregation_event = asyncio.Event()
+        self._aggregation_task = None
+
+        self.reset()
+
+    def reset(self):
+        super().reset()
+        self._seen_interim_results = False
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame):
+            await self._start(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, EndFrame):
+            await self._stop(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, CancelFrame):
+            await self._cancel(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            await self._handle_user_started_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_user_stopped_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, TranscriptionFrame):
+            await self._handle_transcription(frame)
+        elif isinstance(frame, InterimTranscriptionFrame):
+            await self._handle_interim_transcription(frame)
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            self.add_messages(frame.messages)
+        elif isinstance(frame, LLMMessagesUpdateFrame):
+            self.set_messages(frame.messages)
+        elif isinstance(frame, LLMSetToolsFrame):
+            self.set_tools(frame.tools)
+        else:
+            await self.push_frame(frame, direction)
+
+    async def _start(self, frame: StartFrame):
+        self._create_aggregation_task()
+
+    async def _stop(self, frame: EndFrame):
+        await self._cancel_aggregation_task()
+
+    async def _cancel(self, frame: CancelFrame):
+        await self._cancel_aggregation_task()
+
+    async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
+        self._user_speaking = True
+
+    async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
+        self._last_user_speaking_time = time.time()
+        self._user_speaking = False
+        if not self._seen_interim_results:
+            await self.push_aggregation()
+
+    async def _handle_transcription(self, frame: TranscriptionFrame):
+        self._aggregation += f" {frame.text}" if self._aggregation else frame.text
+        # We just got a final result, so let's reset interim results.
+        self._seen_interim_results = False
+        # Reset aggregation timer.
+        self._aggregation_event.set()
+
+    async def _handle_interim_transcription(self, _: InterimTranscriptionFrame):
+        self._seen_interim_results = True
+        # Reset aggregation timer.
+        self._aggregation_event.set()
+
+    def _create_aggregation_task(self):
+        self._aggregation_task = self.create_task(self._aggregation_task_handler())
+
+    async def _cancel_aggregation_task(self):
+        if self._aggregation_task:
+            await self.cancel_task(self._aggregation_task)
+            self._aggregation_task = None
+
+    async def _aggregation_task_handler(self):
+        while True:
+            try:
+                await asyncio.wait_for(self._aggregation_event.wait(), self._aggregation_timeout)
+                await self._maybe_push_bot_interruption()
+            except asyncio.TimeoutError:
+                if not self._user_speaking:
+                    await self.push_aggregation()
+
+                # If we are emulating VAD we still need to send the user stopped
+                # speaking frame.
+                if self._emulating_vad:
+                    await self.push_frame(
+                        EmulateUserStoppedSpeakingFrame(), FrameDirection.UPSTREAM
+                    )
+                    self._emulating_vad = False
+            finally:
+                self._aggregation_event.clear()
+
+    async def _maybe_push_bot_interruption(self):
+        """If the user stopped speaking a while back and we got a transcription
+        frame we might want to interrupt the bot.
+
+        """
+        if not self._user_speaking:
+            diff_time = time.time() - self._last_user_speaking_time
+            if diff_time > self._bot_interruption_timeout:
+                # If we reach this case we received a transcription but VAD was
+                # not able to detect voice (e.g. when you whisper a short
+                # utterance). So, we need to emulate VAD (i.e. user
+                # start/stopped speaking).
+                await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+                self._emulating_vad = True
+
+                # Reset time so we don't interrupt again right away.
+                self._last_user_speaking_time = time.time()
 
 
-class LLMUserContextAggregator(LLMContextAggregator):
-    def __init__(self, context: OpenAILLMContext):
-        super().__init__(
-            messages=[],
-            context=context,
-            role="user",
-            start_frame=UserStartedSpeakingFrame,
-            end_frame=UserStoppedSpeakingFrame,
-            accumulator_frame=TranscriptionFrame,
-            interim_accumulator_frame=InterimTranscriptionFrame,
-        )
+class LLMAssistantContextAggregator(LLMContextResponseAggregator):
+    """This is an assistant LLM aggregator that uses an LLM context to store the
+    conversation. It aggregates text frames received between
+    `LLMFullResponseStartFrame` and `LLMFullResponseEndFrame`.
+
+    """
+
+    def __init__(self, context: OpenAILLMContext, *, expect_stripped_words: bool = True, **kwargs):
+        super().__init__(context=context, role="assistant", **kwargs)
+        self._expect_stripped_words = expect_stripped_words
+
+        self.reset()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartInterruptionFrame):
+            await self.push_aggregation()
+            # Reset anyways
+            self.reset()
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMFullResponseStartFrame):
+            await self._handle_llm_start(frame)
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            await self._handle_llm_end(frame)
+        elif isinstance(frame, TextFrame):
+            await self._handle_text(frame)
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            self.add_messages(frame.messages)
+        elif isinstance(frame, LLMMessagesUpdateFrame):
+            self.set_messages(frame.messages)
+        elif isinstance(frame, LLMSetToolsFrame):
+            self.set_tools(frame.tools)
+        else:
+            await self.push_frame(frame, direction)
+
+    async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
+        self._started = True
+
+    async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
+        self._started = False
+        await self.push_aggregation()
+
+    async def _handle_text(self, frame: TextFrame):
+        if not self._started:
+            return
+
+        if self._expect_stripped_words:
+            self._aggregation += f" {frame.text}" if self._aggregation else frame.text
+        else:
+            self._aggregation += frame.text
+
+
+class LLMUserResponseAggregator(LLMUserContextAggregator):
+    def __init__(self, messages: List[dict] = [], **kwargs):
+        super().__init__(context=OpenAILLMContext(messages), **kwargs)
+
+    async def push_aggregation(self):
+        if len(self._aggregation) > 0:
+            self._context.add_message({"role": self.role, "content": self._aggregation})
+
+            # Reset the aggregation. Reset it before pushing it down, otherwise
+            # if the tasks gets cancelled we won't be able to clear things up.
+            self._aggregation = ""
+
+            frame = LLMMessagesFrame(self._context.messages)
+            await self.push_frame(frame)
+
+            # Reset our accumulator state.
+            self.reset()
+
+
+class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
+    def __init__(self, messages: List[dict], **kwargs):
+        super().__init__(context=OpenAILLMContext(messages), **kwargs)
+
+    async def push_aggregation(self):
+        if len(self._aggregation) > 0:
+            self._context.add_message({"role": self.role, "content": self._aggregation})
+
+            # Reset the aggregation. Reset it before pushing it down, otherwise
+            # if the tasks gets cancelled we won't be able to clear things up.
+            self._aggregation = ""
+
+            frame = LLMMessagesFrame(self._context.messages)
+            await self.push_frame(frame)
+
+            # Reset our accumulator state.
+            self.reset()

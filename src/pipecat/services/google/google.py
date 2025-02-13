@@ -537,7 +537,7 @@ def language_to_google_stt_language(language: Language) -> Optional[str]:
 
 
 class GoogleUserContextAggregator(OpenAIUserContextAggregator):
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if len(self._aggregation) > 0:
             self._context.add_message(
                 glm.Content(role="user", parts=[glm.Part(text=self._aggregation)])
@@ -552,11 +552,11 @@ class GoogleUserContextAggregator(OpenAIUserContextAggregator):
             await self.push_frame(frame)
 
             # Reset our accumulator state.
-            self._reset()
+            self.reset()
 
 
 class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if not (
             self._aggregation or self._function_call_result or self._pending_image_frame_message
         ):
@@ -566,7 +566,7 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
         properties: Optional[FunctionCallResultProperties] = None
 
         aggregation = self._aggregation
-        self._reset()
+        self.reset()
 
         try:
             if self._function_call_result:
@@ -626,15 +626,14 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
                 run_llm = True
 
             if run_llm:
-                await self._user_context_aggregator.push_context_frame()
+                await self.push_context_frame(FrameDirection.UPSTREAM)
 
             # Emit the on_context_updated callback once the function call result is added to the context
             if properties and properties.on_context_updated is not None:
                 await properties.on_context_updated()
 
             # Push context frame
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
+            await self.push_context_frame()
 
             # Push timestamp frame with current time
             timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
@@ -1175,7 +1174,7 @@ class GoogleLLMService(LLMService):
     ) -> GoogleContextAggregatorPair:
         user = GoogleUserContextAggregator(context)
         assistant = GoogleAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, expect_stripped_words=assistant_expect_stripped_words
         )
         return GoogleContextAggregatorPair(_user=user, _assistant=assistant)
 
