@@ -26,7 +26,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 class SleepFrame(SystemFrame):
     """This frame is used by test framework to introduce some sleep time before
     the next frame is pushed. This is useful to control system frames vs data or
-    control frames."""
+    control frames.
+    """
 
     sleep: float = 0.1
 
