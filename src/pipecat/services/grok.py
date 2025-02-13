@@ -17,6 +17,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai import (
     OpenAIAssistantContextAggregator,
     OpenAILLMService,
@@ -91,7 +92,7 @@ class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
                 run_llm = True
 
             if run_llm:
-                await self._user_context_aggregator.push_context_frame()
+                await self.push_context_frame(FrameDirection.UPSTREAM)
 
             # Emit the on_context_updated callback once the function call result is added to the context
             if properties and properties.on_context_updated is not None:

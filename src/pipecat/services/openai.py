@@ -355,7 +355,7 @@ class OpenAILLMService(BaseOpenAILLMService):
     ) -> OpenAIContextAggregatorPair:
         user = OpenAIUserContextAggregator(context)
         assistant = OpenAIAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, expect_stripped_words=assistant_expect_stripped_words
         )
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
@@ -592,9 +592,8 @@ class OpenAIUserContextAggregator(LLMUserContextAggregator):
 
 
 class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, user_context_aggregator: OpenAIUserContextAggregator, **kwargs):
-        super().__init__(context=user_context_aggregator._context, **kwargs)
-        self._user_context_aggregator = user_context_aggregator
+    def __init__(self, context: OpenAILLMContext, **kwargs):
+        super().__init__(context=context, **kwargs)
         self._function_calls_in_progress = {}
         self._function_call_result = None
         self._pending_image_frame_message = None
@@ -686,7 +685,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                 run_llm = True
 
             if run_llm:
-                await self._user_context_aggregator.push_context_frame()
+                await self.push_context_frame(FrameDirection.UPSTREAM)
 
             # Emit the on_context_updated callback once the function call result is added to the context
             if properties and properties.on_context_updated is not None:
