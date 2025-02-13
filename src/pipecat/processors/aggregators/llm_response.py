@@ -5,10 +5,12 @@
 #
 
 import asyncio
+import time
 from abc import abstractmethod
 from typing import List
 
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -171,12 +173,20 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
 
 
 class LLMUserContextAggregator(LLMContextResponseAggregator):
-    def __init__(self, context: OpenAILLMContext, aggregation_timeout: float = 1.0, **kwargs):
+    def __init__(
+        self,
+        context: OpenAILLMContext,
+        aggregation_timeout: float = 1.0,
+        bot_interruption_timeout: float = 2.0,
+        **kwargs,
+    ):
         super().__init__(context=context, role="user", **kwargs)
         self._aggregation_timeout = aggregation_timeout
+        self._bot_interruption_timeout = bot_interruption_timeout
 
         self._seen_interim_results = False
         self._user_speaking = False
+        self._last_user_speaking_time = 0
 
         self._aggregation_event = asyncio.Event()
         self._aggregation_task = None
@@ -219,43 +229,63 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await self.push_frame(frame, direction)
 
     async def _start(self, frame: StartFrame):
-        self._aggregation_task = self.create_task(self._aggregation_task_handler())
+        self._create_aggregation_task()
 
     async def _stop(self, frame: EndFrame):
-        if self._aggregation_task:
-            await self.cancel_task(self._aggregation_task)
-            self._aggregation_task = None
+        await self._cancel_aggregation_task()
 
     async def _cancel(self, frame: CancelFrame):
-        if self._aggregation_task:
-            await self.cancel_task(self._aggregation_task)
-            self._aggregation_task = None
+        await self._cancel_aggregation_task()
 
     async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
         self._user_speaking = True
 
     async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
+        self._last_user_speaking_time = time.time()
         self._user_speaking = False
         if not self._seen_interim_results:
             await self.push_aggregation()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         self._aggregation += frame.text
-        # We just got our final result, so let's reset interim results.
+        # We just got a final result, so let's reset interim results.
         self._seen_interim_results = False
-        # Wakeup our task.
+        # Reset aggregation timer.
         self._aggregation_event.set()
 
     async def _handle_interim_transcription(self, _: InterimTranscriptionFrame):
         self._seen_interim_results = True
+        # Reset aggregation timer.
+        self._aggregation_event.set()
+
+    def _create_aggregation_task(self):
+        self._aggregation_task = self.create_task(self._aggregation_task_handler())
+
+    async def _cancel_aggregation_task(self):
+        if self._aggregation_task:
+            await self.cancel_task(self._aggregation_task)
+            self._aggregation_task = None
 
     async def _aggregation_task_handler(self):
         while True:
-            await self._aggregation_event.wait()
-            await asyncio.sleep(self._aggregation_timeout)
-            if not self._user_speaking:
-                await self.push_aggregation()
-            self._aggregation_event.clear()
+            try:
+                await asyncio.wait_for(self._aggregation_event.wait(), self._aggregation_timeout)
+                await self._maybe_push_bot_interruption()
+            except asyncio.TimeoutError:
+                if not self._user_speaking:
+                    await self.push_aggregation()
+            finally:
+                self._aggregation_event.clear()
+
+    async def _maybe_push_bot_interruption(self):
+        """If the user stopped speaking a while back and we got a transcription
+        frame we might want to interrupt the bot.
+
+        """
+        if not self._user_speaking:
+            diff_time = time.time() - self._last_user_speaking_time
+            if diff_time > self._bot_interruption_timeout:
+                await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
 
 
 class LLMAssistantContextAggregator(LLMContextResponseAggregator):
@@ -279,6 +309,12 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             await self._handle_llm_end(frame)
         elif isinstance(frame, TextFrame):
             await self._handle_text(frame)
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            self.add_messages(frame.messages)
+        elif isinstance(frame, LLMMessagesUpdateFrame):
+            self.set_messages(frame.messages)
+        elif isinstance(frame, LLMSetToolsFrame):
+            self.set_tools(frame.tools)
         else:
             await self.push_frame(frame, direction)
 
