@@ -212,6 +212,6 @@ class GrokLLMService(OpenAILLMService):
     ) -> GrokContextAggregatorPair:
         user = OpenAIUserContextAggregator(context)
         assistant = GrokAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, expect_stripped_words=assistant_expect_stripped_words
         )
         return GrokContextAggregatorPair(_user=user, _assistant=assistant)

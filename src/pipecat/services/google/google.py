@@ -1174,7 +1174,7 @@ class GoogleLLMService(LLMService):
     ) -> GoogleContextAggregatorPair:
         user = GoogleUserContextAggregator(context)
         assistant = GoogleAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, expect_stripped_words=assistant_expect_stripped_words
         )
         return GoogleContextAggregatorPair(_user=user, _assistant=assistant)
 
