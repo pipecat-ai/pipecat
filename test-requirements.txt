@@ -29,3 +29,4 @@ soxr~=0.5.0
 together~=1.2.7
 transformers~=4.48.0
 websockets~=13.1
+Markdown~=3.7
