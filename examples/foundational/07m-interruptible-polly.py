@@ -47,8 +47,9 @@ async def main():
         stt = TranscribeSTTService()
 
         tts = PollyTTSService(
-            voice_id="Amy",
-            params=PollyTTSService.InputParams(engine="standard", language="en-GB", rate="1.05"),
+            region="us-west-2",  # only specific regions support generative TTS
+            voice_id="Joanna",
+            params=PollyTTSService.InputParams(engine="generative", language="en-US", rate="1.05"),
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
