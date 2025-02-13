@@ -173,9 +173,9 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     def get_context_frame(self) -> OpenAILLMContextFrame:
         return OpenAILLMContextFrame(context=self._context)
 
-    async def push_context_frame(self):
+    async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         frame = self.get_context_frame()
-        await self.push_frame(frame)
+        await self.push_frame(frame, direction)
 
     def add_messages(self, messages):
         self._context.add_messages(messages)

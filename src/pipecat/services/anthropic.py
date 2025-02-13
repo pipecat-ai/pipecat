@@ -126,9 +126,11 @@ class AnthropicLLMService(LLMService):
     def create_context_aggregator(
         context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
     ) -> AnthropicContextAggregatorPair:
+        if isinstance(context, OpenAILLMContext):
+            context = AnthropicLLMContext.from_openai_context(context)
         user = AnthropicUserContextAggregator(context)
         assistant = AnthropicAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, expect_stripped_words=assistant_expect_stripped_words
         )
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
@@ -654,9 +656,6 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
     def __init__(self, context: OpenAILLMContext | AnthropicLLMContext, **kwargs):
         super().__init__(context=context, **kwargs)
 
-        if isinstance(context, OpenAILLMContext):
-            self._context = AnthropicLLMContext.from_openai_context(context)
-
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
         # Our parent method has already called push_frame(). So we can't interrupt the
@@ -703,9 +702,8 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
 
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, user_context_aggregator: AnthropicUserContextAggregator, **kwargs):
-        super().__init__(context=user_context_aggregator._context, **kwargs)
-        self._user_context_aggregator = user_context_aggregator
+    def __init__(self, context: OpenAILLMContext | AnthropicLLMContext, **kwargs):
+        super().__init__(context=context, **kwargs)
         self._function_call_in_progress = None
         self._function_call_result = None
         self._pending_image_frame_message = None
@@ -799,7 +797,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                 run_llm = True
 
             if run_llm:
-                await self._user_context_aggregator.push_context_frame()
+                await self.push_context_frame(FrameDirection.UPSTREAM)
 
             # Emit the on_context_updated callback once the function call result is added to the context
             if properties and properties.on_context_updated is not None:

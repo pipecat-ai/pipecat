@@ -217,8 +217,8 @@ class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator)
                 # The standard function callback code path pushes the FunctionCallResultFrame from the llm itself,
                 # so we didn't have a chance to add the result to the openai realtime api context. Let's push a
                 # special frame to do that.
-                await self._user_context_aggregator.push_frame(
-                    RealtimeFunctionCallResultFrame(result_frame=frame)
+                await self.push_frame(
+                    RealtimeFunctionCallResultFrame(result_frame=frame), FrameDirection.UPSTREAM
                 )
                 if properties and properties.run_llm is not None:
                     # If the tool call result has a run_llm property, use it
@@ -228,7 +228,7 @@ class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator)
                     run_llm = not bool(self._function_calls_in_progress)
 
             if run_llm:
-                await self._user_context_aggregator.push_context_frame()
+                await self.push_context_frame(FrameDirection.UPSTREAM)
 
             # Emit the on_context_updated callback once the function call result is added to the context
             if properties and properties.on_context_updated is not None:

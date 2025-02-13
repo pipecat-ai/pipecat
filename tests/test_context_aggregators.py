@@ -11,6 +11,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    OpenAILLMContextAssistantTimestampFrame,
     StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
@@ -25,7 +26,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
-from pipecat.services.openai import OpenAIUserContextAggregator
+from pipecat.services.openai import OpenAIAssistantContextAggregator, OpenAIUserContextAggregator
 from pipecat.tests.utils import SleepFrame, run_test
 
 AGGREGATION_TIMEOUT = 0.1
@@ -37,6 +38,7 @@ BOT_INTERRUPTION_SLEEP = 0.25
 class BaseTestUserContextAggregator:
     CONTEXT_CLASS = None  # To be set in subclasses
     AGGREGATOR_CLASS = None  # To be set in subclasses
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
 
     async def test_se(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -67,7 +69,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -92,7 +94,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -123,7 +125,7 @@ class BaseTestUserContextAggregator:
             UserStoppedSpeakingFrame,
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -149,7 +151,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -176,7 +178,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -200,7 +202,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -225,7 +227,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -251,8 +253,8 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -278,7 +280,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -306,7 +308,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -325,7 +327,7 @@ class BaseTestUserContextAggregator:
             TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
         ]
-        expected_down_frames = [OpenAILLMContextFrame]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
         expected_up_frames = [BotInterruptionFrame]
         await run_test(
             aggregator,
@@ -347,7 +349,7 @@ class BaseTestUserContextAggregator:
             TranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
         ]
-        expected_down_frames = [OpenAILLMContextFrame]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
         expected_up_frames = [BotInterruptionFrame]
         await run_test(
             aggregator,
@@ -380,7 +382,7 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         expected_up_frames = [BotInterruptionFrame]
         await run_test(
@@ -395,6 +397,7 @@ class BaseTestUserContextAggregator:
 class BaseTestAssistantContextAggreagator:
     CONTEXT_CLASS = None  # To be set in subclasses
     AGGREGATOR_CLASS = None  # To be set in subclasses
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
 
     async def test_empty(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -421,7 +424,7 @@ class BaseTestAssistantContextAggreagator:
             TextFrame(text="Hello Pipecat!"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [OpenAILLMContextFrame]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -443,7 +446,7 @@ class BaseTestAssistantContextAggreagator:
             TextFrame(text="you?"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [OpenAILLMContextFrame]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -465,7 +468,7 @@ class BaseTestAssistantContextAggreagator:
             TextFrame(text="you?"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [OpenAILLMContextFrame]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -489,7 +492,7 @@ class BaseTestAssistantContextAggreagator:
             TextFrame(text="you?"),
             LLMFullResponseEndFrame(),
         ]
-        expected_down_frames = [OpenAILLMContextFrame, OpenAILLMContextFrame]
+        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES, *self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -517,9 +520,9 @@ class BaseTestAssistantContextAggreagator:
             LLMFullResponseEndFrame(),
         ]
         expected_down_frames = [
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
             StartInterruptionFrame,
-            OpenAILLMContextFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(
             aggregator,
@@ -563,4 +566,5 @@ class TestOpenAIAssistantContextAggregator(
     BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
 ):
     CONTEXT_CLASS = OpenAILLMContext
-    AGGREGATOR_CLASS = LLMAssistantContextAggregator
+    AGGREGATOR_CLASS = OpenAIAssistantContextAggregator
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
