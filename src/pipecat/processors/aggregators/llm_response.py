@@ -326,6 +326,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             diff_time = time.time() - self._last_user_speaking_time
             if diff_time > self._bot_interruption_timeout:
                 await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+                # Reset time so we don't interrupt again right away.
+                self._last_user_speaking_time = time.time()
 
 
 class LLMAssistantContextAggregator(LLMContextResponseAggregator):

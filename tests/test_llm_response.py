@@ -343,6 +343,7 @@ class BaseTestUserContextAggregator:
         aggregator = self.AGGREGATOR_CLASS(context, aggregation_timeout=AGGREGATION_TIMEOUT)
         frames_to_send = [
             InterimTranscriptionFrame(text="Hello ", user_id="cat", timestamp=""),
+            SleepFrame(),
             TranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
         ]
