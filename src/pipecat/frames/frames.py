@@ -619,6 +619,13 @@ class FunctionCallInProgressFrame(SystemFrame):
 
 
 @dataclass
+class STTMuteFrame(SystemFrame):
+    """System frame to mute/unmute the STT service."""
+
+    mute: bool
+
+
+@dataclass
 class TransportMessageUrgentFrame(SystemFrame):
     message: Any
 
@@ -750,13 +757,6 @@ class LLMUpdateSettingsFrame(ServiceUpdateSettingsFrame):
 @dataclass
 class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame):
     pass
-
-
-@dataclass
-class STTMuteFrame(ControlFrame):
-    """Control frame to mute/unmute the STT service."""
-
-    mute: bool
 
 
 @dataclass
