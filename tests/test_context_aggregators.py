@@ -109,7 +109,7 @@ class BaseTestUserContextAggregator:
         aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [
             UserStartedSpeakingFrame(),
-            TranscriptionFrame(text="Hello Pipecat! ", user_id="cat", timestamp=""),
+            TranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp=""),
             InterimTranscriptionFrame(text="How ", user_id="cat", timestamp=""),
             SleepFrame(),
             UserStoppedSpeakingFrame(),
@@ -271,7 +271,7 @@ class BaseTestUserContextAggregator:
         frames_to_send = [
             UserStartedSpeakingFrame(),
             UserStoppedSpeakingFrame(),
-            TranscriptionFrame(text="Hello Pipecat! ", user_id="cat", timestamp=""),
+            TranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp=""),
             TranscriptionFrame(text="How are you?", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
         ]
@@ -298,7 +298,7 @@ class BaseTestUserContextAggregator:
             InterimTranscriptionFrame(text="Hello ", user_id="cat", timestamp=""),
             SleepFrame(),
             UserStoppedSpeakingFrame(),
-            TranscriptionFrame(text="Hello Pipecat! ", user_id="cat", timestamp=""),
+            TranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp=""),
             InterimTranscriptionFrame(text="How ", user_id="cat", timestamp=""),
             TranscriptionFrame(text="How are you?", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
