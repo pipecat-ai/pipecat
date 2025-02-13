@@ -91,6 +91,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `BaseOutputTransport` issue that was causing upstream frames to no be
+  pushed upstream.
+
 - Fixed multiple issue where user transcriptions where not being handled
   properly. It was possible for short utterances to not trigger VAD which would
   cause user transcriptions to be ignored. It was also possible for one or more
