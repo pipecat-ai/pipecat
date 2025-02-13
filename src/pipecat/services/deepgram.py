@@ -216,7 +216,6 @@ class DeepgramSTTService(STTService):
 
     async def _on_speech_started(self, *args, **kwargs):
         if self.vad_enabled:
-            logger.debug("=========== Deepgram =========== Speech started")
             await self.push_frame(UserStartedSpeakingFrame())
         await self.start_metrics()
         await self._call_event_handler("on_speech_started", *args, **kwargs)
@@ -242,18 +241,7 @@ class DeepgramSTTService(STTService):
                 )
                 logger.debug(f">> Deepgram: {transcript}")
                 if self.vad_enabled:
-                    logger.debug("~~~~~~~~~~~ Deepgram ~~~~~~~~~~~ Speech stopped")
                     await self.push_frame(UserStoppedSpeakingFrame())
-                    # Below line is really important; do not remove this as this is necessary to keep the conversation flow
-                    # while using deepgram as a vad we need to make sure that we correctly trigger UserStartedSpeakingFrame
-                    # as it's necessary for user response aggregators; if this frame is not pushed from here and deepgram also
-                    # doesn't trigger the on_speech_started event we will lose the transcribed text as the flow of frames would be
-                    # Previous UserStoppedSpeakingFrame
-                    # Current Transcription/InterimTranscription Frames
-                    # Another UserStoppedSpeakingFrame
-                    # However the flow should be: Prev Stop; Curr Start -> Curr Transcription -> Curr Stop; Next Start and so on...
-                    # logger.debug("=========== Deepgram =========== Forced Speech started")
-                    # await self.push_frame(UserStartedSpeakingFrame())
                 await self.stop_processing_metrics()
             else:
                 await self.push_frame(
