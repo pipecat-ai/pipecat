@@ -36,33 +36,51 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class BaseLLMResponseAggregator(FrameProcessor):
+    """This is the base class for all LLM response aggregators. These
+    aggregators process incoming frames and aggregate content until they are
+    ready to push the aggregation. In the case of a user, an aggregation might
+    be a full transcription received from the STT service.
+
+    The LLM response aggregators also keep a store (e.g. a message list or an
+    LLM context) of the current conversation, that is, it stores the messages
+    said by the user or by the bot.
+
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     @property
     @abstractmethod
     def messages(self) -> List[dict]:
+        """Returns the messages from the current conversation."""
         pass
 
     @property
     @abstractmethod
     def role(self) -> str:
+        """Returns the role (e.g. user, assistant...) for this aggregator."""
         pass
 
     @abstractmethod
     def add_messages(self, messages):
+        """Add the given messages to the conversation."""
         pass
 
     @abstractmethod
     def set_messages(self, messages):
+        """Reset the conversation with the given messages."""
         pass
 
     @abstractmethod
     def set_tools(self, tools):
+        """Set LLM tools to be used in the current conversation."""
         pass
 
     @abstractmethod
     def reset(self):
+        """Reset the internals of this aggregator. This should not modify the
+        internal messages."""
         pass
 
     @abstractmethod
@@ -71,6 +89,12 @@ class BaseLLMResponseAggregator(FrameProcessor):
 
 
 class LLMResponseAggregator(BaseLLMResponseAggregator):
+    """This is a base LLM aggregator that uses a simple list of messages to
+    store the conversation. It pushes `LLMMessagesFrame` as an aggregation
+    frame.
+
+    """
+
     def __init__(
         self,
         *,
@@ -122,6 +146,11 @@ class LLMResponseAggregator(BaseLLMResponseAggregator):
 
 
 class LLMContextResponseAggregator(BaseLLMResponseAggregator):
+    """This is a base LLM aggregator that uses an LLM context to store the
+    conversation. It pushes `OpenAILLMContextFrame` as an aggregation frame.
+
+    """
+
     def __init__(self, *, context: OpenAILLMContext, role: str, **kwargs):
         super().__init__(**kwargs)
         self._context = context
@@ -173,6 +202,14 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
 
 
 class LLMUserContextAggregator(LLMContextResponseAggregator):
+    """This is a user LLM aggregator that uses an LLM context to store the
+    conversation. It aggregates transcriptions from the STT service and it has
+    logic to handle multiple scenarios where transcriptions are received between
+    VAD events (`UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame`) or
+    even outside or no VAD events at all.
+
+    """
+
     def __init__(
         self,
         context: OpenAILLMContext,
@@ -289,6 +326,12 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
 
 class LLMAssistantContextAggregator(LLMContextResponseAggregator):
+    """This is an assistant LLM aggregator that uses an LLM context to store the
+    conversation. It aggregates text frames received between
+    `LLMFullResponseStartFrame` and `LLMFullResponseEndFrame`.
+
+    """
+
     def __init__(self, context: OpenAILLMContext, *, expect_stripped_words: bool = True, **kwargs):
         super().__init__(context=context, role="assistant", **kwargs)
         self._expect_stripped_words = expect_stripped_words
