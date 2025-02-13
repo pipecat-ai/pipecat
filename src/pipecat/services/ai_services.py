@@ -525,9 +525,13 @@ class STTService(AIService):
             else:
                 logger.warning(f"Unknown setting for STT service: {key}")
 
-    async def process_audio_frame(self, frame: AudioRawFrame):
-        if not self._muted:
-            await self.process_generator(self.run_stt(frame.audio))
+    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
+        if self._muted:
+            return
+
+        await self.process_generator(self.run_stt(frame.audio))
+        if self._audio_passthrough:
+            await self.push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes a frame of audio data, either buffering or transcribing it."""
@@ -537,9 +541,7 @@ class STTService(AIService):
             # In this service we accumulate audio internally and at the end we
             # push a TextFrame. We also push audio downstream in case someone
             # else needs it.
-            await self.process_audio_frame(frame)
-            if self._audio_passthrough:
-                await self.push_frame(frame, direction)
+            await self.process_audio_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, STTMuteFrame):
