@@ -186,6 +186,9 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     def set_tools(self, tools: List):
         self._context.set_tools(tools)
 
+    def reset(self):
+        self._aggregation = ""
+
     async def push_aggregation(self):
         if len(self._aggregation) > 0:
             self._context.add_message({"role": self.role, "content": self._aggregation})
