@@ -1,10 +1,9 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import io
 import json
 import struct
@@ -15,7 +14,6 @@ import aiohttp
 import websockets
 from loguru import logger
 from pydantic import BaseModel
-from tenacity import AsyncRetrying, RetryCallState, stop_after_attempt, wait_exponential
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -33,12 +31,13 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService
+from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
 try:
     from pyht.async_client import AsyncClient
-    from pyht.client import TTSOptions
-    from pyht.protos.api_pb2 import Format
+    from pyht.client import Format, TTSOptions
+    from pyht.client import Language as PlayHTLanguage
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -47,7 +46,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_playht_language(language: Language) -> str | None:
+def language_to_playht_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.AF: "afrikans",
         Language.AM: "amharic",
@@ -101,7 +100,7 @@ def language_to_playht_language(language: Language) -> str | None:
     return result
 
 
-class PlayHTTTSService(TTSService):
+class PlayHTTTSService(TTSService, WebsocketService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
@@ -114,25 +113,25 @@ class PlayHTTTSService(TTSService):
         user_id: str,
         voice_url: str,
         voice_engine: str = "Play3.0-mini",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         output_format: str = "wav",
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(
+        TTSService.__init__(
+            self,
             sample_rate=sample_rate,
             **kwargs,
         )
+        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._user_id = user_id
         self._websocket_url = None
-        self._websocket = None
         self._receive_task = None
         self._request_id = None
 
         self._settings = {
-            "sample_rate": sample_rate,
             "language": self.language_to_service_language(params.language)
             if params.language
             else "english",
@@ -147,7 +146,7 @@ class PlayHTTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_playht_language(language)
 
     async def start(self, frame: StartFrame):
@@ -165,14 +164,13 @@ class PlayHTTTSService(TTSService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
         await self._disconnect_websocket()
 
         if self._receive_task:
-            self._receive_task.cancel()
-            await self._receive_task
+            await self.cancel_task(self._receive_task)
             self._receive_task = None
 
     async def _connect_websocket(self):
@@ -251,7 +249,7 @@ class PlayHTTTSService(TTSService):
                 if message.startswith(b"RIFF"):
                     continue
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(message, self._settings["sample_rate"], 1)
+                frame = TTSAudioRawFrame(message, self.sample_rate, 1)
                 await self.push_frame(frame)
             else:
                 logger.debug(f"Received text message: {message}")
@@ -267,33 +265,9 @@ class PlayHTTTSService(TTSService):
                             self._request_id = None
                     elif "error" in msg:
                         logger.error(f"{self} error: {msg}")
-                        await self.push_error(ErrorFrame(f'{self} error: {msg["error"]}'))
+                        await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
-
-    async def _reconnect_websocket(self, retry_state: RetryCallState):
-        logger.warning(f"{self} reconnecting (attempt: {retry_state.attempt_number})")
-        await self._disconnect_websocket()
-        await self._connect_websocket()
-
-    async def _receive_task_handler(self):
-        while True:
-            try:
-                async for attempt in AsyncRetrying(
-                    stop=stop_after_attempt(3),
-                    wait=wait_exponential(multiplier=1, min=4, max=10),
-                    before_sleep=self._reconnect_websocket,
-                    reraise=True,
-                ):
-                    with attempt:
-                        await self._receive_messages()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                message = f"{self} error receiving messages: {e}"
-                logger.error(message)
-                await self.push_error(ErrorFrame(message, fatal=True))
-                break
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -326,7 +300,7 @@ class PlayHTTTSService(TTSService):
                 "voice": self._voice_id,
                 "voice_engine": self._settings["voice_engine"],
                 "output_format": self._settings["output_format"],
-                "sample_rate": self._settings["sample_rate"],
+                "sample_rate": self.sample_rate,
                 "language": self._settings["language"],
                 "speed": self._settings["speed"],
                 "seed": self._settings["seed"],
@@ -363,8 +337,8 @@ class PlayHTHttpTTSService(TTSService):
         api_key: str,
         user_id: str,
         voice_url: str,
-        voice_engine: str = "Play3.0-mini",
-        sample_rate: int = 24000,
+        voice_engine: str = "Play3.0-mini-http",  # Options: Play3.0-mini-http, Play3.0-mini-ws
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -378,7 +352,6 @@ class PlayHTHttpTTSService(TTSService):
             api_key=self._api_key,
         )
         self._settings = {
-            "sample_rate": sample_rate,
             "language": self.language_to_service_language(params.language)
             if params.language
             else "english",
@@ -389,10 +362,25 @@ class PlayHTHttpTTSService(TTSService):
         }
         self.set_model_name(voice_engine)
         self.set_voice(voice_url)
-        self._options = TTSOptions(
+
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        self._settings["sample_rate"] = self.sample_rate
+
+    def _create_options(self) -> TTSOptions:
+        language_str = self._settings["language"]
+        playht_language = None
+        if language_str:
+            # Convert string to PlayHT Language enum
+            for lang in PlayHTLanguage:
+                if lang.value == language_str:
+                    playht_language = lang
+                    break
+
+        return TTSOptions(
             voice=self._voice_id,
-            language=self._settings["language"],
-            sample_rate=self._settings["sample_rate"],
+            language=playht_language,
+            sample_rate=self.sample_rate,
             format=self._settings["format"],
             speed=self._settings["speed"],
             seed=self._settings["seed"],
@@ -401,20 +389,21 @@ class PlayHTHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_playht_language(language)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
+            options = self._create_options()
             b = bytearray()
             in_header = True
 
             await self.start_ttfb_metrics()
 
             playht_gen = self._client.tts(
-                text, voice_engine=self._settings["voice_engine"], options=self._options
+                text, voice_engine=self._settings["voice_engine"], options=options
             )
 
             await self.start_tts_usage_metrics(text)
@@ -437,7 +426,7 @@ class PlayHTHttpTTSService(TTSService):
                 else:
                     if len(chunk):
                         await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                         yield frame
             yield TTSStoppedFrame()
         except Exception as e:

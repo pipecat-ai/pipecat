@@ -59,6 +59,12 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+If you want to use the local version of `pipecat` in this repo rather than the last published version, also run:
+
+```bash
+pip install --editable "../../../[daily,elevenlabs,openai,silero,google]"
+```
+
 Run the server:
 
 ```bash

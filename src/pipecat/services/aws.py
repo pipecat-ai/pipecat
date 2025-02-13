@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -10,7 +10,7 @@ from typing import AsyncGenerator, Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import resample_audio
+from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -32,7 +32,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_aws_language(language: Language) -> str | None:
+def language_to_aws_language(language: Language) -> Optional[str]:
     language_map = {
         # Arabic
         Language.AR: "arb",
@@ -119,11 +119,12 @@ class PollyTTSService(TTSService):
     def __init__(
         self,
         *,
-        api_key: str,
-        aws_access_key_id: str,
-        region: str,
+        api_key: Optional[str] = None,
+        aws_access_key_id: Optional[str] = None,
+        aws_session_token: Optional[str] = None,
+        region: Optional[str] = None,
         voice_id: str = "Joanna",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -133,10 +134,10 @@ class PollyTTSService(TTSService):
             "polly",
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=api_key,
+            aws_session_token=aws_session_token,
             region_name=region,
         )
         self._settings = {
-            "sample_rate": sample_rate,
             "engine": params.engine,
             "language": self.language_to_service_language(params.language)
             if params.language
@@ -146,12 +147,14 @@ class PollyTTSService(TTSService):
             "volume": params.volume,
         }
 
+        self._resampler = create_default_resampler()
+
         self.set_voice(voice_id)
 
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_aws_language(language)
 
     def _construct_ssml(self, text: str) -> str:
@@ -191,8 +194,7 @@ class PollyTTSService(TTSService):
             response = self._polly_client.synthesize_speech(**args)
             if "AudioStream" in response:
                 audio_data = response["AudioStream"].read()
-                resampled = resample_audio(audio_data, 16000, self._settings["sample_rate"])
-                return resampled
+                return audio_data
             return None
 
         logger.debug(f"Generating TTS: [{text}]")
@@ -223,6 +225,8 @@ class PollyTTSService(TTSService):
                 yield None
                 return
 
+            audio_data = await self._resampler.resample(audio_data, 16000, self.sample_rate)
+
             await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()
@@ -232,7 +236,7 @@ class PollyTTSService(TTSService):
                 chunk = audio_data[i : i + chunk_size]
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
-                    frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
+                    frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                     yield frame
 
             yield TTSStoppedFrame()

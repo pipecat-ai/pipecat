@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   useDaily,
   useParticipantIds,
@@ -33,7 +33,9 @@ const Story: React.FC<StoryProps> = ({ handleLeave }) => {
         setTimeout(() => daily.setLocalAudio(true), 500);
         setStoryState("user");
       } else {
-        daily.setLocalAudio(false);
+        // Uncomment the next line to mute the mic while the 
+        // assistant it talking. Leave it commented to allow for interruptions
+        // daily.setLocalAudio(false);
         setStoryState("assistant");
       }
     },
@@ -58,7 +60,7 @@ const Story: React.FC<StoryProps> = ({ handleLeave }) => {
         {participantIds.length >= 1 ? (
           <VideoTile
             sessionId={participantIds[0]}
-            inactive={storyState === "user"}
+            inactive={false}
           />
         ) : (
           <span className="p-3 rounded-full bg-gray-900/60 animate-pulse">
@@ -71,7 +73,7 @@ const Story: React.FC<StoryProps> = ({ handleLeave }) => {
         )}
         <DailyAudio />
       </div>
-      <UserInputIndicator active={storyState === "user"} />
+      <UserInputIndicator active={true} />
     </div>
   );
 };

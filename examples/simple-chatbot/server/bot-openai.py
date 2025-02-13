@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -31,9 +31,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
-    EndFrame,
     Frame,
-    LLMMessagesFrame,
     OutputImageRawFrame,
     SpriteFrame,
 )
@@ -42,14 +40,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import (
-    RTVIBotTranscriptionProcessor,
-    RTVIConfig,
-    RTVIMetricsProcessor,
-    RTVIProcessor,
-    RTVISpeakingProcessor,
-    RTVIUserTranscriptionProcessor,
-)
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -190,34 +181,16 @@ async def main():
         #
         # RTVI events for Pipecat client UI
         #
-
-        # This will send `user-*-speaking` and `bot-*-speaking` messages.
-        rtvi_speaking = RTVISpeakingProcessor()
-
-        # This will emit UserTranscript events.
-        rtvi_user_transcription = RTVIUserTranscriptionProcessor()
-
-        # This will emit BotTranscript events.
-        rtvi_bot_transcription = RTVIBotTranscriptionProcessor()
-
-        # This will send `metrics` messages.
-        rtvi_metrics = RTVIMetricsProcessor()
-
-        # Handles RTVI messages from the client
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
         pipeline = Pipeline(
             [
                 transport.input(),
                 rtvi,
-                rtvi_speaking,
-                rtvi_user_transcription,
                 context_aggregator.user(),
                 llm,
-                rtvi_bot_transcription,
                 tts,
                 ta,
-                rtvi_metrics,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
@@ -229,6 +202,7 @@ async def main():
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
+                observers=[RTVIObserver(rtvi)],
             ),
         )
         await task.queue_frame(quiet_frame)
@@ -240,12 +214,12 @@ async def main():
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

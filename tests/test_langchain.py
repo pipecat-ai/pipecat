@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -32,8 +32,7 @@ from pipecat.processors.frameworks.langchain import LangchainProcessor
 class TestLangchain(unittest.IsolatedAsyncioTestCase):
     class MockProcessor(FrameProcessor):
         def __init__(self, name):
-            super().__init__()
-            self.name = name
+            super().__init__(name=name)
             self.token: list[str] = []
             # Start collecting tokens when we see the start frame
             self.start_collecting = False
@@ -93,7 +92,3 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         # This next one would fail with:
         # AssertionError: ' H e l l o   d e a r   h u m a n' != 'Hello dear human'
         # self.assertEqual(tma_out.messages[-1]["content"], self.expected_response)
-
-
-if __name__ == "__main__":
-    unittest.main()

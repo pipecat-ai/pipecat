@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -48,7 +48,7 @@ class AudioInputMessage(BaseModel):
     realtimeInput: RealtimeInput
 
     @classmethod
-    def from_raw_audio(cls, raw_audio: bytes, sample_rate=16000) -> "AudioInputMessage":
+    def from_raw_audio(cls, raw_audio: bytes, sample_rate: int) -> "AudioInputMessage":
         data = base64.b64encode(raw_audio).decode("utf-8")
         return cls(
             realtimeInput=RealtimeInput(
@@ -105,6 +105,7 @@ class InlineData(BaseModel):
 
 class Part(BaseModel):
     inlineData: Optional[InlineData] = None
+    text: Optional[str] = None
 
 
 class ModelTurn(BaseModel):

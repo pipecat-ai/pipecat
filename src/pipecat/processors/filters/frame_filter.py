@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -11,7 +11,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class FrameFilter(FrameProcessor):
-    def __init__(self, types: Tuple[Type[Frame]]):
+    def __init__(self, types: Tuple[Type[Frame], ...]):
         super().__init__()
         self._types = types
 

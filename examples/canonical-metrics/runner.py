@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -52,5 +52,4 @@ async def configure(aiohttp_session: aiohttp.ClientSession):
 
     token = await daily_rest_helper.get_token(url, expiry_time)
 
-    return (url, token)
     return (url, token)

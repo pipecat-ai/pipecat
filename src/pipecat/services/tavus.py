@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -12,7 +12,7 @@ import base64
 import aiohttp
 from loguru import logger
 
-from pipecat.audio.utils import resample_audio
+from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -35,7 +35,7 @@ class TavusVideoService(AIService):
         *,
         api_key: str,
         replica_id: str,
-        persona_id: str = "pipecat0",
+        persona_id: str = "pipecat0",  # Use `pipecat0` so that your TTS voice is used in place of the Tavus persona
         session: aiohttp.ClientSession,
         **kwargs,
     ) -> None:
@@ -46,6 +46,8 @@ class TavusVideoService(AIService):
         self._session = session
 
         self._conversation_id: str
+
+        self._resampler = create_default_resampler()
 
     async def initialize(self) -> str:
         url = "https://tavusapi.com/v2/conversations"
@@ -75,20 +77,26 @@ class TavusVideoService(AIService):
         logger.debug(f"TavusVideoService persona grabbed {response_json}")
         return response_json["persona_name"]
 
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self._end_conversation()
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self._end_conversation()
+
     async def _end_conversation(self) -> None:
         url = f"https://tavusapi.com/v2/conversations/{self._conversation_id}/end"
         headers = {"Content-Type": "application/json", "x-api-key": self._api_key}
         async with self._session.post(url, headers=headers) as r:
             r.raise_for_status()
 
-    async def _encode_audio_and_send(
-        self, audio: bytes, original_sample_rate: int, done: bool
-    ) -> None:
+    async def _encode_audio_and_send(self, audio: bytes, in_rate: int, done: bool) -> None:
         """Encodes audio to base64 and sends it to Tavus"""
         if not done:
-            audio = resample_audio(audio, original_sample_rate, 16000)
+            audio = await self._resampler.resample(audio, in_rate, 16000)
         audio_base64 = base64.b64encode(audio).decode("utf-8")
-        logger.trace(f"TavusVideoService sending {len(audio)} bytes")
+        logger.trace(f"{self}: sending {len(audio)} bytes")
         await self._send_audio_message(audio_base64, done=done)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -105,8 +113,6 @@ class TavusVideoService(AIService):
             await self.stop_processing_metrics()
         elif isinstance(frame, StartInterruptionFrame):
             await self._send_interrupt_message()
-        elif isinstance(frame, (EndFrame, CancelFrame)):
-            await self._end_conversation()
         else:
             await self.push_frame(frame, direction)
 

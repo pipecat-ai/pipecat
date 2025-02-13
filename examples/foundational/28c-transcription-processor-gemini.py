@@ -1,13 +1,14 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import asyncio
 import os
+import sqlite3
 import sys
-from typing import List
+from typing import List, Optional
 
 import aiohttp
 from dotenv import load_dotenv
@@ -34,13 +35,68 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 class TranscriptHandler:
-    """Simple handler to demonstrate transcript processing.
+    """Handles real-time transcript processing and output.
 
-    Maintains a list of conversation messages and logs them with timestamps.
+    Maintains a list of conversation messages and outputs them either to a log
+    or to a file as they are received. Each message includes its timestamp and role.
+
+    Attributes:
+        messages: List of all processed transcript messages
+        output_file: Optional path to file where transcript is saved. If None, outputs to log only.
     """
 
-    def __init__(self):
+    def __init__(self, output_file: Optional[str] = None, output_db: Optional[str] = None):
+        """Initialize handler with optional file or database output.
+
+        Args:
+            output_file: Path to output file. If None, outputs to log only.
+        """
         self.messages: List[TranscriptionMessage] = []
+        self.output_file: Optional[str] = output_file
+        self.output_db: Optional[str] = output_db
+
+        if self.output_db:
+            self.con = sqlite3.connect("example.db")
+            self.db = self.con.cursor()
+
+            table = self.db.execute("SELECT name FROM sqlite_master WHERE name='messages'")
+            if not (table.fetchone()):
+                self.db.execute(
+                    "CREATE TABLE messages(role TEXT, content TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP )"
+                )
+        logger.debug(
+            f"TranscriptHandler initialized; output file: {output_file}, output DB: {output_db}"
+        )
+
+    async def save_message(self, message: TranscriptionMessage):
+        """Save a single transcript message.
+
+        Outputs the message to the log and optionally to a SQLite database or file.
+
+        Args:
+            message: The message to save
+        """
+        timestamp = f"[{message.timestamp}] " if message.timestamp else ""
+        line = f"{timestamp}{message.role}: {message.content}"
+
+        # Always log the message
+        logger.info(f"Transcript: {line}")
+
+        # Optionally write to file
+        if self.output_file:
+            try:
+                with open(self.output_file, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except Exception as e:
+                logger.error(f"Error saving transcript message to file: {e}")
+
+        # and/or to a SQLite database
+        if self.output_db:
+            self.db.execute(
+                "INSERT INTO messages VALUES (?, ?, ?)",
+                (message.role, message.content, message.timestamp),
+            )
+            self.con.commit()
 
     async def on_transcript_update(
         self, processor: TranscriptProcessor, frame: TranscriptionUpdateFrame
@@ -51,13 +107,11 @@ class TranscriptHandler:
             processor: The TranscriptProcessor that emitted the update
             frame: TranscriptionUpdateFrame containing new messages
         """
-        self.messages.extend(frame.messages)
+        logger.debug(f"Received transcript update with {len(frame.messages)} new messages")
 
-        # Log the new messages
-        logger.info("New transcript messages:")
         for msg in frame.messages:
-            timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
-            logger.info(f"{timestamp}{msg.role}: {msg.content}")
+            self.messages.append(msg)
+            await self.save_message(msg)
 
 
 async def main():
@@ -102,7 +156,11 @@ async def main():
 
         # Create transcript processor and handler
         transcript = TranscriptProcessor()
-        transcript_handler = TranscriptHandler()
+        # Select a TranscriptHandler output method
+        # Uncomment out only one of the following lines:
+        transcript_handler = TranscriptHandler()  # Output to log only
+        # transcript_handler = TranscriptHandler(output_file="transcript.txt") # Output to file and log
+        # transcript_handler = TranscriptHandler(output_db="example.db")  # Output to SQLite DB and log
 
         pipeline = Pipeline(
             [
@@ -113,8 +171,8 @@ async def main():
                 llm,  # LLM
                 tts,  # TTS
                 transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses
                 transcript.assistant(),  # Assistant transcripts
+                context_aggregator.assistant(),  # Assistant spoken responses
             ]
         )
 
@@ -137,6 +195,11 @@ async def main():
         @transcript.event_handler("on_transcript_update")
         async def on_transcript_update(processor, frame):
             await transcript_handler.on_transcript_update(processor, frame)
+
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            # Stop the pipeline immediately when the participant leaves
+            await task.cancel()
 
         runner = PipelineRunner()
 

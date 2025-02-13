@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -15,6 +15,7 @@ from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import LLMMessagesAppendFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -36,8 +37,6 @@ async def main():
             token,
             "Respond bot",
             DailyParams(
-                audio_in_sample_rate=16000,
-                audio_out_sample_rate=24000,
                 audio_out_enabled=True,
                 vad_enabled=True,
                 vad_audio_passthrough=True,
@@ -70,6 +69,21 @@ async def main():
                 enable_usage_metrics=True,
             ),
         )
+
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            await task.queue_frames(
+                [
+                    LLMMessagesAppendFrame(
+                        messages=[
+                            {
+                                "role": "assistant",
+                                "content": "Greet the user.",
+                            }
+                        ]
+                    )
+                ]
+            )
 
         runner = PipelineRunner()
 

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -71,6 +71,7 @@ class Pipeline(BasePipeline):
     #
 
     async def cleanup(self):
+        await super().cleanup()
         await self._cleanup_processors()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

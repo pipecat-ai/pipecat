@@ -1,11 +1,12 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 import argparse
 import os
+from typing import Optional
 
 import aiohttp
 
@@ -18,7 +19,7 @@ async def configure(aiohttp_session: aiohttp.ClientSession):
 
 
 async def configure_with_args(
-    aiohttp_session: aiohttp.ClientSession, parser: argparse.ArgumentParser | None = None
+    aiohttp_session: aiohttp.ClientSession, parser: Optional[argparse.ArgumentParser] = None
 ):
     if not parser:
         parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")

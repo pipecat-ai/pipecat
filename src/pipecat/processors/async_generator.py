@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -30,7 +30,7 @@ class AsyncGeneratorProcessor(FrameProcessor):
         if isinstance(frame, (CancelFrame, EndFrame)):
             await self._data_queue.put(None)
         else:
-            data = self._serializer.serialize(frame)
+            data = await self._serializer.serialize(frame)
             if data:
                 await self._data_queue.put(data)
 

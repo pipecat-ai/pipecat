@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -20,12 +20,27 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+class KrispProcessorManager:
+    """
+    Ensures that only one KrispAudioProcessor instance exists for the entire program.
+    """
+
+    _krisp_instance = None
+
+    @classmethod
+    def get_processor(cls, sample_rate: int, sample_type: str, channels: int, model_path: str):
+        if cls._krisp_instance is None:
+            cls._krisp_instance = KrispAudioProcessor(
+                sample_rate, sample_type, channels, model_path
+            )
+        return cls._krisp_instance
+
+
 class KrispFilter(BaseAudioFilter):
     def __init__(
         self, sample_type: str = "PCM_16", channels: int = 1, model_path: str = None
     ) -> None:
-        """
-        Initializes the KrispAudioProcessor with customizable audio processing settings.
+        """Initializes the KrispAudioProcessor with customizable audio processing settings.
 
         :param sample_type: The type of audio sample, default is 'PCM_16'.
         :param channels: Number of audio channels, default is 1.
@@ -49,7 +64,7 @@ class KrispFilter(BaseAudioFilter):
 
     async def start(self, sample_rate: int):
         self._sample_rate = sample_rate
-        self._krisp_processor = KrispAudioProcessor(
+        self._krisp_processor = KrispProcessorManager.get_processor(
             self._sample_rate, self._sample_type, self._channels, self._model_path
         )
 

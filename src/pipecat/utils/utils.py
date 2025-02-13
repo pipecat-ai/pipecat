@@ -1,18 +1,21 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
 import collections
 import itertools
+import threading
 
 _COUNTS = collections.defaultdict(itertools.count)
+_COUNTS_LOCK = threading.Lock()
 _ID = itertools.count()
+_ID_LOCK = threading.Lock()
 
 
 def obj_id() -> int:
-    """
-    Generate a unique id for an object.
+    """Generate a unique id for an object.
 
     >>> obj_id()
     0
@@ -21,7 +24,8 @@ def obj_id() -> int:
     >>> obj_id()
     2
     """
-    return next(_ID)
+    with _ID_LOCK:
+        return next(_ID)
 
 
 def obj_count(obj) -> int:
@@ -35,4 +39,5 @@ def obj_count(obj) -> int:
     >>> obj_count(new_type())
     0
     """
-    return next(_COUNTS[obj.__class__.__name__])
+    with _COUNTS_LOCK:
+        return next(_COUNTS[obj.__class__.__name__])

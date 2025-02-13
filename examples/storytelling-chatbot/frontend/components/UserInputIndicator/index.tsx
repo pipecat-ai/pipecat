@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 import { useAppMessage } from "@daily-co/daily-react";
 import { DailyEventObjectAppMessage } from "@daily-co/daily-js";
@@ -13,12 +13,31 @@ interface Props {
 
 export default function UserInputIndicator({ active }: Props) {
   const [transcription, setTranscription] = useState<string[]>([]);
+  const timeoutRef = useRef<NodeJS.Timeout>();
+
+  const resetTimeout = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    timeoutRef.current = setTimeout(() => {
+      setTranscription([]);
+    }, 5000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   useAppMessage({
     onAppMessage: (e: DailyEventObjectAppMessage<any>) => {
       if (e.fromId && e.fromId === "transcription") {
         if (e.data.user_id === "" && e.data.is_final) {
           setTranscription((t) => [...t, ...e.data.text.split(" ")]);
+          resetTimeout();
         }
       }
     },

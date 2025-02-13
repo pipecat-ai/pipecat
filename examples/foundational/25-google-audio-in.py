@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -80,8 +80,7 @@ Rules:
 
 
 class UserAudioCollector(FrameProcessor):
-    """
-    This FrameProcessor collects audio frames in a buffer, then adds them to the
+    """This FrameProcessor collects audio frames in a buffer, then adds them to the
     LLM context when the user stops speaking.
     """
 
@@ -125,8 +124,7 @@ class UserAudioCollector(FrameProcessor):
 
 
 class InputTranscriptionContextFilter(FrameProcessor):
-    """
-    This FrameProcessor blocks all frames except the OpenAILLMContextFrame that triggers
+    """This FrameProcessor blocks all frames except the OpenAILLMContextFrame that triggers
     LLM inference. (And system frames, which are needed for the pipeline element lifecycle.)
 
     We take the context object out of the OpenAILLMContextFrame and use it to create a new
@@ -186,8 +184,7 @@ class InputTranscriptionContextFilter(FrameProcessor):
 
 @dataclass
 class LLMDemoTranscriptionFrame(Frame):
-    """
-    It would be nice if we could just use a TranscriptionFrame to send our transcriber
+    """It would be nice if we could just use a TranscriptionFrame to send our transcriber
     LLM's transcription output down the pipelline. But we can't, because TranscriptionFrame
     is a child class of TextFrame, which in our pipeline will be interpreted by the TTS
     service as text that should be turned into speech. We could restructure this pipeline,
@@ -199,8 +196,7 @@ class LLMDemoTranscriptionFrame(Frame):
 
 
 class InputTranscriptionFrameEmitter(FrameProcessor):
-    """
-    A simple FrameProcessor that aggregates the TextFrame output from the transcriber LLM
+    """A simple FrameProcessor that aggregates the TextFrame output from the transcriber LLM
     and then sends the full response down the pipeline as an LLMDemoTranscriptionFrame.
     """
 
@@ -216,13 +212,12 @@ class InputTranscriptionFrameEmitter(FrameProcessor):
         elif isinstance(frame, LLMFullResponseEndFrame):
             await self.push_frame(LLMDemoTranscriptionFrame(text=self._aggregation.strip()))
             self._aggregation = ""
-        elif isinstance(frame, MetricsFrame):
+        else:
             await self.push_frame(frame, direction)
 
 
 class TranscriptionContextFixup(FrameProcessor):
-    """
-    This FrameProcessor looks for the LLMDemoTranscriptionFrame and swaps out the
+    """This FrameProcessor looks for the LLMDemoTranscriptionFrame and swaps out the
     audio part of the most recent user message with the text transcription.
 
     Audio is big, using a lot of tokens and network bandwidth. So doing this is
@@ -297,7 +292,7 @@ async def main():
 
         conversation_llm = GoogleLLMService(
             name="Conversation",
-            model="gemini-1.5-flash-latest",
+            model="gemini-2.0-flash-001",
             # model="gemini-exp-1121",
             api_key=os.getenv("GOOGLE_API_KEY"),
             # we can give the GoogleLLMService a system instruction to use directly
@@ -308,7 +303,7 @@ async def main():
 
         input_transcription_llm = GoogleLLMService(
             name="Transcription",
-            model="gemini-1.5-flash-latest",
+            model="gemini-2.0-flash-001",
             # model="gemini-exp-1121",
             api_key=os.getenv("GOOGLE_API_KEY"),
             system_instruction=transcriber_system_message,

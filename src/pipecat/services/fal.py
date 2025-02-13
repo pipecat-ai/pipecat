@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -42,7 +42,7 @@ class FalImageGenService(ImageGenService):
         params: InputParams,
         aiohttp_session: aiohttp.ClientSession,
         model: str = "fal-ai/fast-sdxl",
-        key: str | None = None,
+        key: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)

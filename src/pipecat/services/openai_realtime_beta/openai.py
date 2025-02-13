@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -24,11 +24,11 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
-    TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -152,19 +152,51 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_bot_stopped_speaking(self):
         self._current_audio_response = None
 
+    def _calculate_audio_duration_ms(
+        self, total_bytes: int, sample_rate: int = 24000, bytes_per_sample: int = 2
+    ) -> int:
+        """Calculate audio duration in milliseconds based on PCM audio parameters."""
+        samples = total_bytes / bytes_per_sample
+        duration_seconds = samples / sample_rate
+        return int(duration_seconds * 1000)
+
     async def _truncate_current_audio_response(self):
+        """Truncates the current audio response at the appropriate duration.
+
+        Calculates the actual duration of the audio content and truncates at the shorter of
+        either the wall clock time or the actual audio duration to prevent invalid truncation
+        requests.
+        """
+        if not self._current_audio_response:
+            return
+
         # if the bot is still speaking, truncate the last message
-        if self._current_audio_response:
+        try:
             current = self._current_audio_response
             self._current_audio_response = None
+
+            # Calculate actual audio duration instead of using wall clock time
+            audio_duration_ms = self._calculate_audio_duration_ms(current.total_size)
+
+            # Use the shorter of wall clock time or actual audio duration
             elapsed_ms = int(time.time() * 1000 - current.start_time_ms)
+            truncate_ms = min(elapsed_ms, audio_duration_ms)
+
+            logger.trace(
+                f"Truncating audio: duration={audio_duration_ms}ms, "
+                f"elapsed={elapsed_ms}ms, truncate={truncate_ms}ms"
+            )
+
             await self.send_client_event(
                 events.ConversationItemTruncateEvent(
                     item_id=current.item_id,
                     content_index=current.content_index,
-                    audio_end_ms=elapsed_ms,
+                    audio_end_ms=truncate_ms,
                 )
             )
+        except Exception as e:
+            # Log warning and don't re-raise - allow session to continue
+            logger.warning(f"Audio truncation failed (non-fatal): {e}")
 
     #
     # frame processing
@@ -245,7 +277,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                     "OpenAI-Beta": "realtime=v1",
                 },
             )
-            self._receive_task = self.get_event_loop().create_task(self._receive_task_handler())
+            self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -259,11 +291,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._websocket.close()
                 self._websocket = None
             if self._receive_task:
-                self._receive_task.cancel()
-                try:
-                    await asyncio.wait_for(self._receive_task, timeout=1.0)
-                except asyncio.TimeoutError:
-                    logger.warning("Timed out waiting for receive task to finish")
+                await self.cancel_task(self._receive_task, timeout=1.0)
                 self._receive_task = None
             self._disconnecting = False
         except Exception as e:
@@ -435,7 +463,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     async def _handle_evt_audio_transcript_delta(self, evt):
         if evt.delta:
-            await self.push_frame(TextFrame(evt.delta))
+            await self.push_frame(LLMTextFrame(evt.delta))
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()

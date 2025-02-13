@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -70,7 +70,7 @@ class AudioTranscriber:
 
             history = ""
             for msg in previous_messages:
-                content = msg.get("content")
+                content = msg.get("content", [])
                 if isinstance(content, str):
                     history += f"{msg.get('role')}: {content}\n"
                 else:

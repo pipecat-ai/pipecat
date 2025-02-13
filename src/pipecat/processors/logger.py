@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -31,6 +31,8 @@ class FrameLogger(FrameProcessor):
         self._ignored_frame_types = tuple(ignored_frame_types) if ignored_frame_types else None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if self._ignored_frame_types and not isinstance(frame, self._ignored_frame_types):
             dir = "<" if direction is FrameDirection.UPSTREAM else ">"
             msg = f"{dir} {self._prefix}: {frame}"

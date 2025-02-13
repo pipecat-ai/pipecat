@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -14,7 +14,7 @@ ENDOFSENTENCE_PATTERN_STR = r"""
     (?<!Mrs)         # Negative lookbehind: not preceded by "Mrs"
     (?<!Prof)        # Negative lookbehind: not preceded by "Prof"
     [\.\?\!:;]|      # Match a period, question mark, exclamation point, colon, or semicolon
-    [。？！：；]       # the full-width version (mainly used in East Asian languages such as Chinese)
+    [。？！：；।]       # the full-width version (mainly used in East Asian languages such as Chinese, Hindi)
     $                # End of string
 """
 ENDOFSENTENCE_PATTERN = re.compile(ENDOFSENTENCE_PATTERN_STR, re.VERBOSE)

@@ -1,8 +1,10 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
+from typing import Optional
 
 from pipecat.frames.frames import (
     Frame,
@@ -50,7 +52,7 @@ class ResponseAggregator(FrameProcessor):
         start_frame,
         end_frame,
         accumulator_frame: TextFrame,
-        interim_accumulator_frame: TextFrame | None = None,
+        interim_accumulator_frame: Optional[TextFrame] = None,
     ):
         super().__init__()
 

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -16,8 +16,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.whisper import WhisperSTTService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.audio import LocalAudioTransport
+from pipecat.transports.local.audio import LocalAudioTransport, LocalTransportParams
 
 load_dotenv(override=True)
 
@@ -34,7 +33,7 @@ class TranscriptionLogger(FrameProcessor):
 
 
 async def main():
-    transport = LocalAudioTransport(TransportParams(audio_in_enabled=True))
+    transport = LocalAudioTransport(LocalTransportParams(audio_in_enabled=True))
 
     stt = WhisperSTTService()
 
@@ -44,7 +43,7 @@ async def main():
 
     task = PipelineTask(pipeline)
 
-    runner = PipelineRunner()
+    runner = PipelineRunner(handle_sigint=False if sys.platform == "win32" else True)
 
     await runner.run(task)
 

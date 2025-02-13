@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,7 +7,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import Frame, StartFrame
 
 
 class FrameSerializerType(Enum):
@@ -21,10 +21,13 @@ class FrameSerializer(ABC):
     def type(self) -> FrameSerializerType:
         pass
 
-    @abstractmethod
-    def serialize(self, frame: Frame) -> str | bytes | None:
+    async def setup(self, frame: StartFrame):
         pass
 
     @abstractmethod
-    def deserialize(self, data: str | bytes) -> Frame | None:
+    async def serialize(self, frame: Frame) -> str | bytes | None:
+        pass
+
+    @abstractmethod
+    async def deserialize(self, data: str | bytes) -> Frame | None:
         pass

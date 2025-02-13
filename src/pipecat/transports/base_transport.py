@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -16,6 +16,7 @@ from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.utils.utils import obj_count, obj_id
 
 
 class TransportParams(BaseModel):
@@ -30,30 +31,40 @@ class TransportParams(BaseModel):
     camera_out_color_format: str = "RGB"
     audio_out_enabled: bool = False
     audio_out_is_live: bool = False
-    audio_out_sample_rate: int = 24000
+    audio_out_sample_rate: Optional[int] = None
     audio_out_channels: int = 1
     audio_out_bitrate: int = 96000
     audio_out_mixer: Optional[BaseAudioMixer] = None
     audio_in_enabled: bool = False
-    audio_in_sample_rate: int = 16000
+    audio_in_sample_rate: Optional[int] = None
     audio_in_channels: int = 1
     audio_in_filter: Optional[BaseAudioFilter] = None
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
-    vad_analyzer: VADAnalyzer | None = None
+    vad_analyzer: Optional[VADAnalyzer] = None
 
 
 class BaseTransport(ABC):
     def __init__(
         self,
-        input_name: str | None = None,
-        output_name: str | None = None,
-        loop: asyncio.AbstractEventLoop | None = None,
+        *,
+        name: Optional[str] = None,
+        input_name: Optional[str] = None,
+        output_name: Optional[str] = None,
     ):
+        self._id: int = obj_id()
+        self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
         self._input_name = input_name
         self._output_name = output_name
-        self._loop = loop or asyncio.get_running_loop()
         self._event_handlers: dict = {}
+
+    @property
+    def id(self) -> int:
+        return self._id
+
+    @property
+    def name(self) -> str:
+        return self._name
 
     @abstractmethod
     def input(self) -> FrameProcessor:
@@ -89,3 +100,6 @@ class BaseTransport(ABC):
                     handler(self, *args, **kwargs)
         except Exception as e:
             logger.exception(f"Exception in event handler {event_name}: {e}")
+
+    def __str__(self):
+        return self.name

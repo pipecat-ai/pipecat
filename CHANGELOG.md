@@ -5,6 +5,431 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added new `MUTE_UNTIL_FIRST_BOT_COMPLETE` strategy to `STTMuteStrategy`. This
+  strategy starts muted and remains muted until the first bot speech completes,
+  ensuring the bot's first response cannot be interrupted. This complements the
+  existing `FIRST_SPEECH` strategy which only mutes during the first detected
+  bot speech.
+
+- Added support for Google Cloud Speech-to-Text V2 through `GoogleSTTService`.
+
+- Added `RimeTTSService`, a new `WordTTSService`. Updated the foundational
+  example `07q-interruptible-rime.py` to use `RimeTTSService`.
+
+- Added support for Groq's Whisper API through the new `GroqSTTService` and
+  OpenAI's Whisper API through the new `OpenAISTTService`. Introduced a new
+  base class `BaseWhisperSTTService` to handle common Whisper API
+  functionality.
+
+- Added `PerplexityLLMService` for Perplexity NIM API integration, with an
+  OpenAI-compatible interface. Also, added foundational example
+  `14n-function-calling-perplexity.py`.
+
+- Added `DailyTransport.update_remote_participants()`. This allows you to
+  update remote participant's settings, like their permissions or which of
+  their devices are enabled. Requires that the local participant have
+  participant admin permission.
+
+### Changed
+
+- Enhanced `STTMuteConfig` to validate strategy combinations, preventing
+  `MUTE_UNTIL_FIRST_BOT_COMPLETE` and `FIRST_SPEECH` from being used together
+  as they handle first bot speech differently.
+
+- Updated foundational example `07n-interruptible-google.py` to use all Google
+  services.
+
+- `RimeHttpTTSService` now uses the `mistv2` model by default.
+
+- Improved error handling in `AzureTTSService` to properly detect and log
+  synthesis cancellation errors.
+
+- Enhanced `WhisperSTTService` with full language support and improved model
+  documentation.
+
+- Updated foundation example `14f-function-calling-groq.py` to use
+  `GroqSTTService` for transcription.
+
+- Updated `GroqLLMService` to use `llama-3.3-70b-versatile` as the default
+  model.
+
+- `RTVIObserver` doesn't handle `LLMSearchResponseFrame` frames anymore. For
+  now, to handle those frames you need to create a `GoogleRTVIObserver`
+  instead.
+
+### Deprecated
+
+- `STTMuteFilter` constructor's `stt_service` parameter is now deprecated and
+  will be removed in a future version. The filter now manages mute state
+  internally instead of querying the STT service.
+
+- `RTVI.observer()` is now deprecated, instantiate an `RTVIObserver` directly
+  instead.
+
+- All RTVI frame processors (e.g. `RTVISpeakingProcessor`,
+  `RTVIBotLLMProcessor`) are now deprecated, instantiate an `RTVIObserver`
+  instead.
+
+### Fixed
+
+- Fixed an issue that was causing `AudioBufferProcessor` to not record
+  synchronized audio.
+
+- Fixed an `RTVI` issue that was causing `bot-tts-text` messages to be sent
+  before being processed by the output transport.
+
+- Fixed an issue[#1192] in 11labs where we are trying to reconnect/disconnect
+  the websocket connection even when the connection is already closed.
+
+## [0.0.56] - 2025-02-06
+
+### Changed
+
+- Use `gemini-2.0-flash-001` as the default model for `GoogleLLMSerivce`.
+
+- Improved foundational examples 22b, 22c, and 22d to support function calling.
+  With these base examples, `FunctionCallInProgressFrame` and
+  `FunctionCallResultFrame` will no longer be blocked by the gates.
+
+### Fixed
+
+- Fixed a `TkLocalTransport` and `LocalAudioTransport` issues that was causing
+  errors on cleanup.
+
+- Fixed an issue that was causing `tests.utils` import to fail because of
+  logging setup.
+
+- Fixed a `SentryMetrics` issue that was preventing any metrics to be sent to
+  Sentry and also was preventing from metrics frames to be pushed to the
+  pipeline.
+
+- Fixed an issue in `BaseOutputTransport` where incoming audio would not be
+  resampled to the desired output sample rate.
+
+- Fixed an issue with the `TwilioFrameSerializer` and `TelnyxFrameSerializer`
+  where `twilio_sample_rate` and `telnyx_sample_rate` were incorrectly
+  initialized to `audio_in_sample_rate`. Those values currently default to 8000
+  and should be set manually from the serializer constructor if a different
+  value is needed.
+
+### Other
+
+- Added a new `sentry-metrics` example.
+
+## [0.0.55] - 2025-02-05
+
+### Added
+
+- Added a new `start_metadata` field to `PipelineParams`. The provided metadata
+  will be set to the initial `StartFrame` being pushed from the `PipelineTask`.
+
+- Added new fields to `PipelineParams` to control audio input and output sample
+  rates for the whole pipeline. This allows controlling sample rates from a
+  single place instead of having to specify sample rates in each
+  service. Setting a sample rate to a service is still possible and will
+  override the value from `PipelineParams`.
+
+- Introduce audio resamplers (`BaseAudioResampler`). This is just a base class
+  to implement audio resamplers. Currently, two implementations are provided
+  `SOXRAudioResampler` and `ResampyResampler`. A new
+  `create_default_resampler()` has been added (replacing the now deprecated
+  `resample_audio()`).
+
+- It is now possible to specify the asyncio event loop that a `PipelineTask` and
+  all the processors should run on by passing it as a new argument to the
+  `PipelineRunner`. This could allow running pipelines in multiple threads each
+  one with its own event loop.
+
+- Added a new `utils.TaskManager`. Instead of a global task manager we now have
+  a task manager per `PipelineTask`. In the previous version the task manager
+  was global, so running multiple simultaneous `PipelineTask`s could result in
+  dangling task warnings which were not actually true. In order, for all the
+  processors to know about the task manager, we pass it through the
+  `StartFrame`. This means that processors should create tasks when they receive
+  a `StartFrame` but not before (because they don't have a task manager yet).
+
+- Added `TelnyxFrameSerializer` to support Telnyx calls. A full running example
+  has also been added to `examples/telnyx-chatbot`.
+
+- Allow pushing silence audio frames before `TTSStoppedFrame`. This might be
+  useful for testing purposes, for example, passing bot audio to an STT service
+  which usually needs additional audio data to detect the utterance stopped.
+
+- `TwilioSerializer` now supports transport message frames. With this we can
+  create Twilio emulators.
+
+- Added a new transport: `WebsocketClientTransport`.
+
+- Added a `metadata` field to `Frame` which makes it possible to pass custom
+  data to all frames.
+
+- Added `test/utils.py` inside of pipecat package.
+
+### Changed
+
+- `GatedOpenAILLMContextAggregator` now require keyword arguments. Also, a new
+  `start_open` argument has been added to set the initial state of the gate.
+
+- Added `organization` and `project` level authentication to
+  `OpenAILLMService`.
+
+- Improved the language checking logic in `ElevenLabsTTSService` and
+  `ElevenLabsHttpTTSService` to properly handle language codes based on model
+  compatibility, with appropriate warnings when language codes cannot be
+  applied.
+
+- Updated `GoogleLLMContext` to support pushing `LLMMessagesUpdateFrame`s that
+  contain a combination of function calls, function call responses, system
+  messages, or just messages.
+
+- `InputDTMFFrame` is now based on `DTMFFrame`. There's also a new
+  `OutputDTMFFrame` frame.
+
+### Deprecated
+
+- `resample_audio()` is now deprecated, use `create_default_resampler()`
+  instead.
+
+### Removed
+
+- `AudioBufferProcessor.reset_audio_buffers()` has been removed, use
+  `AudioBufferProcessor.start_recording()` and
+  `AudioBufferProcessor.stop_recording()` instead.
+
+### Fixed
+
+- Fixed a `AudioBufferProcessor` that would cause crackling in some recordings.
+
+- Fixed an issue in `AudioBufferProcessor` where user callback would not be
+  called on task cancellation.
+
+- Fixed an issue in `AudioBufferProcessor` that would cause wrong silence
+  padding in some cases.
+
+- Fixed an issue where `ElevenLabsTTSService` messages would return a 1009
+  websocket error by increasing the max message size limit to 16MB.
+
+- Fixed a `DailyTransport` issue that would cause events to be triggered before
+  join finished.
+
+- Fixed a `PipelineTask` issue that was preventing processors to be cleaned up
+  after cancelling the task.
+
+- Fixed an issue where queuing a `CancelFrame` to a pipeline task would not
+  cause the task to finish. However, using `PipelineTask.cancel()` is still the
+  recommended way to cancel a task.
+
+### Other
+
+- Improved Unit Test `run_test()` to use `PipelineTask` and
+  `PipelineRunner`. There's now also some control around `StartFrame` and
+  `EndFrame`. The `EndTaskFrame` has been removed since it doesn't seem
+  necessary with this new approach.
+
+- Updated `twilio-chatbot` with a few new features: use 8000 sample rate and
+  avoid resampling, a new client useful for stress testing and testing locally
+  without the need to make phone calls. Also, added audio recording on both the
+  client and the server to make sure the audio sounds good.
+
+- Updated examples to use `task.cancel()` to immediately exit the example when a
+  participant leaves or disconnects, instead of pushing an `EndFrame`. Pushing
+  an `EndFrame` causes the bot to run through everything that is internally
+  queued (which could take some seconds). Note that using `task.cancel()` might
+  not always be the best option and pushing an `EndFrame` could still be
+  desirable to make sure all the pipeline is flushed.
+
+## [0.0.54] - 2025-01-27
+
+### Added
+
+- In order to create tasks in Pipecat frame processors it is now recommended to
+  use `FrameProcessor.create_task()` (which uses the new
+  `utils.asyncio.create_task()`). It takes care of uncaught exceptions, task
+  cancellation handling and task management. To cancel or wait for a task there
+  is `FrameProcessor.cancel_task()` and `FrameProcessor.wait_for_task()`. All of
+  Pipecat processors have been updated accordingly. Also, when a pipeline runner
+  finishes, a warning about dangling tasks might appear, which indicates if any
+  of the created tasks was never cancelled or awaited for (using these new
+  functions).
+
+- It is now possible to specify the period of the `PipelineTask` heartbeat
+  frames with `heartbeats_period_secs`.
+
+- Added `DailyMeetingTokenProperties` and `DailyMeetingTokenParams` Pydantic models
+  for meeting token creation in `get_token` method of `DailyRESTHelper`.
+
+- Added `enable_recording` and `geo` parameters to `DailyRoomProperties`.
+
+- Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings to a custom AWS bucket.
+
+### Changed
+
+- Enhanced `UserIdleProcessor` with retry functionality and control over idle
+  monitoring via new callback signature `(processor, retry_count) -> bool`.
+  Updated the `17-detect-user-idle.py` to show how to use the `retry_count`.
+
+- Add defensive error handling for `OpenAIRealtimeBetaLLMService`'s audio
+  truncation. Audio truncation errors during interruptions now log a warning
+  and allow the session to continue instead of throwing an exception.
+
+- Modified `TranscriptProcessor` to use TTS text frames for more accurate assistant
+  transcripts. Assistant messages are now aggregated based on bot speaking boundaries
+  rather than LLM context, providing better handling of interruptions and partial
+  utterances.
+
+- Updated foundational examples `28a-transcription-processor-openai.py`,
+  `28b-transcript-processor-anthropic.py`, and
+  `28c-transcription-processor-gemini.py` to use the updated
+  `TranscriptProcessor`.
+
+### Fixed
+
+- Fixed an `GeminiMultimodalLiveLLMService` issue that was preventing the user
+  to push initial LLM assistant messages (using `LLMMessagesAppendFrame`).
+
+- Added missing `FrameProcessor.cleanup()` calls to `Pipeline`,
+  `ParallelPipeline` and `UserIdleProcessor`.
+
+- Fixed a type error when using `voice_settings` in `ElevenLabsHttpTTSService`.
+
+- Fixed an issue where `OpenAIRealtimeBetaLLMService` function calling resulted
+  in an error.
+
+- Fixed an issue in `AudioBufferProcessor` where the last audio buffer was not
+  being processed, in cases where the `_user_audio_buffer` was smaller than the
+  buffer size.
+
+### Performance
+
+- Replaced audio resampling library `resampy` with `soxr`. Resampling a 2:21s
+  audio file from 24KHz to 16KHz took 1.41s with `resampy` and 0.031s with
+  `soxr` with similar audio quality.
+
+### Other
+
+- Added initial unit test infrastructure.
+
+## [0.0.53] - 2025-01-18
+
+### Added
+
+- Added `ElevenLabsHttpTTSService` which uses EleveLabs' HTTP API instead of the
+  websocket one.
+
+- Introduced pipeline frame observers. Observers can view all the frames that go
+  through the pipeline without the need to inject processors in the
+  pipeline. This can be useful, for example, to implement frame loggers or
+  debuggers among other things. The example
+  `examples/foundational/30-observer.py` shows how to add an observer to a
+  pipeline for debugging.
+
+- Introduced heartbeat frames. The pipeline task can now push periodic
+  heartbeats down the pipeline when `enable_heartbeats=True`. Heartbeats are
+  system frames that are supposed to make it all the way to the end of the
+  pipeline. When a heartbeat frame is received the traversing time (i.e. the
+  time it took to go through the whole pipeline) will be displayed (with TRACE
+  logging) otherwise a warning will be shown. The example
+  `examples/foundational/31-heartbeats.py` shows how to enable heartbeats and
+  forces warnings to be displayed.
+
+- Added `LLMTextFrame` and `TTSTextFrame` which should be pushed by LLM and TTS
+  services respectively instead of `TextFrame`s.
+
+- Added `OpenRouter` for OpenRouter integration with an OpenAI-compatible
+  interface. Added foundational example `14m-function-calling-openrouter.py`.
+
+- Added a new `WebsocketService` based class for TTS services, containing
+  base functions and retry logic.
+
+- Added `DeepSeekLLMService` for DeepSeek integration with an OpenAI-compatible
+  interface. Added foundational example `14l-function-calling-deepseek.py`.
+
+- Added `FunctionCallResultProperties` dataclass to provide a structured way to
+  control function call behavior, including:
+
+  - `run_llm`: Controls whether to trigger LLM completion
+  - `on_context_updated`: Optional callback triggered after context update
+
+- Added a new foundational example `07e-interruptible-playht-http.py` for easy
+  testing of `PlayHTHttpTTSService`.
+
+- Added support for Google TTS Journey voices in `GoogleTTSService`.
+
+- Added `29-livekit-audio-chat.py`, as a new foundational examples for
+  `LiveKitTransportLayer`.
+
+- Added `enable_prejoin_ui`, `max_participants` and `start_video_off` params
+  to `DailyRoomProperties`.
+
+- Added `session_timeout` to `FastAPIWebsocketTransport` and
+  `WebsocketServerTransport` for configuring session timeouts (in
+  seconds). Triggers `on_session_timeout` for custom timeout handling.
+  See [examples/websocket-server/bot.py](https://github.com/pipecat-ai/pipecat/blob/main/examples/websocket-server/bot.py).
+
+- Added the new modalities option and helper function to set Gemini output
+  modalities.
+
+- Added `examples/foundational/26d-gemini-multimodal-live-text.py` which is
+  using Gemini as TEXT modality and using another TTS provider for TTS process.
+
+### Changed
+
+- Modified `UserIdleProcessor` to start monitoring only after first
+  conversation activity (`UserStartedSpeakingFrame` or
+  `BotStartedSpeakingFrame`) instead of immediately.
+
+- Modified `OpenAIAssistantContextAggregator` to support controlled completions
+  and to emit context update callbacks via `FunctionCallResultProperties`.
+
+- Added `aws_session_token` to the `PollyTTSService`.
+
+- Changed the default model for `PlayHTHttpTTSService` to `Play3.0-mini-http`.
+
+- `api_key`, `aws_access_key_id` and `region` are no longer required parameters
+  for the PollyTTSService (AWSTTSService)
+
+- Added `session_timeout` example in `examples/websocket-server/bot.py` to
+  handle session timeout event.
+
+- Changed `InputParams` in
+  `src/pipecat/services/gemini_multimodal_live/gemini.py` to support different
+  modalities.
+
+- Changed `DeepgramSTTService` to send `finalize` event whenever VAD detects
+  `UserStoppedSpeakingFrame`. This helps in faster transcriptions and clearing
+  the `Deepgram` audio buffer.
+
+### Fixed
+
+- Fixed an issue where `DeepgramSTTService` was not generating metrics using
+  pipeline's VAD.
+
+- Fixed `UserIdleProcessor` not properly propagating `EndFrame`s through the
+  pipeline.
+
+- Fixed an issue where websocket based TTS services could incorrectly terminate
+  their connection due to a retry counter not resetting.
+
+- Fixed a `PipelineTask` issue that would cause a dangling task after stopping
+  the pipeline with an `EndFrame`.
+
+- Fixed an import issue for `PlayHTHttpTTSService`.
+
+- Fixed an issue where languages couldn't be used with the `PlayHTHttpTTSService`.
+
+- Fixed an issue where `OpenAIRealtimeBetaLLMService` audio chunks were hitting
+  an error when truncating audio content.
+
+- Fixed an issue where setting the voice and model for `RimeHttpTTSService`
+  wasn't working.
+
+- Fixed an issue where `IdleFrameProcessor` and `UserIdleProcessor` were getting
+  initialized before the start of the pipeline.
+
 ## [0.0.52] - 2024-12-24
 
 ### Added
@@ -1263,6 +1688,9 @@ async def on_connected(processor):
   if you say a certain phrase/word.
 
 ### Changed
+
+- `FrameSerializer.serialize()` and `FrameSerializer.deserialize()` are now
+  `async`.
 
 - `Filter` has been renamed to `FrameFilter` and it's now under
   `processors/filters`.

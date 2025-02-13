@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -18,7 +18,6 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, LLMMessagesFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -83,7 +82,6 @@ async def main():
             # English
             #
             voice_id="cgSgspJ2msm6clMCkdW9",
-            aiohttp_session=session,
             #
             # Spanish
             #
@@ -110,8 +108,9 @@ async def main():
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
-        # Save audio every 10 seconds.
-        audiobuffer = AudioBufferProcessor(buffer_size=480000)
+        # NOTE: Watch out! This will save all the conversation in memory. You
+        # can pass `buffer_size` to get periodic callbacks.
+        audiobuffer = AudioBufferProcessor()
 
         pipeline = Pipeline(
             [
@@ -133,13 +132,14 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
+            await audiobuffer.start_recording()
             await transport.capture_participant_transcription(participant["id"])
-            await task.queue_frames([LLMMessagesFrame(messages)])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
-            await task.queue_frame(EndFrame())
+            await task.cancel()
 
         runner = PipelineRunner()
 

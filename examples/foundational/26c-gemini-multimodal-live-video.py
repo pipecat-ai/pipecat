@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -37,8 +37,6 @@ async def main():
             token,
             "Respond bot",
             DailyParams(
-                audio_in_sample_rate=16000,
-                audio_out_sample_rate=24000,
                 audio_out_enabled=True,
                 vad_enabled=True,
                 vad_audio_passthrough=True,
@@ -47,8 +45,6 @@ async def main():
                 # matter because we can only use the Multimodal Live API's phrase
                 # endpointing, for now.
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
-                start_audio_paused=True,
-                start_video_paused=True,
             ),
         )
 

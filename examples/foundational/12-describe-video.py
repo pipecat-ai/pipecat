@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2024, Daily
+# Copyright (c) 2024–2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -7,6 +7,7 @@
 import asyncio
 import os
 import sys
+from typing import Optional
 
 import aiohttp
 from dotenv import load_dotenv
@@ -32,7 +33,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 class UserImageRequester(FrameProcessor):
-    def __init__(self, participant_id: str | None = None):
+    def __init__(self, participant_id: Optional[str] = None):
         super().__init__()
         self._participant_id = participant_id
 
