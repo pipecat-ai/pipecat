@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new frames `EmulateUserStartedSpeakingFrame` and
+  `EmulateUserStoppedSpeakingFrame` which can be used to emulated VAD behavior
+  without VAD being present or not being triggered.
+
 - Added a new `audio_in_stream_on_start` field to `TransportParams`.
 
 - Added a new method `start_audio_in_streaming` in the `BaseInputTransport`.

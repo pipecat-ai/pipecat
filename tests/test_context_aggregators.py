@@ -9,7 +9,8 @@ import unittest
 import google.ai.generativelanguage as glm
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
+    EmulateUserStartedSpeakingFrame,
+    EmulateUserStoppedSpeakingFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -348,7 +349,7 @@ class BaseTestUserContextAggregator:
             SleepFrame(sleep=AGGREGATION_SLEEP),
         ]
         expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
-        expected_up_frames = [BotInterruptionFrame]
+        expected_up_frames = [EmulateUserStartedSpeakingFrame, EmulateUserStoppedSpeakingFrame]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -370,7 +371,7 @@ class BaseTestUserContextAggregator:
             SleepFrame(sleep=AGGREGATION_SLEEP),
         ]
         expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
-        expected_up_frames = [BotInterruptionFrame]
+        expected_up_frames = [EmulateUserStartedSpeakingFrame, EmulateUserStoppedSpeakingFrame]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -404,7 +405,7 @@ class BaseTestUserContextAggregator:
             UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
         ]
-        expected_up_frames = [BotInterruptionFrame]
+        expected_up_frames = [EmulateUserStartedSpeakingFrame, EmulateUserStoppedSpeakingFrame]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,

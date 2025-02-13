@@ -12,6 +12,8 @@ from typing import List
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     CancelFrame,
+    EmulateUserStartedSpeakingFrame,
+    EmulateUserStoppedSpeakingFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
@@ -227,6 +229,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._seen_interim_results = False
         self._user_speaking = False
         self._last_user_speaking_time = 0
+        self._emulating_vad = False
 
         self._aggregation_event = asyncio.Event()
         self._aggregation_task = None
@@ -314,6 +317,14 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             except asyncio.TimeoutError:
                 if not self._user_speaking:
                     await self.push_aggregation()
+
+                # If we are emulating VAD we still need to send the user stopped
+                # speaking frame.
+                if self._emulating_vad:
+                    await self.push_frame(
+                        EmulateUserStoppedSpeakingFrame(), FrameDirection.UPSTREAM
+                    )
+                    self._emulating_vad = False
             finally:
                 self._aggregation_event.clear()
 
@@ -325,7 +336,13 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         if not self._user_speaking:
             diff_time = time.time() - self._last_user_speaking_time
             if diff_time > self._bot_interruption_timeout:
-                await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+                # If we reach this case we received a transcription but VAD was
+                # not able to detect voice (e.g. when you whisper a short
+                # utterance). So, we need to emulate VAD (i.e. user
+                # start/stopped speaking).
+                await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+                self._emulating_vad = True
+
                 # Reset time so we don't interrupt again right away.
                 self._last_user_speaking_time = time.time()
 
