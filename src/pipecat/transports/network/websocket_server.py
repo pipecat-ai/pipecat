@@ -193,10 +193,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             self._next_send_time = 0
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
-        message_frame = TextFrame(
-            text=json.dumps(frame.message),
-        )
-        await self._write_frame(message_frame)
+        await self._write_frame(frame)
 
     async def write_raw_audio_frames(self, frames: bytes):
         if not self._websocket:
