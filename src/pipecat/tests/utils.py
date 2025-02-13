@@ -127,6 +127,7 @@ async def run_test(
             received_down_frames.append(frame)
 
     print("received DOWN frames =", received_down_frames)
+    print("expected DOWN frames =", expected_down_frames)
 
     assert len(received_down_frames) == len(expected_down_frames)
 
@@ -142,6 +143,7 @@ async def run_test(
         received_up_frames.append(frame)
 
     print("received UP frames =", received_up_frames)
+    print("expected UP frames =", expected_up_frames)
 
     assert len(received_up_frames) == len(expected_up_frames)
 
