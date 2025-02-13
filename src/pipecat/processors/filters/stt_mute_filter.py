@@ -156,17 +156,13 @@ class STTMuteFilter(FrameProcessor):
         """Processes incoming frames and manages muting state."""
         await super().process_frame(frame, direction)
 
-        # Handle initial state on StartFrame
-        if isinstance(frame, StartFrame):
-            # Check if we should start muted
-            should_mute = await self._should_mute()
-            if should_mute:
-                await self._handle_mute_state(True)
-
-        # First determine if we need to change mute state
+        # Determine if we need to change mute state based on frame type
         should_mute = None
 
-        if isinstance(frame, FunctionCallInProgressFrame):
+        # Process frames to determine mute state
+        if isinstance(frame, StartFrame):
+            should_mute = await self._should_mute()
+        elif isinstance(frame, FunctionCallInProgressFrame):
             self._function_call_in_progress = True
             should_mute = await self._should_mute()
         elif isinstance(frame, FunctionCallResultFrame):
