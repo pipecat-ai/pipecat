@@ -98,8 +98,7 @@ class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
             if properties and properties.on_context_updated is not None:
                 await properties.on_context_updated()
 
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
+            await self.push_context_frame()
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
