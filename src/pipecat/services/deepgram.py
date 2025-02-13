@@ -215,8 +215,6 @@ class DeepgramSTTService(STTService):
         await self.start_processing_metrics()
 
     async def _on_speech_started(self, *args, **kwargs):
-        if self.vad_enabled:
-            await self.push_frame(UserStartedSpeakingFrame())
         await self.start_metrics()
         await self._call_event_handler("on_speech_started", *args, **kwargs)
 
@@ -236,6 +234,8 @@ class DeepgramSTTService(STTService):
         if len(transcript) > 0:
             await self.stop_ttfb_metrics()
             if is_final:
+                if self.vad_enabled:
+                    await self.push_frame(UserStartedSpeakingFrame())
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )

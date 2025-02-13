@@ -379,7 +379,7 @@ class TTSService(AIService):
             # Check again after running the filter
             if not text.strip():
                 return
-        await self.process_generator(self.run_tts(text))
+        await self.process_generator(self.run_tts(text.strip()))
         await self.stop_processing_metrics()
         if self._push_text_frames:
             # We send the original text after the audio. This way, if we are
