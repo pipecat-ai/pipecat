@@ -568,6 +568,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         OpenAIRealtimeLLMContext.upgrade_to_realtime(context)
         user = OpenAIRealtimeUserContextAggregator(context)
         assistant = OpenAIRealtimeAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, expect_stripped_words=assistant_expect_stripped_words
         )
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
