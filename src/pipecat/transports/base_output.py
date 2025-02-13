@@ -170,6 +170,8 @@ class BaseOutputTransport(FrameProcessor):
         # TODO(aleix): Images and audio should support presentation timestamps.
         elif frame.pts:
             await self._sink_clock_queue.put((frame.pts, frame.id, frame))
+        elif direction == FrameDirection.UPSTREAM:
+            await self.push_frame(frame, direction)
         else:
             await self._sink_queue.put(frame)
 

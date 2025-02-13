@@ -9,14 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new frames `EmulateUserStartedSpeakingFrame` and
+  `EmulateUserStoppedSpeakingFrame` which can be used to emulated VAD behavior
+  without VAD being present or not being triggered.
+
 - Added a new `audio_in_stream_on_start` field to `TransportParams`.
- 
-- Added a new method `start_audio_in_streaming` in the `BaseInputTransport`. 
-  - This method should be used to start receiving the input audio in case the field `audio_in_stream_on_start` is set to `false`.
 
-- Added support for the `RTVIProcessor` to handle buffered audio in `base64` format, converting it into InputAudioRawFrame for transport.
+- Added a new method `start_audio_in_streaming` in the `BaseInputTransport`.
 
-- Added support for the `RTVIProcessor` to trigger `start_audio_in_streaming` only after the `client-ready` message.
+  - This method should be used to start receiving the input audio in case the
+    field `audio_in_stream_on_start` is set to `false`.
+
+- Added support for the `RTVIProcessor` to handle buffered audio in `base64`
+  format, converting it into InputAudioRawFrame for transport.
+
+- Added support for the `RTVIProcessor` to trigger `start_audio_in_streaming`
+  only after the `client-ready` message.
 
 - Added new `MUTE_UNTIL_FIRST_BOT_COMPLETE` strategy to `STTMuteStrategy`. This
   strategy starts muted and remains muted until the first bot speech completes,
@@ -38,18 +46,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenAI-compatible interface. Also, added foundational example
   `14n-function-calling-perplexity.py`.
 
-- Added `DailyTransport.update_remote_participants()`. This allows you to
-  update remote participant's settings, like their permissions or which of
-  their devices are enabled. Requires that the local participant have
-  participant admin permission.
+- Added `DailyTransport.update_remote_participants()`. This allows you to update
+  remote participant's settings, like their permissions or which of their
+  devices are enabled. Requires that the local participant have participant
+  admin permission.
 
 ### Changed
 
-- Updated `DailyTransport` to respect the `audio_in_stream_on_start` field, ensuring it only starts receiving the audio input if it is enabled.
+- Updated `DailyTransport` to respect the `audio_in_stream_on_start` field,
+  ensuring it only starts receiving the audio input if it is enabled.
 
-- Updated `FastAPIWebsocketOutputTransport` to send `TransportMessageFrame` and `TransportMessageUrgentFrame` to the serializer.
+- Updated `FastAPIWebsocketOutputTransport` to send `TransportMessageFrame` and
+  `TransportMessageUrgentFrame` to the serializer.
 
-- Updated `WebsocketServerOutputTransport` to send `TransportMessageFrame` and `TransportMessageUrgentFrame` to the serializer.
+- Updated `WebsocketServerOutputTransport` to send `TransportMessageFrame` and
+  `TransportMessageUrgentFrame` to the serializer.
 
 - Enhanced `STTMuteConfig` to validate strategy combinations, preventing
   `MUTE_UNTIL_FIRST_BOT_COMPLETE` and `FIRST_SPEECH` from being used together
@@ -90,6 +101,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead.
 
 ### Fixed
+
+- Fixed a `BaseOutputTransport` issue that was causing upstream frames to no be
+  pushed upstream.
+
+- Fixed multiple issue where user transcriptions where not being handled
+  properly. It was possible for short utterances to not trigger VAD which would
+  cause user transcriptions to be ignored. It was also possible for one or more
+  transcriptions to be generated after VAD in which case they would also be
+  ignored.
 
 - Fixed an issue that was causing `BotStoppedSpeakingFrame` to be generated too
   late. This could then cause issues unblocking `STTMuteFilter` later than
@@ -283,7 +303,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `enable_recording` and `geo` parameters to `DailyRoomProperties`.
 
-- Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings to a custom AWS bucket.
+- Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings
+  to a custom AWS bucket.
 
 ### Changed
 

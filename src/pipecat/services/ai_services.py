@@ -577,7 +577,7 @@ class SegmentedSTTService(STTService):
         self._smoothing_factor = 0.2
         self._prev_volume = 0
 
-    async def process_audio_frame(self, frame: AudioRawFrame):
+    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         # Try to filter out empty background noise
         volume = self._get_smoothed_volume(frame)
         if volume >= self._min_volume:
