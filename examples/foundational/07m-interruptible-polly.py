@@ -40,8 +40,11 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     stt = TranscribeSTTService()
 
     tts = PollyTTSService(
-        voice_id="Amy",
-        params=PollyTTSService.InputParams(engine="standard", language=Language.EN_GB, rate="1.05"),
+        region="us-west-2",  # only specific regions support generative TTS
+        voice_id="Joanna",
+        params=PollyTTSService.InputParams(
+            engine="generative", language=Language.EN_GB, rate="1.05"
+        ),
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
