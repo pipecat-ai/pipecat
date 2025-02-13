@@ -651,8 +651,8 @@ class AnthropicLLMContext(OpenAILLMContext):
 
 
 class AnthropicUserContextAggregator(LLMUserContextAggregator):
-    def __init__(self, context: OpenAILLMContext | AnthropicLLMContext):
-        super().__init__(context=context)
+    def __init__(self, context: OpenAILLMContext | AnthropicLLMContext, **kwargs):
+        super().__init__(context=context, **kwargs)
 
         if isinstance(context, OpenAILLMContext):
             self._context = AnthropicLLMContext.from_openai_context(context)

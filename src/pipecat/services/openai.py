@@ -555,8 +555,8 @@ class OpenAIImageMessageFrame(Frame):
 
 
 class OpenAIUserContextAggregator(LLMUserContextAggregator):
-    def __init__(self, context: OpenAILLMContext):
-        super().__init__(context=context)
+    def __init__(self, context: OpenAILLMContext, **kwargs):
+        super().__init__(context=context, **kwargs)
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
