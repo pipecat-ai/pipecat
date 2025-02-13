@@ -287,7 +287,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await self.push_aggregation()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
-        self._aggregation += frame.text
+        self._aggregation += f" {frame.text}" if self._aggregation else frame.text
         # We just got a final result, so let's reset interim results.
         self._seen_interim_results = False
         # Reset aggregation timer.
