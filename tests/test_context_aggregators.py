@@ -6,6 +6,8 @@
 
 import unittest
 
+import google.ai.generativelanguage as glm
+
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     InterimTranscriptionFrame,
@@ -26,6 +28,16 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
+from pipecat.services.anthropic import (
+    AnthropicAssistantContextAggregator,
+    AnthropicLLMContext,
+    AnthropicUserContextAggregator,
+)
+from pipecat.services.google.google import (
+    GoogleAssistantContextAggregator,
+    GoogleLLMContext,
+    GoogleUserContextAggregator,
+)
 from pipecat.services.openai import OpenAIAssistantContextAggregator, OpenAIUserContextAggregator
 from pipecat.tests.utils import SleepFrame, run_test
 
@@ -39,6 +51,14 @@ class BaseTestUserContextAggregator:
     CONTEXT_CLASS = None  # To be set in subclasses
     AGGREGATOR_CLASS = None  # To be set in subclasses
     EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
+
+    def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
+        assert context.messages[index]["content"] == content
+
+    def check_message_multi_content(
+        self, context: OpenAILLMContext, content_index: int, index: int, content: str
+    ):
+        assert context.messages[index]["content"] == content
 
     async def test_se(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -76,7 +96,7 @@ class BaseTestUserContextAggregator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello!"
+        self.check_message_content(context, 0, "Hello!")
 
     async def test_site(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -101,7 +121,7 @@ class BaseTestUserContextAggregator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat!"
+        self.check_message_content(context, 0, "Hello Pipecat!")
 
     async def test_st1iest2e(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -132,7 +152,7 @@ class BaseTestUserContextAggregator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat! How are you?"
+        self.check_message_content(context, 0, "Hello Pipecat! How are you?")
 
     async def test_siet(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -158,7 +178,7 @@ class BaseTestUserContextAggregator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "How are you?"
+        self.check_message_content(context, 0, "How are you?")
 
     async def test_sieit(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -185,7 +205,7 @@ class BaseTestUserContextAggregator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "How are you?"
+        self.check_message_content(context, 0, "How are you?")
 
     async def test_set(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -209,7 +229,7 @@ class BaseTestUserContextAggregator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "How are you?"
+        self.check_message_content(context, 0, "How are you?")
 
     async def test_seit(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -234,7 +254,7 @@ class BaseTestUserContextAggregator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "How are you?"
+        self.check_message_content(context, 0, "How are you?")
 
     async def test_st1et2(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -261,8 +281,8 @@ class BaseTestUserContextAggregator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat!"
-        assert context.messages[1]["content"] == "How are you?"
+        self.check_message_multi_content(context, 0, 0, "Hello Pipecat!")
+        self.check_message_multi_content(context, 0, 1, "How are you?")
 
     async def test_set1t2(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -287,7 +307,7 @@ class BaseTestUserContextAggregator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat! How are you?"
+        self.check_message_content(context, 0, "Hello Pipecat! How are you?")
 
     async def test_siet1it2(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -315,7 +335,7 @@ class BaseTestUserContextAggregator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat! How are you?"
+        self.check_message_content(context, 0, "Hello Pipecat! How are you?")
 
     async def test_t(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -335,7 +355,7 @@ class BaseTestUserContextAggregator:
             expected_down_frames=expected_down_frames,
             expected_up_frames=expected_up_frames,
         )
-        assert context.messages[0]["content"] == "Hello!"
+        self.check_message_content(context, 0, "Hello!")
 
     async def test_it(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -357,7 +377,7 @@ class BaseTestUserContextAggregator:
             expected_down_frames=expected_down_frames,
             expected_up_frames=expected_up_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat!"
+        self.check_message_content(context, 0, "Hello Pipecat!")
 
     async def test_sie_delay_it(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -391,13 +411,21 @@ class BaseTestUserContextAggregator:
             expected_down_frames=expected_down_frames,
             expected_up_frames=expected_up_frames,
         )
-        assert context.messages[0]["content"] == "How are you?"
+        self.check_message_content(context, 0, "How are you?")
 
 
 class BaseTestAssistantContextAggreagator:
     CONTEXT_CLASS = None  # To be set in subclasses
     AGGREGATOR_CLASS = None  # To be set in subclasses
     EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
+
+    def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
+        assert context.messages[index]["content"] == content
+
+    def check_message_multi_content(
+        self, context: OpenAILLMContext, content_index: int, index: int, content: str
+    ):
+        assert context.messages[index]["content"] == content
 
     async def test_empty(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -430,7 +458,7 @@ class BaseTestAssistantContextAggreagator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat!"
+        self.check_message_content(context, 0, "Hello Pipecat!")
 
     async def test_multiple_text(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -452,7 +480,7 @@ class BaseTestAssistantContextAggreagator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat. How are you?"
+        self.check_message_content(context, 0, "Hello Pipecat. How are you?")
 
     async def test_multiple_text_stripped(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -474,7 +502,7 @@ class BaseTestAssistantContextAggreagator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat. How are you?"
+        self.check_message_content(context, 0, "Hello Pipecat. How are you?")
 
     async def test_multiple_llm_responses(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -498,8 +526,8 @@ class BaseTestAssistantContextAggreagator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat."
-        assert context.messages[1]["content"] == "How are you?"
+        self.check_message_multi_content(context, 0, 0, "Hello Pipecat.")
+        self.check_message_multi_content(context, 0, 1, "How are you?")
 
     async def test_multiple_llm_responses_interruption(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -529,8 +557,8 @@ class BaseTestAssistantContextAggreagator:
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
         )
-        assert context.messages[0]["content"] == "Hello Pipecat."
-        assert context.messages[1]["content"] == "How are you?"
+        self.check_message_multi_content(context, 0, 0, "Hello Pipecat.")
+        self.check_message_multi_content(context, 0, 1, "How are you?")
 
 
 #
@@ -568,3 +596,75 @@ class TestOpenAIAssistantContextAggregator(
     CONTEXT_CLASS = OpenAILLMContext
     AGGREGATOR_CLASS = OpenAIAssistantContextAggregator
     EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
+
+
+#
+# Anthropic
+#
+
+
+class TestAnthropicUserContextAggregator(
+    BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase
+):
+    CONTEXT_CLASS = AnthropicLLMContext
+    AGGREGATOR_CLASS = AnthropicUserContextAggregator
+
+    def check_message_multi_content(
+        self, context: OpenAILLMContext, content_index: int, index: int, content: str
+    ):
+        messages = context.messages[content_index]
+        assert messages["content"][index]["text"] == content
+
+
+class TestAnthropicAssistantContextAggregator(
+    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
+):
+    CONTEXT_CLASS = AnthropicLLMContext
+    AGGREGATOR_CLASS = AnthropicAssistantContextAggregator
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
+
+    def check_message_multi_content(
+        self, context: OpenAILLMContext, content_index: int, index: int, content: str
+    ):
+        messages = context.messages[content_index]
+        assert messages["content"][index]["text"] == content
+
+
+#
+# Google
+#
+
+
+class TestGoogleUserContextAggregator(
+    BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase
+):
+    CONTEXT_CLASS = GoogleLLMContext
+    AGGREGATOR_CLASS = GoogleUserContextAggregator
+
+    def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
+        obj = glm.Content.to_dict(context.messages[index])
+        assert obj["parts"][0]["text"] == content
+
+    def check_message_multi_content(
+        self, context: OpenAILLMContext, content_index: int, index: int, content: str
+    ):
+        obj = glm.Content.to_dict(context.messages[index])
+        assert obj["parts"][0]["text"] == content
+
+
+class TestGoogleAssistantContextAggregator(
+    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
+):
+    CONTEXT_CLASS = GoogleLLMContext
+    AGGREGATOR_CLASS = GoogleAssistantContextAggregator
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
+
+    def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
+        obj = glm.Content.to_dict(context.messages[index])
+        assert obj["parts"][0]["text"] == content
+
+    def check_message_multi_content(
+        self, context: OpenAILLMContext, content_index: int, index: int, content: str
+    ):
+        obj = glm.Content.to_dict(context.messages[index])
+        assert obj["parts"][0]["text"] == content
