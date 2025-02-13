@@ -55,7 +55,7 @@ class GroqSTTService(BaseWhisperSTTService):
         base_url: API base URL. Defaults to "https://api.groq.com/openai/v1".
         language: Language of the audio input. Defaults to English.
         prompt: Optional text to guide the model's style or continue a previous segment.
-        temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
+        temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
         **kwargs: Additional arguments passed to BaseWhisperSTTService.
     """
 
