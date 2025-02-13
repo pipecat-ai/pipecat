@@ -47,6 +47,13 @@ class BaseInputTransport(FrameProcessor):
         # if passthrough is enabled.
         self._audio_task = None
 
+    def enable_audio_in_stream_on_start(self, enabled: bool) -> None:
+        logger.debug(f"Enabling audio on start. {enabled}")
+        self._params.audio_in_stream_on_start = enabled
+
+    def start_audio_in_streaming(self):
+        pass
+
     @property
     def sample_rate(self) -> int:
         return self._sample_rate

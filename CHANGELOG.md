@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new `audio_in_stream_on_start` field to `TransportParams`.
+ 
+- Added a new method `start_audio_in_streaming` in the `BaseInputTransport`. 
+  - This method should be used to start receiving the input audio in case the field `audio_in_stream_on_start` is set to `false`.
+
+- Added support for the `RTVIProcessor` to handle buffered audio in `base64` format, converting it into InputAudioRawFrame for transport.
+
+- Added support for the `RTVIProcessor` to trigger `start_audio_in_streaming` only after the `client-ready` message.
+
 - Added new `MUTE_UNTIL_FIRST_BOT_COMPLETE` strategy to `STTMuteStrategy`. This
   strategy starts muted and remains muted until the first bot speech completes,
   ensuring the bot's first response cannot be interrupted. This complements the
@@ -35,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   participant admin permission.
 
 ### Changed
+
+- Updated `DailyTransport` to respect the `audio_in_stream_on_start` field, ensuring it only starts receiving the audio input if it is enabled.
+
+- Updated `FastAPIWebsocketOutputTransport` to send `TransportMessageFrame` and `TransportMessageUrgentFrame` to the serializer.
+
+- Updated `WebsocketServerOutputTransport` to send `TransportMessageFrame` and `TransportMessageUrgentFrame` to the serializer.
 
 - Enhanced `STTMuteConfig` to validate strategy combinations, preventing
   `MUTE_UNTIL_FIRST_BOT_COMPLETE` and `FIRST_SPEECH` from being used together
