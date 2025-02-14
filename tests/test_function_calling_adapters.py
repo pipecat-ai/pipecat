@@ -31,7 +31,7 @@ class TestFunctionAdapters(unittest.TestCase):
             required=["location", "format"],
         )
 
-    def test_openai_adapter(self):
+    def test_openai_adapter_single_tool(self):
         """Test OpenAI adapter format transformation."""
         expected = ChatCompletionToolParam(
             type="function",
@@ -57,7 +57,35 @@ class TestFunctionAdapters(unittest.TestCase):
         )
         assert OpenAIFunctionAdapter().to_provider_function_format(self.function_def) == expected
 
-    def test_anthropic_adapter(self):
+    def test_openai_adapter_multiple_tools(self):
+        """Test OpenAI adapter format transformation."""
+        expected = [
+            ChatCompletionToolParam(
+                type="function",
+                function={
+                    "name": "get_weather",
+                    "description": "Get the weather in a given location",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {
+                                "type": "string",
+                                "description": "The city, e.g. San Francisco",
+                            },
+                            "format": {
+                                "type": "string",
+                                "enum": ["celsius", "fahrenheit"],
+                                "description": "The temperature unit to use.",
+                            },
+                        },
+                        "required": ["location", "format"],
+                    },
+                },
+            )
+        ]
+        assert OpenAIFunctionAdapter().to_provider_function_format([self.function_def]) == expected
+
+    def test_anthropic_adapter_single_tool(self):
         """Test Anthropic adapter format transformation."""
         expected = {
             "name": "get_weather",
@@ -80,7 +108,34 @@ class TestFunctionAdapters(unittest.TestCase):
         }
         assert AnthropicFunctionAdapter().to_provider_function_format(self.function_def) == expected
 
-    def test_gemini_adapter(self):
+    def test_anthropic_adapter_multiple_tools(self):
+        """Test Anthropic adapter format transformation."""
+        expected = [
+            {
+                "name": "get_weather",
+                "description": "Get the weather in a given location",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city, e.g. San Francisco",
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"],
+                            "description": "The temperature unit to use.",
+                        },
+                    },
+                    "required": ["location", "format"],
+                },
+            }
+        ]
+        assert (
+            AnthropicFunctionAdapter().to_provider_function_format([self.function_def]) == expected
+        )
+
+    def test_gemini_adapter_single_tool(self):
         """Test Gemini adapter format transformation."""
         expected = {
             "name": "get_weather",
@@ -103,5 +158,31 @@ class TestFunctionAdapters(unittest.TestCase):
         }
         assert GeminiFunctionAdapter().to_provider_function_format(self.function_def) == expected
 
-    # TODO: need to create tests and change the implementations to also convert List of FunctionSchema
-    # yep
+    def test_gemini_adapter_multiple_tools(self):
+        """Test Gemini adapter format transformation."""
+        expected = [
+            {
+                "function_declarations": [
+                    {
+                        "name": "get_weather",
+                        "description": "Get the weather in a given location",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "location": {
+                                    "type": "string",
+                                    "description": "The city, e.g. San Francisco",
+                                },
+                                "format": {
+                                    "type": "string",
+                                    "enum": ["celsius", "fahrenheit"],
+                                    "description": "The temperature unit to use.",
+                                },
+                            },
+                            "required": ["location", "format"],
+                        },
+                    }
+                ]
+            }
+        ]
+        assert GeminiFunctionAdapter().to_provider_function_format([self.function_def]) == expected

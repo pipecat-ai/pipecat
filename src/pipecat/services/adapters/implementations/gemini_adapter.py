@@ -23,7 +23,9 @@ class GeminiFunctionAdapter(BaseLLMAdapter):
         """
         if isinstance(functions_schema, list):
             # Handling list of FunctionSchema
-            return {"function_declarations": [func.to_default_dict() for func in functions_schema]}
+            return [
+                {"function_declarations": [func.to_default_dict() for func in functions_schema]}
+            ]
         else:
             # Handling single FunctionSchema
             print(f"{functions_schema}")
