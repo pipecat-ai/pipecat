@@ -420,7 +420,7 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
 
 
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
-    def __init__(self, messages: List[dict], **kwargs):
+    def __init__(self, messages: List[dict] = [], **kwargs):
         super().__init__(context=OpenAILLMContext(messages), **kwargs)
 
     async def push_aggregation(self):
