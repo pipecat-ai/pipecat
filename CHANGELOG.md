@@ -105,6 +105,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `FalImageGenService` issue that was causing the event loop to be
+  blocked while loading the downloadded image.
+
 - Fixed a `CartesiaTTSService` service issue that would cause audio overlapping
   in some cases.
 
