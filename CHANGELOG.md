@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `AudioContextWordTTSService`. This is a TTS base class for TTS
+  services that handling multiple separate audio requests.
+
 - Added new frames `EmulateUserStartedSpeakingFrame` and
   `EmulateUserStoppedSpeakingFrame` which can be used to emulated VAD behavior
   without VAD being present or not being triggered.
