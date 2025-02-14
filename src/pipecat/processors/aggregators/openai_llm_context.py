@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.adapters.base_llm_adapter import BaseLLMAdapter
 
 try:
     from openai._types import NOT_GIVEN, NotGiven
@@ -59,6 +60,10 @@ class OpenAILLMContext:
         self._tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
         self._tools: List[ChatCompletionToolParam] | NotGiven = tools
         self._user_image_request_context = {}
+        self._llm_adapter: Optional[BaseLLMAdapter] = None
+
+    def set_llm_adapter(self, llm_adapter: BaseLLMAdapter):
+        self._llm_adapter = llm_adapter
 
     @staticmethod
     def from_messages(messages: List[dict]) -> "OpenAILLMContext":
@@ -74,8 +79,10 @@ class OpenAILLMContext:
     def messages(self) -> List[ChatCompletionMessageParam]:
         return self._messages
 
+    # TODO: change here, if _tools is from our new type we should convert it.
     @property
     def tools(self) -> List[ChatCompletionToolParam] | NotGiven:
+        logger.debug(f"Retrieving the tools using the adapter: {type(self._llm_adapter)}")
         return self._tools
 
     @property
@@ -160,6 +167,8 @@ class OpenAILLMContext:
     def set_tool_choice(self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven):
         self._tool_choice = tool_choice
 
+    # TODO: need to change here
+    # maybe just create a union to receive the new type
     def set_tools(self, tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN):
         if tools != NOT_GIVEN and len(tools) == 0:
             tools = NOT_GIVEN
