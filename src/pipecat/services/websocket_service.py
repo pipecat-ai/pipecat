@@ -10,6 +10,7 @@ from typing import Awaitable, Callable, Optional
 
 import websockets
 from loguru import logger
+from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
 
@@ -83,11 +84,13 @@ class WebsocketService(ABC):
         while True:
             try:
                 await self._receive_messages()
-                logger.debug(f"{self} connection established successfully")
                 retry_count = 0  # Reset counter on successful message receive
-            except websockets.ConnectionClosed as e:
-                logger.warning(f"{self} connection closed: {e}")
-                break
+                if self._websocket and self._websocket.state == State.CLOSED:
+                    raise websockets.ConnectionClosedOK(
+                        self._websocket.close_rcvd,
+                        self._websocket.close_sent,
+                        self._websocket.close_rcvd_then_sent,
+                    )
             except Exception as e:
                 retry_count += 1
                 if retry_count >= MAX_RETRIES:
