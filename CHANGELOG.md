@@ -105,6 +105,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `CartesiaTTSService` service issue that would cause audio overlapping
+  in some cases.
+
 - Fixed a websocket-based service issue (e.g. `CartesiaTTSService`) that was
   preventing a reconnection after the server disconnected cleanly, which was
   causing an inifite loop instead.
