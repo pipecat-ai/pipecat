@@ -358,6 +358,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         super().__init__(context=context, role="assistant", **kwargs)
         self._expect_stripped_words = expect_stripped_words
 
+        self._started = False
+
         self.reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
