@@ -109,6 +109,7 @@ class CartesiaTTSService(AudioContextWordTTSService, WebsocketService):
             self,
             aggregate_sentences=True,
             push_text_frames=False,
+            pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )

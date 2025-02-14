@@ -73,6 +73,7 @@ class LmntTTSService(TTSService, WebsocketService):
         TTSService.__init__(
             self,
             push_stop_frames=True,
+            pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )
