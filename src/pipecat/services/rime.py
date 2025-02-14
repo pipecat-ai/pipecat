@@ -101,6 +101,7 @@ class RimeTTSService(AudioContextWordTTSService, WebsocketService):
             push_text_frames=False,
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
+            pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )

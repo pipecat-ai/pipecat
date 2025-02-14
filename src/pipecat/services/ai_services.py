@@ -76,13 +76,13 @@ class AIService(FrameProcessor):
         )
 
         for key, value in settings.items():
-            print("Update request for:", key, value)
+            logger.debug("Update request for:", key, value)
 
             if key in self._settings:
                 logger.info(f"Updating LLM setting {key} to: [{value}]")
                 self._settings[key] = value
             elif key in SessionProperties.model_fields:
-                print("Attempting to update", key, value)
+                logger.debug("Attempting to update", key, value)
 
                 try:
                     from pipecat.services.openai_realtime_beta.events import (
@@ -213,6 +213,8 @@ class TTSService(AIService):
         push_silence_after_stop: bool = False,
         # if push_silence_after_stop is True, send this amount of audio silence
         silence_time_s: float = 2.0,
+        # if True, we will pause processing frames while we are receiving audio
+        pause_frame_processing: bool = False,
         # TTS output sample rate
         sample_rate: Optional[int] = None,
         text_filter: Optional[BaseTextFilter] = None,
@@ -225,6 +227,7 @@ class TTSService(AIService):
         self._stop_frame_timeout_s: float = stop_frame_timeout_s
         self._push_silence_after_stop: bool = push_silence_after_stop
         self._silence_time_s: float = silence_time_s
+        self._pause_frame_processing: bool = pause_frame_processing
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
         self._voice_id: str = ""
@@ -314,8 +317,7 @@ class TTSService(AIService):
             # We pause processing incoming frames if the LLM response included
             # text (it might be that it's only a function calling response). We
             # pause to avoid audio overlapping.
-            if self._processing_text:
-                await self.pause_processing_frames()
+            await self._maybe_pause_frame_processing()
 
             sentence = self._current_sentence
             self._current_sentence = ""
@@ -327,16 +329,16 @@ class TTSService(AIService):
             else:
                 await self.push_frame(frame, direction)
         elif isinstance(frame, TTSSpeakFrame):
+            await self._push_tts_frames(frame.text)
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
-            await self.pause_processing_frames()
-            await self._push_tts_frames(frame.text)
+            await self._maybe_pause_frame_processing()
             await self.flush_audio()
             self._processing_text = False
         elif isinstance(frame, TTSUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.resume_processing_frames()
+            await self._maybe_resume_frame_processing()
         else:
             await self.push_frame(frame, direction)
 
@@ -366,6 +368,14 @@ class TTSService(AIService):
         if self._text_filter:
             self._text_filter.handle_interruption()
         await self.push_frame(frame, direction)
+
+    async def _maybe_pause_frame_processing(self):
+        if self._processing_text and self._pause_frame_processing:
+            await self.pause_processing_frames()
+
+    async def _maybe_resume_frame_processing(self):
+        if self._pause_frame_processing:
+            await self.resume_processing_frames()
 
     async def _process_text_frame(self, frame: TextFrame):
         text: Optional[str] = None

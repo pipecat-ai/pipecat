@@ -120,6 +120,7 @@ class PlayHTTTSService(TTSService, WebsocketService):
     ):
         TTSService.__init__(
             self,
+            pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )
