@@ -10,7 +10,6 @@ from abc import abstractmethod
 from typing import List
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     CancelFrame,
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
@@ -281,6 +280,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         await self._cancel_aggregation_task()
 
     async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
+        self._last_user_speaking_time = time.time()
         self._user_speaking = True
 
     async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
