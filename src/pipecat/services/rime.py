@@ -126,7 +126,6 @@ class RimeTTSService(AudioContextWordTTSService, WebsocketService):
         # State tracking
         self._context_id = None  # Tracks current turn
         self._receive_task = None
-        self._started = False
         self._cumulative_time = 0  # Accumulates time across messages
 
     def can_generate_metrics(self) -> bool:
@@ -200,7 +199,6 @@ class RimeTTSService(AudioContextWordTTSService, WebsocketService):
                 await self._websocket.send(json.dumps(self._build_eos_msg()))
                 await self._websocket.close()
                 self._websocket = None
-            self._started = False
             self._context_id = None
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
@@ -217,7 +215,6 @@ class RimeTTSService(AudioContextWordTTSService, WebsocketService):
         await self.stop_all_metrics()
         if self._context_id:
             await self._get_websocket().send(json.dumps(self._build_clear_msg()))
-            self._started = False
             self._context_id = None
 
     def _calculate_word_times(self, words: list, starts: list, ends: list) -> list:
@@ -300,20 +297,8 @@ class RimeTTSService(AudioContextWordTTSService, WebsocketService):
         """Push frame and handle end-of-turn conditions."""
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
-            self._started = False
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames and manage turn state."""
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, TTSSpeakFrame):
-            await self.pause_processing_frames()
-        elif isinstance(frame, LLMFullResponseEndFrame) and self._started:
-            await self.pause_processing_frames()
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.resume_processing_frames()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text.
@@ -330,10 +315,9 @@ class RimeTTSService(AudioContextWordTTSService, WebsocketService):
                 await self._connect()
 
             try:
-                if not self._started:
+                if not self._context_id:
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame()
-                    self._started = True
                     self._cumulative_time = 0
                     self._context_id = str(uuid.uuid4())
                     await self.create_audio_context(self._context_id)

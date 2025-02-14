@@ -166,16 +166,6 @@ class FishAudioTTSService(TTSService, WebsocketService):
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, TTSSpeakFrame):
-            await self.pause_processing_frames()
-        elif isinstance(frame, LLMFullResponseEndFrame) and self._request_id:
-            await self.pause_processing_frames()
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.resume_processing_frames()
-
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()

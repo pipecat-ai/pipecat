@@ -15,6 +15,7 @@ from loguru import logger
 from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -234,6 +235,7 @@ class TTSService(AIService):
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
         self._current_sentence: str = ""
+        self._processing_text: bool = False
 
     @property
     def sample_rate(self) -> int:
@@ -299,6 +301,7 @@ class TTSService(AIService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+
         if (
             isinstance(frame, TextFrame)
             and not isinstance(frame, InterimTranscriptionFrame)
@@ -308,8 +311,15 @@ class TTSService(AIService):
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
+            # We pause processing incoming frames if the LLM response included
+            # text (it might be that it's only a function calling response). We
+            # pause to avoid audio overlapping.
+            if self._processing_text:
+                await self.pause_processing_frames()
+
             sentence = self._current_sentence
             self._current_sentence = ""
+            self._processing_text = False
             await self._push_tts_frames(sentence)
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
@@ -317,10 +327,16 @@ class TTSService(AIService):
             else:
                 await self.push_frame(frame, direction)
         elif isinstance(frame, TTSSpeakFrame):
+            # We pause processing incoming frames because we are sending data to
+            # the TTS. We pause to avoid audio overlapping.
+            await self.pause_processing_frames()
             await self._push_tts_frames(frame.text)
             await self.flush_audio()
+            self._processing_text = False
         elif isinstance(frame, TTSUpdateSettingsFrame):
             await self._update_settings(frame.settings)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self.resume_processing_frames()
         else:
             await self.push_frame(frame, direction)
 
@@ -370,6 +386,11 @@ class TTSService(AIService):
         # strip all whitespace, as whitespace can influence prosody.
         if not text.strip():
             return
+
+        # This is just a flag that indicates if we sent something to the TTS
+        # service. It will be cleared if we sent text because of a TTSSpeakFrame
+        # or when we received an LLMFullResponseEndFrame
+        self._processing_text = True
 
         await self.start_processing_metrics()
         if self._text_filter:
