@@ -370,8 +370,13 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
+    def _get_websocket(self):
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
     async def _receive_messages(self):
-        async for message in self._websocket:
+        async for message in self._get_websocket():
             msg = json.loads(message)
             if msg.get("audio"):
                 await self.stop_ttfb_metrics()
