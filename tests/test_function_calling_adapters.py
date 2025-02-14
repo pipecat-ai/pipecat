@@ -131,9 +131,7 @@ class TestFunctionAdapters(unittest.TestCase):
                 },
             }
         ]
-        assert (
-                AnthropicLLMAdapter().to_provider_function_format([self.function_def]) == expected
-        )
+        assert AnthropicLLMAdapter().to_provider_function_format([self.function_def]) == expected
 
     def test_gemini_adapter_single_tool(self):
         """Test Gemini adapter format transformation."""
