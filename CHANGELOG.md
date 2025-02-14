@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- We don't consider a colon `:` and end of sentence any more.
+
 - Updated `DailyTransport` to respect the `audio_in_stream_on_start` field,
   ensuring it only starts receiving the audio input if it is enabled.
 
