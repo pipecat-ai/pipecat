@@ -102,6 +102,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a websocket-based service issue (e.g. `CartesiaTTSService`) that was
+  preventing a reconnection after the server disconnected cleanly, which was
+  causing an inifite loop instead.
+
 - Fixed a `BaseOutputTransport` issue that was causing upstream frames to no be
   pushed upstream.
 
