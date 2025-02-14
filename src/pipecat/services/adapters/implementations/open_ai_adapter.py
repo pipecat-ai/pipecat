@@ -11,7 +11,7 @@ from pipecat.services.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.services.adapters.function_schema import FunctionSchema
 
 
-class OpenAIFunctionAdapter(BaseLLMAdapter):
+class OpenAILLMAdapter(BaseLLMAdapter):
     def to_provider_function_format(
         self, functions_schema: Union[FunctionSchema, List[FunctionSchema]]
     ) -> Union[ChatCompletionToolParam, List[ChatCompletionToolParam]]:

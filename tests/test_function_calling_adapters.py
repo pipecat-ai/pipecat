@@ -9,9 +9,9 @@ import unittest
 from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.services.adapters.function_schema import FunctionSchema
-from pipecat.services.adapters.implementations.anthropic_adapter import AnthropicFunctionAdapter
-from pipecat.services.adapters.implementations.gemini_adapter import GeminiFunctionAdapter
-from pipecat.services.adapters.implementations.open_ai_adapter import OpenAIFunctionAdapter
+from pipecat.services.adapters.implementations.anthropic_adapter import AnthropicLLMAdapter
+from pipecat.services.adapters.implementations.gemini_adapter import GeminiLLMAdapter
+from pipecat.services.adapters.implementations.open_ai_adapter import OpenAILLMAdapter
 
 
 class TestFunctionAdapters(unittest.TestCase):
@@ -55,7 +55,7 @@ class TestFunctionAdapters(unittest.TestCase):
                 },
             },
         )
-        assert OpenAIFunctionAdapter().to_provider_function_format(self.function_def) == expected
+        assert OpenAILLMAdapter().to_provider_function_format(self.function_def) == expected
 
     def test_openai_adapter_multiple_tools(self):
         """Test OpenAI adapter format transformation."""
@@ -83,7 +83,7 @@ class TestFunctionAdapters(unittest.TestCase):
                 },
             )
         ]
-        assert OpenAIFunctionAdapter().to_provider_function_format([self.function_def]) == expected
+        assert OpenAILLMAdapter().to_provider_function_format([self.function_def]) == expected
 
     def test_anthropic_adapter_single_tool(self):
         """Test Anthropic adapter format transformation."""
@@ -106,7 +106,7 @@ class TestFunctionAdapters(unittest.TestCase):
                 "required": ["location", "format"],
             },
         }
-        assert AnthropicFunctionAdapter().to_provider_function_format(self.function_def) == expected
+        assert AnthropicLLMAdapter().to_provider_function_format(self.function_def) == expected
 
     def test_anthropic_adapter_multiple_tools(self):
         """Test Anthropic adapter format transformation."""
@@ -132,7 +132,7 @@ class TestFunctionAdapters(unittest.TestCase):
             }
         ]
         assert (
-            AnthropicFunctionAdapter().to_provider_function_format([self.function_def]) == expected
+                AnthropicLLMAdapter().to_provider_function_format([self.function_def]) == expected
         )
 
     def test_gemini_adapter_single_tool(self):
@@ -156,7 +156,7 @@ class TestFunctionAdapters(unittest.TestCase):
                 "required": ["location", "format"],
             },
         }
-        assert GeminiFunctionAdapter().to_provider_function_format(self.function_def) == expected
+        assert GeminiLLMAdapter().to_provider_function_format(self.function_def) == expected
 
     def test_gemini_adapter_multiple_tools(self):
         """Test Gemini adapter format transformation."""
@@ -185,4 +185,4 @@ class TestFunctionAdapters(unittest.TestCase):
                 ]
             }
         ]
-        assert GeminiFunctionAdapter().to_provider_function_format([self.function_def]) == expected
+        assert GeminiLLMAdapter().to_provider_function_format([self.function_def]) == expected

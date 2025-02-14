@@ -10,7 +10,7 @@ from pipecat.services.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.services.adapters.function_schema import FunctionSchema
 
 
-class AnthropicFunctionAdapter(BaseLLMAdapter):
+class AnthropicLLMAdapter(BaseLLMAdapter):
     def _to_anthropic_function_format(self, function: FunctionSchema) -> Dict[str, Any]:
         return {
             "name": function.name,
