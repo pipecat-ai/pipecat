@@ -122,9 +122,8 @@ class AnthropicLLMService(LLMService):
     def enable_prompt_caching_beta(self) -> bool:
         return self._enable_prompt_caching_beta
 
-    @staticmethod
     def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
     ) -> AnthropicContextAggregatorPair:
         if isinstance(context, OpenAILLMContext):
             context = AnthropicLLMContext.from_openai_context(context)

@@ -8,7 +8,7 @@ import asyncio
 import io
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Tuple, Type
 
 from loguru import logger
 
@@ -39,6 +39,8 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.services.adapters.implementations.open_ai_adapter import OpenAILLMAdapter
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.text.base_text_filter import BaseTextFilter
@@ -134,10 +136,18 @@ class AIService(FrameProcessor):
 class LLMService(AIService):
     """This class is a no-op but serves as a base class for LLM services."""
 
+    # OpenAIFunctionAdapter is used as the default adapter since it aligns with most LLM implementations.
+    # However, subclasses should override this with a more specific adapter when necessary.
+    adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._callbacks = {}
         self._start_callbacks = {}
+        self._adapter = self.adapter_class()
+
+    def get_llm_adapter(self) -> BaseLLMAdapter:
+        return self._adapter
 
     # TODO-CB: callback function type
     def register_function(self, function_name: Optional[str], callback, start_callback=None):
