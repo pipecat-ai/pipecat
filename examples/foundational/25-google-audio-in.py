@@ -143,7 +143,14 @@ class InputTranscriptionContextFilter(FrameProcessor):
             return
 
         try:
-            message = frame.context.messages[-1]
+            # Make sure we're working with a GoogleLLMContext
+            context = GoogleLLMContext.upgrade_to_google(frame.context)
+            message = context.messages[-1]
+
+            if not isinstance(message, glm.Content):
+                logger.error(f"Expected glm.Content, got {type(message)}")
+                return
+
             last_part = message.parts[-1]
             if not (
                 message.role == "user"
