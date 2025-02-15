@@ -10,7 +10,6 @@ from abc import abstractmethod
 from typing import List
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     CancelFrame,
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
@@ -281,6 +280,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         await self._cancel_aggregation_task()
 
     async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
+        self._last_user_speaking_time = time.time()
         self._user_speaking = True
 
     async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
@@ -358,6 +358,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         super().__init__(context=context, role="assistant", **kwargs)
         self._expect_stripped_words = expect_stripped_words
 
+        self._started = False
+
         self.reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -420,7 +422,7 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
 
 
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
-    def __init__(self, messages: List[dict], **kwargs):
+    def __init__(self, messages: List[dict] = [], **kwargs):
         super().__init__(context=OpenAILLMContext(messages), **kwargs)
 
     async def push_aggregation(self):

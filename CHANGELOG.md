@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.57] - 2025-02-14
 
 ### Added
 
@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- We don't consider a colon `:` and end of sentence any more.
+
 - Updated `DailyTransport` to respect the `audio_in_stream_on_start` field,
   ensuring it only starts receiving the audio input if it is enabled.
 
@@ -105,6 +107,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `FalImageGenService` issue that was causing the event loop to be
+  blocked while loading the downloadded image.
+
 - Fixed a `CartesiaTTSService` service issue that would cause audio overlapping
   in some cases.
 
@@ -134,9 +139,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue[#1192] in 11labs where we are trying to reconnect/disconnect
   the websocket connection even when the connection is already closed.
 
-- Fixed an issue where `has_regular_messages` condition was always been true in
-  `GoogleLLMContext` due to `Part` having `function_call` & `function_response` with
-  `None` values.
+- Fixed an issue where `has_regular_messages` condition was always true in
+  `GoogleLLMContext` due to `Part` having `function_call` & `function_response`
+  with `None` values.
+
+### Other
+
+- Added new `instant-voice` example. This example showcases how to enable
+  instant voice communication as soon as a user connects.
+
+- Added new `local-input-select-stt` example. This examples allows you to play
+  with local audio inputs by slecting them through a nice text interface.
 
 ## [0.0.56] - 2025-02-06
 
