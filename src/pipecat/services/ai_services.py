@@ -365,6 +365,7 @@ class TTSService(AIService):
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         self._current_sentence = ""
+        self._processing_text = False
         if self._text_filter:
             self._text_filter.handle_interruption()
         await self.push_frame(frame, direction)
