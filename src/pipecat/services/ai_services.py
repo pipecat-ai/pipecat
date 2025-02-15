@@ -313,6 +313,7 @@ class TTSService(AIService):
             await self._process_text_frame(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption(frame, direction)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             # We pause processing incoming frames if the LLM response included
             # text (it might be that it's only a function calling response). We
@@ -339,6 +340,7 @@ class TTSService(AIService):
             await self._update_settings(frame.settings)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._maybe_resume_frame_processing()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -368,7 +370,6 @@ class TTSService(AIService):
         self._processing_text = False
         if self._text_filter:
             self._text_filter.handle_interruption()
-        await self.push_frame(frame, direction)
 
     async def _maybe_pause_frame_processing(self):
         if self._processing_text and self._pause_frame_processing:
