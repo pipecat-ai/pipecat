@@ -28,6 +28,7 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.transcript_processor import TranscriptProcessor
+from pipecat.services.azure import AzureSTTService, AzureTTSService
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
@@ -148,6 +149,15 @@ async def main():
             voice_id="34dbb662-8e98-413c-a1ef-1a3407675fe7",  # Spanish Narrator Man
             model="sonic-multilingual",
         )
+        # stt = AzureSTTService(
+        #                     api_key = os.getenv("AZURE_SPEECH_API_KEY"),
+        #                     region = os.getenv("AZURE_SPEECH_REGION")
+        #                       )
+        # tts = AzureTTSService(
+        #                     api_key = os.getenv("AZURE_SPEECH_API_KEY"),
+        #                     region = os.getenv("AZURE_SPEECH_REGION"),
+        #                     language = "zh"
+        #                       )
 
         in_language = "English"
         out_language = "Spanish"
