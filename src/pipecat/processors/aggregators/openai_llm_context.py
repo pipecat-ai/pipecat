@@ -193,7 +193,7 @@ class OpenAILLMContext:
         *,
         function_name: str,
         tool_call_id: str,
-        arguments: str,
+        arguments: dict[str, Any],
         llm: FrameProcessor,
         run_llm: bool = True,
     ) -> None:
