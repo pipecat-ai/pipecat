@@ -27,7 +27,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use BFL, you need to `pip install pipecat-ai[bfl]`. Also, set `BLACK_FOREST_LABS_KEY` environment variable."
+        "In order to use Black Forest Labs API, you need to `pip install pipecat-ai[blackforestlabs]`. Also, set `BLACK_FOREST_LABS_KEY` environment variable."
     )
     raise Exception(f"Missing module: {e}")
 
