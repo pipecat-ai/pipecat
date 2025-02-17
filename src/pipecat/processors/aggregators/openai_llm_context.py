@@ -54,7 +54,7 @@ class OpenAILLMContext:
     def __init__(
         self,
         messages: Optional[List[ChatCompletionMessageParam]] = None,
-        tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN | List[FunctionSchema],
+        tools: List[ChatCompletionToolParam] | NotGiven | List[FunctionSchema] = NOT_GIVEN,
         tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN,
     ):
         self._messages: List[ChatCompletionMessageParam] = messages if messages else []
@@ -169,7 +169,7 @@ class OpenAILLMContext:
     # TODO: need to change here
     # maybe just create a union to receive the new type
     def set_tools(
-        self, tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN | List[FunctionSchema]
+        self, tools: List[ChatCompletionToolParam] | NotGiven | List[FunctionSchema] = NOT_GIVEN
     ):
         if tools != NOT_GIVEN and len(tools) == 0:
             tools = NOT_GIVEN
