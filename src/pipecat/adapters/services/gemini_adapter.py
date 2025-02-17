@@ -12,11 +12,11 @@ from pipecat.adapters.function_schema import FunctionSchema
 
 # TODO need to think about how we are going to handle the Google Search tools
 # google_search and google_search_retrieval
-# Look at news_bot and 26e-gemini-multimodal-google-search for more details
+# TODO Look at news_bot and 26e-gemini-multimodal-google-search for more details
 class GeminiLLMAdapter(BaseLLMAdapter):
     def to_provider_function_format(
         self, functions_schema: Union[FunctionSchema, List[FunctionSchema]]
-    ) -> Dict[str, Any]:
+    ) -> Union[Dict[str, Any] | List[Dict[str, Any]]]:
         """Converts one or multiple function schemas to Gemini's function-calling format.
 
         :return: Gemini formatted function call definition.
