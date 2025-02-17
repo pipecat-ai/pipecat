@@ -15,6 +15,7 @@ from loguru import logger
 from PIL import Image
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.function_schema import FunctionSchema
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
@@ -53,12 +54,12 @@ class OpenAILLMContext:
     def __init__(
         self,
         messages: Optional[List[ChatCompletionMessageParam]] = None,
-        tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN,
+        tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN | List[FunctionSchema],
         tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN,
     ):
         self._messages: List[ChatCompletionMessageParam] = messages if messages else []
         self._tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
-        self._tools: List[ChatCompletionToolParam] | NotGiven = tools
+        self._tools: List[ChatCompletionToolParam] | NotGiven | List[FunctionSchema] = tools
         self._user_image_request_context = {}
         self._llm_adapter: Optional[BaseLLMAdapter] = None
 
@@ -79,11 +80,9 @@ class OpenAILLMContext:
     def messages(self) -> List[ChatCompletionMessageParam]:
         return self._messages
 
-    # TODO: change here, if _tools is from our new type we should convert it.
     @property
-    def tools(self) -> List[ChatCompletionToolParam] | NotGiven:
-        logger.debug(f"Retrieving the tools using the adapter: {type(self._llm_adapter)}")
-        return self._tools
+    def tools(self) -> List[ChatCompletionToolParam] | NotGiven | List[Any]:
+        return self._llm_adapter.from_standard_tools(self._tools)
 
     @property
     def tool_choice(self) -> ChatCompletionToolChoiceOptionParam | NotGiven:
