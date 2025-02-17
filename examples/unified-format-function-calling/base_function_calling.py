@@ -88,7 +88,7 @@ class BaseFunctionCallingHandler:
                         "description": "The temperature unit to use. Infer this from the user's location.",
                     },
                 },
-                required=["location", "format"],
+                required=["location"],
             )
             tools = [weather_function]
 
