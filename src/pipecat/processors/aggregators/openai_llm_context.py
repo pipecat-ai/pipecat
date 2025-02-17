@@ -168,8 +168,6 @@ class OpenAILLMContext:
     def set_tool_choice(self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven):
         self._tool_choice = tool_choice
 
-    # TODO: need to change here
-    # maybe just create a union to receive the new type
     def set_tools(
         self, tools: List[ChatCompletionToolParam] | NotGiven | List[FunctionSchema] = NOT_GIVEN
     ):
