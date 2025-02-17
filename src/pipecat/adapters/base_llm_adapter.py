@@ -21,4 +21,4 @@ class BaseLLMAdapter(ABC):
         # Fallback to return the same tools in case they are not in a standard format
         return tools
 
-    # TODO: we can move the logic to also adapter the Messages to here
+    # TODO: we can move the logic to also handle the Messages here

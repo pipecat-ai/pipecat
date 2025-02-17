@@ -82,7 +82,9 @@ class OpenAILLMContext:
 
     @property
     def tools(self) -> List[ChatCompletionToolParam] | NotGiven | List[Any]:
-        return self._llm_adapter.from_standard_tools(self._tools)
+        if self._llm_adapter:
+            self._llm_adapter.from_standard_tools(self._tools)
+        return self._tools
 
     @property
     def tool_choice(self) -> ChatCompletionToolChoiceOptionParam | NotGiven:
