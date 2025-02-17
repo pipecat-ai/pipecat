@@ -10,17 +10,16 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from openai.types.chat import ChatCompletionToolParam
-
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.ai_services import LLMService
 from runner import configure
 
+from pipecat.adapters.function_schema import FunctionSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.ai_services import LLMService
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -40,10 +39,10 @@ async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context
     await result_callback({"conditions": "nice", "temperature": "75"})
 
 
-class BaseLLMHandler:
+class BaseFunctionCallingHandler:
     """Generic base class for setting up and running an LLM-powered bot."""
 
-    def __init__(self, llm:LLMService):
+    def __init__(self, llm: LLMService):
         """Initialize the base handler with a specific LLM."""
         self.llm = llm
 
@@ -71,32 +70,27 @@ class BaseLLMHandler:
 
             # Register a function_name of None to get all functions
             # sent to the same callback with an additional function_name parameter.
-            self.llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
+            self.llm.register_function(
+                None, fetch_weather_from_api, start_callback=start_fetch_weather
+            )
 
-            tools = [
-                ChatCompletionToolParam(
-                    type="function",
-                    function={
-                        "name": "get_current_weather",
-                        "description": "Get the current weather",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "location": {
-                                    "type": "string",
-                                    "description": "The city and state, e.g. San Francisco, CA",
-                                },
-                                "format": {
-                                    "type": "string",
-                                    "enum": ["celsius", "fahrenheit"],
-                                    "description": "The temperature unit to use. Infer this from the user's location.",
-                                },
-                            },
-                            "required": ["location", "format"],
-                        },
+            weather_function = FunctionSchema(
+                name="get_current_weather",
+                description="Get the current weather",
+                properties={
+                    "location": {
+                        "type": "string",
+                        "description": "The city and state, e.g. San Francisco, CA",
                     },
-                )
-            ]
+                    "format": {
+                        "type": "string",
+                        "enum": ["celsius", "fahrenheit"],
+                        "description": "The temperature unit to use. Infer this from the user's location.",
+                    },
+                },
+                required=["location", "format"],
+            )
+            tools = [weather_function]
 
             messages = [
                 {

@@ -7,7 +7,7 @@
 import asyncio
 import os
 
-from base_function_calling import BaseLLMHandler
+from base_function_calling import BaseFunctionCallingHandler
 from dotenv import load_dotenv
 
 from pipecat.services.openai import OpenAILLMService
@@ -15,7 +15,7 @@ from pipecat.services.openai import OpenAILLMService
 load_dotenv(override=True)
 
 
-class WeatherBot(BaseLLMHandler):
+class WeatherBot(BaseFunctionCallingHandler):
     """Main class defining the LLM and passing it to the base handler."""
 
     def __init__(self):

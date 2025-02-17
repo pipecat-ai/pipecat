@@ -149,6 +149,12 @@ class LLMService(AIService):
     def get_llm_adapter(self) -> BaseLLMAdapter:
         return self._adapter
 
+    # TODO: should we create a specific type to return that they all should respect ?
+    def create_context_aggregator(
+        self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+    ) -> Any:
+        pass
+
     # TODO-CB: callback function type
     def register_function(self, function_name: Optional[str], callback, start_callback=None):
         # Registering a function with the function_name set to None will run that callback
