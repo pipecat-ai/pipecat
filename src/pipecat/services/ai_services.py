@@ -12,6 +12,8 @@ from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Tuple, Ty
 
 from loguru import logger
 
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -39,8 +41,6 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.text.base_text_filter import BaseTextFilter

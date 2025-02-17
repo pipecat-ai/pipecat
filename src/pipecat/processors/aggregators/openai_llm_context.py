@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable, List, Optional
 from loguru import logger
 from PIL import Image
 
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
@@ -21,7 +22,6 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 
 try:
     from openai._types import NOT_GIVEN, NotGiven
