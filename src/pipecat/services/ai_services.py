@@ -136,7 +136,7 @@ class AIService(FrameProcessor):
 class LLMService(AIService):
     """This class is a no-op but serves as a base class for LLM services."""
 
-    # OpenAIFunctionAdapter is used as the default adapter since it aligns with most LLM implementations.
+    # OpenAILLMAdapter is used as the default adapter since it aligns with most LLM implementations.
     # However, subclasses should override this with a more specific adapter when necessary.
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
 
