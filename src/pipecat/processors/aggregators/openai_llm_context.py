@@ -63,6 +63,9 @@ class OpenAILLMContext:
         self._user_image_request_context = {}
         self._llm_adapter: Optional[BaseLLMAdapter] = None
 
+    def get_llm_adapter(self) -> Optional[BaseLLMAdapter]:
+        return self._llm_adapter
+
     def set_llm_adapter(self, llm_adapter: BaseLLMAdapter):
         self._llm_adapter = llm_adapter
 
@@ -83,7 +86,7 @@ class OpenAILLMContext:
     @property
     def tools(self) -> List[ChatCompletionToolParam] | NotGiven | List[Any]:
         if self._llm_adapter:
-            self._llm_adapter.from_standard_tools(self._tools)
+            return self._llm_adapter.from_standard_tools(self._tools)
         return self._tools
 
     @property

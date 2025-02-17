@@ -942,7 +942,7 @@ class GoogleLLMService(LLMService):
     franca for all LLM services, so that it is easy to switch between different LLMs.
     """
 
-    # Overriden the default adapter to use the Gemini one.
+    # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
     class InputParams(BaseModel):
