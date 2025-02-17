@@ -209,6 +209,8 @@ class GrokLLMService(OpenAILLMService):
     def create_context_aggregator(
         self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
     ) -> GrokContextAggregatorPair:
+        context.set_llm_adapter(self.get_llm_adapter())
+
         user = OpenAIUserContextAggregator(context)
         assistant = GrokAssistantContextAggregator(
             context, expect_stripped_words=assistant_expect_stripped_words
