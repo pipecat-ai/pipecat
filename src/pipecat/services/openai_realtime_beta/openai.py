@@ -565,6 +565,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     def create_context_aggregator(
         self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = False
     ) -> OpenAIContextAggregatorPair:
+        context.set_llm_adapter(self.get_llm_adapter())
+
         OpenAIRealtimeLLMContext.upgrade_to_realtime(context)
         user = OpenAIRealtimeUserContextAggregator(context)
         assistant = OpenAIRealtimeAssistantContextAggregator(

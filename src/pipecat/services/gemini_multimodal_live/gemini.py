@@ -703,6 +703,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
     def create_context_aggregator(
         self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = False
     ) -> GeminiMultimodalLiveContextAggregatorPair:
+        context.set_llm_adapter(self.get_llm_adapter())
+
         GeminiMultimodalLiveContext.upgrade(context)
         user = GeminiMultimodalLiveUserContextAggregator(context)
         assistant = GeminiMultimodalLiveAssistantContextAggregator(
