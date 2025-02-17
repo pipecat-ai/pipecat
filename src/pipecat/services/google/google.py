@@ -11,7 +11,7 @@ import json
 import os
 import time
 
-from pipecat.services.adapters.implementations.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"

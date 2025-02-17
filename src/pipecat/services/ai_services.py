@@ -39,8 +39,8 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.services.adapters.implementations.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.text.base_text_filter import BaseTextFilter

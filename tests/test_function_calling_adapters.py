@@ -8,10 +8,10 @@ import unittest
 
 from openai.types.chat import ChatCompletionToolParam
 
-from pipecat.services.adapters.function_schema import FunctionSchema
-from pipecat.services.adapters.implementations.anthropic_adapter import AnthropicLLMAdapter
-from pipecat.services.adapters.implementations.gemini_adapter import GeminiLLMAdapter
-from pipecat.services.adapters.implementations.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.function_schema import FunctionSchema
+from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 
 
 class TestFunctionAdapters(unittest.TestCase):

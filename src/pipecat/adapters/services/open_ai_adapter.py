@@ -7,8 +7,8 @@ from typing import List, Union
 
 from openai.types.chat import ChatCompletionToolParam
 
-from pipecat.services.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.services.adapters.function_schema import FunctionSchema
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.function_schema import FunctionSchema
 
 
 class OpenAILLMAdapter(BaseLLMAdapter):

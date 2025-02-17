@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 
 try:
     from openai._types import NOT_GIVEN, NotGiven
