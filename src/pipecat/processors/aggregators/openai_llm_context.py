@@ -168,7 +168,7 @@ class OpenAILLMContext:
 
     # TODO: need to change here
     # maybe just create a union to receive the new type
-    def set_tools(self, tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN):
+    def set_tools(self, tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN | List[FunctionSchema]):
         if tools != NOT_GIVEN and len(tools) == 0:
             tools = NOT_GIVEN
         self._tools = tools
