@@ -15,7 +15,7 @@ import websockets
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -167,7 +167,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         system_instruction: Optional[str] = None,
-        tools: Optional[List[Union[dict, FunctionSchema]]] = None,
+        tools: Optional[Union[List[dict], ToolsSchema]] = None,
         transcribe_user_audio: bool = False,
         transcribe_model_audio: bool = False,
         params: InputParams = InputParams(),

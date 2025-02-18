@@ -7,11 +7,13 @@
 from typing import Any, Dict, List, Union
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.function_schema import FunctionSchema
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
 
 class AnthropicLLMAdapter(BaseLLMAdapter):
-    def _to_anthropic_function_format(self, function: FunctionSchema) -> Dict[str, Any]:
+    @staticmethod
+    def _to_anthropic_function_format(function: FunctionSchema) -> Dict[str, Any]:
         return {
             "name": function.name,
             "description": function.description,
@@ -22,17 +24,11 @@ class AnthropicLLMAdapter(BaseLLMAdapter):
             },
         }
 
-    def to_provider_function_format(
-        self, functions_schema: Union[FunctionSchema, List[FunctionSchema]]
-    ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
-        """Converts one or multiple function schemas to Anthropic's function-calling format.
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Dict[str, Any]]:
+        """Converts function schemas to Anthropic's function-calling format.
 
         :return: Anthropic formatted function call definition.
         """
 
-        if isinstance(functions_schema, list):
-            # Handling list of FunctionSchema
-            return [self._to_anthropic_function_format(func) for func in functions_schema]
-        else:
-            # Handling single FunctionSchema
-            return self._to_anthropic_function_format(functions_schema)
+        functions_schema = tools_schema.standard_tools
+        return [self._to_anthropic_function_format(func) for func in functions_schema]

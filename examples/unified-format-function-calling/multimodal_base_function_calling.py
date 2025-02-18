@@ -12,7 +12,8 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
-from pipecat.adapters.function_schema import FunctionSchema
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -46,7 +47,7 @@ class MultimodalBaseFunctionCallingHandler:
         self.llm = llm
 
     @staticmethod
-    def tools() -> List[FunctionSchema]:
+    def tools() -> ToolsSchema:
         weather_function = FunctionSchema(
             name="get_current_weather",
             description="Get the current weather",
@@ -63,7 +64,7 @@ class MultimodalBaseFunctionCallingHandler:
             },
             required=["location"],
         )
-        return [weather_function]
+        return ToolsSchema(standard_tools=[weather_function])
 
     async def run(self):
         """Set up and start the processing pipeline."""

@@ -1,11 +1,11 @@
 import os
-from typing import List
 from unittest.mock import AsyncMock
 
 import pytest
 from dotenv import load_dotenv
 
-from pipecat.adapters.function_schema import FunctionSchema
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -21,7 +21,7 @@ from pipecat.utils.test_frame_processor import TestFrameProcessor
 load_dotenv(override=True)
 
 
-def standard_tools() -> List[FunctionSchema]:
+def standard_tools() -> ToolsSchema:
     weather_function = FunctionSchema(
         name="get_current_weather",
         description="Get the current weather",
@@ -38,7 +38,8 @@ def standard_tools() -> List[FunctionSchema]:
         },
         required=["location"],
     )
-    return [weather_function]
+    tools_def = ToolsSchema(standard_tools=[weather_function])
+    return tools_def
 
 
 async def _test_llm_function_calling(llm: LLMService):

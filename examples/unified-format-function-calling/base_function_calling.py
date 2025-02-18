@@ -12,7 +12,8 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
-from pipecat.adapters.function_schema import FunctionSchema
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -90,7 +91,7 @@ class BaseFunctionCallingHandler:
                 },
                 required=["location"],
             )
-            tools = [weather_function]
+            tools = ToolsSchema(standard_tools=[weather_function])
 
             messages = [
                 {
