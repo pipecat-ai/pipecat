@@ -12,6 +12,7 @@ from pipecat.adapters.function_schema import FunctionSchema
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
+from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 
 
 class TestFunctionAdapters(unittest.TestCase):
@@ -184,3 +185,53 @@ class TestFunctionAdapters(unittest.TestCase):
             }
         ]
         assert GeminiLLMAdapter().to_provider_function_format([self.function_def]) == expected
+
+    def test_openai_realtime_adapter_single_tool(self):
+        """Test Anthropic adapter format transformation."""
+        expected = {
+            "type": "function",
+            "name": "get_weather",
+            "description": "Get the weather in a given location",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "The city, e.g. San Francisco",
+                    },
+                    "format": {
+                        "type": "string",
+                        "enum": ["celsius", "fahrenheit"],
+                        "description": "The temperature unit to use.",
+                    },
+                },
+                "required": ["location", "format"],
+            },
+        }
+        assert OpenAIRealtimeLLMAdapter().to_provider_function_format(self.function_def) == expected
+
+    def test_openai_realtime_adapter_multiple_tools(self):
+        """Test Anthropic adapter format transformation."""
+        expected = [
+            {
+                "type": "function",
+                "name": "get_weather",
+                "description": "Get the weather in a given location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city, e.g. San Francisco",
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"],
+                            "description": "The temperature unit to use.",
+                        },
+                    },
+                    "required": ["location", "format"],
+                },
+            }
+        ]
+        assert OpenAIRealtimeLLMAdapter().to_provider_function_format([self.function_def]) == expected

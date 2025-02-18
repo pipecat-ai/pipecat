@@ -53,6 +53,7 @@ from .context import (
     OpenAIRealtimeUserContextAggregator,
 )
 from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
+from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 
 
 @dataclass
@@ -68,6 +69,10 @@ class OpenAIUnhandledFunctionException(Exception):
 
 
 class OpenAIRealtimeBetaLLMService(LLMService):
+
+    # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
+    adapter_class = OpenAIRealtimeLLMAdapter
+
     def __init__(
         self,
         *,
