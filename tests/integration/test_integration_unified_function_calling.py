@@ -10,7 +10,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
-    TextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
@@ -70,6 +69,7 @@ async def _test_llm_function_calling(llm: LLMService):
     mock_fetch_weather.assert_called_once()
 
 
+@pytest.mark.skipif(os.getenv("OPENAI_API_KEY") is None, reason="OPENAI_API_KEY is not set")
 @pytest.mark.asyncio
 async def test_unified_function_calling_openai():
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
@@ -77,6 +77,7 @@ async def test_unified_function_calling_openai():
     await _test_llm_function_calling(llm)
 
 
+@pytest.mark.skipif(os.getenv("GOOGLE_API_KEY") is None, reason="GOOGLE_API_KEY is not set")
 @pytest.mark.asyncio
 async def test_unified_function_calling_gemini():
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
@@ -84,6 +85,7 @@ async def test_unified_function_calling_gemini():
     await _test_llm_function_calling(llm)
 
 
+@pytest.mark.skipif(os.getenv("ANTHROPIC_API_KEY") is None, reason="ANTHROPIC_API_KEY is not set")
 @pytest.mark.asyncio
 async def test_unified_function_calling_anthropic():
     llm = AnthropicLLMService(
