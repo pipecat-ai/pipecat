@@ -1,20 +1,25 @@
 import os
 from typing import List
+from unittest.mock import AsyncMock
 
 import pytest
 from dotenv import load_dotenv
 
 from pipecat.adapters.function_schema import FunctionSchema
-from pipecat.frames.frames import LLMFullResponseEndFrame, LLMFullResponseStartFrame, TextFrame
+from pipecat.frames.frames import (
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    TextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.ai_services import LLMService
+from pipecat.services.anthropic import AnthropicLLMService
+from pipecat.services.google import GoogleLLMService
 from pipecat.services.openai import OpenAILLMContext, OpenAILLMContextFrame, OpenAILLMService
 from pipecat.utils.test_frame_processor import TestFrameProcessor
 
 load_dotenv(override=True)
-
-
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await result_callback({"conditions": "nice", "temperature": "75"})
 
 
 def standard_tools() -> List[FunctionSchema]:
@@ -37,12 +42,12 @@ def standard_tools() -> List[FunctionSchema]:
     return [weather_function]
 
 
-@pytest.mark.asyncio
-async def test_unified_function_calling_openai():
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+async def _test_llm_function_calling(llm: LLMService):
+    # Create an AsyncMock for the function
+    mock_fetch_weather = AsyncMock()
 
-    llm.register_function(None, fetch_weather_from_api)
-    t = TestFrameProcessor([LLMFullResponseStartFrame, TextFrame, LLMFullResponseEndFrame])
+    llm.register_function(None, mock_fetch_weather)
+    t = TestFrameProcessor([LLMFullResponseStartFrame, LLMTextFrame, LLMFullResponseEndFrame])
     llm.link(t)
 
     messages = [
@@ -50,7 +55,7 @@ async def test_unified_function_calling_openai():
             "role": "system",
             "content": "You are a helpful assistant who can report the weather in any location in the universe. Respond concisely. Your response will be turned into speech so use only simple words and punctuation.",
         },
-        {"role": "user", "content": " Start the conversation by introducing yourself."},
+        {"role": "user", "content": " How is the weather today in San Francisco, California?"},
     ]
     context = OpenAILLMContext(messages, standard_tools())
     # This is done by default inside the create_context_aggregator
@@ -60,3 +65,29 @@ async def test_unified_function_calling_openai():
 
     # This will fail if an exception is raised
     await llm.process_frame(frame, FrameDirection.DOWNSTREAM)
+
+    # Assert that the mock function was called
+    mock_fetch_weather.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_unified_function_calling_openai():
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    # This will fail if an exception is raised
+    await _test_llm_function_calling(llm)
+
+
+@pytest.mark.asyncio
+async def test_unified_function_calling_gemini():
+    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
+    # This will fail if an exception is raised
+    await _test_llm_function_calling(llm)
+
+
+@pytest.mark.asyncio
+async def test_unified_function_calling_anthropic():
+    llm = AnthropicLLMService(
+        api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-5-sonnet-20240620"
+    )
+    # This will fail if an exception is raised
+    await _test_llm_function_calling(llm)
