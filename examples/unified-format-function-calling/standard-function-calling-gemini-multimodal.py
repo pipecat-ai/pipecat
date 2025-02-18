@@ -9,8 +9,8 @@ import os
 
 from dotenv import load_dotenv
 from multimodal_base_function_calling import MultimodalBaseFunctionCallingHandler
-from pipecat.adapters.schemas.tools_schema import AdapterType
 
+from pipecat.adapters.schemas.tools_schema import AdapterType
 from pipecat.services.gemini_multimodal_live import GeminiMultimodalLiveLLMService
 
 load_dotenv(override=True)
