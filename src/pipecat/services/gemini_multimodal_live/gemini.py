@@ -9,7 +9,7 @@ import base64
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import websockets
 from loguru import logger
@@ -54,6 +54,8 @@ from pipecat.utils.time import time_now_iso8601
 
 from . import events
 from .audio_transcriber import AudioTranscriber
+from pipecat.adapters.function_schema import FunctionSchema
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 
 
 class GeminiMultimodalLiveContext(OpenAILLMContext):
@@ -152,6 +154,10 @@ class InputParams(BaseModel):
 
 
 class GeminiMultimodalLiveLLMService(LLMService):
+
+    # Overriding the default adapter to use the Gemini one.
+    adapter_class = GeminiLLMAdapter
+
     def __init__(
         self,
         *,
@@ -162,7 +168,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         system_instruction: Optional[str] = None,
-        tools: Optional[List[dict]] = None,
+        tools: Optional[List[Union[dict, FunctionSchema]]] = None,
         transcribe_user_audio: bool = False,
         transcribe_model_audio: bool = False,
         params: InputParams = InputParams(),
@@ -435,7 +441,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 )
             if self._tools:
                 logger.debug(f"Gemini is configuring to use tools{self._tools}")
-                config.setup.tools = self._tools
+                config.setup.tools = self.get_llm_adapter().from_standard_tools(self._tools)
             await self.send_client_event(config)
 
         except Exception as e:
