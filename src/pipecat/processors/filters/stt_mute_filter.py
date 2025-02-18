@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    InputAudioRawFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -185,6 +186,7 @@ class STTMuteFilter(FrameProcessor):
                 StopInterruptionFrame,
                 UserStartedSpeakingFrame,
                 UserStoppedSpeakingFrame,
+                InputAudioRawFrame,
             ),
         ):
             # Only pass VAD-related frames when not muted

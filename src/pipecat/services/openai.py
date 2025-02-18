@@ -110,7 +110,7 @@ class BaseOpenAILLMService(LLMService):
         seed: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
         # Note: top_k is currently not supported by the OpenAI client library,
-        # so top_k is ignore right now.
+        # so top_k is ignored right now.
         top_k: Optional[int] = Field(default=None, ge=0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         max_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)

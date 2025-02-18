@@ -34,8 +34,15 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+class TkTransportParams(TransportParams):
+    audio_input_device_index: Optional[int] = None
+    audio_output_device_index: Optional[int] = None
+
+
 class TkInputTransport(BaseInputTransport):
-    def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
+    _params: TkTransportParams
+
+    def __init__(self, py_audio: pyaudio.PyAudio, params: TkTransportParams):
         super().__init__(params)
         self._py_audio = py_audio
         self._in_stream = None
@@ -54,6 +61,7 @@ class TkInputTransport(BaseInputTransport):
             frames_per_buffer=num_frames,
             stream_callback=self._audio_in_callback,
             input=True,
+            input_device_index=self._params.audio_input_device_index,
         )
         self._in_stream.start_stream()
 
@@ -76,6 +84,8 @@ class TkInputTransport(BaseInputTransport):
 
 
 class TkOutputTransport(BaseOutputTransport):
+    _params: TkTransportParams
+
     def __init__(self, tk_root: tk.Tk, py_audio: pyaudio.PyAudio, params: TransportParams):
         super().__init__(params)
         self._py_audio = py_audio
@@ -103,6 +113,7 @@ class TkOutputTransport(BaseOutputTransport):
             channels=self._params.audio_out_channels,
             rate=self._sample_rate,
             output=True,
+            output_device_index=self._params.audio_output_device_index,
         )
         self._out_stream.start_stream()
 
