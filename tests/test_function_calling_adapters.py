@@ -234,4 +234,6 @@ class TestFunctionAdapters(unittest.TestCase):
                 },
             }
         ]
-        assert OpenAIRealtimeLLMAdapter().to_provider_function_format([self.function_def]) == expected
+        assert (
+            OpenAIRealtimeLLMAdapter().to_provider_function_format([self.function_def]) == expected
+        )
