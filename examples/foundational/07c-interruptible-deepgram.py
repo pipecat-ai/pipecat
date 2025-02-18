@@ -9,6 +9,7 @@ import os
 import sys
 
 import aiohttp
+from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
@@ -44,7 +45,23 @@ async def main():
             ),
         )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        # stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = DeepgramSTTService(
+            api_key=os.getenv("DEEPGRAM_API_KEY"),
+            # url=deepgram_url,
+            live_options=LiveOptions(
+                encoding="linear16",
+                language="en-US",
+                model="nova-3",
+                channels=1,
+                interim_results=True,
+                # smart_format=smart_format,
+                # endpointing=endpointing,
+                vad_events=True,
+                diarize=True,
+                filler_words=True,
+            ),
+        )
 
         tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
 
