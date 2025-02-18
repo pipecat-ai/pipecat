@@ -7,8 +7,8 @@
 import asyncio
 import os
 
-from multimodal_base_function_calling import MultimodalBaseFunctionCallingHandler
 from dotenv import load_dotenv
+from multimodal_base_function_calling import MultimodalBaseFunctionCallingHandler
 
 from pipecat.services.gemini_multimodal_live import GeminiMultimodalLiveLLMService
 
@@ -24,7 +24,7 @@ class WeatherBot(MultimodalBaseFunctionCallingHandler):
             voice_id="Puck",
             transcribe_user_audio=True,
             transcribe_model_audio=True,
-            tools=MultimodalBaseFunctionCallingHandler.tools()
+            tools=MultimodalBaseFunctionCallingHandler.tools(),
         )
         super().__init__(llm)
 

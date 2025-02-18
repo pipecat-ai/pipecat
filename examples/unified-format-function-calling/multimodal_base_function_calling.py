@@ -5,12 +5,12 @@
 #
 
 import sys
+from typing import List
 
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
-from typing import List
 
 from pipecat.adapters.function_schema import FunctionSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer

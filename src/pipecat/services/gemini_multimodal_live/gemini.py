@@ -15,6 +15,8 @@ import websockets
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.function_schema import FunctionSchema
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -54,8 +56,6 @@ from pipecat.utils.time import time_now_iso8601
 
 from . import events
 from .audio_transcriber import AudioTranscriber
-from pipecat.adapters.function_schema import FunctionSchema
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 
 
 class GeminiMultimodalLiveContext(OpenAILLMContext):
@@ -154,7 +154,6 @@ class InputParams(BaseModel):
 
 
 class GeminiMultimodalLiveLLMService(LLMService):
-
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
