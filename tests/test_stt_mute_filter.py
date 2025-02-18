@@ -11,12 +11,13 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    InputAudioRawFrame,
     STTMuteFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFilter, STTMuteStrategy
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import SleepFrame, run_test
 
 
 class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
@@ -26,10 +27,14 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),  # First bot speech starts
             UserStartedSpeakingFrame(),  # Should be suppressed
+            InputAudioRawFrame(
+                audio=b"", sample_rate=16000, num_channels=1
+            ),  # Should be suppressed
             UserStoppedSpeakingFrame(),  # Should be suppressed
             BotStoppedSpeakingFrame(),  # First bot speech ends
             BotStartedSpeakingFrame(),  # Second bot speech
             UserStartedSpeakingFrame(),  # Should pass through
+            InputAudioRawFrame(audio=b"", sample_rate=16000, num_channels=1),  # Should pass through
             UserStoppedSpeakingFrame(),  # Should pass through
             BotStoppedSpeakingFrame(),
         ]
@@ -41,6 +46,7 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             STTMuteFrame,  # mute=False
             BotStartedSpeakingFrame,
             UserStartedSpeakingFrame,  # Now passes through
+            InputAudioRawFrame,  # Now passes through
             UserStoppedSpeakingFrame,  # Now passes through
             BotStoppedSpeakingFrame,
         ]
@@ -57,12 +63,19 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             BotStartedSpeakingFrame(),  # First speech starts
             UserStartedSpeakingFrame(),  # Should be suppressed
+            InputAudioRawFrame(
+                audio=b"", sample_rate=16000, num_channels=1
+            ),  # Should be suppressed
             UserStoppedSpeakingFrame(),  # Should be suppressed
             BotStoppedSpeakingFrame(),  # First speech ends
             UserStartedSpeakingFrame(),  # Should pass through
+            InputAudioRawFrame(audio=b"", sample_rate=16000, num_channels=1),  # Should pass through
             UserStoppedSpeakingFrame(),  # Should pass through
             BotStartedSpeakingFrame(),  # Second speech starts
             UserStartedSpeakingFrame(),  # Should be suppressed again
+            InputAudioRawFrame(
+                audio=b"", sample_rate=16000, num_channels=1
+            ),  # Should be suppressed again
             UserStoppedSpeakingFrame(),  # Should be suppressed again
             BotStoppedSpeakingFrame(),  # Second speech ends
         ]
@@ -73,6 +86,7 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             BotStoppedSpeakingFrame,
             STTMuteFrame,  # mute=False
             UserStartedSpeakingFrame,
+            InputAudioRawFrame,
             UserStoppedSpeakingFrame,
             BotStartedSpeakingFrame,
             STTMuteFrame,  # mute=True
@@ -134,15 +148,23 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             UserStartedSpeakingFrame(),  # Should be suppressed (starts muted)
+            InputAudioRawFrame(
+                audio=b"", sample_rate=16000, num_channels=1
+            ),  # Should be suppressed
             UserStoppedSpeakingFrame(),  # Should be suppressed
             BotStartedSpeakingFrame(),  # First bot speech
             UserStartedSpeakingFrame(),  # Should be suppressed
+            InputAudioRawFrame(
+                audio=b"", sample_rate=16000, num_channels=1
+            ),  # Should be suppressed
             UserStoppedSpeakingFrame(),  # Should be suppressed
             BotStoppedSpeakingFrame(),  # First speech ends, unmutes
             UserStartedSpeakingFrame(),  # Should pass through
+            InputAudioRawFrame(audio=b"", sample_rate=16000, num_channels=1),  # Should pass through
             UserStoppedSpeakingFrame(),  # Should pass through
             BotStartedSpeakingFrame(),  # Second speech
             UserStartedSpeakingFrame(),  # Should pass through
+            InputAudioRawFrame(audio=b"", sample_rate=16000, num_channels=1),  # Should pass through
             UserStoppedSpeakingFrame(),  # Should pass through
             BotStoppedSpeakingFrame(),
         ]
@@ -153,9 +175,11 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             BotStoppedSpeakingFrame,
             STTMuteFrame,  # mute=False after first speech
             UserStartedSpeakingFrame,
+            InputAudioRawFrame,
             UserStoppedSpeakingFrame,
             BotStartedSpeakingFrame,
             UserStartedSpeakingFrame,
+            InputAudioRawFrame,
             UserStoppedSpeakingFrame,
             BotStoppedSpeakingFrame,
         ]
@@ -190,23 +214,30 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
 
         frames_to_send = [
             UserStartedSpeakingFrame(),  # Should pass through
+            InputAudioRawFrame(audio=b"", sample_rate=16000, num_channels=1),  # Should pass through
             UserStoppedSpeakingFrame(),  # Should pass through
             BotStartedSpeakingFrame(),  # Bot starts speaking
             UserStartedSpeakingFrame(),  # Should be suppressed
+            InputAudioRawFrame(
+                audio=b"", sample_rate=16000, num_channels=1
+            ),  # Should be suppressed
             UserStoppedSpeakingFrame(),  # Should be suppressed
             BotStoppedSpeakingFrame(),  # Bot stops speaking
             UserStartedSpeakingFrame(),  # Should pass through
+            InputAudioRawFrame(audio=b"", sample_rate=16000, num_channels=1),  # Should pass through
             UserStoppedSpeakingFrame(),  # Should pass through
         ]
 
         expected_returned_frames = [
             UserStartedSpeakingFrame,
+            InputAudioRawFrame,
             UserStoppedSpeakingFrame,
             BotStartedSpeakingFrame,
             STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
             STTMuteFrame,  # mute=False
             UserStartedSpeakingFrame,
+            InputAudioRawFrame,
             UserStoppedSpeakingFrame,
         ]
 
