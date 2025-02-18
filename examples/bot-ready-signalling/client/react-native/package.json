@@ -1,0 +1,31 @@
+{
+  "name": "bot-ready-rn",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android --device",
+    "ios": "expo run:ios --device",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@config-plugins/react-native-webrtc": "^10.0.0",
+    "@daily-co/config-plugin-rn-daily-js": "0.0.7",
+    "@daily-co/react-native-daily-js": "^0.70.0",
+    "@daily-co/react-native-webrtc": "^118.0.3-daily.2",
+    "@react-native-async-storage/async-storage": "1.23.1",
+    "expo": "^52.0.0",
+    "expo-build-properties": "~0.13.1",
+    "expo-dev-client": "~5.0.5",
+    "expo-splash-screen": "~0.29.16",
+    "expo-status-bar": "~2.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.3",
+    "react-native-background-timer": "^2.4.1",
+    "react-native-dotenv": "^3.4.11",
+    "react-native-get-random-values": "^1.11.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.12.9"
+  },
+  "private": true
+}
