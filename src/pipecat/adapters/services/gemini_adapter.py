@@ -7,7 +7,7 @@
 from typing import Any, Dict, List, Union
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 
 
 class GeminiLLMAdapter(BaseLLMAdapter):
@@ -18,6 +18,11 @@ class GeminiLLMAdapter(BaseLLMAdapter):
         """
 
         functions_schema = tools_schema.standard_tools
-        return [{"function_declarations": [func.to_default_dict() for func in functions_schema]}]
+        formatted_standard_tools = [
+            {"function_declarations": [func.to_default_dict() for func in functions_schema]}
+        ]
+        custom_gemini_tools = []
+        if tools_schema.custom_tools:
+            custom_gemini_tools = tools_schema.custom_tools.get(AdapterType.GEMINI, [])
 
-        # TODO need to handle google_search and google_search_retrieval
+        return formatted_standard_tools + custom_gemini_tools

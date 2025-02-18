@@ -4,14 +4,21 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+from enum import Enum
 from typing import Any, Dict, List
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
 
+class AdapterType(Enum):
+    GEMINI = "gemini"  # that is the only service where we are able to add custom tools for now
+
+
 class ToolsSchema:
     def __init__(
-        self, standard_tools: List[FunctionSchema], custom_tools: List[Dict[str, Any]] = None
+        self,
+        standard_tools: List[FunctionSchema],
+        custom_tools: Dict[AdapterType, List[Dict[str, Any]]] = None,
     ) -> None:
         """
         A schema for tools that includes both standardized function schemas
