@@ -10,8 +10,12 @@ import os
 from dotenv import load_dotenv
 from multimodal_base_function_calling import MultimodalBaseFunctionCallingHandler
 
-from pipecat.services.openai_realtime_beta import OpenAIRealtimeBetaLLMService, SessionProperties, \
-    InputAudioTranscription, TurnDetection
+from pipecat.services.openai_realtime_beta import (
+    InputAudioTranscription,
+    OpenAIRealtimeBetaLLMService,
+    SessionProperties,
+    TurnDetection,
+)
 
 load_dotenv(override=True)
 

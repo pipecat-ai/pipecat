@@ -23,7 +23,7 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         }
 
     def to_provider_function_format(
-            self, functions_schema: Union[FunctionSchema, List[FunctionSchema]]
+        self, functions_schema: Union[FunctionSchema, List[FunctionSchema]]
     ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
         """Converts one or multiple function schemas to Openai Realtime function-calling format.
 
