@@ -12,8 +12,10 @@ from pipecat.utils.test_frame_processor import TestFrameProcessor
 
 load_dotenv(override=True)
 
+
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
     await result_callback({"conditions": "nice", "temperature": "75"})
+
 
 def standard_tools() -> List[FunctionSchema]:
     weather_function = FunctionSchema(
@@ -33,6 +35,7 @@ def standard_tools() -> List[FunctionSchema]:
         required=["location"],
     )
     return [weather_function]
+
 
 @pytest.mark.asyncio
 async def test_unified_function_calling_openai():
@@ -57,4 +60,3 @@ async def test_unified_function_calling_openai():
 
     # This will fail if an exception is raised
     await llm.process_frame(frame, FrameDirection.DOWNSTREAM)
-
