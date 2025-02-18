@@ -497,7 +497,7 @@ class UserAggregatorBuffer(LLMResponseAggregator):
         if isinstance(frame, UserStartedSpeakingFrame):
             self._transcription = ""
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if self._aggregation:
             self._transcription = self._aggregation
             self._aggregation = ""

@@ -73,10 +73,11 @@ class FrameProcessor:
         self._metrics.set_processor_name(self.name)
 
         # Processors have an input queue. The input queue will be processed
-        # immediately (default) or it will block if `pause_processing_frames()` is
-        # called. To resume processing frames we need to call
-        # `resume_processing_frames()`.
+        # immediately (default) or it will block if `pause_processing_frames()`
+        # is called. To resume processing frames we need to call
+        # `resume_processing_frames()` which will wake up the event.
         self.__should_block_frames = False
+        self.__input_event = asyncio.Event()
         self.__input_frame_task: Optional[asyncio.Task] = None
 
         # Every processor in Pipecat should only output frames from a single
@@ -335,8 +336,8 @@ class FrameProcessor:
     def __create_input_task(self):
         if not self.__input_frame_task:
             self.__should_block_frames = False
+            self.__input_event.clear()
             self.__input_queue = asyncio.Queue()
-            self.__input_event = asyncio.Event()
             self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
     async def __cancel_input_task(self):

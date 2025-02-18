@@ -5,7 +5,6 @@
 #
 
 import asyncio
-import base64
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
@@ -839,6 +838,13 @@ class DailyInputTransport(BaseInputTransport):
     def vad_analyzer(self) -> Optional[VADAnalyzer]:
         return self._vad_analyzer
 
+    def start_audio_in_streaming(self):
+        # Create audio task. It reads audio frames from Daily and push them
+        # internally for VAD processing.
+        if self._params.audio_in_enabled or self._params.vad_enabled:
+            logger.debug(f"Start receiving audio")
+            self._audio_in_task = self.create_task(self._audio_in_task_handler())
+
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
@@ -849,10 +855,8 @@ class DailyInputTransport(BaseInputTransport):
         # Inialize WebRTC VAD if needed.
         if self._params.vad_enabled and not self._params.vad_analyzer:
             self._vad_analyzer = WebRTCVADAnalyzer(sample_rate=self.sample_rate)
-        # Create audio task. It reads audio frames from Daily and push them
-        # internally for VAD processing.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_task = self.create_task(self._audio_in_task_handler())
+        if self._params.audio_in_stream_on_start:
+            self.start_audio_in_streaming()
 
     async def stop(self, frame: EndFrame):
         # Parent stop.
@@ -1200,22 +1204,7 @@ class DailyTransport(BaseTransport):
 
     async def _on_app_message(self, message: Any, sender: str):
         if self._input:
-            if message["type"] in {"raw-audio", "raw-audio-batch"}:
-                data = message["data"]
-                audio_list = data.get(
-                    "base64AudioBatch", [data.get("base64Audio")]
-                )  # Ensure a list
-
-                for base64_audio in filter(None, audio_list):  # Filter out None values
-                    pcm_bytes = base64.b64decode(base64_audio)
-                    frame = InputAudioRawFrame(
-                        audio=pcm_bytes,
-                        sample_rate=data["sampleRate"],
-                        num_channels=data["numChannels"],
-                    )
-                    await self._input.push_audio_frame(frame)
-            else:
-                await self._input.push_app_message(message, sender)
+            await self._input.push_app_message(message, sender)
         await self._call_event_handler("on_app_message", message, sender)
 
     async def _on_call_state_updated(self, state: str):

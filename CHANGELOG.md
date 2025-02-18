@@ -5,9 +5,29 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.57] - 2025-02-14
 
 ### Added
+
+- Added new `AudioContextWordTTSService`. This is a TTS base class for TTS
+  services that handling multiple separate audio requests.
+
+- Added new frames `EmulateUserStartedSpeakingFrame` and
+  `EmulateUserStoppedSpeakingFrame` which can be used to emulated VAD behavior
+  without VAD being present or not being triggered.
+
+- Added a new `audio_in_stream_on_start` field to `TransportParams`.
+
+- Added a new method `start_audio_in_streaming` in the `BaseInputTransport`.
+
+  - This method should be used to start receiving the input audio in case the
+    field `audio_in_stream_on_start` is set to `false`.
+
+- Added support for the `RTVIProcessor` to handle buffered audio in `base64`
+  format, converting it into InputAudioRawFrame for transport.
+
+- Added support for the `RTVIProcessor` to trigger `start_audio_in_streaming`
+  only after the `client-ready` message.
 
 - Added new `MUTE_UNTIL_FIRST_BOT_COMPLETE` strategy to `STTMuteStrategy`. This
   strategy starts muted and remains muted until the first bot speech completes,
@@ -29,12 +49,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenAI-compatible interface. Also, added foundational example
   `14n-function-calling-perplexity.py`.
 
-- Added `DailyTransport.update_remote_participants()`. This allows you to
-  update remote participant's settings, like their permissions or which of
-  their devices are enabled. Requires that the local participant have
-  participant admin permission.
+- Added `DailyTransport.update_remote_participants()`. This allows you to update
+  remote participant's settings, like their permissions or which of their
+  devices are enabled. Requires that the local participant have participant
+  admin permission.
 
 ### Changed
+
+- We don't consider a colon `:` and end of sentence any more.
+
+- Updated `DailyTransport` to respect the `audio_in_stream_on_start` field,
+  ensuring it only starts receiving the audio input if it is enabled.
+
+- Updated `FastAPIWebsocketOutputTransport` to send `TransportMessageFrame` and
+  `TransportMessageUrgentFrame` to the serializer.
+
+- Updated `WebsocketServerOutputTransport` to send `TransportMessageFrame` and
+  `TransportMessageUrgentFrame` to the serializer.
 
 - Enhanced `STTMuteConfig` to validate strategy combinations, preventing
   `MUTE_UNTIL_FIRST_BOT_COMPLETE` and `FIRST_SPEECH` from being used together
@@ -76,6 +107,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `FalImageGenService` issue that was causing the event loop to be
+  blocked while loading the downloadded image.
+
+- Fixed a `CartesiaTTSService` service issue that would cause audio overlapping
+  in some cases.
+
+- Fixed a websocket-based service issue (e.g. `CartesiaTTSService`) that was
+  preventing a reconnection after the server disconnected cleanly, which was
+  causing an inifite loop instead.
+
+- Fixed a `BaseOutputTransport` issue that was causing upstream frames to no be
+  pushed upstream.
+
+- Fixed multiple issue where user transcriptions where not being handled
+  properly. It was possible for short utterances to not trigger VAD which would
+  cause user transcriptions to be ignored. It was also possible for one or more
+  transcriptions to be generated after VAD in which case they would also be
+  ignored.
+
+- Fixed an issue that was causing `BotStoppedSpeakingFrame` to be generated too
+  late. This could then cause issues unblocking `STTMuteFilter` later than
+  desired.
+
 - Fixed an issue that was causing `AudioBufferProcessor` to not record
   synchronized audio.
 
@@ -84,6 +138,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue[#1192] in 11labs where we are trying to reconnect/disconnect
   the websocket connection even when the connection is already closed.
+
+- Fixed an issue where `has_regular_messages` condition was always true in
+  `GoogleLLMContext` due to `Part` having `function_call` & `function_response`
+  with `None` values.
+
+### Other
+
+- Added new `instant-voice` example. This example showcases how to enable
+  instant voice communication as soon as a user connects.
+
+- Added new `local-input-select-stt` example. This examples allows you to play
+  with local audio inputs by slecting them through a nice text interface.
 
 ## [0.0.56] - 2025-02-06
 
@@ -264,7 +330,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `enable_recording` and `geo` parameters to `DailyRoomProperties`.
 
-- Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings to a custom AWS bucket.
+- Added `RecordingsBucketConfig` to `DailyRoomProperties` to upload recordings
+  to a custom AWS bucket.
 
 ### Changed
 

@@ -566,6 +566,22 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
+class EmulateUserStartedSpeakingFrame(SystemFrame):
+    """Emitted by internal processors upstream to emulate VAD behavior when a
+    user starts speaking."""
+
+    pass
+
+
+@dataclass
+class EmulateUserStoppedSpeakingFrame(SystemFrame):
+    """Emitted by internal processors upstream to emulate VAD behavior when a
+    user stops speaking."""
+
+    pass
+
+
+@dataclass
 class BotInterruptionFrame(SystemFrame):
     """Emitted by when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the
@@ -616,6 +632,13 @@ class FunctionCallInProgressFrame(SystemFrame):
     function_name: str
     tool_call_id: str
     arguments: str
+
+
+@dataclass
+class STTMuteFrame(SystemFrame):
+    """System frame to mute/unmute the STT service."""
+
+    mute: bool
 
 
 @dataclass
@@ -750,13 +773,6 @@ class LLMUpdateSettingsFrame(ServiceUpdateSettingsFrame):
 @dataclass
 class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame):
     pass
-
-
-@dataclass
-class STTMuteFrame(ControlFrame):
-    """Control frame to mute/unmute the STT service."""
-
-    mute: bool
 
 
 @dataclass

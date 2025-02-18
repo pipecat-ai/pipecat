@@ -111,6 +111,8 @@ class BaseWhisperSTTService(SegmentedSTTService):
         api_key: Service API key. Defaults to None.
         base_url: Service API base URL. Defaults to None.
         language: Language of the audio input. Defaults to English.
+        prompt: Optional text to guide the model's style or continue a previous segment.
+        temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
         **kwargs: Additional arguments passed to SegmentedSTTService.
     """
 
@@ -121,12 +123,16 @@ class BaseWhisperSTTService(SegmentedSTTService):
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         language: Optional[Language] = Language.EN,
+        prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.set_model_name(model)
         self._client = self._create_client(api_key, base_url)
         self._language = self.language_to_service_language(language or Language.EN)
+        self._prompt = prompt
+        self._temperature = temperature
 
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)

@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import base64
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     FunctionCallResultFrame,
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -58,7 +60,9 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.transports.base_transport import BaseTransport
 from pipecat.utils.string import match_endofsentence
 
 RTVI_PROTOCOL_VERSION = "0.3.0"
@@ -819,6 +823,7 @@ class RTVIProcessor(FrameProcessor):
         self,
         *,
         config: RTVIConfig = RTVIConfig(config=[]),
+        transport: Optional[BaseTransport] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -843,6 +848,14 @@ class RTVIProcessor(FrameProcessor):
 
         self._register_event_handler("on_bot_started")
         self._register_event_handler("on_client_ready")
+
+        self._input_transport = None
+        self._transport = transport
+        if self._transport:
+            input_transport = self._transport.input()
+            if isinstance(input_transport, BaseInputTransport):
+                self._input_transport = input_transport
+                self._input_transport.enable_audio_in_stream_on_start(False)
 
     def observer(self) -> RTVIObserver:
         import warnings
@@ -1013,6 +1026,8 @@ class RTVIProcessor(FrameProcessor):
                 case "llm-function-call-result":
                     data = RTVILLMFunctionCallResultData.model_validate(message.data)
                     await self._handle_function_call_result(data)
+                case "raw-audio" | "raw-audio-batch":
+                    await self._handle_audio_buffer(message.data)
 
                 case _:
                     await self._send_error_response(message.id, f"Unsupported type {message.type}")
@@ -1025,8 +1040,33 @@ class RTVIProcessor(FrameProcessor):
             logger.warning(f"Exception processing message: {e}")
 
     async def _handle_client_ready(self, request_id: str):
+        logger.debug("Received client-ready")
+        if self._input_transport:
+            self._input_transport.start_audio_in_streaming()
+
         self._client_ready_id = request_id
         await self.set_client_ready()
+
+    async def _handle_audio_buffer(self, data):
+        if not self._input_transport:
+            return
+
+        # Extract audio batch ensuring it's a list
+        audio_list = data.get("base64AudioBatch") or [data.get("base64Audio")]
+
+        try:
+            for base64_audio in filter(None, audio_list):  # Filter out None values
+                pcm_bytes = base64.b64decode(base64_audio)
+                frame = InputAudioRawFrame(
+                    audio=pcm_bytes,
+                    sample_rate=data["sampleRate"],
+                    num_channels=data["numChannels"],
+                )
+                await self._input_transport.push_audio_frame(frame)
+
+        except (KeyError, TypeError, ValueError) as e:
+            # Handle missing keys, decoding errors, and invalid types
+            logger.error(f"Error processing audio buffer: {e}")
 
     async def _handle_describe_config(self, request_id: str):
         services = list(self._registered_services.values())

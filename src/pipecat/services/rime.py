@@ -7,7 +7,7 @@
 import base64
 import json
 import uuid
-from typing import AsyncGenerator, Optional, Union
+from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService, WordTTSService
+from pipecat.services.ai_services import AudioContextWordTTSService, TTSService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
@@ -58,7 +58,7 @@ def language_to_rime_language(language: Language) -> str:
     return LANGUAGE_MAP.get(language, "eng")
 
 
-class RimeTTSService(WordTTSService, WebsocketService):
+class RimeTTSService(AudioContextWordTTSService, WebsocketService):
     """Text-to-Speech service using Rime's websocket API.
 
     Uses Rime's websocket JSON API to convert text to speech with word-level timing
@@ -95,12 +95,13 @@ class RimeTTSService(WordTTSService, WebsocketService):
             params: Additional configuration parameters.
         """
         # Initialize with parent class settings for proper frame handling
-        WordTTSService.__init__(
+        AudioContextWordTTSService.__init__(
             self,
             aggregate_sentences=True,
             push_text_frames=False,
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
+            pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )
@@ -126,7 +127,6 @@ class RimeTTSService(WordTTSService, WebsocketService):
         # State tracking
         self._context_id = None  # Tracks current turn
         self._receive_task = None
-        self._started = False
         self._cumulative_time = 0  # Accumulates time across messages
 
     def can_generate_metrics(self) -> bool:
@@ -200,7 +200,6 @@ class RimeTTSService(WordTTSService, WebsocketService):
                 await self._websocket.send(json.dumps(self._build_eos_msg()))
                 await self._websocket.close()
                 self._websocket = None
-            self._started = False
             self._context_id = None
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
@@ -217,7 +216,6 @@ class RimeTTSService(WordTTSService, WebsocketService):
         await self.stop_all_metrics()
         if self._context_id:
             await self._get_websocket().send(json.dumps(self._build_clear_msg()))
-            self._started = False
             self._context_id = None
 
     def _calculate_word_times(self, words: list, starts: list, ends: list) -> list:
@@ -249,12 +247,18 @@ class RimeTTSService(WordTTSService, WebsocketService):
 
         return word_pairs
 
+    async def flush_audio(self):
+        if not self._context_id or not self._websocket:
+            return
+        logger.trace(f"{self}: flushing audio")
+        self._context_id = None
+
     async def _receive_messages(self):
         """Process incoming websocket messages."""
         async for message in self._get_websocket():
             msg = json.loads(message)
 
-            if not msg or msg["contextId"] != self._context_id:
+            if not msg or not self.audio_context_available(msg["contextId"]):
                 continue
 
             if msg["type"] == "chunk":
@@ -266,7 +270,7 @@ class RimeTTSService(WordTTSService, WebsocketService):
                     sample_rate=self.sample_rate,
                     num_channels=1,
                 )
-                await self.push_frame(frame)
+                await self.append_to_audio_context(msg["contextId"], frame)
 
             elif msg["type"] == "timestamps":
                 # Process word timing information
@@ -288,25 +292,14 @@ class RimeTTSService(WordTTSService, WebsocketService):
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
                 await self.push_error(ErrorFrame(f"{self} error: {msg['message']}"))
+                self._context_id = None
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push frame and handle end-of-turn conditions."""
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
-            self._started = False
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames and manage turn state."""
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, TTSSpeakFrame):
-            await self.pause_processing_frames()
-        elif isinstance(frame, LLMFullResponseEndFrame) and self._started:
-            await self.pause_processing_frames()
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.resume_processing_frames()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text.
@@ -323,12 +316,12 @@ class RimeTTSService(WordTTSService, WebsocketService):
                 await self._connect()
 
             try:
-                if not self._started:
+                if not self._context_id:
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame()
-                    self._started = True
                     self._cumulative_time = 0
                     self._context_id = str(uuid.uuid4())
+                    await self.create_audio_context(self._context_id)
 
                 msg = self._build_msg(text=text)
                 await self._get_websocket().send(json.dumps(msg))
