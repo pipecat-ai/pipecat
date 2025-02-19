@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Added `exponential_backoff_time()` to `utils.network` module.
+
 ### Fixed
 
 - Fixed an issue that would cause `DeepgramSTTService` to stop working after an
