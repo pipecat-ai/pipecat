@@ -266,7 +266,6 @@ class BaseOpenAILLMService(LLMService):
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
                     tool_call_id = tool_call.id
-                    await self.call_start_function(context, function_name)
                 if tool_call.function and tool_call.function.arguments:
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments

@@ -14,6 +14,7 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -28,6 +29,12 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 video_participant_id = None
+
+
+async def start_fetch_weather(function_name, llm, context):
+    """Push a frame to the LLM; this is handy when the LLM response might take a while."""
+    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
+    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
 
 
 async def get_weather(function_name, tool_call_id, arguments, llm, context, result_callback):
@@ -63,7 +70,7 @@ async def main():
         )
 
         llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
-        llm.register_function("get_weather", get_weather)
+        llm.register_function("get_weather", get_weather, start_fetch_weather)
         llm.register_function("get_image", get_image)
 
         tools = [
