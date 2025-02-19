@@ -13,6 +13,7 @@ from loguru import logger
 from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
+from pipecat.utils.network import exponential_backoff_time
 
 
 class WebsocketService(ABC):
@@ -51,27 +52,6 @@ class WebsocketService(ABC):
         await self._connect_websocket()
         return await self._verify_connection()
 
-    def _calculate_wait_time(
-        self, attempt: int, min_wait: float = 4, max_wait: float = 10, multiplier: float = 1
-    ) -> float:
-        """Calculate exponential backoff wait time.
-
-        Args:
-            attempt: Current attempt number (1-based)
-            min_wait: Minimum wait time in seconds
-            max_wait: Maximum wait time in seconds
-            multiplier: Base multiplier for exponential calculation
-
-        Returns:
-            Wait time in seconds
-        """
-        try:
-            exp = 2 ** (attempt - 1) * multiplier
-            result = max(0, min(exp, max_wait))
-            return max(min_wait, result)
-        except (ValueError, ArithmeticError):
-            return max_wait
-
     async def _receive_task_handler(self, report_error: Callable[[ErrorFrame], Awaitable[None]]):
         """Handles WebSocket message receiving with automatic retry logic.
 
@@ -104,7 +84,7 @@ class WebsocketService(ABC):
                 try:
                     if await self._reconnect_websocket(retry_count):
                         retry_count = 0  # Reset counter on successful reconnection
-                    wait_time = self._calculate_wait_time(retry_count)
+                    wait_time = exponential_backoff_time(retry_count)
                     await asyncio.sleep(wait_time)
                 except Exception as reconnect_error:
                     logger.error(f"{self} reconnection failed: {reconnect_error}")
