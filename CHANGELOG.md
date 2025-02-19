@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `exponential_backoff_time()` to `utils.network` module.
 
+### Changed
+
+- `DeepgramSTTService` now uses the new `nova-3` model by default. If you want
+  to use the previous model you can pass `LiveOptions(model="nova-2-general")`.
+  (see https://deepgram.com/learn/introducing-nova-3-speech-to-text-api)
+
+```python
+stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
+```
+
 ### Fixed
 
 - Fixed an issue that would cause `DeepgramSTTService` to stop working after an
