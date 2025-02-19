@@ -34,6 +34,7 @@ try:
         AsyncListenWebSocketClient,
         DeepgramClient,
         DeepgramClientOptions,
+        ErrorResponse,
         LiveOptions,
         LiveResultResponse,
         LiveTranscriptionEvents,
@@ -155,13 +156,10 @@ class DeepgramSTTService(STTService):
                 options={"keepalive": "true"},  # verbose=logging.DEBUG
             ),
         )
-        self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
-        self._connection.on(LiveTranscriptionEvents.Transcript, self._on_message)
+
         if self.vad_enabled:
             self._register_event_handler("on_speech_started")
             self._register_event_handler("on_utterance_end")
-            self._connection.on(LiveTranscriptionEvents.SpeechStarted, self._on_speech_started)
-            self._connection.on(LiveTranscriptionEvents.UtteranceEnd, self._on_utterance_end)
 
     @property
     def vad_enabled(self):
@@ -202,6 +200,24 @@ class DeepgramSTTService(STTService):
 
     async def _connect(self):
         logger.debug("Connecting to Deepgram")
+
+        self._connection: AsyncListenWebSocketClient = self._client.listen.asyncwebsocket.v("1")
+
+        self._connection.on(
+            LiveTranscriptionEvents(LiveTranscriptionEvents.Transcript), self._on_message
+        )
+        self._connection.on(LiveTranscriptionEvents(LiveTranscriptionEvents.Error), self._on_error)
+
+        if self.vad_enabled:
+            self._connection.on(
+                LiveTranscriptionEvents(LiveTranscriptionEvents.SpeechStarted),
+                self._on_speech_started,
+            )
+            self._connection.on(
+                LiveTranscriptionEvents(LiveTranscriptionEvents.UtteranceEnd),
+                self._on_utterance_end,
+            )
+
         if not await self._connection.start(self._settings):
             logger.error(f"{self}: unable to connect to Deepgram")
 
@@ -213,6 +229,15 @@ class DeepgramSTTService(STTService):
     async def start_metrics(self):
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
+
+    async def _on_error(self, *args, **kwargs):
+        error: ErrorResponse = kwargs["error"]
+        logger.warning(f"{self} connection error, will retry: {error}")
+        await self.stop_all_metrics()
+        # NOTE(aleix): we don't disconnect (i.e. call finish on the connection)
+        # because this triggers more errors internally in the Deepgram SDK. So,
+        # we just forget about the previous connection and create a new one.
+        await self._connect()
 
     async def _on_speech_started(self, *args, **kwargs):
         await self.start_metrics()
