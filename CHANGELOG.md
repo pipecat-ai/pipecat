@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `room_url` property to `DailyTransport`.
+
 - Added `addons` argument to `DeepgramSTTService`.
 
 - Added `exponential_backoff_time()` to `utils.network` module.
