@@ -193,7 +193,7 @@ class STTMuteFilter(FrameProcessor):
             if not self.is_muted:
                 await self.push_frame(frame, direction)
             else:
-                logger.debug(f"{frame.__class__.__name__} suppressed - STT currently muted")
+                logger.trace(f"{frame.__class__.__name__} suppressed - STT currently muted")
         else:
             # Pass all other frames through
             await self.push_frame(frame, direction)
