@@ -27,6 +27,8 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed an issue that `start_callback` was not invoked for some LLM services.
+
 - Fixed an issue that would cause `DeepgramSTTService` to stop working after an
   error occurred (e.g. sudden network loss). If the network recovered we would
   not reconnect.

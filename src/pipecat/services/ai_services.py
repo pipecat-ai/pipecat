@@ -175,6 +175,7 @@ class LLMService(AIService):
             f = self._callbacks[None]
         else:
             return None
+        await self.call_start_function(context, function_name)
         await context.call_function(
             f,
             function_name=function_name,
