@@ -5,7 +5,7 @@
 #
 
 import asyncio
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
 
@@ -121,6 +121,7 @@ class DeepgramSTTService(STTService):
         url: str = "",
         sample_rate: Optional[int] = None,
         live_options: Optional[LiveOptions] = None,
+        addons: Optional[Dict] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -148,6 +149,7 @@ class DeepgramSTTService(STTService):
             merged_options.language = merged_options.language.value
 
         self._settings = merged_options.to_dict()
+        self._addons = addons
 
         self._client = DeepgramClient(
             api_key,
@@ -218,7 +220,7 @@ class DeepgramSTTService(STTService):
                 self._on_utterance_end,
             )
 
-        if not await self._connection.start(self._settings):
+        if not await self._connection.start(options=self._settings, addons=self._addons):
             logger.error(f"{self}: unable to connect to Deepgram")
 
     async def _disconnect(self):
