@@ -7,17 +7,18 @@ import argparse
 import asyncio
 import os
 import sys
+from pprint import pprint
 from typing import Optional
 
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndTaskFrame, LLMMessagesUpdateFrame
+from pipecat.frames.frames import EndTaskFrame, LLMMessagesFrame, LLMMessagesUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import LLMService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.google import GoogleLLMContext, GoogleLLMService
@@ -33,59 +34,60 @@ daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
+class ContextSwitcher:
+    def __init__(self, llm, context_aggregator):
+        self._llm = llm
+        self._context_aggregator = context_aggregator
+
+    async def switch_context(self, system_instruction):
+        # Create messages with updated system instruction
+        messages = [
+            {
+                "role": "system",
+                "content": system_instruction,
+            }
+        ]
+
+        # Update context with new messages
+        # await self._llm.push_frame(LLMMessagesUpdateFrame(messages))
+        self._context_aggregator.set_messages(messages)
+        context_frame = self._context_aggregator.get_context_frame()
+        # Trigger LLM response by pushing a context frame
+        pprint(vars(context_frame.context))
+        await self._llm.queue_frame(context_frame)
+
+
+## Call result callback
+
+
+class FunctionHandlers:
+    def __init__(self, context_switcher):
+        self.context_switcher = context_switcher
+
+    async def respond_with_apple(
+        self, function_name, tool_call_id, args, llm, context, result_callback
+    ):
+        await self.context_switcher.switch_context(system_instruction="Always respond with Apple")
+        # await result_callback("")
+
+    async def respond_with_banana(
+        self, function_name, tool_call_id, args, llm, context, result_callback
+    ):
+        await self.context_switcher.switch_context(system_instruction="Always respond with Banana")
+        # await result_callback("")
+
+    async def respond_with_oranges(
+        self, function_name, tool_call_id, args, llm, context, result_callback
+    ):
+        await self.context_switcher.switch_context(system_instruction="Always respond with Oranges")
+        # await result_callback("")
+
+
 async def terminate_call(
     function_name, tool_call_id, args, llm: LLMService, context, result_callback
 ):
     """Function the bot can call to terminate the call upon completion of a voicemail message."""
     await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-
-
-async def respond_with_apple(
-    function_name, tool_call_id, args, llm: LLMService, context: GoogleLLMContext, result_callback
-):
-    messages = [
-        {
-            "role": "system",
-            "content": "Always respond with Apple",
-        }
-    ]
-    print("respond_with_apple")
-    # context.system_message = "Always respond with Apple"
-    print(f"context before: {context.tools}")
-    await llm.push_frame(LLMMessagesUpdateFrame(messages))
-    print(f"context after: {context.tools}")
-
-
-async def respond_with_banana(
-    function_name, tool_call_id, args, llm: LLMService, context: GoogleLLMContext, result_callback
-):
-    messages = [
-        {
-            "role": "system",
-            "content": "Always respond with Banana",
-        }
-    ]
-    print("respond_with_banana")
-    # context.system_message = "Always respond with Banana"
-    print(f"context before: {context.tools}")
-    await llm.push_frame(LLMMessagesUpdateFrame(messages))
-    print(f"context after: {context.tools}")
-
-
-async def respond_with_orange(
-    function_name, tool_call_id, args, llm: LLMService, context: GoogleLLMContext, result_callback
-):
-    messages = [
-        {
-            "role": "system",
-            "content": "Always respond with Orange",
-        }
-    ]
-    print("respond_with_orange")
-    # context.system_message = "Always respond with Orange"
-    print(f"context before: {context.tools}")
-    await llm.push_frame(LLMMessagesUpdateFrame(messages))
-    print(f"context after: {context.tools}")
 
 
 async def main(
@@ -141,57 +143,6 @@ async def main(
         }
     ]
 
-    system_instruction2 = """You are Chatbot, a friendly, helpful robot.
-
-IMPORTANT: You MUST use the terminate_call function to end the call in these situations:
-1. After leaving a voicemail message
-2. When the conversation with a human is finished
-
-VOICEMAIL DETECTION:
-- Listen carefully for these exact phrases at the start of the call:
-  * "Please leave a message after the beep"
-  * "No one is available to take your call"
-  * "Record your message after the tone"
-  * "You have reached voicemail for..."
-
-IF VOICEMAIL DETECTED:
-1. Wait for any beep sound if mentioned
-2. Say EXACTLY: "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
-3. IMMEDIATELY call the terminate_call function after your message
-4. Do not say anything else
-
-IF HUMAN DETECTED:
-1. Say: "Oh, hello! I'm a friendly chatbot. Is there anything I can help you with?"
-2. Keep responses short and helpful
-3. When conversation ends, say: "Okay, thank you! Have a great day!"
-4. IMMEDIATELY call the terminate_call function
-
-NEVER say these phrases yourself:
-- "Please leave a message after the beep"
-- "No one is available to take your call"
-- "Record your message after the tone"
-- "You have reached voicemail for..."
-"""
-
-    system_instruction3 = """
-    You are Chatbot. Your MAIN GOAL is to call the terminate_call function at the end.
-
-After each response, YOU MUST call the terminate_call function. This is REQUIRED.
-
-If someone says "Please leave a message after the beep":
-Say: "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
-
-If someone says anything else:
-Say: "Hello, I'm Chatbot. Nice to meet you."
-
-IMPORTANT: YOU MUST CALL the terminate_call function after you respond.
-terminate_call is the ONLY way to end the call properly.
-    """
-
-    system_instruction1 = """You are Chatbot. Follow these exact steps in order:
-1. Say "Hi, I'm Chatbot! Here's a joke: Why don't scientists trust atoms? Because they make up everything!"
-2. IMMEDIATELY after telling the joke, call the function terminate_call"""
-
     system_instruction = """Always respond with the word Apple"""
 
     llm = GoogleLLMService(
@@ -201,14 +152,15 @@ terminate_call is the ONLY way to end the call properly.
         tools=tools,
     )
 
-    # llm.register_function("terminate_call", terminate_call)
-    llm.register_function("respond_with_apple", respond_with_apple)
-    llm.register_function("respond_with_banana", respond_with_banana)
-    llm.register_function("respond_with_orange", respond_with_orange)
-
     context = GoogleLLMContext()
 
     context_aggregator = llm.create_context_aggregator(context)
+    context_switcher = ContextSwitcher(llm, context_aggregator.user())
+    handlers = FunctionHandlers(context_switcher)
+
+    llm.register_function("respond_with_apple", handlers.respond_with_apple)
+    llm.register_function("respond_with_banana", handlers.respond_with_banana)
+    llm.register_function("respond_with_orange", handlers.respond_with_oranges)
 
     pipeline = Pipeline(
         [
