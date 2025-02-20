@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    InputAudioRawFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -185,13 +186,14 @@ class STTMuteFilter(FrameProcessor):
                 StopInterruptionFrame,
                 UserStartedSpeakingFrame,
                 UserStoppedSpeakingFrame,
+                InputAudioRawFrame,
             ),
         ):
             # Only pass VAD-related frames when not muted
             if not self.is_muted:
                 await self.push_frame(frame, direction)
             else:
-                logger.debug(f"{frame.__class__.__name__} suppressed - STT currently muted")
+                logger.trace(f"{frame.__class__.__name__} suppressed - STT currently muted")
         else:
             # Pass all other frames through
             await self.push_frame(frame, direction)

@@ -16,7 +16,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.transports.local.audio import LocalAudioTransport, LocalTransportParams
+from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 
 load_dotenv(override=True)
 
@@ -25,7 +25,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def main():
-    transport = LocalAudioTransport(LocalTransportParams(audio_out_enabled=True))
+    transport = LocalAudioTransport(LocalAudioTransportParams(audio_out_enabled=True))
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),

@@ -17,6 +17,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai import (
     OpenAIAssistantContextAggregator,
     OpenAILLMService,
@@ -27,7 +28,7 @@ from pipecat.services.openai import (
 class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
     """Custom assistant context aggregator for Grok that handles empty content requirement."""
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if not (
             self._aggregation or self._function_call_result or self._pending_image_frame_message
         ):
@@ -37,7 +38,7 @@ class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
         properties: Optional[FunctionCallResultProperties] = None
 
         aggregation = self._aggregation
-        self._reset()
+        self.reset()
 
         try:
             if self._function_call_result:
@@ -91,14 +92,13 @@ class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
                 run_llm = True
 
             if run_llm:
-                await self._user_context_aggregator.push_context_frame()
+                await self.push_context_frame(FrameDirection.UPSTREAM)
 
             # Emit the on_context_updated callback once the function call result is added to the context
             if properties and properties.on_context_updated is not None:
                 await properties.on_context_updated()
 
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
+            await self.push_context_frame()
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
@@ -212,6 +212,6 @@ class GrokLLMService(OpenAILLMService):
     ) -> GrokContextAggregatorPair:
         user = OpenAIUserContextAggregator(context)
         assistant = GrokAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, expect_stripped_words=assistant_expect_stripped_words
         )
         return GrokContextAggregatorPair(_user=user, _assistant=assistant)

@@ -330,6 +330,10 @@ class DailyTransportClient(EventHandler):
         return f"speaker-{self}"
 
     @property
+    def room_url(self) -> str:
+        return self._room_url
+
+    @property
     def participant_id(self) -> str:
         return self._participant_id
 
@@ -1111,6 +1115,10 @@ class DailyTransport(BaseTransport):
     #
     # DailyTransport
     #
+
+    @property
+    def room_url(self) -> str:
+        return self._client.room_url
 
     @property
     def participant_id(self) -> str:

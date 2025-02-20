@@ -113,6 +113,7 @@ We have introduced support for Google's Gemini 2.0 Flash Lite model in this exam
 **Quick Start**
 To use the Gemini-based bot instead of OpenAI:
 
+
 ```shell
 curl -X POST "http://localhost:7860/daily_gemini_start_bot" \                                                                                                        py pipecat
      -H "Content-Type: application/json" \

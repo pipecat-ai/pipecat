@@ -566,6 +566,22 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
+class EmulateUserStartedSpeakingFrame(SystemFrame):
+    """Emitted by internal processors upstream to emulate VAD behavior when a
+    user starts speaking."""
+
+    pass
+
+
+@dataclass
+class EmulateUserStoppedSpeakingFrame(SystemFrame):
+    """Emitted by internal processors upstream to emulate VAD behavior when a
+    user stops speaking."""
+
+    pass
+
+
+@dataclass
 class BotInterruptionFrame(SystemFrame):
     """Emitted by when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the

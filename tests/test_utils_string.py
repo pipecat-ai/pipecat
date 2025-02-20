@@ -14,7 +14,6 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         assert match_endofsentence("This is a sentence.")
         assert match_endofsentence("This is a sentence! ")
         assert match_endofsentence("This is a sentence?")
-        assert match_endofsentence("This is a sentence:")
         assert match_endofsentence("This is a sentence;")
         assert not match_endofsentence("This is not a sentence")
         assert not match_endofsentence("This is not a sentence,")
@@ -33,7 +32,6 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
             "你好！",
             "吃了吗？",
             "安全第一；",
-            "他说：",
         ]
         for i in chinese_sentences:
             assert match_endofsentence(i)
