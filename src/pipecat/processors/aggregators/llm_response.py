@@ -301,8 +301,6 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def _handle_interim_transcription(self, _: InterimTranscriptionFrame):
         self._seen_interim_results = True
-        # Reset aggregation timer.
-        self._aggregation_event.set()
 
     def _create_aggregation_task(self):
         self._aggregation_task = self.create_task(self._aggregation_task_handler())
