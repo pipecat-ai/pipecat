@@ -21,7 +21,11 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomParams
+from pipecat.transports.services.helpers.daily_rest import (
+    DailyMeetingTokenParams,
+    DailyRESTHelper,
+    DailyRoomParams,
+)
 
 load_dotenv(override=True)
 
@@ -41,7 +45,16 @@ async def main():
             params=DailyRoomParams(properties={"enable_recording": "cloud"})
         )
 
-        token = await daily_rest_helper.get_token(room.url, 60 * 60)
+        params = DailyMeetingTokenParams(
+            properties={
+                "enable_recording": "cloud",
+                "start_cloud_recording": True,
+            }
+        )
+
+        token = await daily_rest_helper.get_token(
+            room_url=room.url, expiry_time=60 * 60, params=params
+        )
 
         logger.debug(f"Room URL: {room.url} Room token: {token}")
 
@@ -94,13 +107,11 @@ async def main():
                 report_only_initial_ttfb=True,
             ),
         )
-        
-        
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
-            await transport.start_recording()
+            # await transport.start_recording()
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([context_aggregator.user().get_context_frame()])
