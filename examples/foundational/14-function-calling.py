@@ -29,14 +29,22 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def start_fetch_weather(function_name, llm, context):
+async def start_fetch_products(function_name, llm, context):
     """Push a frame to the LLM; this is handy when the LLM response might take a while."""
     await llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
+    logger.debug(f"Starting fetch_products_from_api with function_name: {function_name}")
 
 
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await result_callback({"conditions": "nice", "temperature": "75"})
+async def fetch_products_from_api(function_name, tool_call_id, args, llm, context, result_callback):
+    logger.debug(f"args for fetch_products_from_api: {args}")
+    #'product': 'vacuums'
+    product = args["product"]
+    if product == "vacuums":
+        await result_callback({"vacuums": ["Dyson V11", "Roomba i7"]})
+    elif product == "tvs":
+        await result_callback({"tvs": ["Samsung 65 inch", "LG 55 inch"]})
+    else:
+        await result_callback({"error": "Unknown product"})
 
 
 async def main():
@@ -63,28 +71,24 @@ async def main():
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
         # Register a function_name of None to get all functions
         # sent to the same callback with an additional function_name parameter.
-        llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
+        llm.register_function(None, fetch_products_from_api, start_callback=start_fetch_products)
 
         tools = [
             ChatCompletionToolParam(
                 type="function",
                 function={
-                    "name": "get_current_weather",
-                    "description": "Get the current weather",
+                    "name": "get_products",
+                    "description": "Get the list of products available.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "location": {
+                            "product": {
                                 "type": "string",
-                                "description": "The city and state, e.g. San Francisco, CA",
-                            },
-                            "format": {
-                                "type": "string",
-                                "enum": ["celsius", "fahrenheit"],
-                                "description": "The temperature unit to use. Infer this from the users location.",
-                            },
+                                "enum": ["vacuums", "tvs"],
+                                "description": "The type of product to show.",
+                            }
                         },
-                        "required": ["location", "format"],
+                        "required": ["product"],
                     },
                 },
             )
@@ -92,7 +96,7 @@ async def main():
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful customer service agent named Hailey in a video call. Your goal is to sell vacuums or tvs. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
             },
         ]
 
