@@ -174,11 +174,9 @@ class BaseInputTransport(FrameProcessor):
     async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
         state = VADState.QUIET
         if self.vad_analyzer:
-            logger.trace(f"{self}: analyzing VAD on {audio_frame}")
             state = await self.get_event_loop().run_in_executor(
                 self._executor, self.vad_analyzer.analyze_audio, audio_frame.audio
             )
-            logger.trace(f"{self}: done analyzing VAD on {audio_frame}")
         return state
 
     async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState):
