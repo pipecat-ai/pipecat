@@ -36,7 +36,12 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
-- Fixed an issue where `EndTaskFrame` was not triggering `on_client_disconnected` or closing the WebSocket in FastAPI.
+- Fixed an issue that would cause undesired interruptions via
+  `EmulateUserStartedSpeakingFrame` when only interim transcriptions (i.e. no
+  final transcriptions) where received.
+
+- Fixed an issue where `EndTaskFrame` was not triggering
+  `on_client_disconnected` or closing the WebSocket in FastAPI.
 
 - Fixed a context aggregator issue that would not append the LLM text response
   to the context if a function call happened in the same LLM turn.
