@@ -27,6 +27,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed an issue that was causing HTTP TTS services to push `TTSStoppedFrame`
+  more than once.
+
 - Fixed a `FishAudioTTSService` issue where `TTSStoppedFrame` was not being
   pushed.
 

@@ -566,18 +566,16 @@ class ElevenLabsHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
+
                 yield TTSStartedFrame()
 
                 async for chunk in response.content:
                     if chunk:
                         await self.stop_ttfb_metrics()
                         yield TTSAudioRawFrame(chunk, self.sample_rate, 1)
-
-                yield TTSStoppedFrame()
-
         except Exception as e:
             logger.error(f"Error in run_tts: {e}")
             yield ErrorFrame(error=str(e))
-
         finally:
+            await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
