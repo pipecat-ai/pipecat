@@ -387,9 +387,6 @@ class RimeHttpTTSService(TTSService):
 
         try:
             await self.start_ttfb_metrics()
-            await self.start_tts_usage_metrics(text)
-
-            yield TTSStartedFrame()
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(self._base_url, json=payload, headers=headers) as response:
@@ -398,6 +395,10 @@ class RimeHttpTTSService(TTSService):
                         logger.error(error_message)
                         yield ErrorFrame(error=error_message)
                         return
+
+                    await self.start_tts_usage_metrics(text)
+
+                    yield TTSStartedFrame()
 
                     # Process the streaming response
                     chunk_size = 8192
@@ -411,12 +412,9 @@ class RimeHttpTTSService(TTSService):
                         if chunk:
                             frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                             yield frame
-
-            yield TTSStoppedFrame()
-
         except Exception as e:
             logger.exception(f"Error generating TTS: {e}")
             yield ErrorFrame(error=f"Rime TTS error: {str(e)}")
-
         finally:
+            await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
