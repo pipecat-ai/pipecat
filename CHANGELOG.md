@@ -27,6 +27,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed a `FishAudioTTSService` issue where `TTSStoppedFrame` was not being
+  pushed.
+
 - Fixed an issue that `start_callback` was not invoked for some LLM services.
 
 - Fixed an issue that would cause `DeepgramSTTService` to stop working after an
