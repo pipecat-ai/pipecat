@@ -165,6 +165,11 @@ If you hear any of these phrases (or very similar ones):
 - "No one is available to take your call"
 - "Record your message after the tone"
 - "You have reached voicemail for..."
+- "You have reached [phone number]"
+- "[phone number] is unavailable"
+- "The person you are trying to reach..."
+- "The number you have dialed..."
+- "Your call has been forwarded to an automated voice messaging system"
 
 Then call the function switch_to_voicemail_response.
 
