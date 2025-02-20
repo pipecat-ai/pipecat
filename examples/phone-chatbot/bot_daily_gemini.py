@@ -14,11 +14,11 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndTaskFrame, LLMMessagesFrame, LLMMessagesUpdateFrame
+from pipecat.frames.frames import EndTaskFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.google import GoogleLLMContext, GoogleLLMService
@@ -40,6 +40,7 @@ class ContextSwitcher:
         self._context_aggregator = context_aggregator
 
     async def switch_context(self, system_instruction):
+        """Switch the context to a new system instruction based on what the bot hears."""
         # Create messages with updated system instruction
         messages = [
             {
@@ -50,9 +51,9 @@ class ContextSwitcher:
 
         # Update context with new messages
         self._context_aggregator.set_messages(messages)
+        # Get the context frame with the updated messages
         context_frame = self._context_aggregator.get_context_frame()
         # Trigger LLM response by pushing a context frame
-        pprint(vars(context_frame.context))
         await self._llm.push_frame(context_frame)
 
 
@@ -60,29 +61,47 @@ class FunctionHandlers:
     def __init__(self, context_switcher):
         self.context_switcher = context_switcher
 
-    async def respond_with_apple(
+    async def voicemail_response(
         self, function_name, tool_call_id, args, llm, context, result_callback
     ):
-        await self.context_switcher.switch_context(system_instruction="Always respond with Apple")
-        await result_callback("Always respond with Apple")
+        """Function the bot can call to leave a voicemail message."""
+        message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and nothing else:
 
-    async def respond_with_banana(
-        self, function_name, tool_call_id, args, llm, context, result_callback
-    ):
-        await self.context_switcher.switch_context(system_instruction="Always respond with Banana")
-        await result_callback("Always respond with banana")
+                    "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
 
-    async def respond_with_oranges(
+                    After saying this message, call the terminate_call function."""
+
+        await self.context_switcher.switch_context(system_instruction=message)
+
+        await result_callback("Leaving a voicemail message")
+
+    async def human_conversation(
         self, function_name, tool_call_id, args, llm, context, result_callback
     ):
-        await self.context_switcher.switch_context(system_instruction="Always respond with Oranges")
-        await result_callback("Always respond with oranges")
+        """Function the bot can when it detects it's talking to a human."""
+        message = """You are Chatbot talking to a human. Be friendly and helpful.
+
+                    Start with: "Hello! I'm a friendly chatbot. How can I help you today?"
+
+                    Keep your responses brief and to the point. Listen to what the person says.
+
+                    When the person indicates they're done with the conversation by saying something like:
+                    - "Goodbye"
+                    - "That's all"
+                    - "I'm done"
+                    - "Thank you, that's all I needed"
+
+                    THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function."""
+
+        await self.context_switcher.switch_context(system_instruction=message)
+
+        await result_callback("Talking to the customer")
 
 
 async def terminate_call(
     function_name, tool_call_id, args, llm: LLMService, context, result_callback
 ):
-    """Function the bot can call to terminate the call upon completion of a voicemail message."""
+    """Function the bot can call to terminate the call upon completion of the call."""
     await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
 
@@ -124,22 +143,34 @@ async def main(
         {
             "function_declarations": [
                 {
-                    "name": "respond_with_banana",
-                    "description": "Call this function when the user asks about bananas.",
+                    "name": "switch_to_voicemail_response",
+                    "description": "Call this function when you detect this is a voicemail system.",
                 },
                 {
-                    "name": "respond_with_orange",
-                    "description": "Call this function when the user asks about oranges.",
+                    "name": "switch_to_human_conversation",
+                    "description": "Call this function when you detect this is a human.",
                 },
                 {
-                    "name": "respond_with_apple",
-                    "description": "Call this function when the user asks about apples.",
+                    "name": "terminate_call",
+                    "description": "Call this function to terminate the call.",
                 },
             ]
         }
     ]
 
-    system_instruction = """Always respond with the word Apple"""
+    system_instruction = """You are Chatbot trying to determine if this is a voicemail system or a human.
+
+If you hear any of these phrases (or very similar ones):
+- "Please leave a message after the beep"
+- "No one is available to take your call"
+- "Record your message after the tone"
+- "You have reached voicemail for..."
+
+Then call the function switch_to_voicemail_response.
+
+If it sounds like a human (saying hello, asking questions, etc.), call the function switch_to_human_conversation.
+
+DO NOT say anything until you've determined if this is a voicemail or human."""
 
     llm = GoogleLLMService(
         model="models/gemini-2.0-flash-lite-preview-02-05",
@@ -154,9 +185,9 @@ async def main(
     context_switcher = ContextSwitcher(llm, context_aggregator.user())
     handlers = FunctionHandlers(context_switcher)
 
-    llm.register_function("respond_with_apple", handlers.respond_with_apple)
-    llm.register_function("respond_with_banana", handlers.respond_with_banana)
-    llm.register_function("respond_with_orange", handlers.respond_with_oranges)
+    llm.register_function("switch_to_voicemail_response", handlers.voicemail_response)
+    llm.register_function("switch_to_human_conversation", handlers.human_conversation)
+    llm.register_function("terminate_call", terminate_call)
 
     pipeline = Pipeline(
         [
