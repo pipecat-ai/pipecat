@@ -9,15 +9,14 @@ import unittest
 import google.ai.generativelanguage as glm
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
     InterimTranscriptionFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
     OpenAILLMContextAssistantTimestampFrame,
     StartInterruptionFrame,
-    TextFrame,
     TranscriptionFrame,
+    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -428,20 +427,6 @@ class BaseTestAssistantContextAggreagator:
     ):
         assert context.messages[index]["content"] == content
 
-    async def test_empty(self):
-        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
-        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
-
-        context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context)
-        frames_to_send = [LLMFullResponseStartFrame(), LLMFullResponseEndFrame()]
-        expected_down_frames = []
-        await run_test(
-            aggregator,
-            frames_to_send=frames_to_send,
-            expected_down_frames=expected_down_frames,
-        )
-
     async def test_single_text(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
@@ -449,11 +434,11 @@ class BaseTestAssistantContextAggreagator:
         context = self.CONTEXT_CLASS()
         aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [
-            LLMFullResponseStartFrame(),
-            TextFrame(text="Hello Pipecat!"),
-            LLMFullResponseEndFrame(),
+            TTSTextFrame(text="Hello Pipecat!"),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
         ]
-        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
+        expected_down_frames = [BotStoppedSpeakingFrame, *self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -468,14 +453,14 @@ class BaseTestAssistantContextAggreagator:
         context = self.CONTEXT_CLASS()
         aggregator = self.AGGREGATOR_CLASS(context, expect_stripped_words=False)
         frames_to_send = [
-            LLMFullResponseStartFrame(),
-            TextFrame(text="Hello "),
-            TextFrame(text="Pipecat. "),
-            TextFrame(text="How are "),
-            TextFrame(text="you?"),
-            LLMFullResponseEndFrame(),
+            TTSTextFrame(text="Hello "),
+            TTSTextFrame(text="Pipecat. "),
+            TTSTextFrame(text="How are "),
+            TTSTextFrame(text="you?"),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
         ]
-        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
+        expected_down_frames = [BotStoppedSpeakingFrame, *self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -490,14 +475,14 @@ class BaseTestAssistantContextAggreagator:
         context = self.CONTEXT_CLASS()
         aggregator = self.AGGREGATOR_CLASS(context)
         frames_to_send = [
-            LLMFullResponseStartFrame(),
-            TextFrame(text="Hello"),
-            TextFrame(text="Pipecat."),
-            TextFrame(text="How are"),
-            TextFrame(text="you?"),
-            LLMFullResponseEndFrame(),
+            TTSTextFrame(text="Hello"),
+            TTSTextFrame(text="Pipecat."),
+            TTSTextFrame(text="How are"),
+            TTSTextFrame(text="you?"),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
         ]
-        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES]
+        expected_down_frames = [BotStoppedSpeakingFrame, *self.EXPECTED_CONTEXT_FRAMES]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -512,16 +497,21 @@ class BaseTestAssistantContextAggreagator:
         context = self.CONTEXT_CLASS()
         aggregator = self.AGGREGATOR_CLASS(context, expect_stripped_words=False)
         frames_to_send = [
-            LLMFullResponseStartFrame(),
-            TextFrame(text="Hello "),
-            TextFrame(text="Pipecat."),
-            LLMFullResponseEndFrame(),
-            LLMFullResponseStartFrame(),
-            TextFrame(text="How are "),
-            TextFrame(text="you?"),
-            LLMFullResponseEndFrame(),
+            TTSTextFrame(text="Hello "),
+            TTSTextFrame(text="Pipecat."),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
+            TTSTextFrame(text="How are "),
+            TTSTextFrame(text="you?"),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
         ]
-        expected_down_frames = [*self.EXPECTED_CONTEXT_FRAMES, *self.EXPECTED_CONTEXT_FRAMES]
+        expected_down_frames = [
+            BotStoppedSpeakingFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
+            BotStoppedSpeakingFrame,
+            *self.EXPECTED_CONTEXT_FRAMES,
+        ]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
@@ -537,20 +527,22 @@ class BaseTestAssistantContextAggreagator:
         context = self.CONTEXT_CLASS()
         aggregator = self.AGGREGATOR_CLASS(context, expect_stripped_words=False)
         frames_to_send = [
-            LLMFullResponseStartFrame(),
-            TextFrame(text="Hello "),
-            TextFrame(text="Pipecat."),
-            LLMFullResponseEndFrame(),
+            TTSTextFrame(text="Hello "),
+            TTSTextFrame(text="Pipecat."),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
             SleepFrame(AGGREGATION_SLEEP),
             StartInterruptionFrame(),
-            LLMFullResponseStartFrame(),
-            TextFrame(text="How are "),
-            TextFrame(text="you?"),
-            LLMFullResponseEndFrame(),
+            TTSTextFrame(text="How are "),
+            TTSTextFrame(text="you?"),
+            SleepFrame(),
+            BotStoppedSpeakingFrame(),
         ]
         expected_down_frames = [
+            BotStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
             StartInterruptionFrame,
+            BotStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(

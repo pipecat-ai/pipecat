@@ -10,14 +10,13 @@ from abc import abstractmethod
 from typing import List
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMMessagesFrame,
     LLMMessagesUpdateFrame,
@@ -26,6 +25,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
+    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -352,16 +352,14 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
 class LLMAssistantContextAggregator(LLMContextResponseAggregator):
     """This is an assistant LLM aggregator that uses an LLM context to store the
-    conversation. It aggregates text frames received between
-    `LLMFullResponseStartFrame` and `LLMFullResponseEndFrame`.
+    conversation. It aggregates text frames spoken by the TTS service and pushes
+    the context when the bot stops speaking..
 
     """
 
     def __init__(self, context: OpenAILLMContext, *, expect_stripped_words: bool = True, **kwargs):
         super().__init__(context=context, role="assistant", **kwargs)
         self._expect_stripped_words = expect_stripped_words
-
-        self._started = False
 
         self.reset()
 
@@ -373,11 +371,10 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             # Reset anyways
             self.reset()
             await self.push_frame(frame, direction)
-        elif isinstance(frame, LLMFullResponseStartFrame):
-            await self._handle_llm_start(frame)
-        elif isinstance(frame, LLMFullResponseEndFrame):
-            await self._handle_llm_end(frame)
-        elif isinstance(frame, TextFrame):
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, TTSTextFrame):
             await self._handle_text(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
             self.add_messages(frame.messages)
@@ -388,17 +385,10 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         else:
             await self.push_frame(frame, direction)
 
-    async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
-        self._started = True
-
-    async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
-        self._started = False
+    async def _handle_bot_stopped_speaking(self, _: BotStoppedSpeakingFrame):
         await self.push_aggregation()
 
     async def _handle_text(self, frame: TextFrame):
-        if not self._started:
-            return
-
         if self._expect_stripped_words:
             self._aggregation += f" {frame.text}" if self._aggregation else frame.text
         else:
