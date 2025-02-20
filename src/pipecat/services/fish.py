@@ -11,16 +11,13 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
@@ -60,7 +57,12 @@ class FishAudioTTSService(TTSService, WebsocketService):
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(pause_frame_processing=True, sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            push_stop_frames=True,
+            pause_frame_processing=True,
+            sample_rate=sample_rate,
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._base_url = "wss://api.fish.audio/v1/tts/live"
