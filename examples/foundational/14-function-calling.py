@@ -31,13 +31,13 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def start_fetch_products(function_name, llm, context):
     """Push a frame to the LLM; this is handy when the LLM response might take a while."""
-    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
+    await llm.push_frame(TTSSpeakFrame("I'll take a look!"))
     logger.debug(f"Starting fetch_products_from_api with function_name: {function_name}")
 
 
 async def fetch_products_from_api(function_name, tool_call_id, args, llm, context, result_callback):
     logger.debug(f"args for fetch_products_from_api: {args}")
-    #'product': 'vacuums'
+    # In the real world you'd fetch the products from an API. We're hardcoding them here.
     product = args["product"]
     if product == "vacuums":
         await result_callback({"vacuums": ["Dyson V11", "Roomba i7"]})
