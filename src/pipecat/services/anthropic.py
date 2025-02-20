@@ -743,18 +743,19 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         run_llm = False
         properties: Optional[FunctionCallResultProperties] = None
 
-        aggregation = self._aggregation
+        aggregation = self._aggregation.strip()
         self.reset()
 
         try:
+            if aggregation:
+                self._context.add_message({"role": "assistant", "content": aggregation})
+
             if self._function_call_result:
                 frame = self._function_call_result
                 properties = frame.properties
                 self._function_call_result = None
                 if frame.result:
                     assistant_message = {"role": "assistant", "content": []}
-                    if aggregation:
-                        assistant_message["content"].append({"type": "text", "text": aggregation})
                     assistant_message["content"].append(
                         {
                             "type": "tool_use",
@@ -782,8 +783,6 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                     else:
                         # Default behavior
                         run_llm = True
-            elif aggregation:
-                self._context.add_message({"role": "assistant", "content": aggregation})
 
             if self._pending_image_frame_message:
                 frame = self._pending_image_frame_message
