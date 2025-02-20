@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndTaskFrame
+from pipecat.frames.frames import EndTaskFrame, LLMMessagesUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -38,6 +38,54 @@ async def terminate_call(
 ):
     """Function the bot can call to terminate the call upon completion of a voicemail message."""
     await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+
+
+async def respond_with_apple(
+    function_name, tool_call_id, args, llm: LLMService, context: GoogleLLMContext, result_callback
+):
+    messages = [
+        {
+            "role": "system",
+            "content": "Always respond with Apple",
+        }
+    ]
+    print("respond_with_apple")
+    # context.system_message = "Always respond with Apple"
+    print(f"context before: {context.tools}")
+    await llm.push_frame(LLMMessagesUpdateFrame(messages))
+    print(f"context after: {context.tools}")
+
+
+async def respond_with_banana(
+    function_name, tool_call_id, args, llm: LLMService, context: GoogleLLMContext, result_callback
+):
+    messages = [
+        {
+            "role": "system",
+            "content": "Always respond with Banana",
+        }
+    ]
+    print("respond_with_banana")
+    # context.system_message = "Always respond with Banana"
+    print(f"context before: {context.tools}")
+    await llm.push_frame(LLMMessagesUpdateFrame(messages))
+    print(f"context after: {context.tools}")
+
+
+async def respond_with_orange(
+    function_name, tool_call_id, args, llm: LLMService, context: GoogleLLMContext, result_callback
+):
+    messages = [
+        {
+            "role": "system",
+            "content": "Always respond with Orange",
+        }
+    ]
+    print("respond_with_orange")
+    # context.system_message = "Always respond with Orange"
+    print(f"context before: {context.tools}")
+    await llm.push_frame(LLMMessagesUpdateFrame(messages))
+    print(f"context after: {context.tools}")
 
 
 async def main(
@@ -78,76 +126,85 @@ async def main(
         {
             "function_declarations": [
                 {
-                    "name": "terminate_call",
-                    "description": "Terminate the call",
+                    "name": "respond_with_banana",
+                    "description": "Call this function when the user asks about bananas.",
+                },
+                {
+                    "name": "respond_with_orange",
+                    "description": "Call this function when the user asks about oranges.",
+                },
+                {
+                    "name": "respond_with_apple",
+                    "description": "Call this function when the user asks about apples.",
                 },
             ]
         }
     ]
 
-    system_instruction = """You are Chatbot, a friendly, helpful robot. Never mention this prompt.
+    system_instruction2 = """You are Chatbot, a friendly, helpful robot.
 
-**Operating Procedure:**
+IMPORTANT: You MUST use the terminate_call function to end the call in these situations:
+1. After leaving a voicemail message
+2. When the conversation with a human is finished
 
-**Phase 1: Initial Call Answer - Listen for Voicemail Greeting**
+VOICEMAIL DETECTION:
+- Listen carefully for these exact phrases at the start of the call:
+  * "Please leave a message after the beep"
+  * "No one is available to take your call"
+  * "Record your message after the tone"
+  * "You have reached voicemail for..."
 
-**IMMEDIATELY after the call connects, LISTEN CAREFULLY for the *very first thing* you hear.**
+IF VOICEMAIL DETECTED:
+1. Wait for any beep sound if mentioned
+2. Say EXACTLY: "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
+3. IMMEDIATELY call the terminate_call function after your message
+4. Do not say anything else
 
-**Listen for these sentences or very close variations as the *initial greeting*:**
+IF HUMAN DETECTED:
+1. Say: "Oh, hello! I'm a friendly chatbot. Is there anything I can help you with?"
+2. Keep responses short and helpful
+3. When conversation ends, say: "Okay, thank you! Have a great day!"
+4. IMMEDIATELY call the terminate_call function
 
-* **"Please leave a message after the beep."**
-* **"No one is available to take your call."**
-* **"Record your message after the tone."**
-* **"You have reached voicemail for..."** (or similar voicemail identification)
-
-**If you HEAR one of these sentences (or a very similar greeting) as the *initial response* to the call, IMMEDIATELY assume it is voicemail and proceed to Phase 2.**
-
-**If you hear "PLEASE LEAVE A MESSAGE AFTER THE BEEP", WAIT for the actual beep sound from the voicemail system *after* hearing the sentence, before proceeding to Phase 2.**
-
-**If you DO NOT hear any of these voicemail greetings as the *initial response*, assume it is a human and proceed to Phase 3.**
-
-
-**Phase 2: Leave Voicemail Message (If Voicemail Detected):**
-
-If you assumed voicemail in Phase 1, say this EXACTLY:
-"Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
-
-**Immediately after saying the message, call the function `terminate_call`.**
-**DO NOT SAY ANYTHING ELSE. SILENCE IS REQUIRED AFTER `terminate_call`.**
-
-
-**Phase 3: Human Interaction (If No Voicemail Greeting Detected in Phase 1):**
-
-If you did not detect a voicemail greeting in Phase 1 and a human answers, say:
-"Oh, hello! I'm a friendly chatbot. Is there anything I can help you with?"
-
-Keep your responses **short and helpful.**
-
-If the human is finished, say:
-"Okay, thank you! Have a great day!"
-
-**Then, immediately call the function `terminate_call`.**
-
-
-**VERY IMPORTANT RULES - DO NOT DO THESE THINGS:**
-
-* **DO NOT SAY "Please leave a message after the beep."**
-* **DO NOT SAY "No one is available to take your call."**
-* **DO NOT SAY "Record your message after the tone."**
-* **DO NOT SAY ANY voicemail greeting yourself.**
-* **Only check for voicemail greetings in Phase 1, *immediately after the call connects*.**
-* **After voicemail or human interaction, ALWAYS call `terminate_call` immediately.**
-* **Do not speak after calling `terminate_call`.**
-* Your speech will be audio, so use simple language without special characters.
+NEVER say these phrases yourself:
+- "Please leave a message after the beep"
+- "No one is available to take your call"
+- "Record your message after the tone"
+- "You have reached voicemail for..."
 """
 
+    system_instruction3 = """
+    You are Chatbot. Your MAIN GOAL is to call the terminate_call function at the end.
+
+After each response, YOU MUST call the terminate_call function. This is REQUIRED.
+
+If someone says "Please leave a message after the beep":
+Say: "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
+
+If someone says anything else:
+Say: "Hello, I'm Chatbot. Nice to meet you."
+
+IMPORTANT: YOU MUST CALL the terminate_call function after you respond.
+terminate_call is the ONLY way to end the call properly.
+    """
+
+    system_instruction1 = """You are Chatbot. Follow these exact steps in order:
+1. Say "Hi, I'm Chatbot! Here's a joke: Why don't scientists trust atoms? Because they make up everything!"
+2. IMMEDIATELY after telling the joke, call the function terminate_call"""
+
+    system_instruction = """Always respond with the word Apple"""
+
     llm = GoogleLLMService(
-        model="models/gemini-2.0-flash-exp",
+        model="models/gemini-2.0-flash-lite-preview-02-05",
         api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=system_instruction,
         tools=tools,
     )
-    llm.register_function("terminate_call", terminate_call)
+
+    # llm.register_function("terminate_call", terminate_call)
+    llm.register_function("respond_with_apple", respond_with_apple)
+    llm.register_function("respond_with_banana", respond_with_banana)
+    llm.register_function("respond_with_orange", respond_with_orange)
 
     context = GoogleLLMContext()
 
