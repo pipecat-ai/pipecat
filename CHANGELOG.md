@@ -32,6 +32,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed a context aggregator issue that would not append the LLM text response
+  to the context if a function call happened in the same LLM turn.
+
 - Fixed an issue that was causing HTTP TTS services to push `TTSStoppedFrame`
   more than once.
 

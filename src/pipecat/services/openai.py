@@ -631,10 +631,13 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         run_llm = False
         properties: Optional[FunctionCallResultProperties] = None
 
-        aggregation = self._aggregation
+        aggregation = self._aggregation.strip()
         self.reset()
 
         try:
+            if aggregation:
+                self._context.add_message({"role": "assistant", "content": aggregation})
+
             if self._function_call_result:
                 frame = self._function_call_result
                 properties = frame.properties
@@ -668,9 +671,6 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
                     else:
                         # Default behavior is to run the LLM if there are no function calls in progress
                         run_llm = not bool(self._function_calls_in_progress)
-
-            else:
-                self._context.add_message({"role": "assistant", "content": aggregation})
 
             if self._pending_image_frame_message:
                 frame = self._pending_image_frame_message
