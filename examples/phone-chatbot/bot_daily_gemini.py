@@ -49,15 +49,11 @@ class ContextSwitcher:
         ]
 
         # Update context with new messages
-        # await self._llm.push_frame(LLMMessagesUpdateFrame(messages))
         self._context_aggregator.set_messages(messages)
         context_frame = self._context_aggregator.get_context_frame()
         # Trigger LLM response by pushing a context frame
         pprint(vars(context_frame.context))
-        await self._llm.queue_frame(context_frame)
-
-
-## Call result callback
+        await self._llm.push_frame(context_frame)
 
 
 class FunctionHandlers:
@@ -68,19 +64,19 @@ class FunctionHandlers:
         self, function_name, tool_call_id, args, llm, context, result_callback
     ):
         await self.context_switcher.switch_context(system_instruction="Always respond with Apple")
-        # await result_callback("")
+        await result_callback("Always respond with Apple")
 
     async def respond_with_banana(
         self, function_name, tool_call_id, args, llm, context, result_callback
     ):
         await self.context_switcher.switch_context(system_instruction="Always respond with Banana")
-        # await result_callback("")
+        await result_callback("Always respond with banana")
 
     async def respond_with_oranges(
         self, function_name, tool_call_id, args, llm, context, result_callback
     ):
         await self.context_switcher.switch_context(system_instruction="Always respond with Oranges")
-        # await result_callback("")
+        await result_callback("Always respond with oranges")
 
 
 async def terminate_call(
