@@ -110,8 +110,13 @@ async def _create_daily_room(
 
     # Spawn a new agent, and join the user session
     # Note: this is mostly for demonstration purposes (refer to 'deployment' in docs)
+    print(f"Vendor: {vendor}")
     if vendor == "daily":
         bot_proc = f"python3 -m bot_daily -u {room.url} -t {token} -i {callId} -d {callDomain}{' -v' if detect_voicemail else ''}"
+        if dialoutNumber:
+            bot_proc += f" -o {dialoutNumber}"
+    elif vendor == "daily-gemini":
+        bot_proc = f"python3 -m bot_daily_gemini -u {room.url} -t {token} -i {callId} -d {callDomain}{' -v' if detect_voicemail else ''}"
         if dialoutNumber:
             bot_proc += f" -o {dialoutNumber}"
     else:
@@ -195,6 +200,38 @@ async def daily_start_bot(request: Request) -> JSONResponse:
 
     room: DailyRoomObject = await _create_daily_room(
         room_url, callId, callDomain, dialoutNumber, "daily", detect_voicemail
+    )
+
+    # Grab a token for the user to join with
+    return JSONResponse({"room_url": room.url, "sipUri": room.config.sip_endpoint})
+
+
+@app.post("/daily_gemini_start_bot")
+async def daily_gemini_start_bot(request: Request) -> JSONResponse:
+    # The /daily_start_bot is invoked when a call is received on Daily's SIP URI
+    # daily_start_bot will create the room, put the call on hold until
+    # the bot and sip worker are ready. Daily will automatically
+    # forward the call to the SIP URi when dialin_ready fires.
+
+    # Use specified room URL, or create a new one if not specified
+    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
+    # Get the dial-in properties from the request
+    try:
+        data = await request.json()
+        if "test" in data:
+            # Pass through any webhook checks
+            return JSONResponse({"test": True})
+        detect_voicemail = data.get("detectVoicemail", False)
+        callId = data.get("callId", None)
+        callDomain = data.get("callDomain", None)
+        dialoutNumber = data.get("dialoutNumber", None)
+    except Exception:
+        raise HTTPException(
+            status_code=500, detail="Missing properties 'callId', 'callDomain', or 'dialoutNumber'"
+        )
+
+    room: DailyRoomObject = await _create_daily_room(
+        room_url, callId, callDomain, dialoutNumber, "daily-gemini", detect_voicemail
     )
 
     # Grab a token for the user to join with

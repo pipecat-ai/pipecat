@@ -1,3 +1,5 @@
+<!-- @format -->
+
 <div align="center">
  <img alt="pipecat" width="300px" height="auto" src="image.png">
 </div>
@@ -103,6 +105,21 @@ curl -X POST "http://localhost:7860/daily_start_bot" \                          
      -H "Content-Type: application/json" \
      -d '{"dialoutNumber": "+18057145330", "detectVoicemail": true}'
 ```
+
+### New! Using Gemini with Daily
+
+We have introduced a new example file that uses Gemini. You can find the code within bot_daily_gemini.py.
+If you want to spin up a Gemini-based bot for this demo, instead of an OpenAI-based bot, call the same properties above but on the `daily_gemini_start_bot` endpoint instead.
+
+For example:
+
+```shell
+curl -X POST "http://localhost:7860/daily_gemini_start_bot" \                                                                                                        py pipecat
+     -H "Content-Type: application/json" \
+     -d '{"detectVoicemail": true}'
+```
+
+Any request body properties supported by `/daily_start_bot` (such as "detectVoicemail", "dialoutnumber", etc) can also be passed to `/daily_gemini_start_bot`. The only difference is that calling the Gemini endpoint will start a Gemini bot session.
 
 ### More information
 
