@@ -11,10 +11,12 @@ from pipecat.utils.string import match_endofsentence
 
 class TestUtilsString(unittest.IsolatedAsyncioTestCase):
     async def test_endofsentence(self):
-        assert match_endofsentence("This is a sentence.")
-        assert match_endofsentence("This is a sentence! ")
-        assert match_endofsentence("This is a sentence?")
-        assert match_endofsentence("This is a sentence;")
+        assert match_endofsentence("This is a sentence.") == 19
+        assert match_endofsentence("This is a sentence!") == 19
+        assert match_endofsentence("This is a sentence?") == 19
+        assert match_endofsentence("This is a sentence;") == 19
+        assert match_endofsentence("This is a sentence...") == 21
+        assert match_endofsentence("This is a sentence . . .") == 24
         assert not match_endofsentence("This is not a sentence")
         assert not match_endofsentence("This is not a sentence,")
         assert not match_endofsentence("This is not a sentence, ")
