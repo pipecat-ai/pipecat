@@ -145,6 +145,9 @@ class LLMResponseAggregator(BaseLLMResponseAggregator):
             frame = LLMMessagesFrame(self._messages)
             await self.push_frame(frame)
 
+            # Reset our accumulator state.
+            self.reset()
+
 
 class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     """This is a base LLM aggregator that uses an LLM context to store the
