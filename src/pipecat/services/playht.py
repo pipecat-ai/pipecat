@@ -16,22 +16,18 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.ai_services import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -100,7 +96,7 @@ def language_to_playht_language(language: Language) -> Optional[str]:
     return result
 
 
-class PlayHTTTSService(TTSService, WebsocketService):
+class PlayHTTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
@@ -118,13 +114,11 @@ class PlayHTTTSService(TTSService, WebsocketService):
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        TTSService.__init__(
-            self,
+        super().__init__(
             pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._user_id = user_id
@@ -168,11 +162,11 @@ class PlayHTTTSService(TTSService, WebsocketService):
         self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
-        await self._disconnect_websocket()
-
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
+
+        await self._disconnect_websocket()
 
     async def _connect_websocket(self):
         try:

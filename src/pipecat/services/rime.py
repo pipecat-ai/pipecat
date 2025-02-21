@@ -26,7 +26,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AudioContextWordTTSService, TTSService
-from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -55,7 +54,7 @@ def language_to_rime_language(language: Language) -> str:
     return LANGUAGE_MAP.get(language, "eng")
 
 
-class RimeTTSService(AudioContextWordTTSService, WebsocketService):
+class RimeTTSService(AudioContextWordTTSService):
     """Text-to-Speech service using Rime's websocket API.
 
     Uses Rime's websocket JSON API to convert text to speech with word-level timing
@@ -92,8 +91,7 @@ class RimeTTSService(AudioContextWordTTSService, WebsocketService):
             params: Additional configuration parameters.
         """
         # Initialize with parent class settings for proper frame handling
-        AudioContextWordTTSService.__init__(
-            self,
+        super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,
             push_stop_frames=True,
@@ -101,7 +99,6 @@ class RimeTTSService(AudioContextWordTTSService, WebsocketService):
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
 
         # Store service configuration
         self._api_key = api_key
@@ -172,10 +169,11 @@ class RimeTTSService(AudioContextWordTTSService, WebsocketService):
 
     async def _disconnect(self):
         """Close websocket connection and clean up tasks."""
-        await self._disconnect_websocket()
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
+
+        await self._disconnect_websocket()
 
     async def _connect_websocket(self):
         """Connect to Rime websocket API with configured settings."""
