@@ -21,8 +21,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.ai_services import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for LMNT configuration needed
@@ -60,7 +59,7 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
     return result
 
 
-class LmntTTSService(TTSService, WebsocketService):
+class LmntTTSService(InterruptibleTTSService):
     def __init__(
         self,
         *,
@@ -70,14 +69,12 @@ class LmntTTSService(TTSService, WebsocketService):
         language: Language = Language.EN,
         **kwargs,
     ):
-        TTSService.__init__(
-            self,
+        super().__init__(
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._voice_id = voice_id
@@ -116,11 +113,11 @@ class LmntTTSService(TTSService, WebsocketService):
         self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
-        await self._disconnect_websocket()
-
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
+
+        await self._disconnect_websocket()
 
     async def _connect_websocket(self):
         """Connect to LMNT websocket."""

@@ -14,22 +14,18 @@ from loguru import logger
 from pydantic import BaseModel, model_validator
 
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService, WordTTSService
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.ai_services import InterruptibleWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for ElevenLabs configuration needed
@@ -141,7 +137,7 @@ def calculate_word_times(
     return word_times
 
 
-class ElevenLabsTTSService(WordTTSService, WebsocketService):
+class ElevenLabsTTSService(InterruptibleWordTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = None
         optimize_streaming_latency: Optional[str] = None
@@ -186,8 +182,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         # Finally, ElevenLabs doesn't provide information on when the bot stops
         # speaking for a while, so we want the parent class to send TTSStopFrame
         # after a short period not receiving any audio.
-        WordTTSService.__init__(
-            self,
+        super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,
             push_stop_frames=True,
@@ -195,7 +190,6 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._url = url

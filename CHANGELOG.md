@@ -39,6 +39,10 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed a `ElevenLabsTTSService`, `FishAudioTTSService`, `LMNTTTSService` and
+  `PlayHTTTSService` issue that was resulting in audio requested before an
+  interruption being played after an interruption.
+
 - Fixed `match_endofsentence` support for ellipses.
 
 - Fixed an issue that would cause undesired interruptions via

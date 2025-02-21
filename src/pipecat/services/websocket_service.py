@@ -91,13 +91,31 @@ class WebsocketService(ABC):
                     continue
 
     @abstractmethod
+    async def _connect(self):
+        """Implement service-specific connection logic. This function will
+        connect to the websocket via _connect_websocket() among other connection
+        logic."""
+        pass
+
+    @abstractmethod
+    async def _disconnect(self):
+        """Implement service-specific disconnection logic. This function will
+        disconnect to the websocket via _connect_websocket() among other
+        connection logic.
+
+        """
+        pass
+
+    @abstractmethod
     async def _connect_websocket(self):
-        """Implement service-specific websocket connection logic."""
+        """Implement service-specific websocket connection logic. This function
+        should only connect to the websocket."""
         pass
 
     @abstractmethod
     async def _disconnect_websocket(self):
-        """Implement service-specific websocket disconnection logic."""
+        """Implement service-specific websocket disconnection logic. This
+        function should only disconnect from the websocket."""
         pass
 
     @abstractmethod
