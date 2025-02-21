@@ -36,6 +36,8 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed `match_endofsentence` support for ellipses.
+
 - Fixed an issue that would cause undesired interruptions via
   `EmulateUserStartedSpeakingFrame` when only interim transcriptions (i.e. no
   final transcriptions) where received.
