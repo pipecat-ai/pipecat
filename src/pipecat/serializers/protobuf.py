@@ -5,6 +5,7 @@
 #
 
 import dataclasses
+import json
 
 from loguru import logger
 
@@ -15,8 +16,15 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     TextFrame,
     TranscriptionFrame,
+    TransportMessageFrame,
+    TransportMessageUrgentFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
+
+
+@dataclasses.dataclass
+class JSONFrame:
+    data: str
 
 
 class ProtobufFrameSerializer(FrameSerializer):
@@ -24,6 +32,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         TextFrame: "text",
         OutputAudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
+        JSONFrame: "json",
     }
     SERIALIZABLE_FIELDS = {v: k for k, v in SERIALIZABLE_TYPES.items()}
 
@@ -42,6 +51,12 @@ class ProtobufFrameSerializer(FrameSerializer):
         return FrameSerializerType.BINARY
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
+        # Wrapping this messages as a JSONFrame to send
+        if isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
+            frame = JSONFrame(
+                data=json.dumps(frame.message),
+            )
+
         proto_frame = frame_protos.Frame()
         if type(frame) not in self.SERIALIZABLE_TYPES:
             logger.warning(f"Frame type {type(frame)} is not serializable")

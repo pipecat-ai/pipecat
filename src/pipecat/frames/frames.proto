@@ -35,10 +35,15 @@ message TranscriptionFrame {
   string timestamp = 5;
 }
 
+message JsonFrame {
+    string data = 1;
+}
+
 message Frame {
   oneof frame {
     TextFrame text = 1;
     AudioRawFrame audio = 2;
     TranscriptionFrame transcription = 3;
+    JsonFrame json = 4;
   }
 }
