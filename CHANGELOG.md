@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `RimeHttpTTSService` needs an `aiohttp.ClientSession` to be passed to the
+  constructor as all the other HTTP-based services.
+
+- `RimeHttpTTSService` doesn't use a default voice anymore.
+
 - `DeepgramSTTService` now uses the new `nova-3` model by default. If you want
   to use the previous model you can pass `LiveOptions(model="nova-2-general")`.
   (see https://deepgram.com/learn/introducing-nova-3-speech-to-text-api)
@@ -26,6 +31,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 ```
 
 ### Fixed
+
+- Fixed an issue that was causing HTTP TTS services to push `TTSStoppedFrame`
+  more than once.
 
 - Fixed a `FishAudioTTSService` issue where `TTSStoppedFrame` was not being
   pushed.

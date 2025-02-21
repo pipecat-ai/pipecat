@@ -364,9 +364,6 @@ class CartesiaHttpTTSService(TTSService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
-        await self.start_ttfb_metrics()
-        yield TTSStartedFrame()
-
         try:
             voice_controls = None
             if self._settings["speed"] or self._settings["emotion"]:
@@ -375,6 +372,8 @@ class CartesiaHttpTTSService(TTSService):
                     voice_controls["speed"] = self._settings["speed"]
                 if self._settings["emotion"]:
                     voice_controls["emotion"] = self._settings["emotion"]
+
+            await self.start_ttfb_metrics()
 
             output = await self._client.tts.sse(
                 model_id=self._model_name,
@@ -386,14 +385,17 @@ class CartesiaHttpTTSService(TTSService):
                 _experimental_voice_controls=voice_controls,
             )
 
+            await self.start_tts_usage_metrics(text)
+
+            yield TTSStartedFrame()
+
             frame = TTSAudioRawFrame(
                 audio=output["audio"], sample_rate=self.sample_rate, num_channels=1
             )
+
             yield frame
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-
-        await self.start_tts_usage_metrics(text)
-
-        await self.stop_ttfb_metrics()
-        yield TTSStoppedFrame()
+        finally:
+            await self.stop_ttfb_metrics()
+            yield TTSStoppedFrame()

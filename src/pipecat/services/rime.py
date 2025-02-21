@@ -345,7 +345,8 @@ class RimeHttpTTSService(TTSService):
         self,
         *,
         api_key: str,
-        voice_id: str = "eva",
+        voice_id: str,
+        aiohttp_session: aiohttp.ClientSession,
         model: str = "mistv2",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
@@ -354,6 +355,7 @@ class RimeHttpTTSService(TTSService):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
+        self._session = aiohttp_session
         self._base_url = "https://users.rime.ai/v1/rime-tts"
         self._settings = {
             "speedAlpha": params.speed_alpha,
@@ -387,36 +389,31 @@ class RimeHttpTTSService(TTSService):
 
         try:
             await self.start_ttfb_metrics()
-            await self.start_tts_usage_metrics(text)
 
-            yield TTSStartedFrame()
+            async with self._session.post(
+                self._base_url, json=payload, headers=headers
+            ) as response:
+                if response.status != 200:
+                    error_message = f"Rime TTS error: HTTP {response.status}"
+                    logger.error(error_message)
+                    yield ErrorFrame(error=error_message)
+                    return
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self._base_url, json=payload, headers=headers) as response:
-                    if response.status != 200:
-                        error_message = f"Rime TTS error: HTTP {response.status}"
-                        logger.error(error_message)
-                        yield ErrorFrame(error=error_message)
-                        return
+                await self.start_tts_usage_metrics(text)
 
-                    # Process the streaming response
-                    chunk_size = 8192
-                    first_chunk = True
+                yield TTSStartedFrame()
 
-                    async for chunk in response.content.iter_chunked(chunk_size):
-                        if first_chunk:
-                            await self.stop_ttfb_metrics()
-                            first_chunk = False
+                # Process the streaming response
+                chunk_size = 8192
 
-                        if chunk:
-                            frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
-                            yield frame
-
-            yield TTSStoppedFrame()
-
+                async for chunk in response.content.iter_chunked(chunk_size):
+                    if chunk:
+                        await self.stop_ttfb_metrics()
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                        yield frame
         except Exception as e:
             logger.exception(f"Error generating TTS: {e}")
             yield ErrorFrame(error=f"Rime TTS error: {str(e)}")
-
         finally:
+            await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
