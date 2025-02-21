@@ -124,6 +124,7 @@ class DeepgramSTTService(STTService):
         addons: Optional[Dict] = None,
         **kwargs,
     ):
+        sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         default_options = LiveOptions(
