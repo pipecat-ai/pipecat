@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    ImageContextRawFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -318,3 +319,49 @@ class LLMUserContextAggregator(LLMContextAggregator):
             accumulator_frame=TranscriptionFrame,
             interim_accumulator_frame=InterimTranscriptionFrame,
         )
+
+        self.latest_cached_frame = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, ImageContextRawFrame):
+            # print("caching latest")
+            self.latest_cached_frame = frame
+    
+
+    async def _push_aggregation(self):
+        if len(self._aggregation) > 0:
+
+            # print("cleaning old messages")
+            # new_messages = []
+            # for messages in self._context.get_messages():
+            #     new_messages 
+
+            
+            # self._context.set_messages(new_messages)
+
+            vision_substrings = ["see", "look", "frame", "vision", "view"]
+            image_prompt = "if the user wants information about what the drone sees or to take action based on whats in the image, use this image as context. If the user doesn't reference the image at all, ignore it completely and just do as the user asks. User ask: "
+            if self.latest_cached_frame and any(sub in self._aggregation.lower() for sub in vision_substrings) :
+                self._context.add_image_frame_message(
+                    format=self.latest_cached_frame.format,
+                    size=self.latest_cached_frame.size,
+                    image=self.latest_cached_frame.image,
+                    text=image_prompt + self._aggregation,
+                )
+                self.latest_cached_frame = None
+            else:
+                self._context.add_message({"role": self._role, "content": self._aggregation})
+
+            # Reset the aggregation. Reset it before pushing it down, otherwise
+            # if the tasks gets cancelled we won't be able to clear things up.
+            self._aggregation = ""
+
+            frame = OpenAILLMContextFrame(self._context)
+            await self.push_frame(frame)
+
+            # Reset our accumulator state.
+            self._reset()
+
+

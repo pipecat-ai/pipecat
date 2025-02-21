@@ -39,6 +39,7 @@ from pipecat.frames.frames import (
     TransportMessageUrgentFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
+    ImageContextRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transcriptions.language import Language
@@ -813,9 +814,12 @@ class DailyInputTransport(BaseInputTransport):
         prev_time = self._video_renderers[participant_id]["timestamp"]
         framerate = self._video_renderers[participant_id]["framerate"]
 
+        render_frame_timer = False
+
         if framerate > 0:
             next_time = prev_time + 1 / framerate
-            render_frame = (next_time - curr_time) < 0.1
+            # print("should new frame")
+            render_frame_timer = (next_time - curr_time) < 0.1
 
         elif self._video_renderers[participant_id]["render_next_frame"]:
             self._video_renderers[participant_id]["render_next_frame"] = False
@@ -828,6 +832,12 @@ class DailyInputTransport(BaseInputTransport):
             await self.push_frame(frame)
             self._video_renderers[participant_id]["timestamp"] = curr_time
 
+        if render_frame_timer:
+            frame = ImageContextRawFrame(
+                user_id=participant_id, image=buffer, size=size, format=format
+            )
+            await self.push_frame(frame)
+            self._video_renderers[participant_id]["timestamp"] = curr_time
 
 class DailyOutputTransport(BaseOutputTransport):
     def __init__(self, client: DailyTransportClient, params: DailyParams, **kwargs):

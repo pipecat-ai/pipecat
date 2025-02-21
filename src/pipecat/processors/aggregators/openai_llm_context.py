@@ -110,7 +110,7 @@ class OpenAILLMContext:
             if "mime_type" in msg and msg["mime_type"].startswith("image/"):
                 msg["data"] = "..."
             msgs.append(msg)
-        return json.dumps(msgs)
+        return json.dumps(msgs, cls=CustomEncoder, ensure_ascii=False, indent=2)
 
     def from_standard_message(self, message):
         """Convert from OpenAI message format to OpenAI message format (passthrough).
