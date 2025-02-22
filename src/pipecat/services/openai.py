@@ -15,6 +15,7 @@ import httpx
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 from pipecat.frames.frames import (
     ErrorFrame,
@@ -160,6 +161,7 @@ class BaseOpenAILLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    @retry(stop=stop_after_attempt(2), wait=wait_fixed(2))
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
     ) -> AsyncStream[ChatCompletionChunk]:

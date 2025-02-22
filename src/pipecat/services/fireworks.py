@@ -8,6 +8,7 @@
 from typing import List
 
 from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai import OpenAILLMService
@@ -50,6 +51,7 @@ class FireworksLLMService(OpenAILLMService):
         logger.debug(f"Creating Fireworks client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
+    @retry(stop=stop_after_attempt(2), wait=wait_fixed(2))
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
     ):

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added retry logic to `get_chat_completions()` fo all OpenAI-based LLM
+  services.
+
 - Added new log observers `LLMLogObserver` and `TranscriptionLogObserver` that
   can be useful for debugging your pipelines.
 

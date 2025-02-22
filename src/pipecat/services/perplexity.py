@@ -7,6 +7,7 @@
 from typing import List
 
 from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
@@ -56,6 +57,7 @@ class PerplexityLLMService(OpenAILLMService):
         self._has_reported_prompt_tokens = False
         self._is_processing = False
 
+    @retry(stop=stop_after_attempt(2), wait=wait_fixed(2))
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
     ) -> AsyncStream[ChatCompletionChunk]:
