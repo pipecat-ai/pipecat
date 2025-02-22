@@ -116,23 +116,44 @@ async def main(
     # dialin_settings are only needed if Daily's SIP URI is used
     # If you are handling this via Twilio, Telnyx, set this to None
     # and handle call-forwarding when on_dialin_ready fires.
-    dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
-    transport = DailyTransport(
-        room_url,
-        token,
-        "Chatbot",
-        DailyParams(
-            api_url=daily_api_url,
-            api_key=daily_api_key,
-            dialin_settings=dialin_settings,
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            camera_out_enabled=False,
-            vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-            transcription_enabled=True,
-        ),
-    )
+
+    # We don't want to specify dialin settings if we're not dialing in
+    if callId in (None, "None") or callDomain in (None, "None"):
+        print("Not using dialin settings")
+        transport = DailyTransport(
+            room_url,
+            token,
+            "Chatbot",
+            DailyParams(
+                api_url=daily_api_url,
+                api_key=daily_api_key,
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                camera_out_enabled=False,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                transcription_enabled=True,
+            ),
+        )
+
+    else:
+        dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
+        transport = DailyTransport(
+            room_url,
+            token,
+            "Chatbot",
+            DailyParams(
+                api_url=daily_api_url,
+                api_key=daily_api_key,
+                dialin_settings=dialin_settings,
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                camera_out_enabled=False,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                transcription_enabled=True,
+            ),
+        )
 
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),

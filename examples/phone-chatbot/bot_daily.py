@@ -49,23 +49,43 @@ async def main(
     # If you are handling this via Twilio, Telnyx, set this to None
     # and handle call-forwarding when on_dialin_ready fires.
 
-    dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
-    transport = DailyTransport(
-        room_url,
-        token,
-        "Chatbot",
-        DailyParams(
-            api_url=daily_api_url,
-            api_key=daily_api_key,
-            dialin_settings=dialin_settings,
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            camera_out_enabled=False,
-            vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-            transcription_enabled=True,
-        ),
-    )
+    # We don't want to specify dialin settings if we're not dialing in
+    if callId in (None, "None") or callDomain in (None, "None"):
+        print("Not using dialin settings")
+        transport = DailyTransport(
+            room_url,
+            token,
+            "Chatbot",
+            DailyParams(
+                api_url=daily_api_url,
+                api_key=daily_api_key,
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                camera_out_enabled=False,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                transcription_enabled=True,
+            ),
+        )
+
+    else:
+        dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
+        transport = DailyTransport(
+            room_url,
+            token,
+            "Chatbot",
+            DailyParams(
+                api_url=daily_api_url,
+                api_key=daily_api_key,
+                dialin_settings=dialin_settings,
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                camera_out_enabled=False,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                transcription_enabled=True,
+            ),
+        )
 
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
@@ -96,6 +116,13 @@ async def main(
             - **"Please leave a message after the beep."**
             - **"No one is available to take your call."**
             - **"Record your message after the tone."**
+            - **"Please leave a message after the beep"**
+            - **"You have reached voicemail for..."**
+            - **"You have reached [phone number]"**
+            - **"[phone number] is unavailable"**
+            - **"The person you are trying to reach..."**
+            - **"The number you have dialed..."**
+            - **"Your call has been forwarded to an automated voice messaging system"**
             - **Any phrase that suggests an answering machine or voicemail.**
             - **ASSUME IT IS A VOICEMAIL. DO NOT WAIT FOR MORE CONFIRMATION.**
             - **IF THE CALL SAYS "PLEASE LEAVE A MESSAGE AFTER THE BEEP", WAIT FOR THE BEEP BEFORE LEAVING A MESSAGE.**
