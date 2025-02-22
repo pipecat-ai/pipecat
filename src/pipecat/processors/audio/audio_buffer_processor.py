@@ -22,7 +22,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 class AudioBufferProcessor(FrameProcessor):
     """This processor buffers audio raw frames (input and output). The mixed
-    audio can be obtained by registering an "on_audio_data" event handler. 
+    audio can be obtained by registering an "on_audio_data" event handler.
     The event handler will be called every time `buffer_size` is reached.
 
     You can provide the desired output `sample_rate` and incoming audio frames
