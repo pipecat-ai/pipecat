@@ -8,6 +8,8 @@ class TestException(Exception):
 
 
 class TestFrameProcessor(FrameProcessor):
+    __test__ = False  # Prevents pytest from collecting this class as a test
+
     def __init__(self, test_frames):
         self.test_frames = test_frames
         self._list_counter = 0

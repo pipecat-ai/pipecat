@@ -206,10 +206,11 @@ class GrokLLMService(OpenAILLMService):
         if tokens.completion_tokens > self._completion_tokens:
             self._completion_tokens = tokens.completion_tokens
 
-    @staticmethod
     def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
     ) -> GrokContextAggregatorPair:
+        context.set_llm_adapter(self.get_llm_adapter())
+
         user = OpenAIUserContextAggregator(context)
         assistant = GrokAssistantContextAggregator(
             context, expect_stripped_words=assistant_expect_stripped_words

@@ -348,10 +348,11 @@ class OpenAILLMService(BaseOpenAILLMService):
     ):
         super().__init__(model=model, params=params, **kwargs)
 
-    @staticmethod
     def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
     ) -> OpenAIContextAggregatorPair:
+        context.set_llm_adapter(self.get_llm_adapter())
+
         user = OpenAIUserContextAggregator(context)
         assistant = OpenAIAssistantContextAggregator(
             context, expect_stripped_words=assistant_expect_stripped_words

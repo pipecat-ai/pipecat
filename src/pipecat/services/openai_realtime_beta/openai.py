@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import websockets
 from loguru import logger
 
+from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -68,6 +69,9 @@ class OpenAIUnhandledFunctionException(Exception):
 
 
 class OpenAIRealtimeBetaLLMService(LLMService):
+    # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
+    adapter_class = OpenAIRealtimeLLMAdapter
+
     def __init__(
         self,
         *,
@@ -565,6 +569,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     def create_context_aggregator(
         self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = False
     ) -> OpenAIContextAggregatorPair:
+        context.set_llm_adapter(self.get_llm_adapter())
+
         OpenAIRealtimeLLMContext.upgrade_to_realtime(context)
         user = OpenAIRealtimeUserContextAggregator(context)
         assistant = OpenAIRealtimeAssistantContextAggregator(

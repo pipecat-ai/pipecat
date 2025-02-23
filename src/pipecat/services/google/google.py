@@ -11,6 +11,8 @@ import json
 import os
 import time
 
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -940,6 +942,9 @@ class GoogleLLMService(LLMService):
     franca for all LLM services, so that it is easy to switch between different LLMs.
     """
 
+    # Overriding the default adapter to use the Gemini one.
+    adapter_class = GeminiLLMAdapter
+
     class InputParams(BaseModel):
         max_tokens: Optional[int] = Field(default=4096, ge=1)
         temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
@@ -1168,10 +1173,11 @@ class GoogleLLMService(LLMService):
         if context:
             await self._process_context(context)
 
-    @staticmethod
     def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
     ) -> GoogleContextAggregatorPair:
+        context.set_llm_adapter(self.get_llm_adapter())
+
         user = GoogleUserContextAggregator(context)
         assistant = GoogleAssistantContextAggregator(
             context, expect_stripped_words=assistant_expect_stripped_words
