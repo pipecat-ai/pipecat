@@ -17,6 +17,7 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         assert match_endofsentence("This is a sentence;") == 19
         assert match_endofsentence("This is a sentence...") == 21
         assert match_endofsentence("This is a sentence . . .") == 24
+        assert match_endofsentence("This is a sentence. ..") == 22
         assert not match_endofsentence("This is not a sentence")
         assert not match_endofsentence("This is not a sentence,")
         assert not match_endofsentence("This is not a sentence, ")
