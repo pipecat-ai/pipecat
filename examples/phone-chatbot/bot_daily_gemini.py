@@ -152,12 +152,13 @@ class FunctionHandlers:
 
         await result_callback("Talking to the customer")
 
-    async def terminate_call(
-        function_name, tool_call_id, args, llm: LLMService, context, result_callback
-    ):
-        """Function the bot can call to terminate the call upon completion of the call."""
 
-        await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+async def terminate_call(
+    function_name, tool_call_id, args, llm: LLMService, context, result_callback
+):
+    """Function the bot can call to terminate the call upon completion of the call."""
+
+    await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
 
 async def main(
@@ -254,7 +255,7 @@ DO NOT say anything until you've determined if this is a voicemail or human."""
 
     llm.register_function("switch_to_voicemail_response", handlers.voicemail_response)
     llm.register_function("switch_to_human_conversation", handlers.human_conversation)
-    llm.register_function("terminate_call", handlers.terminate_call)
+    llm.register_function("terminate_call", terminate_call)
 
     pipeline = Pipeline(
         [
