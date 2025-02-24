@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     EndTaskFrame,
     Frame,
     InputAudioRawFrame,
+    StopTaskFrame,
     SystemFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -43,6 +44,8 @@ logger.add(sys.stderr, level="DEBUG")
 
 daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
+
+system_message = None
 
 
 class UserAudioCollector(FrameProcessor):
@@ -120,21 +123,24 @@ class FunctionHandlers:
         self, function_name, tool_call_id, args, llm, context, result_callback
     ):
         """Function the bot can call to leave a voicemail message."""
-        message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and nothing else:
+        print(f"!!! Got a voicemail response, llm is: {llm}")
+        system_message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and nothing else:
 
                     "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
 
                     After saying this message, call the terminate_call function."""
-
-        await self.context_switcher.switch_context(system_instruction=message)
-
-        await result_callback("Leaving a voicemail message")
+        print("!!! about to push stop task frame from voicemail")
+        await llm.queue_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
+        print("!!! pushed stop task frame from voicemail")
+        await result_callback("Goodbye")
 
     async def human_conversation(
         self, function_name, tool_call_id, args, llm, context, result_callback
     ):
         """Function the bot can when it detects it's talking to a human."""
-        message = """You are Chatbot talking to a human. Be friendly and helpful.
+        print(f"!!! Got a human response, llm is: {llm}")
+
+        system_message = """You are Chatbot talking to a human. Be friendly and helpful.
 
                     Start with: "Hello! I'm a friendly chatbot. How can I help you today?"
 
@@ -147,17 +153,16 @@ class FunctionHandlers:
                     - "Thank you, that's all I needed"
 
                     THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function."""
-
-        await self.context_switcher.switch_context(system_instruction=message)
-
-        await result_callback("Talking to the customer")
+        print("!!! about to push stop task frame from human")
+        await llm.queue_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
+        print("!!! pushed stop task frame from human")
+        await result_callback("Goodbye")
 
 
 async def terminate_call(
     function_name, tool_call_id, args, llm: LLMService, context, result_callback
 ):
     """Function the bot can call to terminate the call upon completion of the call."""
-
     await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
 
@@ -239,38 +244,87 @@ If it sounds like a human (saying hello, asking questions, etc.), call the funct
 
 DO NOT say anything until you've determined if this is a voicemail or human."""
 
-    llm = GoogleLLMService(
+    greeting_llm = GoogleLLMService(
         model="models/gemini-2.0-flash-lite-preview-02-05",
         api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=system_instruction,
         tools=tools,
     )
 
-    context = GoogleLLMContext()
-    context_aggregator = llm.create_context_aggregator(context)
-    audio_collector = UserAudioCollector(context, context_aggregator.user())
+    greeting_context = GoogleLLMContext()
+    greeting_context_aggregator = greeting_llm.create_context_aggregator(greeting_context)
+    greeting_audio_collector = UserAudioCollector(
+        greeting_context, greeting_context_aggregator.user()
+    )
 
-    context_switcher = ContextSwitcher(llm, context_aggregator.user())
+    context_switcher = ContextSwitcher(greeting_llm, greeting_context_aggregator.user())
     handlers = FunctionHandlers(context_switcher)
 
-    llm.register_function("switch_to_voicemail_response", handlers.voicemail_response)
-    llm.register_function("switch_to_human_conversation", handlers.human_conversation)
-    llm.register_function("terminate_call", terminate_call)
+    greeting_llm.register_function("switch_to_voicemail_response", handlers.voicemail_response)
+    greeting_llm.register_function("switch_to_human_conversation", handlers.human_conversation)
+    greeting_llm.register_function("terminate_call", terminate_call)
 
-    pipeline = Pipeline(
+    greeting_pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            audio_collector,  # Collect audio frames
-            context_aggregator.user(),  # User responses
-            llm,  # LLM
+            greeting_audio_collector,  # Collect audio frames
+            greeting_context_aggregator.user(),  # User responses
+            greeting_llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            greeting_context_aggregator.assistant(),  # Assistant spoken responses
+        ]
+    )
+    greeting_pipeline_task = PipelineTask(
+        greeting_pipeline,
+        PipelineParams(allow_interruptions=True),
+    )
+    runner = PipelineRunner()
+
+    print("!!! starting greeting")
+    await runner.run(greeting_pipeline_task)
+    print("!!! Done with greeting")
+
+    # Create conversation pipeline with new system message
+    conversation_llm = GoogleLLMService(
+        model="models/gemini-2.0-flash-lite-preview-02-05",
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        system_instruction=system_message if system_message else "You are a helpful chatbot.",
+        tools=[
+            {
+                "function_declarations": [
+                    {
+                        "name": "terminate_call",
+                        "description": "Call this function to terminate the call.",
+                    }
+                ]
+            }
+        ],
+    )
+    conversation_llm.register_function("terminate_call", terminate_call)
+
+    conversation_context = GoogleLLMContext()
+    conversation_context_aggregator = conversation_llm.create_context_aggregator(
+        conversation_context
+    )
+    conversation_audio_collector = UserAudioCollector(
+        conversation_context, conversation_context_aggregator.user()
+    )
+
+    conversation_pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            conversation_audio_collector,  # Collect audio frames
+            conversation_context_aggregator.user(),  # User responses
+            conversation_llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            conversation_context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
-    task = PipelineTask(
-        pipeline,
+    conversation_task = PipelineTask(
+        conversation_pipeline,
         PipelineParams(allow_interruptions=True),
     )
 
@@ -319,11 +373,11 @@ DO NOT say anything until you've determined if this is a voicemail or human."""
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        await task.cancel()
+        await conversation_task.cancel()
 
-    runner = PipelineRunner()
-
-    await runner.run(task)
+    print("!!! Starting conversation")
+    await runner.run(conversation_task)
+    print("!!! Done with conversation")
 
 
 if __name__ == "__main__":
