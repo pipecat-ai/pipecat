@@ -47,6 +47,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed an issue that was not allowing to pass an `OpenAILLMContext` to create
+  `GoogleLLMService`'s context aggregators.
+
 - Fixed a `ElevenLabsTTSService`, `FishAudioTTSService`, `LMNTTTSService` and
   `PlayHTTTSService` issue that was resulting in audio requested before an
   interruption being played after an interruption.

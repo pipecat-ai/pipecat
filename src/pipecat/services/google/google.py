@@ -1176,6 +1176,8 @@ class GoogleLLMService(LLMService):
     def create_context_aggregator(
         context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
     ) -> GoogleContextAggregatorPair:
+        if isinstance(context, OpenAILLMContext):
+            context = GoogleLLMContext.upgrade_to_google(context)
         user = GoogleUserContextAggregator(context)
         assistant = GoogleAssistantContextAggregator(
             context, expect_stripped_words=assistant_expect_stripped_words
