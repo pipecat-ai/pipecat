@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `AnthropicLLMService` now uses `claude-3-7-sonnet-20250219` as the default
+  model.
+
 - `RimeHttpTTSService` needs an `aiohttp.ClientSession` to be passed to the
   constructor as all the other HTTP-based services.
 
