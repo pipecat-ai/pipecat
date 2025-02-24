@@ -10,8 +10,16 @@ import json
 import time
 from dataclasses import dataclass
 
-import websockets
 from loguru import logger
+
+try:
+    import websockets
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
+    )
+    raise Exception(f"Missing module: {e}")
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,

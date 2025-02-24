@@ -12,6 +12,12 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List, Optional
 
 from loguru import logger
+from openai._types import NOT_GIVEN, NotGiven
+from openai.types.chat import (
+    ChatCompletionMessageParam,
+    ChatCompletionToolChoiceOptionParam,
+    ChatCompletionToolParam,
+)
 from PIL import Image
 
 from pipecat.frames.frames import (
@@ -21,20 +27,6 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-try:
-    from openai._types import NOT_GIVEN, NotGiven
-    from openai.types.chat import (
-        ChatCompletionMessageParam,
-        ChatCompletionToolChoiceOptionParam,
-        ChatCompletionToolParam,
-    )
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
 
 # JSON custom encoder to handle bytes arrays so that we can log contexts
 # with images to the console.
