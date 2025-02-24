@@ -11,6 +11,8 @@ import json
 import os
 import time
 
+from google.api_core.exceptions import DeadlineExceeded
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -1126,6 +1128,8 @@ class GoogleLLMService(LLMService):
                     else:
                         logger.exception(f"{self} error: {e}")
 
+        except DeadlineExceeded:
+            await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:

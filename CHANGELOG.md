@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `on_completion_timeout` event for LLM services (all OpenAI-based
+  services, Anthropic and Google). Note that this event will only get triggered
+  if LLM timeouts are setup and if the timeout was reached. It can be useful to
+  retrigger another completion and see if the timeout was just a blip.
+
 - Added new log observers `LLMLogObserver` and `TranscriptionLogObserver` that
   can be useful for debugging your pipelines.
 

@@ -4,15 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import copy
 import io
 import json
 import re
-from asyncio import CancelledError
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
+import httpx
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -251,12 +252,14 @@ class AnthropicLLMService(LLMService):
                     if total_input_tokens >= 1024:
                         context.turns_above_cache_threshold += 1
 
-        except CancelledError:
+        except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the
             # token estimate. The reraise the exception so all the processors running in this task
             # also get cancelled.
             use_completion_tokens_estimate = True
             raise
+        except httpx.TimeoutException:
+            await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
