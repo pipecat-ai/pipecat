@@ -10,6 +10,7 @@ from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
+from openai import AsyncAzureOpenAI
 from PIL import Image
 from pydantic import BaseModel
 
@@ -48,7 +49,6 @@ try:
         PushAudioInputStream,
     )
     from azure.cognitiveservices.speech.dialog import AudioConfig
-    from openai import AsyncAzureOpenAI
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
