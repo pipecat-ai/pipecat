@@ -15,6 +15,7 @@ from loguru import logger
 from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
@@ -40,6 +41,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.text.base_text_filter import BaseTextFilter
@@ -434,6 +436,12 @@ class TTSService(AIService):
 
 
 class WordTTSService(TTSService):
+    """This is a base class for TTS services that support word timestamps. Word
+    timestamps are useful to synchronize audio with text of the spoken
+    words. This way only the spoken words are added to the conversation context.
+
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._initial_word_timestamp = -1
@@ -503,11 +511,93 @@ class WordTTSService(TTSService):
             self._words_queue.task_done()
 
 
-class AudioContextWordTTSService(WordTTSService):
-    """This services allow us to send multiple TTS request to the services. Each
-    request could be multiple sentences long which are grouped by context. For
-    this to work, the TTS service needs to support handling multiple requests at
-    once (i.e. multiple simultaneous contexts).
+class WebsocketTTSService(TTSService, WebsocketService):
+    """This is a base class for websocket-based TTS services."""
+
+    def __init__(self, **kwargs):
+        TTSService.__init__(self, **kwargs)
+        WebsocketService.__init__(self)
+
+
+class InterruptibleTTSService(WebsocketTTSService):
+    """This is a base class for websocket-based TTS services that don't support
+    word timestamps and that don't offer a way to correlate the generated audio
+    to the requested text.
+
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # Indicates if the bot is speaking. If the bot is not speaking we don't
+        # need to reconnect when the user speaks. If the bot is speaking and the
+        # user interrupts we need to reconnect.
+        self._bot_speaking = False
+
+    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+        await super()._handle_interruption(frame, direction)
+        if self._bot_speaking:
+            await self._disconnect()
+            await self._connect()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+
+
+class WebsocketWordTTSService(WordTTSService, WebsocketService):
+    """This is a base class for websocket-based TTS services that support word
+    timestamps.
+
+    """
+
+    def __init__(self, **kwargs):
+        WordTTSService.__init__(self, **kwargs)
+        WebsocketService.__init__(self)
+
+
+class InterruptibleWordTTSService(WebsocketWordTTSService):
+    """This is a base class for websocket-based TTS services that support word
+    timestamps but don't offer a way to correlate the generated audio to the
+    requested text.
+
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        # Indicates if the bot is speaking. If the bot is not speaking we don't
+        # need to reconnect when the user speaks. If the bot is speaking and the
+        # user interrupts we need to reconnect.
+        self._bot_speaking = False
+
+    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+        await super()._handle_interruption(frame, direction)
+        if self._bot_speaking:
+            await self._disconnect()
+            await self._connect()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+
+
+class AudioContextWordTTSService(WebsocketWordTTSService):
+    """This is a base class for websocket-based TTS services that support word
+    timestamps and also allow correlating the generated audio with the requested
+    text.
+
+    Each request could be multiple sentences long which are grouped by
+    context. For this to work, the TTS service needs to support handling
+    multiple requests at once (i.e. multiple simultaneous contexts).
 
     The audio received from the TTS will be played in context order. That is, if
     we requested audio for a context "A" and then audio for context "B", the
