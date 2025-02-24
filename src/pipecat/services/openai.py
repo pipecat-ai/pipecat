@@ -13,6 +13,14 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
 import aiohttp
 import httpx
 from loguru import logger
+from openai import (
+    NOT_GIVEN,
+    AsyncOpenAI,
+    AsyncStream,
+    BadRequestError,
+    DefaultAsyncHttpxClient,
+)
+from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 from PIL import Image
 from pydantic import BaseModel, Field
 
@@ -56,23 +64,6 @@ from pipecat.services.ai_services import (
 from pipecat.services.base_whisper import BaseWhisperSTTService, Transcription
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-
-try:
-    from openai import (
-        NOT_GIVEN,
-        AsyncOpenAI,
-        AsyncStream,
-        BadRequestError,
-        DefaultAsyncHttpxClient,
-    )
-    from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
-
 
 ValidVoice = Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
 
