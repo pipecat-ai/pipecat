@@ -7,17 +7,29 @@ import argparse
 import asyncio
 import os
 import sys
+from dataclasses import dataclass
 from typing import Optional
 
+import google.ai.generativelanguage as glm
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import BotStoppedSpeakingFrame, EndTaskFrame, Frame
+from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
+    EndTaskFrame,
+    Frame,
+    InputAudioRawFrame,
+    SystemFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import LLMService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.google import GoogleLLMContext, GoogleLLMService
@@ -31,6 +43,50 @@ logger.add(sys.stderr, level="DEBUG")
 
 daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
+
+
+class UserAudioCollector(FrameProcessor):
+    """This FrameProcessor collects audio frames in a buffer, then adds them to the
+    LLM context when the user stops speaking.
+    """
+
+    def __init__(self, context, user_context_aggregator):
+        super().__init__()
+        self._context = context
+        self._user_context_aggregator = user_context_aggregator
+        self._audio_frames = []
+        self._start_secs = 0.2  # this should match VAD start_secs (hardcoding for now)
+        self._user_speaking = False
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TranscriptionFrame):
+            # We could gracefully handle both audio input and text/transcription input ...
+            # but let's leave that as an exercise to the reader. :-)
+            return
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._user_speaking = True
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_speaking = False
+            self._context.add_audio_frames_message(audio_frames=self._audio_frames)
+            await self._user_context_aggregator.push_frame(
+                self._user_context_aggregator.get_context_frame()
+            )
+        elif isinstance(frame, InputAudioRawFrame):
+            if self._user_speaking:
+                self._audio_frames.append(frame)
+            else:
+                # Append the audio frame to our buffer. Treat the buffer as a ring buffer, dropping the oldest
+                # frames as necessary. Assume all audio frames have the same duration.
+                self._audio_frames.append(frame)
+                frame_duration = len(frame.audio) / 16 * frame.num_channels / frame.sample_rate
+                buffer_duration = frame_duration * len(self._audio_frames)
+                while buffer_duration > self._start_secs:
+                    self._audio_frames.pop(0)
+                    buffer_duration -= frame_duration
+
+        await self.push_frame(frame, direction)
 
 
 class ContextSwitcher:
@@ -134,7 +190,8 @@ async def main(
             camera_out_enabled=False,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            transcription_enabled=True,
+            vad_audio_passthrough=True,
+            # transcription_enabled=True,
         ),
     )
 
@@ -189,8 +246,9 @@ DO NOT say anything until you've determined if this is a voicemail or human."""
     )
 
     context = GoogleLLMContext()
-
     context_aggregator = llm.create_context_aggregator(context)
+    audio_collector = UserAudioCollector(context, context_aggregator.user())
+
     context_switcher = ContextSwitcher(llm, context_aggregator.user())
     handlers = FunctionHandlers(context_switcher)
 
@@ -201,6 +259,7 @@ DO NOT say anything until you've determined if this is a voicemail or human."""
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
+            audio_collector,  # Collect audio frames
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
