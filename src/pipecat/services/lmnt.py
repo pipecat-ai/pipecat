@@ -150,8 +150,9 @@ class LmntTTSService(InterruptibleTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from LMNT")
-                # Send EOF message before closing
-                await self._websocket.send(json.dumps({"eof": True}))
+                # NOTE(aleix): sending EOF message before closing is causing
+                # errors on the websocket, so we just skip it for now.
+                # await self._websocket.send(json.dumps({"eof": True}))
                 await self._websocket.close()
                 self._websocket = None
 
