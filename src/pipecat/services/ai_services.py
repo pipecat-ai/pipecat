@@ -142,6 +142,8 @@ class LLMService(AIService):
         self._callbacks = {}
         self._start_callbacks = {}
 
+        self._register_event_handler("on_completion_timeout")
+
     # TODO-CB: callback function type
     def register_function(self, function_name: Optional[str], callback, start_callback=None):
         # Registering a function with the function_name set to None will run that callback
