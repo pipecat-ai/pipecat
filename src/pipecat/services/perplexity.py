@@ -7,23 +7,12 @@
 from typing import List
 
 from loguru import logger
+from openai import NOT_GIVEN, AsyncStream
+from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai import OpenAILLMService
-
-try:
-    from openai import (
-        NOT_GIVEN,
-        AsyncStream,
-    )
-    from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use Perplexity, you need to `pip install pipecat-ai[perplexity]`. Also, set `PERPLEXITY_API_KEY` environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
 
 
 class PerplexityLLMService(OpenAILLMService):
