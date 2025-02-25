@@ -106,12 +106,12 @@ curl -X POST "http://localhost:7860/daily_start_bot" \                          
      -d '{"dialoutNumber": "+18057145330", "detectVoicemail": true}'
 ```
 
-### New! Using Gemini with Daily
+### New! Using Gemini 2.0 Flash Lite with Daily
 
-We have introduced a new example file that uses Gemini. You can find the code within bot_daily_gemini.py.
-If you want to spin up a Gemini-based bot for this demo, instead of an OpenAI-based bot, call the same properties above but on the `daily_gemini_start_bot` endpoint instead.
+We have introduced support for Google's Gemini 2.0 Flash Lite model in this example. This lightweight model offers faster response times and reduced costs while maintaining good conversational capabilities.
 
-For example:
+**Quick Start**
+To use the Gemini-based bot instead of OpenAI:
 
 ```shell
 curl -X POST "http://localhost:7860/daily_gemini_start_bot" \                                                                                                        py pipecat
@@ -119,7 +119,27 @@ curl -X POST "http://localhost:7860/daily_gemini_start_bot" \                   
      -d '{"detectVoicemail": true}'
 ```
 
-Any request body properties supported by `/daily_start_bot` (such as "detectVoicemail", "dialoutnumber", etc) can also be passed to `/daily_gemini_start_bot`. The only difference is that calling the Gemini endpoint will start a Gemini bot session.
+All request body parameters supported by /daily_start_bot (such as detectVoicemail, dialoutNumber, etc.) are also compatible with /daily_gemini_start_bot.
+
+This example uses context switching to help steer the bot in the right direction. As Flash Lite is a smaller model, breaking the prompt down into smaller piece helps to improve the bot's accuracy.
+
+For example, instead of giving one large prompt like:
+
+```python
+system_instruction="""You are a chatbot that needs to detect if you're talking to a voicemail system or human, then either leave a message or have a conversation. If it's voicemail, say "Hello, this is a message..." and hang up. If it's a human, introduce yourself and be helpful until they say goodbye."""
+```
+
+We break it into stages:
+
+First prompt focuses only on detection: "Determine if this is voicemail or human"
+After detection, we switch to a new context: either "Leave this specific voicemail message" or "Have a conversation with the human".
+
+**Implementation Details**
+The implementation is available in bot_daily_gemini.py and features:
+
+- Staged prompting approach: Breaking down complex tasks into smaller, more focused prompts to improve the lightweight model's performance
+- Dynamic context switching: The bot can change its behavior in real-time based on what it detects (voicemail vs. human caller)
+- Function-based architecture: Uses function calling to trigger context switches and call termination
 
 ### More information
 
