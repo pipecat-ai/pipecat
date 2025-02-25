@@ -513,9 +513,9 @@ class CancelTaskFrame(SystemFrame):
 
 @dataclass
 class StopTaskFrame(SystemFrame):
-    """Indicates that a pipeline task should be stopped but that the pipeline
-    processors should be kept in a running state. This is normally queued from
-    the pipeline task.
+    """This is used to notify the pipeline task that it should be stopped as
+    soon as possible (flushing all the queued frames) but that the pipeline
+    processors should be kept in a running state.
 
     """
 
@@ -716,6 +716,17 @@ class EndFrame(ControlFrame):
     sending frames to its output channel(s) and close all its threads. Note,
     that this is a control frame, which means it will received in the order it
     was sent (unline system frames).
+
+    """
+
+    pass
+
+
+@dataclass
+class StopFrame(ControlFrame):
+    """Indicates that a pipeline should be stopped but that the pipeline
+    processors should be kept in a running state. This is normally queued from
+    the pipeline task.
 
     """
 
