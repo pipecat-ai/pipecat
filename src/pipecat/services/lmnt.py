@@ -124,6 +124,9 @@ class LmntTTSService(InterruptibleTTSService):
     async def _connect_websocket(self):
         """Connect to LMNT websocket."""
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to LMNT")
 
             # Build initial connection message

@@ -308,6 +308,9 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
 
     async def _connect_websocket(self):
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to ElevenLabs")
 
             voice_id = self._voice_id

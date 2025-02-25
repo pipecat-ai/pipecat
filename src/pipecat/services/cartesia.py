@@ -194,6 +194,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
     async def _connect_websocket(self):
         try:
+            if self._websocket:
+                return
             logger.debug("Connecting to Cartesia")
             self._websocket = await websockets.connect(
                 f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
