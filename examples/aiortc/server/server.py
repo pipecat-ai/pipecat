@@ -89,16 +89,6 @@ class VideoTransformTrack(MediaStreamTrack):
             return frame
 
 
-async def index(request):
-    content = open(os.path.join(ROOT, "../client/javascript/index.html"), "r").read()
-    return web.Response(content_type="text/html", text=content)
-
-
-async def javascript(request):
-    content = open(os.path.join(ROOT, "../client/javascript/client.js"), "r").read()
-    return web.Response(content_type="application/javascript", text=content)
-
-
 async def offer(request):
     params = await request.json()
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
@@ -187,7 +177,7 @@ if __name__ == "__main__":
         "--host", default="0.0.0.0", help="Host for HTTP server (default: 0.0.0.0)"
     )
     parser.add_argument(
-        "--port", type=int, default=8080, help="Port for HTTP server (default: 8080)"
+        "--port", type=int, default=7860, help="Port for HTTP server (default: 7860)"
     )
     parser.add_argument("--record-to", help="Write received media to a file.")
     parser.add_argument("--verbose", "-v", action="count")
@@ -206,9 +196,7 @@ if __name__ == "__main__":
 
     app = web.Application()
     app.on_shutdown.append(on_shutdown)
-    app.router.add_get("/", index)
-    app.router.add_get("/client.js", javascript)
-    app.router.add_post("/offer", offer)
+    app.router.add_post("/api/offer", offer)
     web.run_app(
         app, access_log=None, host=args.host, port=args.port, ssl_context=ssl_context
     )

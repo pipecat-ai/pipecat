@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -82,8 +82,8 @@
     <label for="use-stun">Use STUN server</label>
 </div>
 
-<button id="start" onclick="start()">Start</button>
-<button id="stop" style="display: none" onclick="stop()">Stop</button>
+<button id="start">Start</button>
+<button id="stop" style="display: none">Stop</button>
 
 <h2>State</h2>
 <p>
@@ -114,6 +114,7 @@
 <h3>Answer</h3>
 <pre id="answer-sdp"></pre>
 
-<script src="client.js"></script>
+<script type="module" src="/src/app.ts"></script>
+<link rel="stylesheet" href="/src/style.css">
 </body>
 </html>
