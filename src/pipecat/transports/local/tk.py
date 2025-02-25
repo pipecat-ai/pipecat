@@ -90,7 +90,7 @@ class TkInputTransport(BaseInputTransport):
 class TkOutputTransport(BaseOutputTransport):
     _params: TkTransportParams
 
-    def __init__(self, tk_root: tk.Tk, py_audio: pyaudio.PyAudio, params: TransportParams):
+    def __init__(self, tk_root: tk.Tk, py_audio: pyaudio.PyAudio, params: TkTransportParams):
         super().__init__(params)
         self._py_audio = py_audio
         self._out_stream = None
@@ -153,7 +153,7 @@ class TkOutputTransport(BaseOutputTransport):
 
 
 class TkLocalTransport(BaseTransport):
-    def __init__(self, tk_root: tk.Tk, params: TransportParams):
+    def __init__(self, tk_root: tk.Tk, params: TkTransportParams):
         super().__init__()
         self._tk_root = tk_root
         self._params = params
