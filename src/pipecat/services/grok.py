@@ -125,7 +125,7 @@ class GrokLLMService(OpenAILLMService):
     Args:
         api_key (str): The API key for accessing Grok's API
         base_url (str, optional): The base URL for Grok API. Defaults to "https://api.x.ai/v1"
-        model (str, optional): The model identifier to use. Defaults to "grok-beta"
+        model (str, optional): The model identifier to use. Defaults to "grok-2"
         **kwargs: Additional keyword arguments passed to OpenAILLMService
     """
 
@@ -134,7 +134,7 @@ class GrokLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.x.ai/v1",
-        model: str = "grok-beta",
+        model: str = "grok-2",
         **kwargs,
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
