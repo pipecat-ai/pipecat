@@ -240,7 +240,7 @@ class FrameProcessor:
         elif isinstance(frame, StopInterruptionFrame):
             self._should_report_ttfb = True
         elif isinstance(frame, CancelFrame):
-            self._cancelling = True
+            await self.__cancel(frame)
 
     async def push_error(self, error: ErrorFrame):
         await self.push_frame(error, FrameDirection.UPSTREAM)
@@ -274,6 +274,11 @@ class FrameProcessor:
     async def __start(self, frame: StartFrame):
         self.__create_input_task()
         self.__create_push_task()
+
+    async def __cancel(self, frame: CancelFrame):
+        self._cancelling = True
+        await self.__cancel_input_task()
+        await self.__cancel_push_task()
 
     #
     # Handle interruptions
