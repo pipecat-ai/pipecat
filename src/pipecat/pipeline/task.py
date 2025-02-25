@@ -5,7 +5,7 @@
 #
 
 import asyncio
-from typing import Any, AsyncIterable, Dict, Iterable, List
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
@@ -31,7 +31,7 @@ from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager, TaskManager
 from pipecat.utils.utils import obj_count, obj_id
 
 HEARTBEAT_SECONDS = 1.0
@@ -134,6 +134,7 @@ class PipelineTask(BaseTask):
         params: PipelineParams = PipelineParams(),
         observers: List[BaseObserver] = [],
         clock: BaseClock = SystemClock(),
+        task_manager: Optional[BaseTaskManager] = None,
         check_dangling_tasks: bool = True,
     ):
         self._id: int = obj_id()
@@ -174,7 +175,7 @@ class PipelineTask(BaseTask):
         self._sink = PipelineTaskSink(self._down_queue)
         pipeline.link(self._sink)
 
-        self._task_manager = TaskManager()
+        self._task_manager = task_manager or TaskManager()
 
         self._observer = TaskObserver(observers=observers, task_manager=self._task_manager)
 

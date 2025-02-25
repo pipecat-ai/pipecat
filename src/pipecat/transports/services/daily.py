@@ -43,7 +43,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 
 try:
     from daily import CallClient, Daily, EventHandler
@@ -293,7 +293,7 @@ class DailyTransportClient(EventHandler):
         self._joined_event = asyncio.Event()
         self._leave_counter = 0
 
-        self._task_manager: Optional[TaskManager] = None
+        self._task_manager: Optional[BaseTaskManager] = None
 
         # We use the executor to cleanup the client. We just do it from one
         # place, so only one thread is really needed.

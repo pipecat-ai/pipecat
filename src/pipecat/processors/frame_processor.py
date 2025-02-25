@@ -23,7 +23,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 from pipecat.utils.utils import obj_count, obj_id
 
 
@@ -52,7 +52,7 @@ class FrameProcessor:
         self._clock: Optional[BaseClock] = None
 
         # Task Manager
-        self._task_manager: Optional[TaskManager] = None
+        self._task_manager: Optional[BaseTaskManager] = None
 
         # Other properties
         self._allow_interruptions = False
@@ -192,7 +192,7 @@ class FrameProcessor:
             raise Exception(f"{self} Clock is still not initialized.")
         return self._clock
 
-    def get_task_manager(self) -> TaskManager:
+    def get_task_manager(self) -> BaseTaskManager:
         if not self._task_manager:
             raise Exception(f"{self} TaskManager is still not initialized.")
         return self._task_manager
