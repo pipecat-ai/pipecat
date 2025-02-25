@@ -49,7 +49,7 @@ async def main(
     # If you are handling this via Twilio, Telnyx, set this to None
     # and handle call-forwarding when on_dialin_ready fires.
 
-    # We don't want to specify dialin settings if we're not dialing in
+    # We don't want to specify dial-in settings if we're not dialing in
     dialin_settings = None
     if callId and callDomain:
         dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)

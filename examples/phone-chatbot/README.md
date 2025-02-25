@@ -113,7 +113,6 @@ We have introduced support for Google's Gemini 2.0 Flash Lite model in this exam
 **Quick Start**
 To use the Gemini-based bot instead of OpenAI:
 
-
 ```shell
 curl -X POST "http://localhost:7860/daily_gemini_start_bot" \                                                                                                        py pipecat
      -H "Content-Type: application/json" \
@@ -122,24 +121,25 @@ curl -X POST "http://localhost:7860/daily_gemini_start_bot" \                   
 
 All request body parameters supported by /daily_start_bot (such as detectVoicemail, dialoutNumber, etc.) are also compatible with /daily_gemini_start_bot.
 
-This example uses context switching to help steer the bot in the right direction. As Flash Lite is a smaller model, getting it to consistently call functions was difficult for these longer prompts. Breaking the prompt
-down into smaller pieces helped improve the accuracy of the bot.
+This example uses context switching to help steer the bot in the right direction. As Flash Lite is a smaller model, breaking the prompt down into smaller piece helps to improve the bot's accuracy.
+
+For example, instead of giving one large prompt like:
+
+```python
+system_instruction="""You are a chatbot that needs to detect if you're talking to a voicemail system or human, then either leave a message or have a conversation. If it's voicemail, say "Hello, this is a message..." and hang up. If it's a human, introduce yourself and be helpful until they say goodbye."""
+```
+
+We break it into stages:
+
+First prompt focuses only on detection: "Determine if this is voicemail or human"
+After detection, we switch to a new context: either "Leave this specific voicemail message" or "Have a conversation with the human".
 
 **Implementation Details**
 The implementation is available in bot_daily_gemini.py and features:
 
-Staged prompting approach: Breaking down complex tasks into smaller, more focused prompts to improve the lightweight model's performance
-Dynamic context switching: The bot can change its behavior in real-time based on what it detects (voicemail vs. human caller)
-Function-based architecture: Uses function calling to trigger context switches and call termination
-
-**Optimizations for Lightweight Models**
-Working with Gemini 2.0 Flash Lite required some specific optimizations:
-
-Simplified prompts: Each prompt focuses on a single task with clear instructions
-Function-driven state changes: The model calls specific functions to switch between different conversation modes
-Reduced context requirements: Each stage maintains only the context needed for its specific purpose
-
-This approach significantly improves the consistency of function calling in this lightweight model, which was challenging with longer, more complex prompts.
+- Staged prompting approach: Breaking down complex tasks into smaller, more focused prompts to improve the lightweight model's performance
+- Dynamic context switching: The bot can change its behavior in real-time based on what it detects (voicemail vs. human caller)
+- Function-based architecture: Uses function calling to trigger context switches and call termination
 
 ### More information
 
