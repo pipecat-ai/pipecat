@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new `PipelineTask` parameter `check_dangling_tasks` to enable or
+  disable checking for frame processors' dangling tasks when the Pipeline
+  finishes running.
+
 - Added new `on_completion_timeout` event for LLM services (all OpenAI-based
   services, Anthropic and Google). Note that this event will only get triggered
   if LLM timeouts are setup and if the timeout was reached. It can be useful to
