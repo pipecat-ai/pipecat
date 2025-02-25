@@ -23,7 +23,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -438,7 +438,7 @@ class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
 
     clock: BaseClock
-    task_manager: TaskManager
+    task_manager: BaseTaskManager
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
     allow_interruptions: bool = False
@@ -513,9 +513,9 @@ class CancelTaskFrame(SystemFrame):
 
 @dataclass
 class StopTaskFrame(SystemFrame):
-    """Indicates that a pipeline task should be stopped but that the pipeline
-    processors should be kept in a running state. This is normally queued from
-    the pipeline task.
+    """This is used to notify the pipeline task that it should be stopped as
+    soon as possible (flushing all the queued frames) but that the pipeline
+    processors should be kept in a running state.
 
     """
 
@@ -716,6 +716,17 @@ class EndFrame(ControlFrame):
     sending frames to its output channel(s) and close all its threads. Note,
     that this is a control frame, which means it will received in the order it
     was sent (unline system frames).
+
+    """
+
+    pass
+
+
+@dataclass
+class StopFrame(ControlFrame):
+    """Indicates that a pipeline should be stopped but that the pipeline
+    processors should be kept in a running state. This is normally queued from
+    the pipeline task.
 
     """
 

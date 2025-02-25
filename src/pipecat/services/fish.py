@@ -106,7 +106,8 @@ class FishAudioTTSService(InterruptibleTTSService):
 
     async def _connect(self):
         await self._connect_websocket()
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
         if self._receive_task:
@@ -117,6 +118,9 @@ class FishAudioTTSService(InterruptibleTTSService):
 
     async def _connect_websocket(self):
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to Fish Audio")
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self._websocket = await websockets.connect(self._base_url, extra_headers=headers)

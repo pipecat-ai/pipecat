@@ -83,6 +83,7 @@ class LmntTTSService(InterruptibleTTSService):
             "format": "raw",  # Use raw format for direct PCM data
         }
         self._started = False
+        self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -110,7 +111,8 @@ class LmntTTSService(InterruptibleTTSService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
         if self._receive_task:
@@ -122,6 +124,9 @@ class LmntTTSService(InterruptibleTTSService):
     async def _connect_websocket(self):
         """Connect to LMNT websocket."""
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to LMNT")
 
             # Build initial connection message

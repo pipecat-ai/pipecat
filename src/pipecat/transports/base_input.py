@@ -74,7 +74,7 @@ class BaseInputTransport(FrameProcessor):
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
         # Create audio input queue and task if needed.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if not self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_in_queue = asyncio.Queue()
             self._audio_task = self.create_task(self._audio_task_handler())
 

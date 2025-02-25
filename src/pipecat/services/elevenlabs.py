@@ -214,6 +214,9 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         self._started = False
         self._cumulative_time = 0
 
+        self._receive_task = None
+        self._keepalive_task = None
+
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -286,8 +289,11 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
-        self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+
+        if not self._keepalive_task:
+            self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
         if self._receive_task:
@@ -302,6 +308,9 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
 
     async def _connect_websocket(self):
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to ElevenLabs")
 
             voice_id = self._voice_id

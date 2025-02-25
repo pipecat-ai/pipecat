@@ -24,8 +24,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.tk import TkLocalTransport
+from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -67,7 +66,7 @@ async def main():
 
         tk_transport = TkLocalTransport(
             tk_root,
-            TransportParams(
+            TkTransportParams(
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_is_live=True,
