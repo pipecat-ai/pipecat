@@ -111,8 +111,8 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             params=PipelineParams(
                 enable_heartbeats=True,
                 heartbeats_period_secs=0.2,
-                observers=[heartbeats_observer],
             ),
+            observers=[heartbeats_observer],
         )
         task.set_event_loop(asyncio.get_event_loop())
 
