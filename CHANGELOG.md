@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The base `TTSService` class now strips leading newlines before sending text
+  to the TTS provider. This change is to solve issues where some TTS providers,
+  like Azure, would not output text due to newlines.
+
 - `GrokLLMSService` now uses `grok-2` as the default model.
 
 - `AnthropicLLMService` now uses `claude-3-7-sonnet-20250219` as the default
