@@ -92,10 +92,8 @@ async def main():
 
     task = PipelineTask(
         pipeline,
-        params=PipelineParams(
-            allow_interruptions=True,
-            observers=[rtvi.observer()],
-        ),
+        params=PipelineParams(allow_interruptions=True),
+        observers=[rtvi.observer()],
     )
 
     @rtvi.event_handler("on_client_ready")
