@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new `PipelineTask` parameter `observers` that replaces the previous
+  `PipelineParams.observers`.
+
 - Added a new `PipelineTask` parameter `check_dangling_tasks` to enable or
   disable checking for frame processors' dangling tasks when the Pipeline
   finishes running.
@@ -44,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ```python
 stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 ```
+
+### Deprecated
+
+- `PipelineParams.observers` is now deprecated, you the new `PipelineTask`
+  parameter `observers`.
 
 ### Removed
 

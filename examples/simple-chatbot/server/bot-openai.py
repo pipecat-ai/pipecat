@@ -202,8 +202,8 @@ async def main():
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
-                observers=[RTVIObserver(rtvi)],
             ),
+            observers=[RTVIObserver(rtvi)],
         )
         await task.queue_frame(quiet_frame)
 
