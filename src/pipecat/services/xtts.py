@@ -150,8 +150,10 @@ class XTTSService(TTSService):
 
             yield TTSStartedFrame()
 
+            CHUNK_SIZE = 1024
+
             buffer = bytearray()
-            async for chunk in r.content.iter_chunked(1024):
+            async for chunk in r.content.iter_chunked(CHUNK_SIZE):
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
                     # Append new chunk to the buffer.
