@@ -51,6 +51,9 @@ class TkInputTransport(BaseInputTransport):
     async def start(self, frame: StartFrame):
         await super().start(frame)
 
+        if self._in_stream:
+            return
+
         self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
         num_frames = int(self._sample_rate / 100) * 2  # 20ms of audio
 
@@ -70,6 +73,7 @@ class TkInputTransport(BaseInputTransport):
         if self._in_stream:
             self._in_stream.stop_stream()
             self._in_stream.close()
+            self._in_stream = None
 
     def _audio_in_callback(self, in_data, frame_count, time_info, status):
         frame = InputAudioRawFrame(
@@ -106,6 +110,9 @@ class TkOutputTransport(BaseOutputTransport):
     async def start(self, frame: StartFrame):
         await super().start(frame)
 
+        if self._out_stream:
+            return
+
         self._sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
         self._out_stream = self._py_audio.open(
@@ -122,6 +129,7 @@ class TkOutputTransport(BaseOutputTransport):
         if self._out_stream:
             self._out_stream.stop_stream()
             self._out_stream.close()
+            self._out_stream = None
 
     async def write_raw_audio_frames(self, frames: bytes):
         if self._out_stream:

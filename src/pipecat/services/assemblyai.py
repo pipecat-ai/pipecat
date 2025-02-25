@@ -91,6 +91,9 @@ class AssemblyAISTTService(STTService):
         AssemblyAI transcriber.
         """
 
+        if self._transcriber:
+            return
+
         def on_open(session_opened: aai.RealtimeSessionOpened):
             """Callback for when the connection to AssemblyAI is opened."""
             logger.info(f"{self}: Connected to AssemblyAI")
