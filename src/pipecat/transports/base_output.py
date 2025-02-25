@@ -238,10 +238,12 @@ class BaseOutputTransport(FrameProcessor):
     #
 
     def _create_sink_tasks(self):
-        self._sink_queue = asyncio.Queue()
-        self._sink_clock_queue = asyncio.PriorityQueue()
-        self._sink_task = self.create_task(self._sink_task_handler())
-        self._sink_clock_task = self.create_task(self._sink_clock_task_handler())
+        if not self._sink_task:
+            self._sink_queue = asyncio.Queue()
+            self._sink_task = self.create_task(self._sink_task_handler())
+        if not self._sink_clock_task:
+            self._sink_clock_queue = asyncio.PriorityQueue()
+            self._sink_clock_task = self.create_task(self._sink_clock_task_handler())
 
     async def _cancel_sink_tasks(self):
         # Stop sink tasks.
@@ -358,7 +360,7 @@ class BaseOutputTransport(FrameProcessor):
 
     def _create_camera_task(self):
         # Create camera output queue and task if needed.
-        if self._params.camera_out_enabled:
+        if not self._camera_out_task and self._params.camera_out_enabled:
             self._camera_out_queue = asyncio.Queue()
             self._camera_out_task = self.create_task(self._camera_out_task_handler())
 

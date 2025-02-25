@@ -115,15 +115,19 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._params.serializer.setup(frame)
-        if self._params.session_timeout:
+        if not self._monitor_websocket_task and self._params.session_timeout:
             self._monitor_websocket_task = self.create_task(self._monitor_websocket())
         await self._client.trigger_client_connected()
-        self._receive_task = self.create_task(self._receive_messages())
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_messages())
 
     async def _stop_tasks(self):
         if self._monitor_websocket_task:
             await self.cancel_task(self._monitor_websocket_task)
-        await self.cancel_task(self._receive_task)
+            self._monitor_websocket_task = None
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
