@@ -1,4 +1,3 @@
-
 class WebRTCConnection {
 
     private declare dataChannelLog: HTMLElement;
@@ -32,7 +31,7 @@ class WebRTCConnection {
     constructor() {
         this.setupDOMElements();
         this.setupDOMEventListeners();
-        this.enumerateInputDevices();
+        void this.enumerateInputDevices();
     }
 
     private setupDOMElements(): void {
@@ -102,7 +101,7 @@ class WebRTCConnection {
         return this.pc;
     }
 
-    private enumerateInputDevices(): void {
+    private async enumerateInputDevices(): Promise<void> {
         const populateSelect = (select: HTMLSelectElement, devices: MediaDeviceInfo[]): void => {
             let counter = 1;
             devices.forEach((device) => {
@@ -114,21 +113,27 @@ class WebRTCConnection {
             });
         };
 
-        navigator.mediaDevices.enumerateDevices().then((devices) => {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
             populateSelect(this.audioInput, devices.filter((device) => device.kind === 'audioinput'));
             populateSelect(this.videoInput, devices.filter((device) => device.kind === 'videoinput'));
-        }).catch((e) => {
+        } catch (e) {
             alert(e);
-        });
+        }
     }
 
-    private negotiate(): Promise<void> {
-        if (!this.pc) return Promise.reject('Peer connection is not initialized');
+    private async negotiate(): Promise<void> {
+        if (!this.pc) {
+            return Promise.reject('Peer connection is not initialized');
+        }
 
-        return this.pc.createOffer().then((offer) => {
-            return this.pc!.setLocalDescription(offer);
-        }).then(() => {
-            return new Promise<void>((resolve) => {
+        try {
+            // Create offer
+            const offer = await this.pc.createOffer();
+            await this.pc.setLocalDescription(offer);
+
+            // Wait for ICE gathering to complete
+            await new Promise<void>((resolve) => {
                 if (this.pc!.iceGatheringState === 'complete') {
                     resolve();
                 } else {
@@ -137,50 +142,54 @@ class WebRTCConnection {
                             this.pc!.removeEventListener('icegatheringstatechange', checkState);
                             resolve();
                         }
-                    }
+                    };
                     this.pc!.addEventListener('icegatheringstatechange', checkState);
                 }
             });
-        }).then(() => {
-            let offer = this.pc!.localDescription!;
+
+            let offerSdp = this.pc!.localDescription!;
             let codec: string;
 
+            // Filter audio codec
             codec = this.audioCodec.value;
             if (codec !== 'default') {
                 // @ts-ignore
-                offer.sdp = this.sdpFilterCodec('audio', codec, offer.sdp);
+                offerSdp.sdp = this.sdpFilterCodec('audio', codec, offerSdp.sdp);
             }
 
+            // Filter video codec
             codec = this.videoCodec.value;
             if (codec !== 'default') {
                 // @ts-ignore
-                offer.sdp = this.sdpFilterCodec('video', codec, offer.sdp);
+                offerSdp.sdp = this.sdpFilterCodec('video', codec, offerSdp.sdp);
             }
 
-            this.offerSdp.textContent = offer.sdp;
+            this.offerSdp.textContent = offerSdp.sdp;
 
-            return fetch('/api/offer', {
+            // Send offer to server
+            const response = await fetch('/api/offer', {
                 body: JSON.stringify({
-                    sdp: offer.sdp,
-                    type: offer.type,
-                    video_transform: this.videoResolution.value
+                    sdp: offerSdp.sdp,
+                    type: offerSdp.type,
+                    video_transform: this.videoResolution.value,
                 }),
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
                 },
-                method: 'POST'
+                method: 'POST',
             });
-        }).then((response) => {
-            return response.json();
-        }).then((answer: RTCSessionDescriptionInit) => {
+
+            const answer: RTCSessionDescriptionInit = await response.json();
+
             this.answerSdp.textContent = answer.sdp || '';
-            return this.pc!.setRemoteDescription(answer);
-        }).catch((e) => {
+            await this.pc!.setRemoteDescription(answer);
+        } catch (e) {
             alert(e);
-        });
+        }
     }
 
-    private start(): void {
+
+    private async start(): Promise<void> {
         this.startButton.style.display = 'none';
 
         this.pc = this.createPeerConnection();
@@ -261,16 +270,17 @@ class WebRTCConnection {
             if (constraints.video) {
                 this.media.style.display = 'block';
             }
-            navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 stream.getTracks().forEach((track) => {
                     this.pc!.addTrack(track, stream);
                 });
-                return this.negotiate();
-            }, (err) => {
+                await this.negotiate();
+            } catch (err) {
                 alert('Could not acquire media: ' + err);
-            });
+            }
         } else {
-            this.negotiate();
+            await this.negotiate();
         }
 
         this.stopButton.style.display = 'inline-block';
