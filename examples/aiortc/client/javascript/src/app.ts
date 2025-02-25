@@ -1,42 +1,76 @@
+
 class WebRTCConnection {
-    private dataChannelLog: HTMLElement;
-    private iceConnectionLog: HTMLElement;
-    private iceGatheringLog: HTMLElement;
-    private signalingLog: HTMLElement;
+
+    private declare dataChannelLog: HTMLElement;
+    private declare iceConnectionLog: HTMLElement;
+    private declare iceGatheringLog: HTMLElement;
+    private declare signalingLog: HTMLElement;
+
+    private declare startButton: HTMLButtonElement;
+    private declare stopButton: HTMLButtonElement;
+
+    private declare useStun: HTMLInputElement;
+    private declare useDataChannel: HTMLInputElement;
+    private declare dataChannelParameters: HTMLTextAreaElement;
+    private declare useAudio: HTMLInputElement;
+    private declare useVideo: HTMLInputElement;
+    private declare audioInput: HTMLSelectElement;
+    private declare videoInput: HTMLSelectElement;
+    private declare audioCodec: HTMLSelectElement;
+    private declare videoCodec: HTMLSelectElement;
+    private declare videoResolution: HTMLSelectElement;
+    private declare offerSdp: HTMLElement;
+    private declare answerSdp: HTMLElement;
+    private declare video: HTMLVideoElement;
+    private declare audio: HTMLAudioElement;
+    private declare media: HTMLElement;
 
     private pc: RTCPeerConnection | null = null;
     private dc: RTCDataChannel | null = null;
     private dcInterval: number | null = null;
 
-    private startButton: HTMLButtonElement;
-    private stopButton: HTMLButtonElement;
-
     constructor() {
+        this.setupDOMElements();
+        this.setupDOMEventListeners();
+        this.enumerateInputDevices();
+    }
+
+    private setupDOMElements(): void {
         this.dataChannelLog = document.getElementById('data-channel')!;
         this.iceConnectionLog = document.getElementById('ice-connection-state')!;
         this.iceGatheringLog = document.getElementById('ice-gathering-state')!;
         this.signalingLog = document.getElementById('signaling-state')!;
 
-        this.startButton = <HTMLButtonElement>document.getElementById('start')!;
-        this.startButton.addEventListener("click", () => {
-            this.start()
-        })
+        this.startButton = document.getElementById('start') as HTMLButtonElement;
+        this.stopButton = document.getElementById('stop') as HTMLButtonElement;
+        this.useStun = document.getElementById('use-stun') as HTMLInputElement;
+        this.useDataChannel = document.getElementById('use-datachannel') as HTMLInputElement;
+        this.dataChannelParameters = document.getElementById('datachannel-parameters') as HTMLTextAreaElement;
+        this.useAudio = document.getElementById('use-audio') as HTMLInputElement;
+        this.useVideo = document.getElementById('use-video') as HTMLInputElement;
+        this.audioInput = document.getElementById('audio-input') as HTMLSelectElement;
+        this.videoInput = document.getElementById('video-input') as HTMLSelectElement;
+        this.audioCodec = document.getElementById('audio-codec') as HTMLSelectElement;
+        this.videoCodec = document.getElementById('video-codec') as HTMLSelectElement;
+        this.videoResolution = document.getElementById('video-resolution') as HTMLSelectElement;
+        this.offerSdp = document.getElementById('offer-sdp') as HTMLElement;
+        this.answerSdp = document.getElementById('answer-sdp') as HTMLElement;
+        this.video = document.getElementById('video') as HTMLVideoElement;
+        this.audio = document.getElementById('audio') as HTMLAudioElement;
+        this.media = document.getElementById('media') as HTMLElement;
+    }
 
-        this.stopButton = <HTMLButtonElement>document.getElementById('stop')!;
-        this.stopButton.addEventListener("click", () => {
-            this.stop()
-        })
-
-        this.enumerateInputDevices();
+    private setupDOMEventListeners(): void {
+        this.startButton.addEventListener("click", () => this.start());
+        this.stopButton.addEventListener("click", () => this.stop());
     }
 
     private createPeerConnection(): RTCPeerConnection {
         const config: RTCConfiguration = {
-            //sdpSemantics: 'unified-plan'
+            // sdpSemantics: 'unified-plan'
         };
 
-        let stunElement:HTMLInputElement = <HTMLInputElement> document.getElementById('use-stun')
-        if (stunElement && stunElement.checked) {
+        if (this.useStun.checked) {
             config.iceServers = [{ urls: ['stun:stun.l.google.com:19302'] }];
         }
 
@@ -59,11 +93,9 @@ class WebRTCConnection {
 
         this.pc.addEventListener('track', (evt: RTCTrackEvent) => {
             if (evt.track.kind === 'video') {
-                // @ts-ignore
-                document.getElementById('video')!.srcObject = evt.streams[0];
+                this.video.srcObject = evt.streams[0];
             } else {
-                // @ts-ignore
-                document.getElementById('audio')!.srcObject = evt.streams[0];
+                this.audio.srcObject = evt.streams[0];
             }
         });
 
@@ -83,14 +115,8 @@ class WebRTCConnection {
         };
 
         navigator.mediaDevices.enumerateDevices().then((devices) => {
-            populateSelect(
-                document.getElementById('audio-input') as HTMLSelectElement,
-                devices.filter((device) => device.kind === 'audioinput')
-            );
-            populateSelect(
-                document.getElementById('video-input') as HTMLSelectElement,
-                devices.filter((device) => device.kind === 'videoinput')
-            );
+            populateSelect(this.audioInput, devices.filter((device) => device.kind === 'audioinput'));
+            populateSelect(this.videoInput, devices.filter((device) => device.kind === 'videoinput'));
         }).catch((e) => {
             alert(e);
         });
@@ -119,25 +145,25 @@ class WebRTCConnection {
             let offer = this.pc!.localDescription!;
             let codec: string;
 
-            codec = (document.getElementById('audio-codec') as HTMLSelectElement).value;
+            codec = this.audioCodec.value;
             if (codec !== 'default') {
                 // @ts-ignore
                 offer.sdp = this.sdpFilterCodec('audio', codec, offer.sdp);
             }
 
-            codec = (document.getElementById('video-codec') as HTMLSelectElement).value;
+            codec = this.videoCodec.value;
             if (codec !== 'default') {
                 // @ts-ignore
                 offer.sdp = this.sdpFilterCodec('video', codec, offer.sdp);
             }
 
-            (document.getElementById('offer-sdp') as HTMLElement).textContent = offer.sdp;
+            this.offerSdp.textContent = offer.sdp;
 
             return fetch('/api/offer', {
                 body: JSON.stringify({
                     sdp: offer.sdp,
                     type: offer.type,
-                    video_transform: (document.getElementById('video-transform') as HTMLInputElement).value
+                    video_transform: this.videoResolution.value
                 }),
                 headers: {
                     'Content-Type': 'application/json'
@@ -147,7 +173,7 @@ class WebRTCConnection {
         }).then((response) => {
             return response.json();
         }).then((answer: RTCSessionDescriptionInit) => {
-            (document.getElementById('answer-sdp') as HTMLElement).textContent = answer.sdp || '';
+            this.answerSdp.textContent = answer.sdp || '';
             return this.pc!.setRemoteDescription(answer);
         }).catch((e) => {
             alert(e);
@@ -155,7 +181,7 @@ class WebRTCConnection {
     }
 
     private start(): void {
-        (document.getElementById('start') as HTMLElement).style.display = 'none';
+        this.startButton.style.display = 'none';
 
         this.pc = this.createPeerConnection();
 
@@ -170,8 +196,8 @@ class WebRTCConnection {
             }
         };
 
-        if ((document.getElementById('use-datachannel') as HTMLInputElement).checked) {
-            const parameters = JSON.parse((document.getElementById('datachannel-parameters') as HTMLTextAreaElement).value);
+        if (this.useDataChannel.checked) {
+            const parameters = JSON.parse(this.dataChannelParameters.value);
 
             this.dc = this.pc.createDataChannel('chat', parameters);
             this.dc.addEventListener('close', () => {
@@ -202,10 +228,10 @@ class WebRTCConnection {
             video: false
         };
 
-        if ((document.getElementById('use-audio') as HTMLInputElement).checked) {
+        if (this.useAudio.checked) {
             const audioConstraints: MediaTrackConstraints = {};
 
-            const device = (document.getElementById('audio-input') as HTMLSelectElement).value;
+            const device = this.audioInput.value;
             if (device) {
                 audioConstraints.deviceId = { exact: device };
             }
@@ -213,15 +239,15 @@ class WebRTCConnection {
             constraints.audio = Object.keys(audioConstraints).length ? audioConstraints : true;
         }
 
-        if ((document.getElementById('use-video') as HTMLInputElement).checked) {
+        if (this.useVideo.checked) {
             const videoConstraints: MediaTrackConstraints = {};
 
-            const device = (document.getElementById('video-input') as HTMLSelectElement).value;
+            const device = this.videoInput.value;
             if (device) {
                 videoConstraints.deviceId = { exact: device };
             }
 
-            const resolution = (document.getElementById('video-resolution') as HTMLSelectElement).value;
+            const resolution = this.videoResolution.value;
             if (resolution) {
                 const dimensions = resolution.split('x');
                 videoConstraints.width = parseInt(dimensions[0], 10);
@@ -233,7 +259,7 @@ class WebRTCConnection {
 
         if (constraints.audio || constraints.video) {
             if (constraints.video) {
-                (document.getElementById('media') as HTMLElement).style.display = 'block';
+                this.media.style.display = 'block';
             }
             navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
                 stream.getTracks().forEach((track) => {
@@ -247,11 +273,11 @@ class WebRTCConnection {
             this.negotiate();
         }
 
-        (document.getElementById('stop') as HTMLElement).style.display = 'inline-block';
+        this.stopButton.style.display = 'inline-block';
     }
 
     private stop(): void {
-        (document.getElementById('stop') as HTMLElement).style.display = 'none';
+        this.stopButton.style.display = 'none';
 
         if (this.dc) {
             this.dc.close();
