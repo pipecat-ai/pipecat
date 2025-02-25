@@ -309,7 +309,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._seen_interim_results = True
 
     def _create_aggregation_task(self):
-        self._aggregation_task = self.create_task(self._aggregation_task_handler())
+        if not self._aggregation_task:
+            self._aggregation_task = self.create_task(self._aggregation_task_handler())
 
     async def _cancel_aggregation_task(self):
         if self._aggregation_task:

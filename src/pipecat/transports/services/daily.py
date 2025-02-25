@@ -845,7 +845,7 @@ class DailyInputTransport(BaseInputTransport):
     def start_audio_in_streaming(self):
         # Create audio task. It reads audio frames from Daily and push them
         # internally for VAD processing.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if not self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             logger.debug(f"Start receiving audio")
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
 

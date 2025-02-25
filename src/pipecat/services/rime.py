@@ -165,7 +165,9 @@ class RimeTTSService(AudioContextWordTTSService):
     async def _connect(self):
         """Establish websocket connection and start receive task."""
         await self._connect_websocket()
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
         """Close websocket connection and clean up tasks."""
