@@ -832,6 +832,9 @@ class DailyInputTransport(BaseInputTransport):
 
         self._video_renderers = {}
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
         # Task that gets audio data from a device or the network and queues it
         # internally to be processed.
         self._audio_in_task = None
@@ -852,6 +855,12 @@ class DailyInputTransport(BaseInputTransport):
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         # Setup client.
         await self._client.setup(frame)
         # Join the room.
@@ -980,9 +989,18 @@ class DailyOutputTransport(BaseOutputTransport):
 
         self._client = client
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         # Setup client.
         await self._client.setup(frame)
         # Join the room.

@@ -166,6 +166,7 @@ class ParakeetSTTService(STTService):
         self._asr_service = riva.client.ASRService(auth)
 
         self._queue = asyncio.Queue()
+        self._config = None
         self._thread_task = None
         self._response_task = None
 
@@ -174,6 +175,9 @@ class ParakeetSTTService(STTService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._config:
+            return
 
         config = riva.client.StreamingRecognitionConfig(
             config=riva.client.RecognitionConfig(

@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     StartFrame,
     StartInterruptionFrame,
-    TextFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )

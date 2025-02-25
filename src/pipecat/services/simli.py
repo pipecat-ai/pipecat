@@ -43,11 +43,15 @@ class SimliVideoService(FrameProcessor):
         self._pipecat_resampler: AudioResampler = None
         self._simli_resampler = AudioResampler("s16", "mono", 16000)
 
+        self._initialized = False
         self._audio_task: asyncio.Task = None
         self._video_task: asyncio.Task = None
 
     async def _start_connection(self):
-        await self._simli_client.Initialize()
+        if not self._initialized:
+            await self._simli_client.Initialize()
+            self._initialized = True
+
         # Create task to consume and process audio and video
         if not self._audio_task:
             self._audio_task = self.create_task(self._consume_and_process_audio())
