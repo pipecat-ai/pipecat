@@ -399,6 +399,9 @@ class TTSService(AIService):
             await self._push_tts_frames(text)
 
     async def _push_tts_frames(self, text: str):
+        # Remove leading newlines only
+        text = text.lstrip("\n")
+
         # Don't send only whitespace. This causes problems for some TTS models. But also don't
         # strip all whitespace, as whitespace can influence prosody.
         if not text.strip():
