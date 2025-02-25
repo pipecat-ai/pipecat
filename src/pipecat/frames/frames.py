@@ -23,7 +23,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -438,7 +438,7 @@ class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
 
     clock: BaseClock
-    task_manager: TaskManager
+    task_manager: BaseTaskManager
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
     allow_interruptions: bool = False
