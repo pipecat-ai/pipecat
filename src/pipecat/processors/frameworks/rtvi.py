@@ -956,8 +956,10 @@ class RTVIProcessor(FrameProcessor):
             await self._pipeline.cleanup()
 
     async def _start(self, frame: StartFrame):
-        self._action_task = self.create_task(self._action_task_handler())
-        self._message_task = self.create_task(self._message_task_handler())
+        if not self._action_task:
+            self._action_task = self.create_task(self._action_task_handler())
+        if not self._message_task:
+            self._message_task = self.create_task(self._message_task_handler())
         await self._call_event_handler("on_bot_started")
 
     async def _stop(self, frame: EndFrame):

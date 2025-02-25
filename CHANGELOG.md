@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new `StopFrame` which can be used to stop a pipeline task while
+  keeping the frame processors running. The frame processors could then be used
+  in a different pipeline. The difference between a `StopFrame` and a
+  `StopTaskFrame` is that, as with `EndFrame` and `EndTaskFrame`, the
+  `StopFrame` is pushed from the task and the `StopTaskFrame` is pushed upstream
+  inside the pipeline by any processor.
+
 - Added a new `PipelineTask` parameter `observers` that replaces the previous
   `PipelineParams.observers`.
 

@@ -273,7 +273,7 @@ class TTSService(AIService):
     async def start(self, frame: StartFrame):
         await super().start(frame)
         self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
-        if self._push_stop_frames:
+        if self._push_stop_frames and not self._stop_frame_task:
             self._stop_frame_task = self.create_task(self._stop_frame_handler())
 
     async def stop(self, frame: EndFrame):
@@ -487,7 +487,8 @@ class WordTTSService(TTSService):
         self.reset_word_timestamps()
 
     def _create_words_task(self):
-        self._words_task = self.create_task(self._words_task_handler())
+        if not self._words_task:
+            self._words_task = self.create_task(self._words_task_handler())
 
     async def _stop_words_task(self):
         if self._words_task:
@@ -663,9 +664,10 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
         self._create_audio_context_task()
 
     def _create_audio_context_task(self):
-        self._contexts_queue = asyncio.Queue()
-        self._contexts: Dict[str, asyncio.Queue] = {}
-        self._audio_context_task = self.create_task(self._audio_context_task_handler())
+        if not self._audio_context_task:
+            self._contexts_queue = asyncio.Queue()
+            self._contexts: Dict[str, asyncio.Queue] = {}
+            self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
     async def _stop_audio_context_task(self):
         if self._audio_context_task:
@@ -841,7 +843,8 @@ class SegmentedSTTService(STTService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        (self._content, self._wave) = self._new_wave()
+        if not self._wave:
+            (self._content, self._wave) = self._new_wave()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)

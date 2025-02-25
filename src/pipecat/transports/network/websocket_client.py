@@ -30,7 +30,7 @@ from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 
 
 class WebsocketClientParams(TransportParams):
@@ -57,12 +57,12 @@ class WebsocketClientSession:
         self._callbacks = callbacks
         self._transport_name = transport_name
 
-        self._task_manager: Optional[TaskManager] = None
+        self._task_manager: Optional[BaseTaskManager] = None
 
         self._websocket: Optional[websockets.WebSocketClientProtocol] = None
 
     @property
-    def task_manager(self) -> TaskManager:
+    def task_manager(self) -> BaseTaskManager:
         if not self._task_manager:
             raise Exception(
                 f"{self._transport_name}::WebsocketClientSession: TaskManager not initialized (pipeline not started?)"

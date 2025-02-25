@@ -172,27 +172,38 @@ class GladiaSTTService(STTService):
             },
         }
         self._confidence = confidence
+        self._websocket = None
+        self._receive_task = None
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_gladia_language(language)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        if self._websocket:
+            return
         self._settings["sample_rate"] = self.sample_rate
         response = await self._setup_gladia()
         self._websocket = await websockets.connect(response["url"])
-        self._receive_task = self.create_task(self._receive_task_handler())
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler())
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
         await self._send_stop_recording()
-        await self._websocket.close()
-        await self.wait_for_task(self._receive_task)
+        if self._websocket:
+            await self._websocket.close()
+            self._websocket = None
+        if self._receive_task:
+            await self.wait_for_task(self._receive_task)
+            self._receive_task = None
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._websocket.close()
-        await self.cancel_task(self._receive_task)
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_processing_metrics()

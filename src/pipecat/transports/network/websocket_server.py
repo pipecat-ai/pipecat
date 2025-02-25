@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     StartFrame,
     StartInterruptionFrame,
-    TextFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
@@ -81,22 +80,27 @@ class WebsocketServerInputTransport(BaseInputTransport):
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._params.serializer.setup(frame)
-        self._server_task = self.create_task(self._server_task_handler())
+        if not self._server_task:
+            self._server_task = self.create_task(self._server_task_handler())
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
         self._stop_server_event.set()
         if self._monitor_task:
             await self.cancel_task(self._monitor_task)
+            self._monitor_task = None
         if self._server_task:
             await self.wait_for_task(self._server_task)
+            self._server_task = None
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         if self._monitor_task:
             await self.cancel_task(self._monitor_task)
+            self._monitor_task = None
         if self._server_task:
             await self.cancel_task(self._server_task)
+            self._server_task = None
 
     async def _server_task_handler(self):
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
@@ -116,7 +120,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
         await self._callbacks.on_client_connected(websocket)
 
         # Create a task to monitor the websocket connection
-        if self._params.session_timeout:
+        if not self._monitor_task and self._params.session_timeout:
             self._monitor_task = self.create_task(
                 self._monitor_websocket(websocket, self._params.session_timeout)
             )

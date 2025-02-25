@@ -99,6 +99,10 @@ class XTTSService(TTSService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._studio_speakers:
+            return
+
         async with self._aiohttp_session.get(self._settings["base_url"] + "/studio_speakers") as r:
             if r.status != 200:
                 text = await r.text()

@@ -246,11 +246,15 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
+            # Push StartFrame before start(), because we want StartFrame to be
+            # processed by every processor before any other frame is processed.
+            await self.push_frame(frame, direction)
             await self._start(frame)
-            await self.push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
-            await self._stop(frame)
+            # Push EndFrame before stop(), because stop() waits on the task to
+            # finish and the task finishes when EndFrame is processed.
             await self.push_frame(frame, direction)
+            await self._stop(frame)
         elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
@@ -309,7 +313,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._seen_interim_results = True
 
     def _create_aggregation_task(self):
-        self._aggregation_task = self.create_task(self._aggregation_task_handler())
+        if not self._aggregation_task:
+            self._aggregation_task = self.create_task(self._aggregation_task_handler())
 
     async def _cancel_aggregation_task(self):
         if self._aggregation_task:

@@ -81,6 +81,8 @@ class ParallelPipeline(BasePipeline):
         self._seen_ids = set()
         self._endframe_counter: Dict[int, int] = {}
 
+        self._up_task = None
+        self._down_task = None
         self._up_queue = asyncio.Queue()
         self._down_queue = asyncio.Queue()
 
@@ -150,19 +152,30 @@ class ParallelPipeline(BasePipeline):
         await self._create_tasks()
 
     async def _stop(self):
-        # The up task doesn't receive an EndFrame, so we just cancel it.
-        await self.cancel_task(self._up_task)
-        # The down tasks waits for the last EndFrame sent by the internal
-        # pipelines.
-        await self._down_task
+        if self._up_task:
+            # The up task doesn't receive an EndFrame, so we just cancel it.
+            await self.cancel_task(self._up_task)
+            self._up_task = None
+
+        if self._down_task:
+            # The down tasks waits for the last EndFrame sent by the internal
+            # pipelines.
+            await self._down_task
+            self._down_task = None
 
     async def _cancel(self):
-        await self.cancel_task(self._up_task)
-        await self.cancel_task(self._down_task)
+        if self._up_task:
+            await self.cancel_task(self._up_task)
+            self._up_task = None
+        if self._down_task:
+            await self.cancel_task(self._down_task)
+            self._down_task = None
 
     async def _create_tasks(self):
-        self._up_task = self.create_task(self._process_up_queue())
-        self._down_task = self.create_task(self._process_down_queue())
+        if not self._up_task:
+            self._up_task = self.create_task(self._process_up_queue())
+        if not self._down_task:
+            self._down_task = self.create_task(self._process_down_queue())
 
     async def _drain_queues(self):
         while not self._up_queue.empty:

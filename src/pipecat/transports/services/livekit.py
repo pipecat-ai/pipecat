@@ -27,7 +27,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 
 try:
     from livekit import rtc
@@ -88,7 +88,7 @@ class LiveKitTransportClient:
         self._audio_tracks = {}
         self._audio_queue = asyncio.Queue()
         self._other_participant_has_joined = False
-        self._task_manager: Optional[TaskManager] = None
+        self._task_manager: Optional[BaseTaskManager] = None
 
     @property
     def participant_id(self) -> str:
@@ -360,7 +360,7 @@ class LiveKitInputTransport(BaseInputTransport):
         await super().start(frame)
         await self._client.setup(frame)
         await self._client.connect()
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if not self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
         logger.info("LiveKitInputTransport started")
 
