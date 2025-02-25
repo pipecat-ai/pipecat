@@ -80,6 +80,7 @@ class TaskManager:
             logger.warning(f"{name}: timed out waiting for task to finish")
         except asyncio.CancelledError:
             logger.trace(f"{name}: unexpected task cancellation (maybe Ctrl-C?)")
+            raise
         except Exception as e:
             logger.exception(f"{name}: unexpected exception while stopping task: {e}")
         finally:
