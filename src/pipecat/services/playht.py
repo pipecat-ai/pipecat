@@ -171,6 +171,9 @@ class PlayHTTTSService(InterruptibleTTSService):
 
     async def _connect_websocket(self):
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to PlayHT")
 
             if not self._websocket_url:

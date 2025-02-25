@@ -180,6 +180,9 @@ class RimeTTSService(AudioContextWordTTSService):
     async def _connect_websocket(self):
         """Connect to Rime websocket API with configured settings."""
         try:
+            if self._websocket:
+                return
+
             params = "&".join(f"{k}={v}" for k, v in self._settings.items())
             url = f"{self._url}?{params}"
             headers = {"Authorization": f"Bearer {self._api_key}"}
