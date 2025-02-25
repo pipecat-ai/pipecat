@@ -122,8 +122,8 @@ async def main():
                 enable_metrics=True,
                 enable_usage_metrics=True,
                 report_only_initial_ttfb=True,
-                observers=[DebugObserver(), LLMLogObserver()],
             ),
+            observers=[DebugObserver(), LLMLogObserver()],
         )
 
         @transport.event_handler("on_first_participant_joined")
