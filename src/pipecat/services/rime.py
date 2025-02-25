@@ -407,10 +407,10 @@ class RimeHttpTTSService(TTSService):
                 yield TTSStartedFrame()
 
                 # Process the streaming response
-                chunk_size = 8192
+                CHUNK_SIZE = 1024
 
-                async for chunk in response.content.iter_chunked(chunk_size):
-                    if chunk:
+                async for chunk in response.content.iter_chunked(CHUNK_SIZE):
+                    if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
                         frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                         yield frame

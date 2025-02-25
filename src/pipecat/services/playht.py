@@ -383,8 +383,6 @@ class PlayHTHttpTTSService(TTSService):
 
         try:
             options = self._create_options()
-            b = bytearray()
-            in_header = True
 
             await self.start_ttfb_metrics()
 
@@ -396,6 +394,8 @@ class PlayHTHttpTTSService(TTSService):
 
             yield TTSStartedFrame()
 
+            b = bytearray()
+            in_header = True
             async for chunk in playht_gen:
                 # skip the RIFF header.
                 if in_header:
@@ -410,11 +410,10 @@ class PlayHTHttpTTSService(TTSService):
                             fh.read(size)
                             (data, size) = struct.unpack("<4sI", fh.read(8))
                         in_header = False
-                else:
-                    if len(chunk):
-                        await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
-                        yield frame
+                elif len(chunk) > 0:
+                    await self.stop_ttfb_metrics()
+                    frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                    yield frame
         except Exception as e:
             logger.error(f"{self} error generating TTS: {e}")
         finally:
