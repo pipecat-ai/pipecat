@@ -131,6 +131,7 @@ class PipelineTask(BaseTask):
     def __init__(
         self,
         pipeline: BasePipeline,
+        *,
         params: PipelineParams = PipelineParams(),
         observers: List[BaseObserver] = [],
         clock: BaseClock = SystemClock(),

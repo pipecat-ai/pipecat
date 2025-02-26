@@ -150,7 +150,7 @@ async def main(
         ]
     )
 
-    task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
     if dialout_number:
         logger.debug("dialout number detected; doing dialout")

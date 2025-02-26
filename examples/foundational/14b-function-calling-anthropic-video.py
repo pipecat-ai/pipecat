@@ -153,7 +153,13 @@ If you need to use a tool, simply use the tool. Do not tell the user the tool yo
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                allow_interruptions=True,
+                enable_metrics=True,
+            ),
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
