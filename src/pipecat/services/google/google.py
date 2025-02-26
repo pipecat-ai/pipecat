@@ -998,8 +998,8 @@ class GoogleLLMService(LLMService):
 
         try:
             logger.debug(
-                # f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
-                f"Generating chat: {context.get_messages_for_logging()}"
+                # f"{self}: Generating chat [{self._system_instruction}] | [{context.get_messages_for_logging()}]"
+                f"{self}: Generating chat [{context.get_messages_for_logging()}]"
             )
 
             messages = context.messages
@@ -1297,7 +1297,7 @@ class GoogleTTSService(TTSService):
         return ssml
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             await self.start_ttfb_metrics()

@@ -101,7 +101,7 @@ class FastPitchTTSService(TTSService):
         await self.start_ttfb_metrics()
         yield TTSStartedFrame()
 
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             queue = asyncio.Queue()
