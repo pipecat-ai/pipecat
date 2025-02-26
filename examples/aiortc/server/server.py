@@ -13,19 +13,17 @@ from pipecat.transports.webrtc.webrtc_connection import PipecatWebRTCConnection
 ROOT = os.path.dirname(__file__)
 
 logger = logging.getLogger("pc")
-pcs = set()
-relay = MediaRelay()
 
 app = FastAPI()
+
+
+pcs = set()
+relay = MediaRelay()
 
 
 @app.post("/api/offer")
 async def offer(request: dict, background_tasks: BackgroundTasks):
     pipecat_connection = PipecatWebRTCConnection()
-
-    # TODO need to do how we are going to fix this
-    await run_new_bot(pipecat_connection)
-
     await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
 
     pcs.add(pipecat_connection)
@@ -35,7 +33,7 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
         logger.info("Discarding the peer connection.")
         pcs.discard(pipecat_connection)
 
-    # background_tasks.add_task(run_new_bot, pipecat_connection)
+    background_tasks.add_task(run_new_bot, pipecat_connection)
 
     return pipecat_connection.get_answer()
 
@@ -49,10 +47,10 @@ async def run_new_bot(pipecat_connection: PipecatWebRTCConnection):
 
     def handle_track(track: MediaStreamTrack):
         if track.kind == "audio":
-            pipecat_connection.pc.addTrack(player.audio)
+            pipecat_connection.replace_audio_track(player.audio)
             recorder.addTrack(track)
         elif track.kind == "video":
-            pipecat_connection.pc.addTrack(relay.subscribe(track))
+            pipecat_connection.replace_video_track(relay.subscribe(track))
 
     @pipecat_connection.on("connected")
     def on_connected():

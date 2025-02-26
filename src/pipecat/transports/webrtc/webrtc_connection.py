@@ -25,34 +25,63 @@ class PipecatWebRTCConnection(EventEmitter):
 
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():
-            logger.info("Connection state is %s", self.pc.connectionState)
+            logger.info(f"Connection state is {self.pc.connectionState}")
             self.emit(self.pc.connectionState)
             if self.pc.connectionState == "failed":
                 await self.close()
 
         @self.pc.on("track")
         def on_track(track):
-            logger.info("Track %s received", track.kind)
+            logger.info(f"Track {track.kind} received")
             self._tracks.add(track)
             self.emit("track-started", track)
 
             @track.on("ended")
             async def on_ended():
-                logger.info("Track %s ended", track.kind)
+                logger.info(f"Track {track.kind} ended")
                 self._tracks.discard(track)
                 self.emit("track-ended", track)
 
     async def initialize(self, sdp: str, type: str):
-        offer = RTCSessionDescription(sdp=sdp, type=type)
+        logger.info(f"sdp: {sdp}")
 
-        logger.info("create_peer_connection 00")
+        offer = RTCSessionDescription(sdp=sdp, type=type)
         await self.pc.setRemoteDescription(offer)
-        logger.info("create_peer_connection 01")
+
+        # For some reason, aiortc is not respecting the SDP for the transceivers to be sendrcv
+        # so we are basically forcing it to act this way
+        self.force_tranceivers_to_send_recv()
+
         answer = await self.pc.createAnswer()
-        logger.info("create_peer_connection 02")
         await self.pc.setLocalDescription(answer)
-        logger.info("create_peer_connection 03")
+
         return self.pc
+
+    def force_tranceivers_to_send_recv(self):
+        for transceiver in self.pc.getTransceivers():
+            transceiver.direction = "sendrecv"
+            logger.info(
+                f"Transceiver: {transceiver}, Mid: {transceiver.mid}, Direction: {transceiver.direction}"
+            )
+            logger.info(f"Sender track: {transceiver.sender.track}")
+
+    def replace_audio_track(self, track):
+        logger.info(f"Replacing audio track {track.kind}")
+        # Transceivers always appear in creation-order for both peers
+        # For now we are only considering that we are going to have 02 transceivers,
+        # one for audio and one for video
+        audio_transceiver = self.pc.getTransceivers()[0]
+        logger.info(f"audio_transceiver ${audio_transceiver}")
+        audio_transceiver.sender.replaceTrack(track)
+
+    def replace_video_track(self, track):
+        logger.info(f"Replacing video track {track.kind}")
+        # Transceivers always appear in creation-order for both peers
+        # For now we are only considering that we are going to have 02 transceivers,
+        # one for audio and one for video
+        video_transceiver = self.pc.getTransceivers()[1]
+        logger.info(f"video_transceiver ${video_transceiver}")
+        video_transceiver.sender.replaceTrack(track)
 
     async def close(self):
         if self.pc:

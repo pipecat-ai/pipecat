@@ -97,6 +97,7 @@ class WebRTCConnection {
         this.log(`signalingState: ${pc.signalingState}`)
 
         pc.addEventListener('track', (evt: RTCTrackEvent) => {
+            this.log(`Received new track ${evt.track.kind}`)
             if (evt.track.kind === 'video') {
                 this.video.srcObject = evt.streams[0];
             } else {
@@ -121,6 +122,11 @@ class WebRTCConnection {
         this.updateStatus('Connected');
         if (this.connectBtn) this.connectBtn.disabled = true;
         if (this.disconnectBtn) this.disconnectBtn.disabled = false;
+
+        //Since we are using transceivers, the event with a new track is not triggered
+        this.log("onConnectedHandler, trying to setup the tracks")
+        this.audio.srcObject = new MediaStream([this.getAudioTransceiver().receiver.track]);
+        this.video.srcObject = new MediaStream([this.getVideoTransceiver().receiver.track]);
     }
 
     private onDisconnectedHandler() {
@@ -205,17 +211,41 @@ class WebRTCConnection {
             });
 
             const answer: RTCSessionDescriptionInit = await response.json();
+            // @ts-ignore
+            this.log(`Received answer for peer connection id ${answer.pc_id}`)
             await this.pc!.setRemoteDescription(answer);
         } catch (e) {
             alert(e);
         }
     }
 
+    private addInitialTransceivers() {
+        // Transceivers always appear in creation-order for both peers
+        // For now we are only considering that we are going to have 02 transceivers,
+        // one for audio and one for video
+        this.pc!.addTransceiver('audio', { direction: 'sendrecv' });
+        this.pc!.addTransceiver('video', { direction: 'sendrecv' });
+    }
+
+    private getAudioTransceiver() {
+        // Transceivers always appear in creation-order for both peers
+        // Look at addInitialTransceivers
+        return this.pc!.getTransceivers()[0];
+    }
+
+    private getVideoTransceiver() {
+        // Transceivers always appear in creation-order for both peers
+        // Look at addInitialTransceivers
+        return this.pc!.getTransceivers()[1];
+    }
+
+    // TODO: we need to implement to renegotiate to support add and remove transceivers on the flight
 
     private async start(): Promise<void> {
         this.clearAllLogs()
 
         this.pc = this.createPeerConnection();
+        this.addInitialTransceivers();
         this.dc = this.createDataChannel('chat', { ordered: true });
 
         const constraints = this.createMediaConstraints();
@@ -223,14 +253,17 @@ class WebRTCConnection {
         if (constraints.audio || constraints.video) {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                stream.getTracks().forEach(track => this.pc!.addTrack(track, stream));
-                await this.negotiate();
+
+                let audioTrack = stream.getAudioTracks()[0]
+                await this.getAudioTransceiver().sender.replaceTrack(audioTrack);
+
+                let videoTrack = stream.getVideoTracks()[0]
+                await this.getVideoTransceiver().sender.replaceTrack(videoTrack);
             } catch (err) {
                 alert(`Could not acquire media: ${err}`);
             }
-        } else {
-            await this.negotiate();
         }
+        await this.negotiate();
     }
 
     private createDataChannel(label: string, options: RTCDataChannelInit): RTCDataChannel {
