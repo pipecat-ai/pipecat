@@ -7,20 +7,15 @@ import argparse
 import asyncio
 import os
 import sys
-from dataclasses import dataclass
 from typing import Optional
 
-import google.ai.generativelanguage as glm
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     EndTaskFrame,
-    Frame,
     InputAudioRawFrame,
-    SystemFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -28,11 +23,11 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import LLMService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.google import GoogleLLMContext, GoogleLLMService
+from pipecat.services.google import GoogleLLMService
+from pipecat.services.google.google import GoogleLLMContext
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -240,7 +235,7 @@ If it sounds like a human (saying hello, asking questions, etc.), call the funct
 DO NOT say anything until you've determined if this is a voicemail or human."""
 
     llm = GoogleLLMService(
-        model="models/gemini-2.0-flash-lite-preview-02-05",
+        model="models/gemini-2.0-flash-lite",
         api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=system_instruction,
         tools=tools,
