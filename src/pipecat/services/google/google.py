@@ -722,7 +722,9 @@ class GoogleLLMContext(OpenAILLMContext):
 
         self.add_message(glm.Content(role="user", parts=parts))
 
-    def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: str = None):
+    def add_audio_frames_message(
+        self, *, audio_frames: list[AudioRawFrame], text: str = "Audio follows"
+    ):
         if not audio_frames:
             return
 
@@ -731,8 +733,9 @@ class GoogleLLMContext(OpenAILLMContext):
 
         parts = []
         data = b"".join(frame.audio for frame in audio_frames)
-        if text:
-            parts.append(glm.Part(text=text))
+        # NOTE(aleix): According to the docs only text or inline_data should be needed.
+        # (see https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference)
+        parts.append(glm.Part(text=text))
         parts.append(
             glm.Part(
                 inline_data=glm.Blob(
