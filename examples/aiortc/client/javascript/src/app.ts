@@ -1,12 +1,7 @@
 class WebRTCConnection {
 
-    private declare dataChannelLog: HTMLElement;
-    private declare iceConnectionLog: HTMLElement;
-    private declare iceGatheringLog: HTMLElement;
-    private declare signalingLog: HTMLElement;
-
-    private declare startButton: HTMLButtonElement;
-    private declare stopButton: HTMLButtonElement;
+    private declare connectBtn: HTMLButtonElement;
+    private declare disconnectBtn: HTMLButtonElement;
 
     private declare audioInput: HTMLSelectElement;
     private declare videoInput: HTMLSelectElement;
@@ -16,11 +11,13 @@ class WebRTCConnection {
 
     private declare video: HTMLVideoElement;
     private declare audio: HTMLAudioElement;
-    private declare media: HTMLElement;
 
     private pc: RTCPeerConnection | null = null;
     private dc: RTCDataChannel | null = null;
     private dcInterval: number | null = null;
+
+    private debugLog: HTMLElement | null = null;
+    private statusSpan: HTMLElement | null = null;
 
     constructor() {
         this.setupDOMElements();
@@ -29,13 +26,8 @@ class WebRTCConnection {
     }
 
     private setupDOMElements(): void {
-        this.dataChannelLog = document.getElementById('data-channel')!;
-        this.iceConnectionLog = document.getElementById('ice-connection-state')!;
-        this.iceGatheringLog = document.getElementById('ice-gathering-state')!;
-        this.signalingLog = document.getElementById('signaling-state')!;
-
-        this.startButton = document.getElementById('start') as HTMLButtonElement;
-        this.stopButton = document.getElementById('stop') as HTMLButtonElement;
+        this.connectBtn = document.getElementById('connect-btn') as HTMLButtonElement;
+        this.disconnectBtn = document.getElementById('disconnect-btn') as HTMLButtonElement;
 
         this.audioInput = document.getElementById('audio-input') as HTMLSelectElement;
         this.videoInput = document.getElementById('video-input') as HTMLSelectElement;
@@ -43,15 +35,38 @@ class WebRTCConnection {
         this.videoCodec = document.getElementById('video-codec') as HTMLSelectElement;
         this.videoResolution = document.getElementById('video-resolution') as HTMLSelectElement;
 
-        this.video = document.getElementById('video') as HTMLVideoElement;
-        this.audio = document.getElementById('audio') as HTMLAudioElement;
-        this.media = document.getElementById('media') as HTMLElement;
+        this.video = document.getElementById('bot-video') as HTMLVideoElement;
+        this.audio = document.getElementById('bot-audio') as HTMLAudioElement;
+
+        this.debugLog = document.getElementById('debug-log');
+        this.statusSpan = document.getElementById('connection-status');
     }
 
     private setupDOMEventListeners(): void {
-        this.startButton.addEventListener("click", () => this.start());
-        this.stopButton.addEventListener("click", () => this.stop());
+        this.connectBtn.addEventListener("click", () => this.start());
+        this.disconnectBtn.addEventListener("click", () => this.stop());
     }
+
+    private log(message: string): void {
+        if (!this.debugLog) return;
+        const entry = document.createElement('div');
+        entry.textContent = `${new Date().toISOString()} - ${message}`;
+        if (message.startsWith('User: ')) {
+          entry.style.color = '#2196F3';
+        } else if (message.startsWith('Bot: ')) {
+          entry.style.color = '#4CAF50';
+        }
+        this.debugLog.appendChild(entry);
+        this.debugLog.scrollTop = this.debugLog.scrollHeight;
+        console.log(message);
+    }
+
+    private updateStatus(status: string): void {
+        if (this.statusSpan) {
+            this.statusSpan.textContent = status;
+        }
+        this.log(`Status: ${status}`);
+   }
 
     private createPeerConnection(): RTCPeerConnection {
         const config: RTCConfiguration = {
@@ -59,24 +74,25 @@ class WebRTCConnection {
             iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
         };
 
-        this.pc = new RTCPeerConnection(config);
+        let pc = new RTCPeerConnection(config);
 
-        this.pc.addEventListener('icegatheringstatechange', () => {
-            this.iceGatheringLog.textContent += ' -> ' + this.pc!.iceGatheringState;
+        pc.addEventListener('icegatheringstatechange', () => {
+            this.log(`iceGatheringState: ${this.pc!.iceGatheringState}`)
         });
-        this.iceGatheringLog.textContent = this.pc!.iceGatheringState;
+        this.log(`iceGatheringState: ${pc.iceGatheringState}`)
 
-        this.pc.addEventListener('iceconnectionstatechange', () => {
-            this.iceConnectionLog.textContent += ' -> ' + this.pc!.iceConnectionState;
+        pc.addEventListener('iceconnectionstatechange', () => {
+            let connectionState = this.pc!.iceConnectionState
+            this.log(`iceConnectionState: ${connectionState}`)
         });
-        this.iceConnectionLog.textContent = this.pc!.iceConnectionState;
+        this.log(`iceConnectionState: ${pc.iceConnectionState}`)
 
-        this.pc.addEventListener('signalingstatechange', () => {
-            this.signalingLog.textContent += ' -> ' + this.pc!.signalingState;
+        pc.addEventListener('signalingstatechange', () => {
+            this.log(`signalingState: ${this.pc!.signalingState}`)
         });
-        this.signalingLog.textContent = this.pc!.signalingState;
+        this.log(`signalingState: ${pc.signalingState}`)
 
-        this.pc.addEventListener('track', (evt: RTCTrackEvent) => {
+        pc.addEventListener('track', (evt: RTCTrackEvent) => {
             if (evt.track.kind === 'video') {
                 this.video.srcObject = evt.streams[0];
             } else {
@@ -84,7 +100,29 @@ class WebRTCConnection {
             }
         });
 
-        return this.pc;
+        pc.onconnectionstatechange = () => {
+            let connectionState = this.pc?.connectionState
+            this.log(`connectionState: ${connectionState}`)
+            if (connectionState == 'connected') {
+                this.onConnectedHandler()
+            } else if (connectionState == 'disconnected') {
+                this.onDiscconnectedHandler()
+            }
+        }
+
+        return pc;
+    }
+
+    private onConnectedHandler() {
+        this.updateStatus('Connected');
+        if (this.connectBtn) this.connectBtn.disabled = true;
+        if (this.disconnectBtn) this.disconnectBtn.disabled = false;
+    }
+
+    private onDiscconnectedHandler() {
+        this.updateStatus('Disconnected');
+        if (this.connectBtn) this.connectBtn.disabled = false;
+        if (this.disconnectBtn) this.disconnectBtn.disabled = true;
     }
 
     private async enumerateInputDevices(): Promise<void> {
@@ -172,16 +210,12 @@ class WebRTCConnection {
 
 
     private async start(): Promise<void> {
-        this.startButton.style.display = 'none';
-
         this.pc = this.createPeerConnection();
         this.dc = this.createDataChannel('chat', { ordered: true });
 
         const constraints = this.createMediaConstraints();
 
         if (constraints.audio || constraints.video) {
-            if (constraints.video) this.media.style.display = 'block';
-
             try {
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 stream.getTracks().forEach(track => this.pc!.addTrack(track, stream));
@@ -192,8 +226,6 @@ class WebRTCConnection {
         } else {
             await this.negotiate();
         }
-
-        this.stopButton.style.display = 'inline-block';
     }
 
     private createDataChannel(label: string, options: RTCDataChannelInit): RTCDataChannel {
@@ -210,24 +242,25 @@ class WebRTCConnection {
 
         dc.addEventListener('close', () => {
             if (this.dcInterval) clearInterval(this.dcInterval);
-            this.dataChannelLog.textContent += '- close\n';
+            this.log("datachannel closed")
         });
 
         dc.addEventListener('open', () => {
-            this.dataChannelLog.textContent += '- open\n';
+            this.log("datachannel opened")
             // @ts-ignore
             this.dcInterval = setInterval(() => {
                 const message = `ping ${getCurrentTimestamp()}`;
-                this.dataChannelLog.textContent += `> ${message}\n`;
+                //this.log(`Sending datachannel message: ${message}}`)
                 dc.send(message);
             }, 1000);
         });
 
         dc.addEventListener('message', (evt: MessageEvent) => {
-            this.dataChannelLog.textContent += `< ${evt.data}\n`;
-            if (evt.data.startsWith('pong')) {
+            let message = evt.data
+            //this.log(`Received datachannel message: ${message}}`)
+            if (message.startsWith('pong')) {
                 const elapsedMs = getCurrentTimestamp() - parseInt(evt.data.substring(5), 10);
-                this.dataChannelLog.textContent += ` RTT ${elapsedMs} ms\n`;
+                //this.log(` RTT ${elapsedMs} ms`);
             }
         });
 
@@ -260,25 +293,42 @@ class WebRTCConnection {
     }
 
     private stop(): void {
-        this.stopButton.style.display = 'none';
+        if (!this.pc) {
+            this.log("Peer connection is already closed or null.");
+            return;
+        }
 
         if (this.dc) {
             this.dc.close();
         }
 
-        this.pc!.getTransceivers().forEach((transceiver) => {
+        this.pc.getTransceivers().forEach((transceiver) => {
             if (transceiver.stop) {
                 transceiver.stop();
             }
         });
 
-        this.pc!.getSenders().forEach((sender) => {
+        this.pc.getSenders().forEach((sender) => {
             sender.track?.stop();
         });
 
-        setTimeout(() => {
-            this.pc!.close();
-        }, 500);
+        this.log(`Before closing: 
+            connectionState=${this.pc.connectionState}, 
+            iceConnectionState=${this.pc.iceConnectionState}, 
+            signalingState=${this.pc.signalingState}`
+        );
+
+        this.pc.close();
+
+        this.log(`After closing: 
+            connectionState=${this.pc.connectionState}, 
+            iceConnectionState=${this.pc.iceConnectionState}, 
+            signalingState=${this.pc.signalingState}`
+        );
+
+        // TODO: For some reason after we close the peer connection, it is not trigerring the listeners
+        // need to investigate why. For now, forcing it here.
+        this.onDiscconnectedHandler()
     }
 
     private sdpFilterCodec(kind: string, codec: string, realSdp: string): string {
