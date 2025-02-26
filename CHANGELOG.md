@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Pipecat version will now be logged on every application startup. This will
+  help us identify what version we are running in case of any issues.
+
 - Added a new `StopFrame` which can be used to stop a pipeline task while
   keeping the frame processors running. The frame processors could then be used
   in a different pipeline. The difference between a `StopFrame` and a
