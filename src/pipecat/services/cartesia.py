@@ -272,7 +272,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 logger.error(f"{self} error, unknown message type: {msg}")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             if not self._websocket:
@@ -358,7 +358,7 @@ class CartesiaHttpTTSService(TTSService):
         await self._client.close()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             voice_controls = None
