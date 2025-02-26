@@ -132,6 +132,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Added
 
+- Added track-specific audio event `on_track_audio_data` to
+  `AudioBufferProcessor` for accessing separate input and output audio tracks.
+
 - Added new `AudioContextWordTTSService`. This is a TTS base class for TTS
   services that handling multiple separate audio requests.
 
