@@ -106,7 +106,7 @@ class WebRTCConnection {
             if (connectionState == 'connected') {
                 this.onConnectedHandler()
             } else if (connectionState == 'disconnected') {
-                this.onDiscconnectedHandler()
+                this.onDisconnectedHandler()
             }
         }
 
@@ -119,7 +119,7 @@ class WebRTCConnection {
         if (this.disconnectBtn) this.disconnectBtn.disabled = false;
     }
 
-    private onDiscconnectedHandler() {
+    private onDisconnectedHandler() {
         this.updateStatus('Disconnected');
         if (this.connectBtn) this.connectBtn.disabled = false;
         if (this.disconnectBtn) this.disconnectBtn.disabled = true;
@@ -328,7 +328,7 @@ class WebRTCConnection {
 
         // TODO: For some reason after we close the peer connection, it is not trigerring the listeners
         // need to investigate why. For now, forcing it here.
-        this.onDiscconnectedHandler()
+        this.onDisconnectedHandler()
     }
 
     private sdpFilterCodec(kind: string, codec: string, realSdp: string): string {
