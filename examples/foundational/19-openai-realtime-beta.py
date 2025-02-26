@@ -16,10 +16,13 @@ from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import TranscriptionMessage, TranscriptionUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.transcript_processor import TranscriptProcessor
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai_realtime_beta import (
     InputAudioTranscription,
     OpenAIRealtimeBetaLLMService,
@@ -140,14 +143,22 @@ Remember, your responses should be short. Just one or two sentences, usually."""
             tools,
         )
 
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+
+        # Create transcript processor and handler
+        transcript = TranscriptProcessor()
+
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                stt,
+                transcript.user(),  # User transcripts
                 context_aggregator.user(),
                 llm,  # LLM
                 context_aggregator.assistant(),
+                transcript.assistant(),  # Assistant transcripts
                 transport.output(),  # Transport bot output
             ]
         )
@@ -162,9 +173,16 @@ Remember, your responses should be short. Just one or two sentences, usually."""
             ),
         )
 
+        # Register event handler for transcript updates
+        @transcript.event_handler("on_transcript_update")
+        async def on_transcript_update(processor, frame):
+            logger.debug(f"Received transcript update with {len(frame.messages)} new messages")
+            for msg in frame.messages:
+                logger.debug(msg)
+
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
+            # await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 
