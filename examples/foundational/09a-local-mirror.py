@@ -82,7 +82,11 @@ async def main():
         pipeline = Pipeline([daily_transport.input(), MirrorProcessor(), tk_transport.output()])
 
         task = PipelineTask(
-            pipeline, PipelineParams(audio_in_sample_rate=24000, audio_out_sample_rate=24000)
+            pipeline,
+            params=PipelineParams(
+                audio_in_sample_rate=24000,
+                audio_out_sample_rate=24000,
+            ),
         )
 
         async def run_tk():

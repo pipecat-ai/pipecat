@@ -140,7 +140,7 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(allow_interruptions=True),
+            params=PipelineParams(allow_interruptions=True),
             observers=[GoogleRTVIObserver(rtvi)],
         )
 
