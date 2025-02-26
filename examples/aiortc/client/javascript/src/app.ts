@@ -197,7 +197,6 @@ class WebRTCConnection {
                 body: JSON.stringify({
                     sdp: offerSdp.sdp,
                     type: offerSdp.type,
-                    video_transform: "none", //Look the possible options at the server example
                 }),
                 headers: {
                     'Content-Type': 'application/json',

@@ -19,9 +19,8 @@ app = FastAPI()
 
 
 class WebRTCConnection:
-    def __init__(self, transform):
+    def __init__(self):
         self.pc = None
-        self.transform = transform
 
     async def create_peer_connection(self, offer):
         pc = RTCPeerConnection()
@@ -91,11 +90,8 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
     params = request
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
-    # Extract the video transformation type from the offer
-    transform = params.get("video_transform", "none")
-
     # Create WebRTC connection instance and process the offer
-    webrtc_connection = WebRTCConnection(transform)
+    webrtc_connection = WebRTCConnection()
     pc = await webrtc_connection.create_peer_connection(offer)
 
     # This background task will run after sending the response
