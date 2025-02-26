@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added track-specific audio event `on_track_audio_data` to
+  `AudioBufferProcessor` for accessing separate input and output audio tracks.
+
 - Pipecat version will now be logged on every application startup. This will
   help us identify what version we are running in case of any issues.
 
@@ -130,6 +133,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 ### Other
 
 - Added Gemini support to `examples/phone-chatbot`.
+
+- Added foundational example `34-audio-recording.py` showing how to use the
+  AudioBufferProcessor callbacks to save merged and track recordings.
 
 ## [0.0.57] - 2025-02-14
 
