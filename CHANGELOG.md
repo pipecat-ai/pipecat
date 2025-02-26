@@ -82,6 +82,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed a `GoogleLLMService` that was causing an exception when sending inline
+  audio in some cases.
+
 - Fixed an `AudioContextWordTTSService` issue that would cause an `EndFrame` to
   disconnect from the TTS service before audio from all the contexts was
   received. This affected services like Cartesia and Rime.
