@@ -1,13 +1,12 @@
 import argparse
 import asyncio
-import json
 import logging
 import os
-import ssl
 import uuid
+from contextlib import asynccontextmanager
 
 import cv2
-from aiohttp import web
+from fastapi import FastAPI
 from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaBlackhole, MediaPlayer, MediaRecorder, MediaRelay
 from av import VideoFrame
@@ -18,16 +17,17 @@ logger = logging.getLogger("pc")
 pcs = set()
 relay = MediaRelay()
 
+# FastAPI instance
+app = FastAPI()
 
 class VideoTransformTrack(MediaStreamTrack):
     """
-    A video stream track that transforms frames from an another track.
+    A video stream track that transforms frames from another track.
     """
-
     kind = "video"
 
     def __init__(self, track, transform):
-        super().__init__()  # don't forget this!
+        super().__init__()
         self.track = track
         self.transform = transform
 
@@ -89,97 +89,108 @@ class VideoTransformTrack(MediaStreamTrack):
             return frame
 
 
-async def offer(request):
-    params = await request.json()
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+class WebRTCConnection:
+    def __init__(self, transform):
+        self.pc = None
+        self.transform = transform
 
-    pc = RTCPeerConnection()
-    pc_id = "PeerConnection(%s)" % uuid.uuid4()
-    pcs.add(pc)
+    async def create_peer_connection(self, offer):
+        pc = RTCPeerConnection()
+        self.pc = pc
+        pc_id = "PeerConnection(%s)" % uuid.uuid4()
+        pcs.add(pc)
 
-    def log_info(msg, *args):
-        logger.info(pc_id + " " + msg, *args)
+        def log_info(msg, *args):
+            logger.info(pc_id + " " + msg, *args)
 
-    log_info("Created for %s", request.remote)
+        log_info("Created")
 
-    # prepare local media
-    player = MediaPlayer(os.path.join(ROOT, "demo-instruct.wav"))
-    if args.record_to:
-        recorder = MediaRecorder(args.record_to)
-    else:
+        # prepare local media
+        player = MediaPlayer(os.path.join(ROOT, "demo-instruct.wav"))
+        # TODO: in case we wish to record the audio
+        # recorder = MediaRecorder(args.record_to)
         recorder = MediaBlackhole()
 
-    @pc.on("datachannel")
-    def on_datachannel(channel):
-        @channel.on("message")
-        def on_message(message):
-            if isinstance(message, str) and message.startswith("ping"):
-                channel.send("pong" + message[4:])
+        @pc.on("datachannel")
+        def on_datachannel(channel):
+            @channel.on("message")
+            def on_message(message):
+                if isinstance(message, str) and message.startswith("ping"):
+                    channel.send("pong" + message[4:])
 
-    @pc.on("connectionstatechange")
-    async def on_connectionstatechange():
-        log_info("Connection state is %s", pc.connectionState)
-        if pc.connectionState == "failed":
-            await pc.close()
-            pcs.discard(pc)
+        @pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            log_info("Connection state is %s", pc.connectionState)
+            if pc.connectionState == "failed":
+                await pc.close()
+                pcs.discard(pc)
 
-    @pc.on("track")
-    def on_track(track):
-        log_info("Track %s received", track.kind)
+        @pc.on("track")
+        def on_track(track):
+            log_info("Track %s received", track.kind)
 
-        if track.kind == "audio":
-            pc.addTrack(player.audio)
-            recorder.addTrack(track)
-        elif track.kind == "video":
-            pc.addTrack(
-                VideoTransformTrack(
-                    relay.subscribe(track), transform=params["video_transform"]
+            if track.kind == "audio":
+                pc.addTrack(player.audio)
+                recorder.addTrack(track)
+            elif track.kind == "video":
+                pc.addTrack(
+                    VideoTransformTrack(relay.subscribe(track), transform=self.transform)
                 )
-            )
-            if args.record_to:
-                recorder.addTrack(relay.subscribe(track))
 
-        @track.on("ended")
-        async def on_ended():
-            log_info("Track %s ended", track.kind)
-            await recorder.stop()
+            @track.on("ended")
+            async def on_ended():
+                log_info("Track %s ended", track.kind)
+                await recorder.stop()
 
-    # handle offer
-    await pc.setRemoteDescription(offer)
-    await recorder.start()
+        # handle offer
+        await pc.setRemoteDescription(offer)
+        await recorder.start()
 
-    # send answer
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
+        # send answer
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
 
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps(
-            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
-        ),
-    )
+        return pc
+
+    async def close_connection(self):
+        if self.pc:
+            await self.pc.close()
+            pcs.discard(self.pc)
 
 
-async def on_shutdown(app):
-    # close peer connections
-    coros = [pc.close() for pc in pcs]
+@app.post("/api/offer")
+async def offer(request: dict):
+    params = request
+    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+
+    # Extract the video transformation type from the offer
+    transform = params.get("video_transform", "none")
+
+    # Create WebRTC connection instance and process the offer
+    webrtc_connection = WebRTCConnection(transform)
+    pc = await webrtc_connection.create_peer_connection(offer)
+
+    return {
+        "sdp": pc.localDescription.sdp,
+        "type": pc.localDescription.type
+    }
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handles FastAPI startup and shutdown."""
+    yield  # Run app
+    coros = [webrtc_connection.close_connection() for webrtc_connection in pcs]
     await asyncio.gather(*coros)
     pcs.clear()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="WebRTC audio / video / data-channels demo"
-    )
-    parser.add_argument("--cert-file", help="SSL certificate file (for HTTPS)")
-    parser.add_argument("--key-file", help="SSL key file (for HTTPS)")
-    parser.add_argument(
-        "--host", default="0.0.0.0", help="Host for HTTP server (default: 0.0.0.0)"
-    )
+    parser = argparse.ArgumentParser(description="WebRTC demo")
+    parser.add_argument("--host", default="0.0.0.0", help="Host for HTTP server (default: 0.0.0.0)")
     parser.add_argument(
         "--port", type=int, default=7860, help="Port for HTTP server (default: 7860)"
     )
-    parser.add_argument("--record-to", help="Write received media to a file.")
     parser.add_argument("--verbose", "-v", action="count")
     args = parser.parse_args()
 
@@ -188,15 +199,6 @@ if __name__ == "__main__":
     else:
         logging.basicConfig(level=logging.INFO)
 
-    if args.cert_file:
-        ssl_context = ssl.SSLContext()
-        ssl_context.load_cert_chain(args.cert_file, args.key_file)
-    else:
-        ssl_context = None
+    import uvicorn
 
-    app = web.Application()
-    app.on_shutdown.append(on_shutdown)
-    app.router.add_post("/api/offer", offer)
-    web.run_app(
-        app, access_log=None, host=args.host, port=args.port, ssl_context=ssl_context
-    )
+    uvicorn.run(app, host=args.host, port=args.port)
