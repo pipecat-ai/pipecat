@@ -530,8 +530,10 @@ class OpenAITTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
+                CHUNK_SIZE = 1024
+
                 yield TTSStartedFrame()
-                async for chunk in r.iter_bytes(8192):
+                async for chunk in r.iter_bytes(CHUNK_SIZE):
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
                         frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
