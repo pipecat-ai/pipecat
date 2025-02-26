@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ⚠️ `PipelineTask` now requires keyword arguments (except for the first one for
   the pipeline).
 
+- Updated `PlayHTHttpTTSService` to take a `voice_engine` and `protocol` input
+  in the constructor. The previous method of providing a `voice_engine` input
+  that contains the engine and protocol is deprecated by PlayHT.
+
 - The base `TTSService` class now strips leading newlines before sending text
   to the TTS provider. This change is to solve issues where some TTS providers,
   like Azure, would not output text due to newlines.

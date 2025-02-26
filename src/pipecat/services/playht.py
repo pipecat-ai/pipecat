@@ -323,7 +323,8 @@ class PlayHTHttpTTSService(TTSService):
         api_key: str,
         user_id: str,
         voice_url: str,
-        voice_engine: str = "Play3.0-mini-http",  # Options: Play3.0-mini-http, Play3.0-mini-ws
+        voice_engine: str = "Play3.0-mini",
+        protocol: str = "http",  # Options: http, ws
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
@@ -337,12 +338,24 @@ class PlayHTHttpTTSService(TTSService):
             user_id=self._user_id,
             api_key=self._api_key,
         )
+
+        # Check if voice_engine contains protocol information (backward compatibility)
+        if "-http" in voice_engine:
+            # Extract the base engine name
+            voice_engine = voice_engine.replace("-http", "")
+            protocol = "http"
+        elif "-ws" in voice_engine:
+            # Extract the base engine name
+            voice_engine = voice_engine.replace("-ws", "")
+            protocol = "ws"
+
         self._settings = {
             "language": self.language_to_service_language(params.language)
             if params.language
             else "english",
             "format": Format.FORMAT_WAV,
             "voice_engine": voice_engine,
+            "protocol": protocol,
             "speed": params.speed,
             "seed": params.seed,
         }
@@ -389,7 +402,10 @@ class PlayHTHttpTTSService(TTSService):
             await self.start_ttfb_metrics()
 
             playht_gen = self._client.tts(
-                text, voice_engine=self._settings["voice_engine"], options=options
+                text,
+                voice_engine=self._settings["voice_engine"],
+                protocol=self._settings["protocol"],
+                options=options,
             )
 
             await self.start_tts_usage_metrics(text)
