@@ -570,10 +570,12 @@ class ElevenLabsHttpTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                yield TTSStartedFrame()
+                # Process the streaming response
+                CHUNK_SIZE = 1024
 
-                async for chunk in response.content:
-                    if chunk:
+                yield TTSStartedFrame()
+                async for chunk in response.content.iter_chunked(CHUNK_SIZE):
+                    if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
                         yield TTSAudioRawFrame(chunk, self.sample_rate, 1)
         except Exception as e:
