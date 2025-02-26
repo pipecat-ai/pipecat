@@ -61,6 +61,10 @@ class WebRTCConnection {
         console.log(message);
     }
 
+    private clearAllLogs() {
+        this.debugLog!.innerText = ''
+    }
+
     private updateStatus(status: string): void {
         if (this.statusSpan) {
             this.statusSpan.textContent = status;
@@ -210,6 +214,8 @@ class WebRTCConnection {
 
 
     private async start(): Promise<void> {
+        this.clearAllLogs()
+
         this.pc = this.createPeerConnection();
         this.dc = this.createDataChannel('chat', { ordered: true });
 
