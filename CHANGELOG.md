@@ -5,6 +5,16 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added a new frame, `ServerMessageFrame`, and RTVI message `RTVIServerMessage`
+  which provides a generic mechanism for sending custom messages from server to
+  client. The `ServerMessageFrame` can be processed by either a `RTVIProcessor`
+  or `RTVIObserver` and will be delivered to the client's `onServerMessage`
+  callback.
+
 ## [0.0.58] - 2025-02-26
 
 ### Added
