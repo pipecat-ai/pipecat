@@ -30,15 +30,7 @@
 <body>
 
 <h2>Options</h2>
-<div class="option">
-    <input id="use-datachannel" checked="checked" type="checkbox"/>
-    <label for="use-datachannel">Use datachannel</label>
-    <select id="datachannel-parameters">
-        <option value='{"ordered": true}'>Ordered, reliable</option>
-        <option value='{"ordered": false, "maxRetransmits": 0}'>Unordered, no retransmissions</option>
-        <option value='{"ordered": false, "maxPacketLifetime": 500}'>Unordered, 500ms lifetime</option>
-    </select>
-</div>
+
 <div class="option">
     <input id="use-audio" checked="checked" type="checkbox"/>
     <label for="use-audio">Use audio</label>
@@ -77,10 +69,6 @@
         <option value="H264/90000">H264</option>
     </select>
 </div>
-<div class="option">
-    <input id="use-stun" type="checkbox"/>
-    <label for="use-stun">Use STUN server</label>
-</div>
 
 <button id="start">Start</button>
 <button id="stop" style="display: none">Stop</button>
@@ -105,14 +93,6 @@
 
 <h2>Data channel</h2>
 <pre id="data-channel" style="height: 200px;"></pre>
-
-<h2>SDP</h2>
-
-<h3>Offer</h3>
-<pre id="offer-sdp"></pre>
-
-<h3>Answer</h3>
-<pre id="answer-sdp"></pre>
 
 <script type="module" src="/src/app.ts"></script>
 <link rel="stylesheet" href="/src/style.css">

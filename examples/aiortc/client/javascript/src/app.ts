@@ -8,9 +8,6 @@ class WebRTCConnection {
     private declare startButton: HTMLButtonElement;
     private declare stopButton: HTMLButtonElement;
 
-    private declare useStun: HTMLInputElement;
-    private declare useDataChannel: HTMLInputElement;
-    private declare dataChannelParameters: HTMLTextAreaElement;
     private declare useAudio: HTMLInputElement;
     private declare useVideo: HTMLInputElement;
     private declare audioInput: HTMLSelectElement;
@@ -18,8 +15,7 @@ class WebRTCConnection {
     private declare audioCodec: HTMLSelectElement;
     private declare videoCodec: HTMLSelectElement;
     private declare videoResolution: HTMLSelectElement;
-    private declare offerSdp: HTMLElement;
-    private declare answerSdp: HTMLElement;
+
     private declare video: HTMLVideoElement;
     private declare audio: HTMLAudioElement;
     private declare media: HTMLElement;
@@ -42,9 +38,7 @@ class WebRTCConnection {
 
         this.startButton = document.getElementById('start') as HTMLButtonElement;
         this.stopButton = document.getElementById('stop') as HTMLButtonElement;
-        this.useStun = document.getElementById('use-stun') as HTMLInputElement;
-        this.useDataChannel = document.getElementById('use-datachannel') as HTMLInputElement;
-        this.dataChannelParameters = document.getElementById('datachannel-parameters') as HTMLTextAreaElement;
+
         this.useAudio = document.getElementById('use-audio') as HTMLInputElement;
         this.useVideo = document.getElementById('use-video') as HTMLInputElement;
         this.audioInput = document.getElementById('audio-input') as HTMLSelectElement;
@@ -52,8 +46,7 @@ class WebRTCConnection {
         this.audioCodec = document.getElementById('audio-codec') as HTMLSelectElement;
         this.videoCodec = document.getElementById('video-codec') as HTMLSelectElement;
         this.videoResolution = document.getElementById('video-resolution') as HTMLSelectElement;
-        this.offerSdp = document.getElementById('offer-sdp') as HTMLElement;
-        this.answerSdp = document.getElementById('answer-sdp') as HTMLElement;
+
         this.video = document.getElementById('video') as HTMLVideoElement;
         this.audio = document.getElementById('audio') as HTMLAudioElement;
         this.media = document.getElementById('media') as HTMLElement;
@@ -67,11 +60,8 @@ class WebRTCConnection {
     private createPeerConnection(): RTCPeerConnection {
         const config: RTCConfiguration = {
             // sdpSemantics: 'unified-plan'
+            iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
         };
-
-        if (this.useStun.checked) {
-            config.iceServers = [{ urls: ['stun:stun.l.google.com:19302'] }];
-        }
 
         this.pc = new RTCPeerConnection(config);
 
@@ -164,8 +154,6 @@ class WebRTCConnection {
                 offerSdp.sdp = this.sdpFilterCodec('video', codec, offerSdp.sdp);
             }
 
-            this.offerSdp.textContent = offerSdp.sdp;
-
             // Send offer to server
             const response = await fetch('/api/offer', {
                 body: JSON.stringify({
@@ -180,8 +168,6 @@ class WebRTCConnection {
             });
 
             const answer: RTCSessionDescriptionInit = await response.json();
-
-            this.answerSdp.textContent = answer.sdp || '';
             await this.pc!.setRemoteDescription(answer);
         } catch (e) {
             alert(e);
@@ -205,32 +191,28 @@ class WebRTCConnection {
             }
         };
 
-        if (this.useDataChannel.checked) {
-            const parameters = JSON.parse(this.dataChannelParameters.value);
+        this.dc = this.pc.createDataChannel('chat', {"ordered": true});
+        this.dc.addEventListener('close', () => {
+            if (this.dcInterval) clearInterval(this.dcInterval);
+            this.dataChannelLog.textContent += '- close\n';
+        });
+        this.dc.addEventListener('open', () => {
+            this.dataChannelLog.textContent += '- open\n';
+            // @ts-ignore
+            this.dcInterval = setInterval(() => {
+                const message = 'ping ' + current_stamp();
+                this.dataChannelLog.textContent += '> ' + message + '\n';
+                this.dc!.send(message);
+            }, 1000);
+        });
+        this.dc.addEventListener('message', (evt: MessageEvent) => {
+            this.dataChannelLog.textContent += '< ' + evt.data + '\n';
 
-            this.dc = this.pc.createDataChannel('chat', parameters);
-            this.dc.addEventListener('close', () => {
-                if (this.dcInterval) clearInterval(this.dcInterval);
-                this.dataChannelLog.textContent += '- close\n';
-            });
-            this.dc.addEventListener('open', () => {
-                this.dataChannelLog.textContent += '- open\n';
-                // @ts-ignore
-                this.dcInterval = setInterval(() => {
-                    const message = 'ping ' + current_stamp();
-                    this.dataChannelLog.textContent += '> ' + message + '\n';
-                    this.dc!.send(message);
-                }, 1000);
-            });
-            this.dc.addEventListener('message', (evt: MessageEvent) => {
-                this.dataChannelLog.textContent += '< ' + evt.data + '\n';
-
-                if (evt.data.substring(0, 4) === 'pong') {
-                    const elapsed_ms = current_stamp() - parseInt(evt.data.substring(5), 10);
-                    this.dataChannelLog.textContent += ' RTT ' + elapsed_ms + ' ms\n';
-                }
-            });
-        }
+            if (evt.data.substring(0, 4) === 'pong') {
+                const elapsed_ms = current_stamp() - parseInt(evt.data.substring(5), 10);
+                this.dataChannelLog.textContent += ' RTT ' + elapsed_ms + ' ms\n';
+            }
+        });
 
         const constraints: MediaStreamConstraints = {
             audio: false,
