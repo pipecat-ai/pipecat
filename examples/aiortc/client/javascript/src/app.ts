@@ -8,8 +8,6 @@ class WebRTCConnection {
     private declare startButton: HTMLButtonElement;
     private declare stopButton: HTMLButtonElement;
 
-    private declare useAudio: HTMLInputElement;
-    private declare useVideo: HTMLInputElement;
     private declare audioInput: HTMLSelectElement;
     private declare videoInput: HTMLSelectElement;
     private declare audioCodec: HTMLSelectElement;
@@ -39,8 +37,6 @@ class WebRTCConnection {
         this.startButton = document.getElementById('start') as HTMLButtonElement;
         this.stopButton = document.getElementById('stop') as HTMLButtonElement;
 
-        this.useAudio = document.getElementById('use-audio') as HTMLInputElement;
-        this.useVideo = document.getElementById('use-video') as HTMLInputElement;
         this.audioInput = document.getElementById('audio-input') as HTMLSelectElement;
         this.videoInput = document.getElementById('video-input') as HTMLSelectElement;
         this.audioCodec = document.getElementById('audio-codec') as HTMLSelectElement;
@@ -159,7 +155,7 @@ class WebRTCConnection {
                 body: JSON.stringify({
                     sdp: offerSdp.sdp,
                     type: offerSdp.type,
-                    video_transform: this.videoResolution.value,
+                    video_transform: "none", //Look the possible options at the server example
                 }),
                 headers: {
                     'Content-Type': 'application/json',
@@ -179,93 +175,88 @@ class WebRTCConnection {
         this.startButton.style.display = 'none';
 
         this.pc = this.createPeerConnection();
+        this.dc = this.createDataChannel('chat', { ordered: true });
 
-        let time_start: number | null = null;
-
-        const current_stamp = (): number => {
-            if (time_start === null) {
-                time_start = new Date().getTime();
-                return 0;
-            } else {
-                return new Date().getTime() - time_start;
-            }
-        };
-
-        this.dc = this.pc.createDataChannel('chat', {"ordered": true});
-        this.dc.addEventListener('close', () => {
-            if (this.dcInterval) clearInterval(this.dcInterval);
-            this.dataChannelLog.textContent += '- close\n';
-        });
-        this.dc.addEventListener('open', () => {
-            this.dataChannelLog.textContent += '- open\n';
-            // @ts-ignore
-            this.dcInterval = setInterval(() => {
-                const message = 'ping ' + current_stamp();
-                this.dataChannelLog.textContent += '> ' + message + '\n';
-                this.dc!.send(message);
-            }, 1000);
-        });
-        this.dc.addEventListener('message', (evt: MessageEvent) => {
-            this.dataChannelLog.textContent += '< ' + evt.data + '\n';
-
-            if (evt.data.substring(0, 4) === 'pong') {
-                const elapsed_ms = current_stamp() - parseInt(evt.data.substring(5), 10);
-                this.dataChannelLog.textContent += ' RTT ' + elapsed_ms + ' ms\n';
-            }
-        });
-
-        const constraints: MediaStreamConstraints = {
-            audio: false,
-            video: false
-        };
-
-        if (this.useAudio.checked) {
-            const audioConstraints: MediaTrackConstraints = {};
-
-            const device = this.audioInput.value;
-            if (device) {
-                audioConstraints.deviceId = { exact: device };
-            }
-
-            constraints.audio = Object.keys(audioConstraints).length ? audioConstraints : true;
-        }
-
-        if (this.useVideo.checked) {
-            const videoConstraints: MediaTrackConstraints = {};
-
-            const device = this.videoInput.value;
-            if (device) {
-                videoConstraints.deviceId = { exact: device };
-            }
-
-            const resolution = this.videoResolution.value;
-            if (resolution) {
-                const dimensions = resolution.split('x');
-                videoConstraints.width = parseInt(dimensions[0], 10);
-                videoConstraints.height = parseInt(dimensions[1], 10);
-            }
-
-            constraints.video = Object.keys(videoConstraints).length ? videoConstraints : true;
-        }
+        const constraints = this.createMediaConstraints();
 
         if (constraints.audio || constraints.video) {
-            if (constraints.video) {
-                this.media.style.display = 'block';
-            }
+            if (constraints.video) this.media.style.display = 'block';
+
             try {
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                stream.getTracks().forEach((track) => {
-                    this.pc!.addTrack(track, stream);
-                });
+                stream.getTracks().forEach(track => this.pc!.addTrack(track, stream));
                 await this.negotiate();
             } catch (err) {
-                alert('Could not acquire media: ' + err);
+                alert(`Could not acquire media: ${err}`);
             }
         } else {
             await this.negotiate();
         }
 
         this.stopButton.style.display = 'inline-block';
+    }
+
+    private createDataChannel(label: string, options: RTCDataChannelInit): RTCDataChannel {
+        const dc = this.pc!.createDataChannel(label, options);
+        let timeStart: number | null = null;
+
+        const getCurrentTimestamp = (): number => {
+            if (timeStart === null) {
+                timeStart = Date.now();
+                return 0;
+            }
+            return Date.now() - timeStart;
+        };
+
+        dc.addEventListener('close', () => {
+            if (this.dcInterval) clearInterval(this.dcInterval);
+            this.dataChannelLog.textContent += '- close\n';
+        });
+
+        dc.addEventListener('open', () => {
+            this.dataChannelLog.textContent += '- open\n';
+            // @ts-ignore
+            this.dcInterval = setInterval(() => {
+                const message = `ping ${getCurrentTimestamp()}`;
+                this.dataChannelLog.textContent += `> ${message}\n`;
+                dc.send(message);
+            }, 1000);
+        });
+
+        dc.addEventListener('message', (evt: MessageEvent) => {
+            this.dataChannelLog.textContent += `< ${evt.data}\n`;
+            if (evt.data.startsWith('pong')) {
+                const elapsedMs = getCurrentTimestamp() - parseInt(evt.data.substring(5), 10);
+                this.dataChannelLog.textContent += ` RTT ${elapsedMs} ms\n`;
+            }
+        });
+
+        return dc;
+    }
+
+    private createMediaConstraints(): MediaStreamConstraints {
+        const constraints: MediaStreamConstraints = { audio: false, video: false };
+
+        const audioConstraints: MediaTrackConstraints = {};
+        const audioDevice = this.audioInput.value;
+        if (audioDevice) audioConstraints.deviceId = { exact: audioDevice };
+
+        constraints.audio = Object.keys(audioConstraints).length ? audioConstraints : true;
+
+        const videoConstraints: MediaTrackConstraints = {};
+        const videoDevice = this.videoInput.value;
+        if (videoDevice) videoConstraints.deviceId = { exact: videoDevice };
+
+        const resolution = this.videoResolution.value;
+        if (resolution) {
+            const [width, height] = resolution.split('x').map(Number);
+            videoConstraints.width = width;
+            videoConstraints.height = height;
+        }
+
+        constraints.video = Object.keys(videoConstraints).length ? videoConstraints : true;
+
+        return constraints;
     }
 
     private stop(): void {
