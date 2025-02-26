@@ -18,11 +18,18 @@ relay = MediaRelay()
 app = FastAPI()
 
 
-class WebRTCConnection:
+class PipecatWebRTCUtil:
+    async def create_new_webrtc_connection(sdp:str, type:str):
+        # Create WebRTC connection instance and process the offer
+        pipecat_webrtc_connection = PipecatWebRTCConnection()
+        await pipecat_webrtc_connection.create_peer_connection(RTCSessionDescription(sdp=sdp, type=type))
+        return pipecat_webrtc_connection
+
+class PipecatWebRTCConnection:
     def __init__(self):
         self.pc = None
 
-    async def create_peer_connection(self, offer):
+    async def create_peer_connection(self, offer:RTCSessionDescription):
         pc = RTCPeerConnection()
         self.pc = pc
         pc_id = "PeerConnection(%s)" % uuid.uuid4()
@@ -84,27 +91,23 @@ class WebRTCConnection:
             await self.pc.close()
             pcs.discard(self.pc)
 
+    def get_answer(self):
+        return {
+            "sdp": self.pc.localDescription.sdp,
+            "type": self.pc.localDescription.type
+        }
+
 
 @app.post("/api/offer")
 async def offer(request: dict, background_tasks: BackgroundTasks):
-    params = request
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-
-    # Create WebRTC connection instance and process the offer
-    webrtc_connection = WebRTCConnection()
-    pc = await webrtc_connection.create_peer_connection(offer)
-
+    pipecat_connection = await PipecatWebRTCUtil.create_new_webrtc_connection(sdp=request["sdp"], type=request["type"])
     # This background task will run after sending the response
-    background_tasks.add_task(run_additional_logic, webrtc_connection)
-
+    background_tasks.add_task(run_new_bot, pipecat_connection)
     # Send the answer back to the client
-    return {
-        "sdp": pc.localDescription.sdp,
-        "type": pc.localDescription.type
-    }
+    return pipecat_connection.get_answer()
 
 
-async def run_additional_logic(webrtc_connection: WebRTCConnection):
+async def run_new_bot(webrtc_connection: PipecatWebRTCConnection):
     logger.info("Should run the bot here passing the peer connection")
 
 
