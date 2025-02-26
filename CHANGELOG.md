@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- ⚠️ `PipelineTask` now requires keyword arguments (except for the first one for
+  the pipeline).
+
 - The base `TTSService` class now strips leading newlines before sending text
   to the TTS provider. This change is to solve issues where some TTS providers,
   like Azure, would not output text due to newlines.

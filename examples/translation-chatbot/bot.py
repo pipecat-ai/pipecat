@@ -183,7 +183,7 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=False,  # We don't want to interrupt the translator bot
                 enable_metrics=True,
                 enable_usage_metrics=True,

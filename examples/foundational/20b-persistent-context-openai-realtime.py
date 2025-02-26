@@ -237,7 +237,7 @@ Remember, your responses should be short. Just one or two sentences, usually."""
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
