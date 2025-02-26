@@ -262,7 +262,7 @@ class WebRTCConnection {
 
         dc.addEventListener('message', (evt: MessageEvent) => {
             let message = evt.data
-            //this.log(`Received datachannel message: ${message}}`)
+            //this.log(`Received datachannel message: ${message}`)
             if (message.startsWith('pong')) {
                 const elapsedMs = getCurrentTimestamp() - parseInt(evt.data.substring(5), 10);
                 //this.log(` RTT ${elapsedMs} ms`);

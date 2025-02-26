@@ -4,11 +4,13 @@ class EventEmitter:
 
     def on(self, event_name):
         """Decorator to register an event handler."""
+
         def decorator(func):
             if event_name not in self._events:
                 self._events[event_name] = []
             self._events[event_name].append(func)
             return func
+
         return decorator
 
     def emit(self, event_name, *args, **kwargs):
