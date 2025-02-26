@@ -271,7 +271,7 @@ DO NOT say anything until you've determined if this is a voicemail or human."""
 
     task = PipelineTask(
         pipeline,
-        PipelineParams(allow_interruptions=True),
+        params=PipelineParams(allow_interruptions=True),
     )
 
     if dialout_number:
