@@ -196,7 +196,7 @@ class LmntTTSService(InterruptibleTTSService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio from text."""
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             if not self._websocket:
