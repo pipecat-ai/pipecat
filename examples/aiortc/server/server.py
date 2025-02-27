@@ -1,16 +1,17 @@
 import argparse
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 
-from aiortc import MediaStreamTrack
-from aiortc.contrib.media import MediaBlackhole, MediaPlayer, MediaRelay
+import uvicorn
+from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
 
+from aiortc_bot import run_aiortc_bot
 from pipecat.transports.webrtc.webrtc_connection import PipecatWebRTCConnection
 
-ROOT = os.path.dirname(__file__)
+# Load environment variables
+load_dotenv(override=True)
 
 logger = logging.getLogger("pc")
 
@@ -18,7 +19,6 @@ app = FastAPI()
 
 
 pcs = set()
-relay = MediaRelay()
 
 
 @app.post("/api/offer")
@@ -33,47 +33,9 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
         logger.info("Discarding the peer connection.")
         pcs.discard(pipecat_connection)
 
-    background_tasks.add_task(run_new_bot, pipecat_connection)
+    background_tasks.add_task(run_aiortc_bot, pipecat_connection)
 
     return pipecat_connection.get_answer()
-
-
-async def run_new_bot(pipecat_connection: PipecatWebRTCConnection):
-    logger.info("Setting up media handling for the bot")
-
-    player = MediaPlayer(os.path.join(ROOT, "demo-instruct.wav"))
-    recorder = MediaBlackhole()
-    await recorder.start()
-
-    def handle_track(track: MediaStreamTrack):
-        if track.kind == "audio":
-            pipecat_connection.replace_audio_track(player.audio)
-            recorder.addTrack(track)
-        elif track.kind == "video":
-            pipecat_connection.replace_video_track(relay.subscribe(track))
-
-    @pipecat_connection.on("connected")
-    def on_connected():
-        logger.info("Peer connection established.")
-
-    @pipecat_connection.on("disconnected")
-    async def on_disconnected():
-        logger.info("Peer connection lost.")
-
-    @pipecat_connection.on("track-started")
-    def on_track_started(track: MediaStreamTrack):
-        logger.info(f"Processing new track: {track.kind}")
-        handle_track(track)
-
-    @pipecat_connection.on("track-ended")
-    async def on_track_ended(track):
-        logger.info(f"Track ended: {track.kind}")
-        await recorder.stop()
-
-    # Checking in case already had some existent track
-    for track in pipecat_connection.tracks():
-        logger.info(f"handling existent track: {track.kind}")
-        handle_track(track)
 
 
 @asynccontextmanager
@@ -97,7 +59,5 @@ if __name__ == "__main__":
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
-
-    import uvicorn
 
     uvicorn.run(app, host=args.host, port=args.port)
