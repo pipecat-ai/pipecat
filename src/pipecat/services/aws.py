@@ -197,7 +197,7 @@ class PollyTTSService(TTSService):
                 return audio_data
             return None
 
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             await self.start_ttfb_metrics()

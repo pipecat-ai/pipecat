@@ -269,7 +269,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                     logger.error(f"Invalid JSON message: {message}")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             # Reconnect if the websocket is closed
@@ -392,7 +392,7 @@ class PlayHTHttpTTSService(TTSService):
         return language_to_playht_language(language)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             options = self._create_options()
