@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   how to gather user emails. The example uses's Rime `spell()` function to spell
   out the emails for confirmation.
 
+### Other
+
+- Added a new example `examples/foundational/35-user-email-gathering.py` to show
+  how to gather user emails. The example uses's Rime `spell()` function to spell
+  out the emails for confirmation.
+
 ## [0.0.58] - 2025-02-26
 
 ### Added
