@@ -18,6 +18,14 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         assert match_endofsentence("This is a sentence...") == 21
         assert match_endofsentence("This is a sentence . . .") == 24
         assert match_endofsentence("This is a sentence. ..") == 22
+        assert match_endofsentence("This is for Mr. and Mrs. Jones.") == 31
+        assert match_endofsentence("U.S.A and U.S.A..") == 17
+        assert match_endofsentence("My emails are foo@pipecat.ai and bar@pipecat.ai.") == 48
+        assert match_endofsentence("My email is foo.bar@pipecat.ai.") == 31
+        assert match_endofsentence("My email is spell(foo.bar@pipecat.ai).") == 38
+        assert match_endofsentence("The number pi is 3.14159.") == 25
+        assert match_endofsentence("Valid scientific notation 1.23e4.") == 33
+        assert match_endofsentence("Valid scientific notation 0.e4.") == 31
         assert not match_endofsentence("This is not a sentence")
         assert not match_endofsentence("This is not a sentence,")
         assert not match_endofsentence("This is not a sentence, ")
@@ -28,6 +36,8 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         assert not match_endofsentence("Heute ist Dienstag, der 3.")  # 3. Juli 2024
         assert not match_endofsentence("America, or the U.")  # U.S.A.
         assert not match_endofsentence("It still early, it's 3:00 a.")  # 3:00 a.m.
+        assert not match_endofsentence("My emails are foo@pipecat.ai and bar@pipecat.ai")
+        assert not match_endofsentence("The number pi is 3.14159")
 
     async def test_endofsentence_zh(self):
         chinese_sentences = [

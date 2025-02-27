@@ -5,6 +5,18 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- Fixed end of sentence matching when emails are found.
+
+### Other
+
+- Added a new example `examples/foundational/35-user-email-gathering.py` to show
+  how to gather user emails. The example uses's Rime `spell()` function to spell
+  out the emails for confirmation.
+
 ## [0.0.58] - 2025-02-26
 
 ### Added
