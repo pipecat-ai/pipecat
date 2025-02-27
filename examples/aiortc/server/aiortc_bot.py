@@ -20,12 +20,9 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
-from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.gemini_multimodal_live import GeminiMultimodalLiveLLMService
-from pipecat.transports.network.fastapi_websocket import (
-    FastAPIWebsocketParams,
-    FastAPIWebsocketTransport,
-)
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.webrtc.pipecat_webrtc import PipecatWebRTCTransport
 from pipecat.transports.webrtc.webrtc_connection import PipecatWebRTCConnection
 
 load_dotenv(override=True)
@@ -45,18 +42,14 @@ Respond to what the user said in a creative and helpful way. Keep your responses
 """
 
 
-async def run_bot(websocket_client):
-    ws_transport = FastAPIWebsocketTransport(
-        websocket=websocket_client,
-        params=FastAPIWebsocketParams(
-            audio_in_sample_rate=16000,  # Need to be 16_000 in order to VAD to work as expected
-            audio_out_sample_rate=24000,
+async def run_bot(webrtc_connection):
+    pipecat_transport = PipecatWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
             audio_out_enabled=True,
-            add_wav_header=False,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            serializer=ProtobufFrameSerializer(),
         ),
     )
 
@@ -83,11 +76,11 @@ async def run_bot(websocket_client):
 
     pipeline = Pipeline(
         [
-            ws_transport.input(),
+            pipecat_transport.input(),
             context_aggregator.user(),
             rtvi,
             llm,  # LLM
-            ws_transport.output(),
+            pipecat_transport.output(),
             context_aggregator.assistant(),
         ]
     )
@@ -104,15 +97,15 @@ async def run_bot(websocket_client):
     async def on_client_ready(rtvi):
         await rtvi.set_bot_ready()
 
-    @ws_transport.event_handler("on_client_connected")
+    @pipecat_transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info("WS Client connected")
+        logger.info("Pipecat Client connected")
         # Kick off the conversation.
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-    @ws_transport.event_handler("on_client_disconnected")
+    @pipecat_transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info("WS Client disconnected")
+        logger.info("Pipecat Client disconnected")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)
@@ -120,7 +113,9 @@ async def run_bot(websocket_client):
     await runner.run(task)
 
 
-# TODO: remove, only for testing
+# ---------------- EVERYTHING BELOW THIS IS ONLY FOR TESTING AIORTC DIRECTLY ------------------------------------------
+
+
 class AudioBeepStreamTrack(MediaStreamTrack):
     """
     A custom MediaStreamTrack that generates a beep sound.
@@ -160,7 +155,6 @@ class AudioBeepStreamTrack(MediaStreamTrack):
         return frame
 
 
-# TODO: only for testing
 async def run_aiortc_bot(pipecat_connection: PipecatWebRTCConnection):
     relay = MediaRelay()
     recorder = MediaBlackhole()

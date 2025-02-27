@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
-from aiortc_bot import run_aiortc_bot
+from aiortc_bot import run_bot
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
 
@@ -33,7 +33,7 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
         logger.info("Discarding the peer connection.")
         pcs.discard(pipecat_connection)
 
-    background_tasks.add_task(run_aiortc_bot, pipecat_connection)
+    background_tasks.add_task(run_bot, pipecat_connection)
 
     return pipecat_connection.get_answer()
 

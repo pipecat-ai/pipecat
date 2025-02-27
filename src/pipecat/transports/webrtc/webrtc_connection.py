@@ -94,5 +94,8 @@ class PipecatWebRTCConnection(EventEmitter):
             "pc_id": self.pc_id,
         }
 
+    def is_connected(self):
+        return self.pc.connectionState == "connected"
+
     def tracks(self):
         return self._tracks
