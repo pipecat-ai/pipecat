@@ -54,6 +54,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService, LLMService, STTService, TTSService
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.openai import (
+    BaseOpenAILLMService,
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
@@ -1186,6 +1187,22 @@ class GoogleLLMService(LLMService):
             context, expect_stripped_words=assistant_expect_stripped_words
         )
         return GoogleContextAggregatorPair(_user=user, _assistant=assistant)
+
+
+class GoogleLLMOpenAIBetaService(BaseOpenAILLMService):
+    """This class implements inference with Google's AI LLM models using the OpenAI format.
+    Ref - https://ai.google.dev/gemini-api/docs/openai
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/",
+        model: str = "gemini-2.0-flash",
+        **kwargs,
+    ):
+        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
 
 class GoogleTTSService(TTSService):
