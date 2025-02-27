@@ -905,11 +905,6 @@ class RTVIProcessor(FrameProcessor):
     async def handle_message(self, message: RTVIMessage):
         await self._message_queue.put(message)
 
-    async def _handle_server_message(self, frame: ServerMessageFrame):
-        """Handle server message frame by converting it to a transport message."""
-        message = RTVIServerMessage(data=frame.data)
-        await self._push_transport_message(message)
-
     async def handle_function_call(
         self,
         function_name: str,
@@ -949,9 +944,6 @@ class RTVIProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TransportMessageUrgentFrame):
             await self._handle_transport_message(frame)
-        elif isinstance(frame, ServerMessageFrame):
-            await self._handle_server_message(frame)
-            await self.push_frame(frame, direction)
         # All other system frames
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
