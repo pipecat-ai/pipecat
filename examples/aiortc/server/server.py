@@ -29,7 +29,7 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
     pcs.add(pipecat_connection)
 
     @pipecat_connection.on("closed")
-    def handle_disconnected():
+    async def handle_disconnected():
         logger.info("Discarding the peer connection.")
         pcs.discard(pipecat_connection)
 

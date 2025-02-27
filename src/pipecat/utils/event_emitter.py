@@ -13,8 +13,8 @@ class EventEmitter:
 
         return decorator
 
-    def emit(self, event_name, *args, **kwargs):
+    async def emit(self, event_name, *args, **kwargs):
         """Trigger all handlers for a given event."""
         if event_name in self._events:
             for handler in self._events[event_name]:
-                handler(*args, **kwargs)
+                await handler(*args, **kwargs)

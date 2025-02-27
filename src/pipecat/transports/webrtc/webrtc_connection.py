@@ -26,7 +26,7 @@ class PipecatWebRTCConnection(EventEmitter):
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():
             logger.info(f"Connection state is {self.pc.connectionState}")
-            self.emit(self.pc.connectionState)
+            await self.emit(self.pc.connectionState)
             if self.pc.connectionState == "failed":
                 await self.close()
 
@@ -43,8 +43,6 @@ class PipecatWebRTCConnection(EventEmitter):
                 self.emit("track-ended", track)
 
     async def initialize(self, sdp: str, type: str):
-        logger.info(f"sdp: {sdp}")
-
         offer = RTCSessionDescription(sdp=sdp, type=type)
         await self.pc.setRemoteDescription(offer)
 
@@ -60,10 +58,10 @@ class PipecatWebRTCConnection(EventEmitter):
     def force_transceivers_to_send_recv(self):
         for transceiver in self.pc.getTransceivers():
             transceiver.direction = "sendrecv"
-            logger.info(
-                f"Transceiver: {transceiver}, Mid: {transceiver.mid}, Direction: {transceiver.direction}"
-            )
-            logger.info(f"Sender track: {transceiver.sender.track}")
+            #logger.info(
+            #    f"Transceiver: {transceiver}, Mid: {transceiver.mid}, Direction: {transceiver.direction}"
+            #)
+            #logger.info(f"Sender track: {transceiver.sender.track}")
 
     def replace_audio_track(self, track):
         logger.info(f"Replacing audio track {track.kind}")
@@ -71,7 +69,6 @@ class PipecatWebRTCConnection(EventEmitter):
         # For now we are only considering that we are going to have 02 transceivers,
         # one for audio and one for video
         audio_transceiver = self.pc.getTransceivers()[0]
-        logger.info(f"audio_transceiver ${audio_transceiver}")
         audio_transceiver.sender.replaceTrack(track)
 
     def replace_video_track(self, track):
@@ -80,7 +77,6 @@ class PipecatWebRTCConnection(EventEmitter):
         # For now we are only considering that we are going to have 02 transceivers,
         # one for audio and one for video
         video_transceiver = self.pc.getTransceivers()[1]
-        logger.info(f"video_transceiver ${video_transceiver}")
         video_transceiver.sender.replaceTrack(track)
 
     async def close(self):

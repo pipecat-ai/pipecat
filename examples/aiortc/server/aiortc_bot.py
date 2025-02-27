@@ -19,7 +19,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor, RTVIObserver
 from pipecat.services.gemini_multimodal_live import GeminiMultimodalLiveLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.webrtc.pipecat_webrtc import PipecatWebRTCTransport
@@ -89,7 +89,7 @@ async def run_bot(webrtc_connection):
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
-            observers=[rtvi.observer()],
+            observers=[RTVIObserver(rtvi)],
         ),
     )
 
@@ -106,6 +106,10 @@ async def run_bot(webrtc_connection):
     @pipecat_transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Pipecat Client disconnected")
+
+    @pipecat_transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info("Pipecat Client closed")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)

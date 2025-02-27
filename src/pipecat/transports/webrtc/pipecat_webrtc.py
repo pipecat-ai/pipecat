@@ -38,6 +38,21 @@ class PipecatWebRTCClient:
         self._closing = False
         self._callbacks = callbacks
 
+        @self._webrtcConnection.on("connected")
+        async def on_connected():
+            logger.info("Peer connection established.")
+            await self.trigger_client_connected()
+
+        @self._webrtcConnection.on("disconnected")
+        async def on_disconnected():
+            logger.info("Peer connection lost.")
+            await self.trigger_client_disconnected()
+
+        @self._webrtcConnection.on("closed")
+        async def on_closed():
+            logger.info("Client connection closed.")
+            await self.trigger_client_closed()
+
     # TODO implement to receive the audio
 
     async def send(self, data: str | bytes):
@@ -61,8 +76,8 @@ class PipecatWebRTCClient:
     async def trigger_client_connected(self):
         await self._callbacks.on_client_connected(self._webrtcConnection)
 
-    async def trigger_client_timout(self):
-        await self._callbacks.on_session_timeout(self._webrtcConnection)
+    async def trigger_client_closed(self):
+        await self._callbacks.on_client_closed(self._webrtcConnection)
 
     def _can_send(self):
         return self.is_connected and not self.is_closing
@@ -142,7 +157,8 @@ class PipecatWebRTCOutputTransport(BaseOutputTransport):
         pass
 
     async def write_raw_audio_frames(self, frames: bytes):
-        # TODO: implement it
+        # TODO: implement it.
+        logger.info("Received raw audio frames to send")
         pass
 
 
