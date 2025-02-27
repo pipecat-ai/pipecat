@@ -138,6 +138,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `match_endofsentence` issue that would result in floating point
+  numbers to be considered an end of sentence.
+
 - Fixed a `match_endofsentence` issue that would result in emails to be
   considered an end of sentence.
 
