@@ -166,6 +166,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Added a new example `examples/foundational/36-user-email-gathering.py` to show
+  how to gather user emails. The example uses's Cartesia's `<spell></spell>`
+  tags and Rime `spell()` function to spell out the emails for confirmation.
+
 - Update the `34-audio-recording.py` example to include an STT processor.
 
 - Added foundational example `35-voice-switching.py` showing how to use the new
