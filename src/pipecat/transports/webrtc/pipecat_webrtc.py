@@ -9,7 +9,7 @@ from typing import Awaitable, Callable, Optional
 
 import numpy as np
 from aiortc import MediaStreamTrack
-from av import AudioFrame
+from av import AudioFrame, AudioResampler
 from loguru import logger
 from pydantic import BaseModel
 
@@ -33,52 +33,88 @@ class PipecatWebRTCCallbacks(BaseModel):
     on_client_closed: Callable[[PipecatWebRTCConnection], Awaitable[None]]
 
 
-class AudioBeepStreamTrack(MediaStreamTrack):
-    """
-    A custom MediaStreamTrack that generates a beep sound.
-    """
+class RawAudioTrack(MediaStreamTrack):
 
     kind = "audio"
 
-    def __init__(self, sample_rate=48000, frequency=440):
+    def __init__(self, sample_rate=48000):
         super().__init__()
         self.sample_rate = sample_rate
-        self.frequency = frequency
         self.samples_per_frame = self.sample_rate // 50  # 20ms per frame
         self.time = 0
+        self.audio_buffer = b""  # Holds the audio bytes to be sent
+        #self._audio_resampler = AudioResampler("s16", "mono", 16000)
+
+    def add_audio_bytes(self, audio_bytes: bytes):
+        """
+        Adds bytes to the audio buffer.
+        :param audio_bytes: Byte data to be added to the buffer.
+        """
+        self.audio_buffer += audio_bytes
 
     async def recv(self):
         """
-        Generate a sine wave beep sound.
+        Returns the next audio frame from the accumulated audio bytes in the buffer.
         """
+
         await asyncio.sleep(0.02)  # Simulate real-time audio (20ms frame)
 
-        # Generate sine wave
-        t = np.arange(self.samples_per_frame) + self.time
-        samples = 0.5 * np.sin(2 * np.pi * self.frequency * t / self.sample_rate)
+        # Ensure we have enough bytes: 2 bytes when using a 16-bit
+        if len(self.audio_buffer) >= self.samples_per_frame * 2:
+            # Extract the appropriate chunk of bytes
+            chunk = self.audio_buffer[:self.samples_per_frame * 2]  # 2 bytes per sample (16-bit)
 
-        # Convert float32 (-1 to 1 range) to int16 (-32768 to 32767 range)
-        samples = (samples * 32767).astype(np.int16)
+            # Update the buffer by removing the chunk we just processed
+            self.audio_buffer = self.audio_buffer[self.samples_per_frame * 2:]
 
-        # Create AudioFrame
-        frame = AudioFrame(format="s16", layout="mono", samples=len(samples))
-        frame.sample_rate = self.sample_rate  # Set sample rate
+            # Convert the byte data to an ndarray of int16 samples
+            samples = np.frombuffer(chunk, dtype=np.int16)
 
-        self.time += self.samples_per_frame
-        frame.pts = self.time  # Set timestamp (must be increasing)
+            # Create AudioFrame from the byte data
+            frame = AudioFrame.from_ndarray(
+                samples[None, :],  # Convert 1D array to 2D (mono or stereo depending on your frame)
+                layout="mono"  # Assuming mono, adjust based on your setup (stereo)
+            )
+            frame.sample_rate = self.sample_rate  # Set sample rate
+            frame.pts = self.time  # Set timestamp (must be increasing)
 
-        frame.planes[0].update(samples.tobytes())
+            self.time += self.samples_per_frame
 
-        return frame
+            #resampled_frames = self._audio_resampler.resample(frame)
+            #return resampled_frames
+
+            return frame
+        else:
+            # If the buffer is empty or not enough data, generate silence
+            # Create a silent audio frame (all zero samples)
+            silent_samples = np.zeros(self.samples_per_frame, dtype=np.int16)
+
+            # Create AudioFrame from the silent data
+            frame = AudioFrame.from_ndarray(
+                silent_samples[None, :],  # Convert 1D array to 2D (mono)
+                layout="mono"  # Assuming mono, adjust based on your setup (stereo)
+            )
+            frame.sample_rate = self.sample_rate  # Set sample rate
+            frame.pts = self.time  # Set timestamp
+
+            self.time += self.samples_per_frame
+
+            return frame
 
 
 class PipecatWebRTCClient:
+
+    # TODO: should receive the params, so we can get the sample_rate
     def __init__(
         self, webrtc_connection: PipecatWebRTCConnection, callbacks: PipecatWebRTCCallbacks
     ):
         self._webrtcConnection = webrtc_connection
         self._closing = False
         self._callbacks = callbacks
+
+        self._audio_track = None
+        self._in_sample_rate = None
+        self._out_sample_rate = None
 
         @self._webrtcConnection.on("connected")
         async def on_connected():
@@ -97,14 +133,22 @@ class PipecatWebRTCClient:
 
     # TODO implement to receive the audio
 
-    async def send(self, data: str | bytes):
+    async def write_raw_audio_frames(self, data:bytes):
         if self._can_send():
-            # TODO implement to send the audio
-            pass
+            self._audio_track.add_audio_bytes(data)
+
+    async def setup(self, _params, frame):
+        self._in_sample_rate = _params.audio_in_sample_rate or frame.audio_in_sample_rate
+        self._out_sample_rate = _params.audio_out_sample_rate or frame.audio_out_sample_rate
 
     async def connect(self):
-        # FIXME: should include the custom audio track which we are going to use to send the raw audio
-        self._webrtcConnection.replace_audio_track(AudioBeepStreamTrack())
+        if self._audio_track:
+            # already initialized
+            return
+
+        logger.info(f"Connecting to Pipecat WebRTC")
+        self._audio_track = RawAudioTrack(sample_rate=self._out_sample_rate)
+        self._webrtcConnection.replace_audio_track(self._audio_track)
 
     async def disconnect(self):
         if self.is_connected and not self.is_closing:
@@ -147,7 +191,8 @@ class PipecatWebRTCInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        await self._client.trigger_client_connected()
+        await self._client.setup(self._params, frame)
+        await self._client.connect()
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_messages())
 
@@ -184,6 +229,7 @@ class PipecatWebRTCOutputTransport(BaseOutputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        await self._client.setup(self._params, frame)
         await self._client.connect()
 
     async def stop(self, frame: EndFrame):
@@ -199,9 +245,7 @@ class PipecatWebRTCOutputTransport(BaseOutputTransport):
         pass
 
     async def write_raw_audio_frames(self, frames: bytes):
-        # TODO: implement it.
-        logger.info("Received raw audio frames to send")
-        pass
+        await self._client.write_raw_audio_frames(frames)
 
 
 class PipecatWebRTCTransport(BaseTransport):
