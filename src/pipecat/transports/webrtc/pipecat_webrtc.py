@@ -12,6 +12,7 @@ from aiortc import MediaStreamTrack
 from av import AudioFrame, AudioResampler
 from loguru import logger
 from pydantic import BaseModel
+from collections import deque
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -34,7 +35,6 @@ class PipecatWebRTCCallbacks(BaseModel):
 
 
 class RawAudioTrack(MediaStreamTrack):
-
     kind = "audio"
 
     def __init__(self, sample_rate=48000):
@@ -42,64 +42,49 @@ class RawAudioTrack(MediaStreamTrack):
         self.sample_rate = sample_rate
         self.samples_per_frame = self.sample_rate // 50  # 20ms per frame
         self.time = 0
-        self.audio_buffer = b""  # Holds the audio bytes to be sent
-        #self._audio_resampler = AudioResampler("s16", "mono", 16000)
+        self.audio_buffer = deque()  # Efficient buffer storage
 
     def add_audio_bytes(self, audio_bytes: bytes):
         """
         Adds bytes to the audio buffer.
-        :param audio_bytes: Byte data to be added to the buffer.
+        Ensures that only full 16-bit samples are stored.
         """
-        self.audio_buffer += audio_bytes
+        if len(audio_bytes) % 2 != 0:
+            raise ValueError("Audio bytes length must be even (16-bit samples).")
+        self.audio_buffer.append(audio_bytes)
 
     async def recv(self):
         """
-        Returns the next audio frame from the accumulated audio bytes in the buffer.
+        Returns the next audio frame, generating silence if needed.
         """
 
-        await asyncio.sleep(0.02)  # Simulate real-time audio (20ms frame)
+        await asyncio.sleep(0.02)  # Simulate real-time delay (20ms)
 
-        # Ensure we have enough bytes: 2 bytes when using a 16-bit
-        if len(self.audio_buffer) >= self.samples_per_frame * 2:
-            # Extract the appropriate chunk of bytes
-            chunk = self.audio_buffer[:self.samples_per_frame * 2]  # 2 bytes per sample (16-bit)
+        # Check if we have enough data
+        needed_bytes = self.samples_per_frame * 2  # 16-bit (2 bytes per sample)
+        if sum(map(len, self.audio_buffer)) >= needed_bytes:
+            # Extract data from deque
+            chunk = bytearray()
+            while len(chunk) < needed_bytes:
+                chunk.extend(self.audio_buffer.popleft())
 
-            # Update the buffer by removing the chunk we just processed
-            self.audio_buffer = self.audio_buffer[self.samples_per_frame * 2:]
+            # Trim excess bytes in case the last deque element exceeded needed_bytes
+            chunk = bytes(chunk[:needed_bytes])
 
-            # Convert the byte data to an ndarray of int16 samples
-            samples = np.frombuffer(chunk, dtype=np.int16)
-
-            # Create AudioFrame from the byte data
-            frame = AudioFrame.from_ndarray(
-                samples[None, :],  # Convert 1D array to 2D (mono or stereo depending on your frame)
-                layout="mono"  # Assuming mono, adjust based on your setup (stereo)
-            )
-            frame.sample_rate = self.sample_rate  # Set sample rate
-            frame.pts = self.time  # Set timestamp (must be increasing)
-
-            self.time += self.samples_per_frame
-
-            #resampled_frames = self._audio_resampler.resample(frame)
-            #return resampled_frames
-
-            return frame
         else:
-            # If the buffer is empty or not enough data, generate silence
-            # Create a silent audio frame (all zero samples)
-            silent_samples = np.zeros(self.samples_per_frame, dtype=np.int16)
+            # Not enough data, generate silent frame
+            chunk = bytes(needed_bytes)
 
-            # Create AudioFrame from the silent data
-            frame = AudioFrame.from_ndarray(
-                silent_samples[None, :],  # Convert 1D array to 2D (mono)
-                layout="mono"  # Assuming mono, adjust based on your setup (stereo)
-            )
-            frame.sample_rate = self.sample_rate  # Set sample rate
-            frame.pts = self.time  # Set timestamp
+        # Convert the byte data to an ndarray of int16 samples
+        samples = np.frombuffer(chunk, dtype=np.int16)
 
-            self.time += self.samples_per_frame
+        # Create AudioFrame
+        frame = AudioFrame.from_ndarray(samples[None, :], layout="mono")
+        frame.sample_rate = self.sample_rate
+        frame.pts = self.time
 
-            return frame
+        self.time += self.samples_per_frame
+        return frame
 
 
 class PipecatWebRTCClient:
