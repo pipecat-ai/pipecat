@@ -138,6 +138,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `match_endofsentence` issue that would result in emails to be
+  considered an end of sentence.
+
 - Fixed an issue where the RTVI message `disconnect-bot` was pushing an
   `EndFrame`, resulting in the pipeline not shutting down. It now pushes an
   `EndTaskFrame` upstream to shutdown the pipeline.
