@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added `GoogleLLMOpenAIBetaService` for Google LLM integration with an
-  OpenAI-compatible interface.
+  OpenAI-compatible interface. Added foundational example
+  `14o-function-calling-gemini-openai-format.py`.
 
 ## [0.0.58] - 2025-02-26
 
