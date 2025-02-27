@@ -4,10 +4,10 @@ import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
+from aiortc_bot import run_aiortc_bot
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
 
-from aiortc_bot import run_aiortc_bot
 from pipecat.transports.webrtc.webrtc_connection import PipecatWebRTCConnection
 
 # Load environment variables

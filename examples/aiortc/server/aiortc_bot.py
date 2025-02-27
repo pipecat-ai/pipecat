@@ -3,24 +3,24 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+import asyncio
 import os
 import sys
 
+import numpy as np
 from aiortc import MediaStreamTrack
-from aiortc.contrib.media import MediaBlackhole, MediaPlayer, MediaRelay
+from aiortc.contrib.media import MediaBlackhole, MediaRelay
+from av import AudioFrame
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndTaskFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
-from pipecat.services.ai_services import LLMService
 from pipecat.services.gemini_multimodal_live import GeminiMultimodalLiveLLMService
 from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,
@@ -45,15 +45,6 @@ Respond to what the user said in a creative and helpful way. Keep your responses
 """
 
 
-async def terminate_call(
-    function_name, tool_call_id, args, llm: LLMService, context, result_callback
-):
-    logger.debug("Will terminate call!")
-    """Function the bot can call to terminate the call upon completion of a voicemail message."""
-    await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-    await result_callback("Goodbye")
-
-
 async def run_bot(websocket_client):
     ws_transport = FastAPIWebsocketTransport(
         websocket=websocket_client,
@@ -69,28 +60,22 @@ async def run_bot(websocket_client):
         ),
     )
 
-    tools = [
-        {
-            "function_declarations": [
-                {
-                    "name": "terminate_call",
-                    "description": "Terminate the call",
-                },
-            ]
-        }
-    ]
-
     llm = GeminiMultimodalLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
         transcribe_user_audio=True,
         transcribe_model_audio=True,
         system_instruction=SYSTEM_INSTRUCTION,
-        tools=tools,
     )
-    llm.register_function("terminate_call", terminate_call)
 
-    context = OpenAILLMContext()
+    context = OpenAILLMContext(
+        [
+            {
+                "role": "user",
+                "content": "Start by greeting the user warmly and introducing yourself.",
+            }
+        ],
+    )
     context_aggregator = llm.create_context_aggregator(context)
 
     # RTVI events for Pipecat client UI
@@ -123,7 +108,6 @@ async def run_bot(websocket_client):
     async def on_client_connected(transport, client):
         logger.info("WS Client connected")
         # Kick off the conversation.
-        # messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @ws_transport.event_handler("on_client_disconnected")
@@ -136,20 +120,55 @@ async def run_bot(websocket_client):
     await runner.run(task)
 
 
+# TODO: remove, only for testing
+class AudioBeepStreamTrack(MediaStreamTrack):
+    """
+    A custom MediaStreamTrack that generates a beep sound.
+    """
+
+    kind = "audio"
+
+    def __init__(self, sample_rate=48000, frequency=440):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.frequency = frequency
+        self.samples_per_frame = self.sample_rate // 50  # 20ms per frame
+        self.time = 0
+
+    async def recv(self):
+        """
+        Generate a sine wave beep sound.
+        """
+        await asyncio.sleep(0.02)  # Simulate real-time audio (20ms frame)
+
+        # Generate sine wave
+        t = np.arange(self.samples_per_frame) + self.time
+        samples = 0.5 * np.sin(2 * np.pi * self.frequency * t / self.sample_rate)
+
+        # Convert float32 (-1 to 1 range) to int16 (-32768 to 32767 range)
+        samples = (samples * 32767).astype(np.int16)
+
+        # Create AudioFrame
+        frame = AudioFrame(format="s16", layout="mono", samples=len(samples))
+        frame.sample_rate = self.sample_rate  # Set sample rate
+
+        self.time += self.samples_per_frame
+        frame.pts = self.time  # Set timestamp (must be increasing)
+
+        frame.planes[0].update(samples.tobytes())
+
+        return frame
+
+
 # TODO: only for testing
 async def run_aiortc_bot(pipecat_connection: PipecatWebRTCConnection):
     relay = MediaRelay()
-    ROOT = os.path.dirname(__file__)
-
-    logger.info("Setting up media handling for the bot")
-
-    player = MediaPlayer(os.path.join(ROOT, "demo-instruct.wav"))
     recorder = MediaBlackhole()
     await recorder.start()
 
     def handle_track(track: MediaStreamTrack):
         if track.kind == "audio":
-            pipecat_connection.replace_audio_track(player.audio)
+            pipecat_connection.replace_audio_track(AudioBeepStreamTrack())
             recorder.addTrack(track)
         elif track.kind == "video":
             pipecat_connection.replace_video_track(relay.subscribe(track))
