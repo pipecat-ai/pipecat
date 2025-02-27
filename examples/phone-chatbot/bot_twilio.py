@@ -77,7 +77,7 @@ async def main(room_url: str, token: str, callId: str, sipUri: str):
         ]
     )
 
-    task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):

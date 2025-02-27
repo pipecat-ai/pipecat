@@ -17,6 +17,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai import (
     OpenAIAssistantContextAggregator,
     OpenAILLMService,
@@ -27,7 +28,7 @@ from pipecat.services.openai import (
 class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
     """Custom assistant context aggregator for Grok that handles empty content requirement."""
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if not (
             self._aggregation or self._function_call_result or self._pending_image_frame_message
         ):
@@ -36,10 +37,13 @@ class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
         run_llm = False
         properties: Optional[FunctionCallResultProperties] = None
 
-        aggregation = self._aggregation
-        self._reset()
+        aggregation = self._aggregation.strip()
+        self.reset()
 
         try:
+            if aggregation:
+                self._context.add_message({"role": "assistant", "content": aggregation})
+
             if self._function_call_result:
                 frame = self._function_call_result
                 properties = frame.properties
@@ -76,9 +80,6 @@ class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
                         # Default behavior is to run the LLM if there are no function calls in progress
                         run_llm = not bool(self._function_calls_in_progress)
 
-            else:
-                self._context.add_message({"role": "assistant", "content": aggregation})
-
             if self._pending_image_frame_message:
                 frame = self._pending_image_frame_message
                 self._pending_image_frame_message = None
@@ -91,14 +92,13 @@ class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
                 run_llm = True
 
             if run_llm:
-                await self._user_context_aggregator.push_context_frame()
+                await self.push_context_frame(FrameDirection.UPSTREAM)
 
             # Emit the on_context_updated callback once the function call result is added to the context
             if properties and properties.on_context_updated is not None:
                 await properties.on_context_updated()
 
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
+            await self.push_context_frame()
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
@@ -125,7 +125,7 @@ class GrokLLMService(OpenAILLMService):
     Args:
         api_key (str): The API key for accessing Grok's API
         base_url (str, optional): The base URL for Grok API. Defaults to "https://api.x.ai/v1"
-        model (str, optional): The model identifier to use. Defaults to "grok-beta"
+        model (str, optional): The model identifier to use. Defaults to "grok-2"
         **kwargs: Additional keyword arguments passed to OpenAILLMService
     """
 
@@ -134,7 +134,7 @@ class GrokLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.x.ai/v1",
-        model: str = "grok-beta",
+        model: str = "grok-2",
         **kwargs,
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
@@ -212,6 +212,6 @@ class GrokLLMService(OpenAILLMService):
     ) -> GrokContextAggregatorPair:
         user = OpenAIUserContextAggregator(context)
         assistant = GrokAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, expect_stripped_words=assistant_expect_stripped_words
         )
         return GrokContextAggregatorPair(_user=user, _assistant=assistant)

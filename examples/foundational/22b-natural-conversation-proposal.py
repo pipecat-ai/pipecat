@@ -138,6 +138,7 @@ class OutputGate(FrameProcessor):
         self._gate_open = start_open
         self._frames_buffer = []
         self._notifier = notifier
+        self._gate_task = None
 
     def close_gate(self):
         self._gate_open = False
@@ -178,10 +179,13 @@ class OutputGate(FrameProcessor):
 
     async def _start(self):
         self._frames_buffer = []
-        self._gate_task = self.create_task(self._gate_task_handler())
+        if not self._gate_task:
+            self._gate_task = self.create_task(self._gate_task_handler())
 
     async def _stop(self):
-        await self.cancel_task(self._gate_task)
+        if self._gate_task:
+            await self.cancel_task(self._gate_task)
+            self._gate_task = None
 
     async def _gate_task_handler(self):
         while True:
@@ -351,7 +355,7 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,

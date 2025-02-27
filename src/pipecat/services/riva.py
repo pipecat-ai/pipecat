@@ -166,12 +166,18 @@ class ParakeetSTTService(STTService):
         self._asr_service = riva.client.ASRService(auth)
 
         self._queue = asyncio.Queue()
+        self._config = None
+        self._thread_task = None
+        self._response_task = None
 
     def can_generate_metrics(self) -> bool:
         return False
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._config:
+            return
 
         config = riva.client.StreamingRecognitionConfig(
             config=riva.client.RecognitionConfig(
@@ -205,9 +211,12 @@ class ParakeetSTTService(STTService):
 
         self._config = config
 
-        self._thread_task = self.create_task(self._thread_task_handler())
-        self._response_task = self.create_task(self._response_task_handler())
-        self._response_queue = asyncio.Queue()
+        if not self._thread_task:
+            self._thread_task = self.create_task(self._thread_task_handler())
+
+        if not self._response_task:
+            self._response_queue = asyncio.Queue()
+            self._response_task = self.create_task(self._response_task_handler())
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -218,8 +227,13 @@ class ParakeetSTTService(STTService):
         await self._stop_tasks()
 
     async def _stop_tasks(self):
-        await self.cancel_task(self._thread_task)
-        await self.cancel_task(self._response_task)
+        if self._thread_task:
+            await self.cancel_task(self._thread_task)
+            self._thread_task = None
+
+        if self._response_task:
+            await self.cancel_task(self._response_task)
+            self._response_task = None
 
     def _response_handler(self):
         responses = self._asr_service.streaming_response_generator(

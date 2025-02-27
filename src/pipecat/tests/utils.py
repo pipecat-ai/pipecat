@@ -5,6 +5,7 @@
 #
 
 import asyncio
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Sequence, Tuple
 
 from pipecat.frames.frames import (
@@ -12,12 +13,23 @@ from pipecat.frames.frames import (
     Frame,
     HeartbeatFrame,
     StartFrame,
+    SystemFrame,
 )
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+
+@dataclass
+class SleepFrame(SystemFrame):
+    """This frame is used by test framework to introduce some sleep time before
+    the next frame is pushed. This is useful to control system frames vs data or
+    control frames.
+    """
+
+    sleep: float = 0.1
 
 
 class HeartbeatsObserver(BaseObserver):
@@ -44,7 +56,11 @@ class HeartbeatsObserver(BaseObserver):
 
 class QueuedFrameProcessor(FrameProcessor):
     def __init__(
-        self, queue: asyncio.Queue, queue_direction: FrameDirection, ignore_start: bool = True
+        self,
+        *,
+        queue: asyncio.Queue,
+        queue_direction: FrameDirection,
+        ignore_start: bool = True,
     ):
         super().__init__()
         self._queue = queue
@@ -72,21 +88,35 @@ async def run_test(
 ) -> Tuple[Sequence[Frame], Sequence[Frame]]:
     received_up = asyncio.Queue()
     received_down = asyncio.Queue()
-    source = QueuedFrameProcessor(received_up, FrameDirection.UPSTREAM, ignore_start)
-    sink = QueuedFrameProcessor(received_down, FrameDirection.DOWNSTREAM, ignore_start)
+    source = QueuedFrameProcessor(
+        queue=received_up,
+        queue_direction=FrameDirection.UPSTREAM,
+        ignore_start=ignore_start,
+    )
+    sink = QueuedFrameProcessor(
+        queue=received_down,
+        queue_direction=FrameDirection.DOWNSTREAM,
+        ignore_start=ignore_start,
+    )
 
     pipeline = Pipeline([source, processor, sink])
 
     task = PipelineTask(pipeline, params=PipelineParams(start_metadata=start_metadata))
 
-    for frame in frames_to_send:
-        await task.queue_frame(frame)
+    async def push_frames():
+        # Just give a little head start to the runner.
+        await asyncio.sleep(0.01)
+        for frame in frames_to_send:
+            if isinstance(frame, SleepFrame):
+                await asyncio.sleep(frame.sleep)
+            else:
+                await task.queue_frame(frame)
 
-    if send_end_frame:
-        await task.queue_frame(EndFrame())
+        if send_end_frame:
+            await task.queue_frame(EndFrame())
 
     runner = PipelineRunner()
-    await runner.run(task)
+    await asyncio.gather(runner.run(task), push_frames())
 
     #
     # Down frames
@@ -98,6 +128,7 @@ async def run_test(
             received_down_frames.append(frame)
 
     print("received DOWN frames =", received_down_frames)
+    print("expected DOWN frames =", expected_down_frames)
 
     assert len(received_down_frames) == len(expected_down_frames)
 
@@ -113,6 +144,7 @@ async def run_test(
         received_up_frames.append(frame)
 
     print("received UP frames =", received_up_frames)
+    print("expected UP frames =", expected_up_frames)
 
     assert len(received_up_frames) == len(expected_up_frames)
 

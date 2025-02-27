@@ -5,7 +5,7 @@
 #
 
 import asyncio
-from typing import Any, AsyncIterable, Dict, Iterable, List
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     HeartbeatFrame,
     MetricsFrame,
     StartFrame,
+    StopFrame,
     StopTaskFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
@@ -30,7 +31,7 @@ from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager, TaskManager
 from pipecat.utils.utils import obj_count, obj_id
 
 HEARTBEAT_SECONDS = 1.0
@@ -122,14 +123,20 @@ class PipelineTask(BaseTask):
     Args:
         pipeline: The pipeline to execute.
         params: Configuration parameters for the pipeline.
+        observers: List of observers for monitoring pipeline execution.
         clock: Clock implementation for timing operations.
+        check_dangling_tasks: Whether to check for processors' tasks finishing properly.
     """
 
     def __init__(
         self,
         pipeline: BasePipeline,
+        *,
         params: PipelineParams = PipelineParams(),
+        observers: List[BaseObserver] = [],
         clock: BaseClock = SystemClock(),
+        task_manager: Optional[BaseTaskManager] = None,
+        check_dangling_tasks: bool = True,
     ):
         self._id: int = obj_id()
         self._name: str = f"{self.__class__.__name__}#{obj_count(self)}"
@@ -137,6 +144,17 @@ class PipelineTask(BaseTask):
         self._pipeline = pipeline
         self._clock = clock
         self._params = params
+        self._check_dangling_tasks = check_dangling_tasks
+        if self._params.observers:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Field 'observers' is deprecated, use the 'observers' parameter instead.",
+                    DeprecationWarning,
+                )
+            observers = self._params.observers
         self._finished = False
 
         # This queue receives frames coming from the pipeline upstream.
@@ -148,9 +166,9 @@ class PipelineTask(BaseTask):
         # This is the heartbeat queue. When a heartbeat frame is received in the
         # down queue we add it to the heartbeat queue for processing.
         self._heartbeat_queue = asyncio.Queue()
-        # This event is used to indicate an EndFrame has been received in the
-        # down queue.
-        self._endframe_event = asyncio.Event()
+        # This event is used to indicate a finalize frame (e.g. EndFrame,
+        # StopFrame) has been received in the down queue.
+        self._pipeline_end_event = asyncio.Event()
 
         self._source = PipelineTaskSource(self._up_queue)
         self._source.link(pipeline)
@@ -158,9 +176,9 @@ class PipelineTask(BaseTask):
         self._sink = PipelineTaskSink(self._down_queue)
         pipeline.link(self._sink)
 
-        self._task_manager = TaskManager()
+        self._task_manager = task_manager or TaskManager()
 
-        self._observer = TaskObserver(observers=params.observers, task_manager=self._task_manager)
+        self._observer = TaskObserver(observers=observers, task_manager=self._task_manager)
 
     @property
     def id(self) -> int:
@@ -209,9 +227,12 @@ class PipelineTask(BaseTask):
         """Starts and manages the pipeline execution until completion or cancellation."""
         if self.has_finished():
             return
+        cleanup_pipeline = True
         try:
             push_task = await self._create_tasks()
             await self._task_manager.wait_for_task(push_task)
+            # We have already cleaned up the pipeline inside the task.
+            cleanup_pipeline = False
         except asyncio.CancelledError:
             # We are awaiting on the push task and it might be cancelled
             # (e.g. Ctrl-C). This means we will get a CancelledError here as
@@ -219,8 +240,9 @@ class PipelineTask(BaseTask):
             # awaiting a task.
             pass
         await self._cancel_tasks()
-        await self._cleanup()
-        self._print_dangling_tasks()
+        await self._cleanup(cleanup_pipeline)
+        if self._check_dangling_tasks:
+            self._print_dangling_tasks()
         self._finished = True
 
     async def queue_frame(self, frame: Frame):
@@ -289,13 +311,14 @@ class PipelineTask(BaseTask):
             data.append(ProcessingMetricsData(processor=p.name, value=0.0))
         return MetricsFrame(data=data)
 
-    async def _wait_for_endframe(self):
-        await self._endframe_event.wait()
-        self._endframe_event.clear()
+    async def _wait_for_pipeline_end(self):
+        await self._pipeline_end_event.wait()
+        self._pipeline_end_event.clear()
 
-    async def _cleanup(self):
+    async def _cleanup(self, cleanup_pipeline: bool):
         await self._source.cleanup()
-        await self._pipeline.cleanup()
+        if cleanup_pipeline:
+            await self._pipeline.cleanup()
         await self._sink.cleanup()
 
     async def _process_push_queue(self):
@@ -326,18 +349,16 @@ class PipelineTask(BaseTask):
             await self._source.queue_frame(self._initial_metrics_frame(), FrameDirection.DOWNSTREAM)
 
         running = True
-        should_cleanup = True
+        cleanup_pipeline = True
         while running:
             frame = await self._push_queue.get()
             await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
-            if isinstance(frame, EndFrame):
-                await self._wait_for_endframe()
-            running = not isinstance(frame, (CancelFrame, EndFrame, StopTaskFrame))
-            should_cleanup = not isinstance(frame, StopTaskFrame)
+            if isinstance(frame, (EndFrame, StopFrame)):
+                await self._wait_for_pipeline_end()
+            running = not isinstance(frame, (CancelFrame, EndFrame, StopFrame))
+            cleanup_pipeline = not isinstance(frame, StopFrame)
             self._push_queue.task_done()
-        # Cleanup only if we need to.
-        if should_cleanup:
-            await self._cleanup()
+        await self._cleanup(cleanup_pipeline)
 
     async def _process_up_queue(self):
         """This is the task that processes frames coming upstream from the
@@ -355,7 +376,8 @@ class PipelineTask(BaseTask):
                 # Tell the task we should end right away.
                 await self.queue_frame(CancelFrame())
             elif isinstance(frame, StopTaskFrame):
-                await self.queue_frame(StopTaskFrame())
+                # Tell the task we should stop nicely.
+                await self.queue_frame(StopFrame())
             elif isinstance(frame, ErrorFrame):
                 logger.error(f"Error running app: {frame}")
                 if frame.fatal:
@@ -374,8 +396,8 @@ class PipelineTask(BaseTask):
         """
         while True:
             frame = await self._down_queue.get()
-            if isinstance(frame, EndFrame):
-                self._endframe_event.set()
+            if isinstance(frame, (EndFrame, StopFrame)):
+                self._pipeline_end_event.set()
             elif isinstance(frame, HeartbeatFrame):
                 await self._heartbeat_queue.put(frame)
             self._down_queue.task_done()

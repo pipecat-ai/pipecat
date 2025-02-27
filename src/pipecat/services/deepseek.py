@@ -8,21 +8,11 @@
 from typing import List
 
 from loguru import logger
+from openai import AsyncStream
+from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai import OpenAILLMService
-
-try:
-    from openai import (
-        AsyncStream,
-    )
-    from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use DeepSeek, you need to `pip install pipecat-ai[deepseek]`. Also, set `DEEPSEEK_API_KEY` environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
 
 
 class DeepSeekLLMService(OpenAILLMService):

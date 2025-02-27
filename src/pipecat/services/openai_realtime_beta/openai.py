@@ -10,8 +10,16 @@ import json
 import time
 from dataclasses import dataclass
 
-import websockets
 from loguru import logger
+
+try:
+    import websockets
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
+    )
+    raise Exception(f"Missing module: {e}")
 
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -568,6 +576,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         OpenAIRealtimeLLMContext.upgrade_to_realtime(context)
         user = OpenAIRealtimeUserContextAggregator(context)
         assistant = OpenAIRealtimeAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, expect_stripped_words=assistant_expect_stripped_words
         )
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)

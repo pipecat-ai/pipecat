@@ -21,6 +21,7 @@ class GatedOpenAILLMContextAggregator(FrameProcessor):
         self._notifier = notifier
         self._start_open = start_open
         self._last_context_frame = None
+        self._gate_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -41,10 +42,13 @@ class GatedOpenAILLMContextAggregator(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def _start(self):
-        self._gate_task = self.create_task(self._gate_task_handler())
+        if not self._gate_task:
+            self._gate_task = self.create_task(self._gate_task_handler())
 
     async def _stop(self):
-        await self.cancel_task(self._gate_task)
+        if self._gate_task:
+            await self.cancel_task(self._gate_task)
+            self._gate_task = None
 
     async def _gate_task_handler(self):
         while True:

@@ -4,15 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import copy
 import io
 import json
 import re
-from asyncio import CancelledError
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
+import httpx
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -96,7 +97,7 @@ class AnthropicLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "claude-3-5-sonnet-20241022",
+        model: str = "claude-3-7-sonnet-20250219",
         params: InputParams = InputParams(),
         client=None,
         **kwargs,
@@ -126,9 +127,11 @@ class AnthropicLLMService(LLMService):
     def create_context_aggregator(
         context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
     ) -> AnthropicContextAggregatorPair:
+        if isinstance(context, OpenAILLMContext):
+            context = AnthropicLLMContext.from_openai_context(context)
         user = AnthropicUserContextAggregator(context)
         assistant = AnthropicAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, expect_stripped_words=assistant_expect_stripped_words
         )
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
@@ -249,12 +252,14 @@ class AnthropicLLMService(LLMService):
                     if total_input_tokens >= 1024:
                         context.turns_above_cache_threshold += 1
 
-        except CancelledError:
+        except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the
             # token estimate. The reraise the exception so all the processors running in this task
             # also get cancelled.
             use_completion_tokens_estimate = True
             raise
+        except httpx.TimeoutException:
+            await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
@@ -651,11 +656,8 @@ class AnthropicLLMContext(OpenAILLMContext):
 
 
 class AnthropicUserContextAggregator(LLMUserContextAggregator):
-    def __init__(self, context: OpenAILLMContext | AnthropicLLMContext):
-        super().__init__(context=context)
-
-        if isinstance(context, OpenAILLMContext):
-            self._context = AnthropicLLMContext.from_openai_context(context)
+    def __init__(self, context: OpenAILLMContext | AnthropicLLMContext, **kwargs):
+        super().__init__(context=context, **kwargs)
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
@@ -703,9 +705,8 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
 
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, user_context_aggregator: AnthropicUserContextAggregator, **kwargs):
-        super().__init__(context=user_context_aggregator._context, **kwargs)
-        self._user_context_aggregator = user_context_aggregator
+    def __init__(self, context: OpenAILLMContext | AnthropicLLMContext, **kwargs):
+        super().__init__(context=context, **kwargs)
         self._function_call_in_progress = None
         self._function_call_result = None
         self._pending_image_frame_message = None
@@ -725,7 +726,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
             ):
                 self._function_call_in_progress = None
                 self._function_call_result = frame
-                await self._push_aggregation()
+                await self.push_aggregation()
             else:
                 logger.warning(
                     "FunctionCallResultFrame tool_call_id != InProgressFrame tool_call_id"
@@ -734,9 +735,9 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                 self._function_call_result = None
         elif isinstance(frame, AnthropicImageMessageFrame):
             self._pending_image_frame_message = frame
-            await self._push_aggregation()
+            await self.push_aggregation()
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if not (
             self._aggregation or self._function_call_result or self._pending_image_frame_message
         ):
@@ -745,18 +746,19 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         run_llm = False
         properties: Optional[FunctionCallResultProperties] = None
 
-        aggregation = self._aggregation
-        self._reset()
+        aggregation = self._aggregation.strip()
+        self.reset()
 
         try:
+            if aggregation:
+                self._context.add_message({"role": "assistant", "content": aggregation})
+
             if self._function_call_result:
                 frame = self._function_call_result
                 properties = frame.properties
                 self._function_call_result = None
                 if frame.result:
                     assistant_message = {"role": "assistant", "content": []}
-                    if aggregation:
-                        assistant_message["content"].append({"type": "text", "text": aggregation})
                     assistant_message["content"].append(
                         {
                             "type": "tool_use",
@@ -784,8 +786,6 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                     else:
                         # Default behavior
                         run_llm = True
-            elif aggregation:
-                self._context.add_message({"role": "assistant", "content": aggregation})
 
             if self._pending_image_frame_message:
                 frame = self._pending_image_frame_message
@@ -799,15 +799,14 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                 run_llm = True
 
             if run_llm:
-                await self._user_context_aggregator.push_context_frame()
+                await self.push_context_frame(FrameDirection.UPSTREAM)
 
             # Emit the on_context_updated callback once the function call result is added to the context
             if properties and properties.on_context_updated is not None:
                 await properties.on_context_updated()
 
             # Push context frame
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
+            await self.push_context_frame()
 
             # Push timestamp frame with current time
             timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())

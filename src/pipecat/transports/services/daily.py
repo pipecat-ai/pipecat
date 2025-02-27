@@ -13,9 +13,6 @@ from typing import Any, Awaitable, Callable, Mapping, Optional
 
 import aiohttp
 from daily import (
-    CallClient,
-    Daily,
-    EventHandler,
     VirtualCameraDevice,
     VirtualMicrophoneDevice,
     VirtualSpeakerDevice,
@@ -46,7 +43,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 
 try:
     from daily import CallClient, Daily, EventHandler
@@ -62,15 +59,36 @@ VAD_RESET_PERIOD_MS = 2000
 
 @dataclass
 class DailyTransportMessageFrame(TransportMessageFrame):
+    """Frame for transport messages in Daily calls.
+
+    Attributes:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
     participant_id: Optional[str] = None
 
 
 @dataclass
 class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
+    """Frame for urgent transport messages in Daily calls.
+
+    Attributes:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
     participant_id: Optional[str] = None
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
+    """Voice Activity Detection analyzer using WebRTC.
+
+    Implements voice activity detection using Daily's native WebRTC VAD.
+
+    Args:
+        sample_rate: Audio sample rate in Hz.
+        params: VAD configuration parameters (VADParams).
+    """
+
     def __init__(self, *, sample_rate: Optional[int] = None, params: VADParams = VADParams()):
         super().__init__(sample_rate=sample_rate, params=params)
 
@@ -90,11 +108,32 @@ class WebRTCVADAnalyzer(VADAnalyzer):
 
 
 class DailyDialinSettings(BaseModel):
+    """Settings for Daily's dial-in functionality.
+
+    Attributes:
+        call_id: CallId is represented by UUID and represents the sessionId in the SIP Network.
+        call_domain: Call Domain is represented by UUID and represents your Daily Domain on the SIP Network.
+    """
+
     call_id: str = ""
     call_domain: str = ""
 
 
 class DailyTranscriptionSettings(BaseModel):
+    """Configuration settings for Daily's transcription service.
+
+    Attributes:
+        language: ISO language code for transcription (e.g. "en").
+        tier: Deprecated. Use model instead.
+        model: Transcription model to use (e.g. "nova-2-general").
+        profanity_filter: Whether to filter profanity from transcripts.
+        redact: Whether to redact sensitive information.
+        endpointing: Whether to use endpointing to determine speech segments.
+        punctuate: Whether to add punctuation to transcripts.
+        includeRawResponse: Whether to include raw response data.
+        extra: Additional parameters passed to the Deepgram transcription service.
+    """
+
     language: str = "en"
     tier: Optional[str] = None
     model: str = "nova-2-general"
@@ -117,6 +156,16 @@ class DailyTranscriptionSettings(BaseModel):
 
 
 class DailyParams(TransportParams):
+    """Configuration parameters for Daily transport.
+
+    Args:
+        api_url: Daily API base URL
+        api_key: Daily API authentication key
+        dialin_settings: Optional settings for dial-in functionality
+        transcription_enabled: Whether to enable speech transcription
+        transcription_settings: Configuration for transcription service
+    """
+
     api_url: str = "https://api.daily.co/v1"
     api_key: str = ""
     dialin_settings: Optional[DailyDialinSettings] = None
@@ -125,6 +174,33 @@ class DailyParams(TransportParams):
 
 
 class DailyCallbacks(BaseModel):
+    """Callback handlers for Daily events.
+
+    Attributes:
+        on_joined: Called when bot successfully joined a room.
+        on_left: Called when bot left a room.
+        on_error: Called when an error occurs.
+        on_app_message: Called when receiving an app message.
+        on_call_state_updated: Called when call state changes.
+        on_dialin_connected: Called when dial-in is connected.
+        on_dialin_ready: Called when dial-in is ready.
+        on_dialin_stopped: Called when dial-in is stopped.
+        on_dialin_error: Called when dial-in encounters an error.
+        on_dialin_warning: Called when dial-in has a warning.
+        on_dialout_answered: Called when dial-out is answered.
+        on_dialout_connected: Called when dial-out is connected.
+        on_dialout_stopped: Called when dial-out is stopped.
+        on_dialout_error: Called when dial-out encounters an error.
+        on_dialout_warning: Called when dial-out has a warning.
+        on_participant_joined: Called when a participant joins.
+        on_participant_left: Called when a participant leaves.
+        on_participant_updated: Called when participant info is updated.
+        on_transcription_message: Called when receiving transcription.
+        on_recording_started: Called when recording starts.
+        on_recording_stopped: Called when recording stops.
+        on_recording_error: Called when recording encounters an error.
+    """
+
     on_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_left: Callable[[], Awaitable[None]]
     on_error: Callable[[str], Awaitable[None]]
@@ -166,6 +242,19 @@ def completion_callback(future):
 
 
 class DailyTransportClient(EventHandler):
+    """Core client for interacting with Daily's API.
+
+    Manages the connection to Daily rooms and handles all low-level API interactions.
+
+    Args:
+        room_url: URL of the Daily room to connect to.
+        token: Optional authentication token for the room.
+        bot_name: Display name for the bot in the call.
+        params: Configuration parameters (DailyParams).
+        callbacks: Event callback handlers (DailyCallbacks).
+        transport_name: Name identifier for the transport.
+    """
+
     _daily_initialized: bool = False
 
     # This is necessary to override EventHandler's __new__ method.
@@ -199,11 +288,12 @@ class DailyTransportClient(EventHandler):
         self._transcription_ids = []
         self._transcription_status = None
 
+        self._joining = False
         self._joined = False
         self._joined_event = asyncio.Event()
         self._leave_counter = 0
 
-        self._task_manager: Optional[TaskManager] = None
+        self._task_manager: Optional[BaseTaskManager] = None
 
         # We use the executor to cleanup the client. We just do it from one
         # place, so only one thread is really needed.
@@ -238,6 +328,10 @@ class DailyTransportClient(EventHandler):
 
     def _speaker_name(self):
         return f"speaker-{self}"
+
+    @property
+    def room_url(self) -> str:
+        return self._room_url
 
     @property
     def participant_id(self) -> str:
@@ -331,13 +425,14 @@ class DailyTransportClient(EventHandler):
             )
 
     async def join(self):
-        # Transport already joined, ignore.
-        if self._joined:
+        # Transport already joined or joining, ignore.
+        if self._joined or self._joining:
             # Increment leave counter if we already joined.
             self._leave_counter += 1
             return
 
         logger.info(f"Joining {self._room_url}")
+        self._joining = True
 
         # For performance reasons, never subscribe to video streams (unless a
         # video renderer is registered).
@@ -358,6 +453,7 @@ class DailyTransportClient(EventHandler):
 
             if not error:
                 self._joined = True
+                self._joining = False
                 # Increment leave counter if we successfully joined.
                 self._leave_counter += 1
 
@@ -376,6 +472,7 @@ class DailyTransportClient(EventHandler):
         except asyncio.TimeoutError:
             error_msg = f"Time out joining {self._room_url}"
             logger.error(error_msg)
+            self._joining = False
             await self._callbacks.on_error(error_msg)
 
     async def _start_transcription(self):
@@ -607,6 +704,13 @@ class DailyTransportClient(EventHandler):
         )
         await future
 
+    async def update_remote_participants(self, remote_participants: Mapping[str, Any] = None):
+        future = self._get_event_loop().create_future()
+        self._client.update_remote_participants(
+            remote_participants=remote_participants, completion=completion_callback(future)
+        )
+        await future
+
     #
     #
     # Daily (EventHandler)
@@ -720,6 +824,15 @@ class DailyTransportClient(EventHandler):
 
 
 class DailyInputTransport(BaseInputTransport):
+    """Handles incoming media streams and events from Daily calls.
+
+    Processes incoming audio, video, transcriptions and other events from Daily.
+
+    Args:
+        client: DailyTransportClient instance.
+        params: Configuration parameters.
+    """
+
     def __init__(self, client: DailyTransportClient, params: DailyParams, **kwargs):
         super().__init__(params, **kwargs)
 
@@ -727,6 +840,9 @@ class DailyInputTransport(BaseInputTransport):
         self._params = params
 
         self._video_renderers = {}
+
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
 
         # Task that gets audio data from a device or the network and queues it
         # internally to be processed.
@@ -738,9 +854,22 @@ class DailyInputTransport(BaseInputTransport):
     def vad_analyzer(self) -> Optional[VADAnalyzer]:
         return self._vad_analyzer
 
+    def start_audio_in_streaming(self):
+        # Create audio task. It reads audio frames from Daily and push them
+        # internally for VAD processing.
+        if not self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+            logger.debug(f"Start receiving audio")
+            self._audio_in_task = self.create_task(self._audio_in_task_handler())
+
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         # Setup client.
         await self._client.setup(frame)
         # Join the room.
@@ -748,10 +877,8 @@ class DailyInputTransport(BaseInputTransport):
         # Inialize WebRTC VAD if needed.
         if self._params.vad_enabled and not self._params.vad_analyzer:
             self._vad_analyzer = WebRTCVADAnalyzer(sample_rate=self.sample_rate)
-        # Create audio task. It reads audio frames from Daily and push them
-        # internally for VAD processing.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_task = self.create_task(self._audio_in_task_handler())
+        if self._params.audio_in_stream_on_start:
+            self.start_audio_in_streaming()
 
     async def stop(self, frame: EndFrame):
         # Parent stop.
@@ -857,14 +984,32 @@ class DailyInputTransport(BaseInputTransport):
 
 
 class DailyOutputTransport(BaseOutputTransport):
+    """Handles outgoing media streams and events to Daily calls.
+
+    Manages sending audio, video and other data to Daily calls.
+
+    Args:
+        client: DailyTransportClient instance.
+        params: Configuration parameters.
+    """
+
     def __init__(self, client: DailyTransportClient, params: DailyParams, **kwargs):
         super().__init__(params, **kwargs)
 
         self._client = client
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         # Setup client.
         await self._client.setup(frame)
         # Join the room.
@@ -897,6 +1042,20 @@ class DailyOutputTransport(BaseOutputTransport):
 
 
 class DailyTransport(BaseTransport):
+    """Transport implementation for Daily audio and video calls.
+
+    Handles audio/video streaming, transcription, recordings, dial-in,
+        dial-out, and call management through Daily's API.
+
+    Args:
+        room_url: URL of the Daily room to connect to.
+        token: Optional authentication token for the room.
+        bot_name: Display name for the bot in the call.
+        params: Configuration parameters (DailyParams) for the transport.
+        input_name: Optional name for the input transport.
+        output_name: Optional name for the output transport.
+    """
+
     def __init__(
         self,
         room_url: str,
@@ -984,6 +1143,10 @@ class DailyTransport(BaseTransport):
     #
 
     @property
+    def room_url(self) -> str:
+        return self._client.room_url
+
+    @property
     def participant_id(self) -> str:
         return self._client.participant_id
 
@@ -1053,6 +1216,9 @@ class DailyTransport(BaseTransport):
         await self._client.update_subscriptions(
             participant_settings=participant_settings, profile_settings=profile_settings
         )
+
+    async def update_remote_participants(self, remote_participants: Mapping[str, Any] = None):
+        await self._client.update_remote_participants(remote_participants=remote_participants)
 
     async def _on_joined(self, data):
         await self._call_event_handler("on_joined", data)

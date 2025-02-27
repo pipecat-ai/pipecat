@@ -12,7 +12,7 @@ from attr import dataclass
 from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 from pipecat.utils.utils import obj_count, obj_id
 
 
@@ -55,7 +55,7 @@ class TaskObserver(BaseObserver):
 
     """
 
-    def __init__(self, *, observers: List[BaseObserver] = [], task_manager: TaskManager):
+    def __init__(self, *, observers: List[BaseObserver] = [], task_manager: BaseTaskManager):
         self._id: int = obj_id()
         self._name: str = f"{self.__class__.__name__}#{obj_count(self)}"
         self._observers = observers

@@ -21,8 +21,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.ai_services import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for LMNT configuration needed
@@ -60,7 +59,7 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
     return result
 
 
-class LmntTTSService(TTSService, WebsocketService):
+class LmntTTSService(InterruptibleTTSService):
     def __init__(
         self,
         *,
@@ -70,13 +69,12 @@ class LmntTTSService(TTSService, WebsocketService):
         language: Language = Language.EN,
         **kwargs,
     ):
-        TTSService.__init__(
-            self,
+        super().__init__(
             push_stop_frames=True,
+            pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._voice_id = voice_id
@@ -85,6 +83,7 @@ class LmntTTSService(TTSService, WebsocketService):
             "format": "raw",  # Use raw format for direct PCM data
         }
         self._started = False
+        self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -112,18 +111,22 @@ class LmntTTSService(TTSService, WebsocketService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
-        await self._disconnect_websocket()
-
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
+        await self._disconnect_websocket()
+
     async def _connect_websocket(self):
         """Connect to LMNT websocket."""
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to LMNT")
 
             # Build initial connection message
@@ -152,8 +155,9 @@ class LmntTTSService(TTSService, WebsocketService):
 
             if self._websocket:
                 logger.debug("Disconnecting from LMNT")
-                # Send EOF message before closing
-                await self._websocket.send(json.dumps({"eof": True}))
+                # NOTE(aleix): sending EOF message before closing is causing
+                # errors on the websocket, so we just skip it for now.
+                # await self._websocket.send(json.dumps({"eof": True}))
                 await self._websocket.close()
                 self._websocket = None
 
