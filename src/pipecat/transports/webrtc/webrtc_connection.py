@@ -58,10 +58,10 @@ class PipecatWebRTCConnection(EventEmitter):
     def force_transceivers_to_send_recv(self):
         for transceiver in self.pc.getTransceivers():
             transceiver.direction = "sendrecv"
-            #logger.info(
+            # logger.info(
             #    f"Transceiver: {transceiver}, Mid: {transceiver.mid}, Direction: {transceiver.direction}"
-            #)
-            #logger.info(f"Sender track: {transceiver.sender.track}")
+            # )
+            # logger.info(f"Sender track: {transceiver.sender.track}")
 
     def replace_audio_track(self, track):
         logger.info(f"Replacing audio track {track.kind}")

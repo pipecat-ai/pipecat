@@ -4,9 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
+import asyncio
 from typing import Awaitable, Callable, Optional
 
+import numpy as np
+from aiortc import MediaStreamTrack
+from av import AudioFrame
 from loguru import logger
 from pydantic import BaseModel
 
@@ -28,6 +31,45 @@ class PipecatWebRTCCallbacks(BaseModel):
     on_client_connected: Callable[[PipecatWebRTCConnection], Awaitable[None]]
     on_client_disconnected: Callable[[PipecatWebRTCConnection], Awaitable[None]]
     on_client_closed: Callable[[PipecatWebRTCConnection], Awaitable[None]]
+
+
+class AudioBeepStreamTrack(MediaStreamTrack):
+    """
+    A custom MediaStreamTrack that generates a beep sound.
+    """
+
+    kind = "audio"
+
+    def __init__(self, sample_rate=48000, frequency=440):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.frequency = frequency
+        self.samples_per_frame = self.sample_rate // 50  # 20ms per frame
+        self.time = 0
+
+    async def recv(self):
+        """
+        Generate a sine wave beep sound.
+        """
+        await asyncio.sleep(0.02)  # Simulate real-time audio (20ms frame)
+
+        # Generate sine wave
+        t = np.arange(self.samples_per_frame) + self.time
+        samples = 0.5 * np.sin(2 * np.pi * self.frequency * t / self.sample_rate)
+
+        # Convert float32 (-1 to 1 range) to int16 (-32768 to 32767 range)
+        samples = (samples * 32767).astype(np.int16)
+
+        # Create AudioFrame
+        frame = AudioFrame(format="s16", layout="mono", samples=len(samples))
+        frame.sample_rate = self.sample_rate  # Set sample rate
+
+        self.time += self.samples_per_frame
+        frame.pts = self.time  # Set timestamp (must be increasing)
+
+        frame.planes[0].update(samples.tobytes())
+
+        return frame
 
 
 class PipecatWebRTCClient:
@@ -61,8 +103,8 @@ class PipecatWebRTCClient:
             pass
 
     async def connect(self):
-        # I guess there is nothing to do here, we should already be connected when we receive the PipecatWebRTCConnection
-        pass
+        # FIXME: should include the custom audio track which we are going to use to send the raw audio
+        self._webrtcConnection.replace_audio_track(AudioBeepStreamTrack())
 
     async def disconnect(self):
         if self.is_connected and not self.is_closing:
