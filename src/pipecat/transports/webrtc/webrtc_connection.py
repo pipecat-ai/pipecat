@@ -50,14 +50,14 @@ class PipecatWebRTCConnection(EventEmitter):
 
         # For some reason, aiortc is not respecting the SDP for the transceivers to be sendrcv
         # so we are basically forcing it to act this way
-        self.force_tranceivers_to_send_recv()
+        self.force_transceivers_to_send_recv()
 
         answer = await self.pc.createAnswer()
         await self.pc.setLocalDescription(answer)
 
         return self.pc
 
-    def force_tranceivers_to_send_recv(self):
+    def force_transceivers_to_send_recv(self):
         for transceiver in self.pc.getTransceivers():
             transceiver.direction = "sendrecv"
             logger.info(
