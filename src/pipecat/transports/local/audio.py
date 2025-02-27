@@ -26,22 +26,26 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class LocalTransportParams(TransportParams):
-    input_device_index: int = 0
-    output_device_index: int = 0
+class LocalAudioTransportParams(TransportParams):
+    input_device_index: Optional[int] = None
+    output_device_index: Optional[int] = None
 
 
 class LocalAudioInputTransport(BaseInputTransport):
-    _params: LocalTransportParams
+    _params: LocalAudioTransportParams
 
-    def __init__(self, py_audio: pyaudio.PyAudio, params: LocalTransportParams):
+    def __init__(self, py_audio: pyaudio.PyAudio, params: LocalAudioTransportParams):
         super().__init__(params)
         self._py_audio = py_audio
+
         self._in_stream = None
         self._sample_rate = 0
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._in_stream:
+            return
 
         self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
         num_frames = int(self._sample_rate / 100) * 2  # 20ms of audio
@@ -77,11 +81,12 @@ class LocalAudioInputTransport(BaseInputTransport):
 
 
 class LocalAudioOutputTransport(BaseOutputTransport):
-    _params: LocalTransportParams
+    _params: LocalAudioTransportParams
 
-    def __init__(self, py_audio: pyaudio.PyAudio, params: TransportParams):
+    def __init__(self, py_audio: pyaudio.PyAudio, params: LocalAudioTransportParams):
         super().__init__(params)
         self._py_audio = py_audio
+
         self._out_stream = None
         self._sample_rate = 0
 
@@ -91,6 +96,9 @@ class LocalAudioOutputTransport(BaseOutputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._out_stream:
+            return
 
         self._sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
@@ -108,6 +116,7 @@ class LocalAudioOutputTransport(BaseOutputTransport):
         if self._out_stream:
             self._out_stream.stop_stream()
             self._out_stream.close()
+            self._out_stream = None
 
     async def write_raw_audio_frames(self, frames: bytes):
         if self._out_stream:
@@ -117,7 +126,7 @@ class LocalAudioOutputTransport(BaseOutputTransport):
 
 
 class LocalAudioTransport(BaseTransport):
-    def __init__(self, params: LocalTransportParams):
+    def __init__(self, params: LocalAudioTransportParams):
         super().__init__()
         self._params = params
         self._pyaudio = pyaudio.PyAudio()

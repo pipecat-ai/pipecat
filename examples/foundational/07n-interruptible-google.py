@@ -18,9 +18,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.google import GoogleTTSService
-from pipecat.services.openai import OpenAILLMService
+from pipecat.services.google import GoogleLLMService, GoogleSTTService, GoogleTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -46,14 +44,16 @@ async def main():
             ),
         )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        stt = GoogleSTTService(
+            params=GoogleSTTService.InputParams(languages=Language.EN_US),
+        )
 
         tts = GoogleTTSService(
             voice_id="en-US-Journey-F",
             params=GoogleTTSService.InputParams(language=Language.EN_US),
         )
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
         messages = [
             {
@@ -79,7 +79,7 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,

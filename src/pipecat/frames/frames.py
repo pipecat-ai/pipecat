@@ -23,7 +23,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
@@ -438,7 +438,7 @@ class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
 
     clock: BaseClock
-    task_manager: TaskManager
+    task_manager: BaseTaskManager
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
     allow_interruptions: bool = False
@@ -513,9 +513,9 @@ class CancelTaskFrame(SystemFrame):
 
 @dataclass
 class StopTaskFrame(SystemFrame):
-    """Indicates that a pipeline task should be stopped but that the pipeline
-    processors should be kept in a running state. This is normally queued from
-    the pipeline task.
+    """This is used to notify the pipeline task that it should be stopped as
+    soon as possible (flushing all the queued frames) but that the pipeline
+    processors should be kept in a running state.
 
     """
 
@@ -561,6 +561,22 @@ class UserStartedSpeakingFrame(SystemFrame):
 @dataclass
 class UserStoppedSpeakingFrame(SystemFrame):
     """Emitted by the VAD to indicate that a user stopped speaking."""
+
+    pass
+
+
+@dataclass
+class EmulateUserStartedSpeakingFrame(SystemFrame):
+    """Emitted by internal processors upstream to emulate VAD behavior when a
+    user starts speaking."""
+
+    pass
+
+
+@dataclass
+class EmulateUserStoppedSpeakingFrame(SystemFrame):
+    """Emitted by internal processors upstream to emulate VAD behavior when a
+    user stops speaking."""
 
     pass
 
@@ -616,6 +632,13 @@ class FunctionCallInProgressFrame(SystemFrame):
     function_name: str
     tool_call_id: str
     arguments: str
+
+
+@dataclass
+class STTMuteFrame(SystemFrame):
+    """System frame to mute/unmute the STT service."""
+
+    mute: bool
 
 
 @dataclass
@@ -728,6 +751,17 @@ class EndFrame(ControlFrame):
 
 
 @dataclass
+class StopFrame(ControlFrame):
+    """Indicates that a pipeline should be stopped but that the pipeline
+    processors should be kept in a running state. This is normally queued from
+    the pipeline task.
+
+    """
+
+    pass
+
+
+@dataclass
 class LLMFullResponseStartFrame(ControlFrame):
     """Used to indicate the beginning of an LLM response. Following by one or
     more TextFrame and a final LLMFullResponseEndFrame.
@@ -778,13 +812,6 @@ class LLMUpdateSettingsFrame(ServiceUpdateSettingsFrame):
 @dataclass
 class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame):
     pass
-
-
-@dataclass
-class STTMuteFrame(ControlFrame):
-    """Control frame to mute/unmute the STT service."""
-
-    mute: bool
 
 
 @dataclass

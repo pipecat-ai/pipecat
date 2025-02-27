@@ -13,9 +13,6 @@ from typing import Any, Awaitable, Callable, Mapping, Optional
 
 import aiohttp
 from daily import (
-    CallClient,
-    Daily,
-    EventHandler,
     VirtualCameraDevice,
     VirtualMicrophoneDevice,
     VirtualSpeakerDevice,
@@ -46,7 +43,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 
 try:
     from daily import CallClient, Daily, EventHandler
@@ -291,11 +288,12 @@ class DailyTransportClient(EventHandler):
         self._transcription_ids = []
         self._transcription_status = None
 
+        self._joining = False
         self._joined = False
         self._joined_event = asyncio.Event()
         self._leave_counter = 0
 
-        self._task_manager: Optional[TaskManager] = None
+        self._task_manager: Optional[BaseTaskManager] = None
 
         # We use the executor to cleanup the client. We just do it from one
         # place, so only one thread is really needed.
@@ -330,6 +328,10 @@ class DailyTransportClient(EventHandler):
 
     def _speaker_name(self):
         return f"speaker-{self}"
+
+    @property
+    def room_url(self) -> str:
+        return self._room_url
 
     @property
     def participant_id(self) -> str:
@@ -423,13 +425,14 @@ class DailyTransportClient(EventHandler):
             )
 
     async def join(self):
-        # Transport already joined, ignore.
-        if self._joined:
+        # Transport already joined or joining, ignore.
+        if self._joined or self._joining:
             # Increment leave counter if we already joined.
             self._leave_counter += 1
             return
 
         logger.info(f"Joining {self._room_url}")
+        self._joining = True
 
         # For performance reasons, never subscribe to video streams (unless a
         # video renderer is registered).
@@ -450,6 +453,7 @@ class DailyTransportClient(EventHandler):
 
             if not error:
                 self._joined = True
+                self._joining = False
                 # Increment leave counter if we successfully joined.
                 self._leave_counter += 1
 
@@ -468,6 +472,7 @@ class DailyTransportClient(EventHandler):
         except asyncio.TimeoutError:
             error_msg = f"Time out joining {self._room_url}"
             logger.error(error_msg)
+            self._joining = False
             await self._callbacks.on_error(error_msg)
 
     async def _start_transcription(self):
@@ -836,6 +841,9 @@ class DailyInputTransport(BaseInputTransport):
 
         self._video_renderers = {}
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
         # Task that gets audio data from a device or the network and queues it
         # internally to be processed.
         self._audio_in_task = None
@@ -846,9 +854,22 @@ class DailyInputTransport(BaseInputTransport):
     def vad_analyzer(self) -> Optional[VADAnalyzer]:
         return self._vad_analyzer
 
+    def start_audio_in_streaming(self):
+        # Create audio task. It reads audio frames from Daily and push them
+        # internally for VAD processing.
+        if not self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+            logger.debug(f"Start receiving audio")
+            self._audio_in_task = self.create_task(self._audio_in_task_handler())
+
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         # Setup client.
         await self._client.setup(frame)
         # Join the room.
@@ -856,10 +877,8 @@ class DailyInputTransport(BaseInputTransport):
         # Inialize WebRTC VAD if needed.
         if self._params.vad_enabled and not self._params.vad_analyzer:
             self._vad_analyzer = WebRTCVADAnalyzer(sample_rate=self.sample_rate)
-        # Create audio task. It reads audio frames from Daily and push them
-        # internally for VAD processing.
-        if self._params.audio_in_enabled or self._params.vad_enabled:
-            self._audio_in_task = self.create_task(self._audio_in_task_handler())
+        if self._params.audio_in_stream_on_start:
+            self.start_audio_in_streaming()
 
     async def stop(self, frame: EndFrame):
         # Parent stop.
@@ -979,9 +998,18 @@ class DailyOutputTransport(BaseOutputTransport):
 
         self._client = client
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def start(self, frame: StartFrame):
         # Parent start.
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         # Setup client.
         await self._client.setup(frame)
         # Join the room.
@@ -1113,6 +1141,10 @@ class DailyTransport(BaseTransport):
     #
     # DailyTransport
     #
+
+    @property
+    def room_url(self) -> str:
+        return self._client.room_url
 
     @property
     def participant_id(self) -> str:

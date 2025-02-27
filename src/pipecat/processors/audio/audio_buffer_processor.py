@@ -21,21 +21,32 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class AudioBufferProcessor(FrameProcessor):
-    """This processor buffers audio raw frames (input and output). The mixed
-    audio can be obtained by calling `get_audio()` (if `buffer_size` is 0) or by
-    registering an "on_audio_data" event handler. The event handler will be
-    called every time `buffer_size` is reached.
+    """Processes and buffers audio frames from both input (user) and output (bot) sources.
 
-    You can provide the desired output `sample_rate` and incoming audio frames
-    will resampled to match it. Also, you can provide the number of channels, 1
-    for mono and 2 for stereo. With mono audio user and bot audio will be mixed,
-    in the case of stereo the left channel will be used for the user's audio and
-    the right channel for the bot.
+    This processor manages audio buffering and synchronization, providing both merged and
+    track-specific audio access through event handlers. It supports various audio configurations
+    including sample rate conversion and mono/stereo output.
 
-    Most of the time, user audio will be a continuous stream but it's possible
-    that in some cases only the spoken audio is sent. To accomodate for those
-    cases make sure to set `user_continuous_stream` accordingly.
+    Events:
+        on_audio_data: Triggered when buffer_size is reached, providing merged audio
+        on_track_audio_data: Triggered when buffer_size is reached, providing separate tracks
 
+    Args:
+        sample_rate (Optional[int]): Desired output sample rate. If None, uses source rate
+        num_channels (int): Number of channels (1 for mono, 2 for stereo). Defaults to 1
+        buffer_size (int): Size of buffer before triggering events. 0 for no buffering
+        user_continuous_stream (bool): Whether user audio is continuous or speech-only
+
+    Audio handling:
+        - Mono output (num_channels=1): User and bot audio are mixed
+        - Stereo output (num_channels=2): User audio on left, bot audio on right
+        - Automatic resampling of incoming audio to match desired sample_rate
+        - Silence insertion for non-continuous audio streams
+        - Buffer synchronization between user and bot audio
+
+    Note:
+        When user_continuous_stream is False, the processor expects only speech
+        segments and will handle silence insertion between segments automatically.
     """
 
     def __init__(
@@ -66,21 +77,45 @@ class AudioBufferProcessor(FrameProcessor):
         self._resampler = create_default_resampler()
 
         self._register_event_handler("on_audio_data")
+        self._register_event_handler("on_track_audio_data")
 
     @property
     def sample_rate(self) -> int:
+        """Current sample rate of the audio processor.
+
+        Returns:
+            int: The sample rate in Hz
+        """
         return self._sample_rate
 
     @property
     def num_channels(self) -> int:
+        """Number of channels in the audio output.
+
+        Returns:
+            int: Number of channels (1 for mono, 2 for stereo)
+        """
         return self._num_channels
 
     def has_audio(self) -> bool:
+        """Check if both user and bot audio buffers contain data.
+
+        Returns:
+            bool: True if both buffers contain audio data
+        """
         return self._buffer_has_audio(self._user_audio_buffer) and self._buffer_has_audio(
             self._bot_audio_buffer
         )
 
     def merge_audio_buffers(self) -> bytes:
+        """Merge user and bot audio buffers into a single audio stream.
+
+        For mono output, audio is mixed. For stereo output, user audio is placed
+        on the left channel and bot audio on the right channel.
+
+        Returns:
+            bytes: Mixed audio data
+        """
         if self._num_channels == 1:
             return mix_audio(bytes(self._user_audio_buffer), bytes(self._bot_audio_buffer))
         elif self._num_channels == 2:
@@ -91,14 +126,23 @@ class AudioBufferProcessor(FrameProcessor):
             return b""
 
     async def start_recording(self):
+        """Start recording audio from both user and bot.
+
+        Initializes recording state and resets audio buffers.
+        """
         self._recording = True
         self._reset_recording()
 
     async def stop_recording(self):
+        """Stop recording and trigger final audio data handlers.
+
+        Calls audio handlers with any remaining buffered audio before stopping.
+        """
         await self._call_on_audio_data_handler()
         self._recording = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming audio frames and manage audio buffers."""
         await super().process_frame(frame, direction)
 
         # Update output sample rate if necessary.
@@ -161,10 +205,21 @@ class AudioBufferProcessor(FrameProcessor):
         if not self.has_audio() or not self._recording:
             return
 
+        # Call original handler with merged audio
         merged_audio = self.merge_audio_buffers()
         await self._call_event_handler(
             "on_audio_data", merged_audio, self._sample_rate, self._num_channels
         )
+
+        # Call new handler with separate tracks
+        await self._call_event_handler(
+            "on_track_audio_data",
+            bytes(self._user_audio_buffer),
+            bytes(self._bot_audio_buffer),
+            self._sample_rate,
+            self._num_channels,
+        )
+
         self._reset_audio_buffers()
 
     def _buffer_has_audio(self, buffer: bytearray) -> bool:

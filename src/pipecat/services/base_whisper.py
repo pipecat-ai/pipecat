@@ -7,21 +7,13 @@
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
+from openai import AsyncOpenAI
+from openai.types.audio import Transcription
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.ai_services import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-
-try:
-    from openai import AsyncOpenAI
-    from openai.types.audio import Transcription
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
 
 
 def language_to_whisper_language(language: Language) -> Optional[str]:
@@ -111,6 +103,8 @@ class BaseWhisperSTTService(SegmentedSTTService):
         api_key: Service API key. Defaults to None.
         base_url: Service API base URL. Defaults to None.
         language: Language of the audio input. Defaults to English.
+        prompt: Optional text to guide the model's style or continue a previous segment.
+        temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
         **kwargs: Additional arguments passed to SegmentedSTTService.
     """
 
@@ -121,12 +115,16 @@ class BaseWhisperSTTService(SegmentedSTTService):
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         language: Optional[Language] = Language.EN,
+        prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.set_model_name(model)
         self._client = self._create_client(api_key, base_url)
         self._language = self.language_to_service_language(language or Language.EN)
+        self._prompt = prompt
+        self._temperature = temperature
 
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)

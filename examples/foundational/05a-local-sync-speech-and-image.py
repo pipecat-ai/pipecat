@@ -30,8 +30,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.tk import TkLocalTransport, TkOutputTransport
+from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
 load_dotenv(override=True)
 
@@ -152,7 +151,7 @@ async def main():
 
         transport = TkLocalTransport(
             tk_root,
-            TransportParams(
+            TkTransportParams(
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,

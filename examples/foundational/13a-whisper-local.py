@@ -16,7 +16,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.whisper import WhisperSTTService
-from pipecat.transports.local.audio import LocalAudioTransport, LocalTransportParams
+from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 
 load_dotenv(override=True)
 
@@ -33,7 +33,7 @@ class TranscriptionLogger(FrameProcessor):
 
 
 async def main():
-    transport = LocalAudioTransport(LocalTransportParams(audio_in_enabled=True))
+    transport = LocalAudioTransport(LocalAudioTransportParams(audio_in_enabled=True))
 
     stt = WhisperSTTService()
 

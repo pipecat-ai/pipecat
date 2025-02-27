@@ -11,22 +11,18 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.ai_services import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -43,7 +39,7 @@ except ModuleNotFoundError as e:
 FishAudioOutputFormat = Literal["opus", "mp3", "pcm", "wav"]
 
 
-class FishAudioTTSService(TTSService, WebsocketService):
+class FishAudioTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         latency: Optional[str] = "normal"  # "normal" or "balanced"
@@ -60,7 +56,12 @@ class FishAudioTTSService(TTSService, WebsocketService):
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        super().__init__(
+            push_stop_frames=True,
+            pause_frame_processing=True,
+            sample_rate=sample_rate,
+            **kwargs,
+        )
 
         self._api_key = api_key
         self._base_url = "wss://api.fish.audio/v1/tts/live"
@@ -105,16 +106,21 @@ class FishAudioTTSService(TTSService, WebsocketService):
 
     async def _connect(self):
         await self._connect_websocket()
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
-        await self._disconnect_websocket()
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
+        await self._disconnect_websocket()
+
     async def _connect_websocket(self):
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to Fish Audio")
             headers = {"Authorization": f"Bearer {self._api_key}"}
             self._websocket = await websockets.connect(self._base_url, extra_headers=headers)
@@ -147,6 +153,11 @@ class FishAudioTTSService(TTSService, WebsocketService):
             return self._websocket
         raise Exception("Websocket not connected")
 
+    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+        await super()._handle_interruption(frame, direction)
+        await self.stop_all_metrics()
+        self._request_id = None
+
     async def _receive_messages(self):
         async for message in self._get_websocket():
             try:
@@ -165,21 +176,6 @@ class FishAudioTTSService(TTSService, WebsocketService):
 
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, TTSSpeakFrame):
-            await self.pause_processing_frames()
-        elif isinstance(frame, LLMFullResponseEndFrame) and self._request_id:
-            await self.pause_processing_frames()
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.resume_processing_frames()
-
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
-        await super()._handle_interruption(frame, direction)
-        await self.stop_all_metrics()
-        self._request_id = None
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating Fish TTS: [{text}]")

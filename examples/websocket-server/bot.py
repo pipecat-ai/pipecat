@@ -125,7 +125,9 @@ async def main():
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            audio_in_sample_rate=16000, audio_out_sample_rate=16000, allow_interruptions=True
+            audio_in_sample_rate=16000,
+            audio_out_sample_rate=16000,
+            allow_interruptions=True,
         ),
     )
 

@@ -10,6 +10,7 @@ from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
+from openai import AsyncAzureOpenAI
 from PIL import Image
 from pydantic import BaseModel
 
@@ -49,7 +50,6 @@ try:
         PushAudioInputStream,
     )
     from azure.cognitiveservices.speech.dialog import AudioConfig
-    from openai import AsyncAzureOpenAI
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -540,6 +540,10 @@ class AzureTTSService(AzureBaseTTSService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._speech_config:
+            return
+
         # Now self.sample_rate is properly initialized
         self._speech_config = SpeechConfig(
             subscription=self._api_key,
@@ -630,6 +634,10 @@ class AzureHttpTTSService(AzureBaseTTSService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._speech_config:
+            return
+
         self._speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
@@ -687,14 +695,21 @@ class AzureSTTService(STTService):
         self._speech_config = SpeechConfig(subscription=api_key, region=region)
         self._speech_config.speech_recognition_language = language_code
 
+        self._audio_stream = None
+        self._speech_recognizer = None
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_processing_metrics()
-        self._audio_stream.write(audio)
+        if self._audio_stream:
+            self._audio_stream.write(audio)
         await self.stop_processing_metrics()
         yield None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._audio_stream:
+            return
 
         stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
         self._audio_stream = PushAudioInputStream(stream_format)
@@ -710,13 +725,21 @@ class AzureSTTService(STTService):
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
-        self._speech_recognizer.stop_continuous_recognition_async()
-        self._audio_stream.close()
+
+        if self._speech_recognizer:
+            self._speech_recognizer.stop_continuous_recognition_async()
+
+        if self._audio_stream:
+            self._audio_stream.close()
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
-        self._speech_recognizer.stop_continuous_recognition_async()
-        self._audio_stream.close()
+
+        if self._speech_recognizer:
+            self._speech_recognizer.stop_continuous_recognition_async()
+
+        if self._audio_stream:
+            self._audio_stream.close()
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:

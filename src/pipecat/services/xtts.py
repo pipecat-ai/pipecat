@@ -99,6 +99,10 @@ class XTTSService(TTSService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._studio_speakers:
+            return
+
         async with self._aiohttp_session.get(self._settings["base_url"] + "/studio_speakers") as r:
             if r.status != 200:
                 text = await r.text()
@@ -146,8 +150,10 @@ class XTTSService(TTSService):
 
             yield TTSStartedFrame()
 
+            CHUNK_SIZE = 1024
+
             buffer = bytearray()
-            async for chunk in r.content.iter_chunked(1024):
+            async for chunk in r.content.iter_chunked(CHUNK_SIZE):
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
                     # Append new chunk to the buffer.

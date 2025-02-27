@@ -14,7 +14,6 @@ from loguru import logger
 from PIL import Image
 
 from pipecat.audio.utils import create_default_resampler
-from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
@@ -37,6 +36,8 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import nanoseconds_to_seconds
+
+BOT_VAD_STOP_SECS = 0.3
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -169,6 +170,8 @@ class BaseOutputTransport(FrameProcessor):
         # TODO(aleix): Images and audio should support presentation timestamps.
         elif frame.pts:
             await self._sink_clock_queue.put((frame.pts, frame.id, frame))
+        elif direction == FrameDirection.UPSTREAM:
+            await self.push_frame(frame, direction)
         else:
             await self._sink_queue.put(frame)
 
@@ -229,16 +232,21 @@ class BaseOutputTransport(FrameProcessor):
             await self.push_frame(BotStoppedSpeakingFrame())
             await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
             self._bot_speaking = False
+            # Clean audio buffer (there could be tiny left overs if not multiple
+            # to our output chunk size).
+            self._audio_buffer = bytearray()
 
     #
     # Sink tasks
     #
 
     def _create_sink_tasks(self):
-        self._sink_queue = asyncio.Queue()
-        self._sink_clock_queue = asyncio.PriorityQueue()
-        self._sink_task = self.create_task(self._sink_task_handler())
-        self._sink_clock_task = self.create_task(self._sink_clock_task_handler())
+        if not self._sink_task:
+            self._sink_queue = asyncio.Queue()
+            self._sink_task = self.create_task(self._sink_task_handler())
+        if not self._sink_clock_task:
+            self._sink_clock_queue = asyncio.PriorityQueue()
+            self._sink_clock_task = self.create_task(self._sink_clock_task_handler())
 
     async def _cancel_sink_tasks(self):
         # Stop sink tasks.
@@ -321,15 +329,10 @@ class BaseOutputTransport(FrameProcessor):
                     )
                     yield frame
 
-        vad_stop_secs = (
-            self._params.vad_analyzer.params.stop_secs
-            if self._params.vad_analyzer
-            else VAD_STOP_SECS
-        )
         if self._params.audio_out_mixer:
-            return with_mixer(vad_stop_secs)
+            return with_mixer(BOT_VAD_STOP_SECS)
         else:
-            return without_mixer(vad_stop_secs)
+            return without_mixer(BOT_VAD_STOP_SECS)
 
     async def _sink_task_handler(self):
         async for frame in self._next_frame():
@@ -360,7 +363,7 @@ class BaseOutputTransport(FrameProcessor):
 
     def _create_camera_task(self):
         # Create camera output queue and task if needed.
-        if self._params.camera_out_enabled:
+        if not self._camera_out_task and self._params.camera_out_enabled:
             self._camera_out_queue = asyncio.Queue()
             self._camera_out_task = self.create_task(self._camera_out_task_handler())
 

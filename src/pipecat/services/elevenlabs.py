@@ -14,22 +14,18 @@ from loguru import logger
 from pydantic import BaseModel, model_validator
 
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService, WordTTSService
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.ai_services import InterruptibleWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for ElevenLabs configuration needed
@@ -141,7 +137,7 @@ def calculate_word_times(
     return word_times
 
 
-class ElevenLabsTTSService(WordTTSService, WebsocketService):
+class ElevenLabsTTSService(InterruptibleWordTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = None
         optimize_streaming_latency: Optional[str] = None
@@ -186,16 +182,14 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         # Finally, ElevenLabs doesn't provide information on when the bot stops
         # speaking for a while, so we want the parent class to send TTSStopFrame
         # after a short period not receiving any audio.
-        WordTTSService.__init__(
-            self,
+        super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,
             push_stop_frames=True,
-            stop_frame_timeout_s=2.0,
+            pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._url = url
@@ -219,6 +213,9 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         # there's an interruption or TTSStoppedFrame.
         self._started = False
         self._cumulative_time = 0
+
+        self._receive_task = None
+        self._keepalive_task = None
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -289,24 +286,14 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        # If we received a TTSSpeakFrame and the LLM response included text (it
-        # might be that it's only a function calling response) we pause
-        # processing more frames until we receive a BotStoppedSpeakingFrame.
-        if isinstance(frame, TTSSpeakFrame):
-            await self.pause_processing_frames()
-        elif isinstance(frame, LLMFullResponseEndFrame) and self._started:
-            await self.pause_processing_frames()
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.resume_processing_frames()
-
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
-        self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+
+        if not self._keepalive_task:
+            self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
         if self._receive_task:
@@ -321,6 +308,9 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
 
     async def _connect_websocket(self):
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to ElevenLabs")
 
             voice_id = self._voice_id
@@ -370,8 +360,13 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
+    def _get_websocket(self):
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
     async def _receive_messages(self):
-        async for message in self._websocket:
+        async for message in self._get_websocket():
             msg = json.loads(message)
             if msg.get("audio"):
                 await self.stop_ttfb_metrics()
@@ -574,18 +569,18 @@ class ElevenLabsHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
-                yield TTSStartedFrame()
 
-                async for chunk in response.content:
-                    if chunk:
+                # Process the streaming response
+                CHUNK_SIZE = 1024
+
+                yield TTSStartedFrame()
+                async for chunk in response.content.iter_chunked(CHUNK_SIZE):
+                    if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
                         yield TTSAudioRawFrame(chunk, self.sample_rate, 1)
-
-                yield TTSStoppedFrame()
-
         except Exception as e:
             logger.error(f"Error in run_tts: {e}")
             yield ErrorFrame(error=str(e))
-
         finally:
+            await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
