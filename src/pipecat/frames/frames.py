@@ -568,7 +568,8 @@ class UserStoppedSpeakingFrame(SystemFrame):
 @dataclass
 class EmulateUserStartedSpeakingFrame(SystemFrame):
     """Emitted by internal processors upstream to emulate VAD behavior when a
-    user starts speaking."""
+    user starts speaking.
+    """
 
     pass
 
@@ -576,7 +577,8 @@ class EmulateUserStartedSpeakingFrame(SystemFrame):
 @dataclass
 class EmulateUserStoppedSpeakingFrame(SystemFrame):
     """Emitted by internal processors upstream to emulate VAD behavior when a
-    user stops speaking."""
+    user stops speaking.
+    """
 
     pass
 
@@ -702,6 +704,16 @@ class VisionImageRawFrame(InputImageRawFrame):
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, text: [{self.text}], size: {self.size}, format: {self.format})"
+
+
+@dataclass
+class ServerMessageFrame(SystemFrame):
+    """A frame for sending server messages to the client."""
+
+    data: Any
+
+    def __str__(self):
+        return f"{self.name}(data: {self.data})"
 
 
 #
