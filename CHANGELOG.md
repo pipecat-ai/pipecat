@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added a new frame, `ServerMessageFrame`, and RTVI message `RTVIServerMessage`
-  which provides a generic mechanism for sending custom messages from server to
-  client. The `ServerMessageFrame` is processed by the `RTVIObserver` and will
-  be delivered to the client's `onServerMessage` callback or `ServerMessage`
-  event.
+- Added a new frame, `RTVIServerMessageFrame`, and RTVI message
+  `RTVIServerMessage` which provides a generic mechanism for sending custom
+  messages from server to client. The `RTVIServerMessageFrame` is processed by
+  the `RTVIObserver` and will be delivered to the client's `onServerMessage`
+  callback or `ServerMessage` event.
 
 ## [0.0.58] - 2025-02-26
 
