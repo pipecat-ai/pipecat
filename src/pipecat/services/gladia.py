@@ -166,6 +166,7 @@ class GladiaSTTService(STTService):
             "maximum_duration_without_endpointing": params.maximum_duration_without_endpointing,
             "pre_processing": {
                 "audio_enhancer": params.audio_enhancer,
+                "speech_threshold": 0.99,
             },
             "realtime_processing": {
                 "words_accurate_timestamps": params.words_accurate_timestamps,
