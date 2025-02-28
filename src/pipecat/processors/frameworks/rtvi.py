@@ -38,7 +38,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     MetricsFrame,
-    ServerMessageFrame,
     StartFrame,
     SystemFrame,
     TranscriptionFrame,
@@ -382,6 +381,16 @@ class RTVIServerMessage(BaseModel):
     data: Any
 
 
+@dataclass
+class RTVIServerMessageFrame(SystemFrame):
+    """A frame for sending server messages to the client."""
+
+    data: Any
+
+    def __str__(self):
+        return f"{self.name}(data: {self.data})"
+
+
 class RTVIFrameProcessor(FrameProcessor):
     def __init__(self, direction: FrameDirection = FrameDirection.DOWNSTREAM, **kwargs):
         super().__init__(**kwargs)
@@ -717,7 +726,7 @@ class RTVIObserver(BaseObserver):
                 mark_as_seen = False
         elif isinstance(frame, MetricsFrame):
             await self._handle_metrics(frame)
-        elif isinstance(frame, ServerMessageFrame):
+        elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVIServerMessage(data=frame.data)
             await self.push_transport_message_urgent(message)
 
