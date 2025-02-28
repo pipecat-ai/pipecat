@@ -706,16 +706,6 @@ class VisionImageRawFrame(InputImageRawFrame):
         return f"{self.name}(pts: {pts}, text: [{self.text}], size: {self.size}, format: {self.format})"
 
 
-@dataclass
-class ServerMessageFrame(SystemFrame):
-    """A frame for sending server messages to the client."""
-
-    data: Any
-
-    def __str__(self):
-        return f"{self.name}(data: {self.data})"
-
-
 #
 # Control frames
 #
