@@ -113,8 +113,8 @@ async def main():
                 llm,
                 tts,
                 transport.output(),
-                audio_buffer_processor,  # captures audio into a buffer
                 canonical,  # uploads audio buffer to Canonical AI for metrics
+                audio_buffer_processor,  # captures audio into a buffer
                 context_aggregator.assistant(),
             ]
         )
