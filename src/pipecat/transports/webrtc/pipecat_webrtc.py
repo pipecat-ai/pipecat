@@ -10,6 +10,7 @@ from typing import Awaitable, Callable, Optional
 
 import numpy as np
 from aiortc import MediaStreamTrack
+from aiortc.mediastreams import VideoFrame
 from av import AudioFrame, AudioResampler
 from loguru import logger
 from pydantic import BaseModel
@@ -18,6 +19,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     InputAudioRawFrame,
+    InputImageRawFrame,
     StartFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
@@ -97,6 +99,7 @@ class PipecatWebRTCClient:
 
         self._audio_output_track = None
         self._audio_input_track = None
+        self._video_input_track = None
 
         self._audio_in_channels = None
         self._in_sample_rate = None
@@ -120,6 +123,30 @@ class PipecatWebRTCClient:
         async def on_closed():
             logger.info("Client connection closed.")
             await self._handle_client_closed()
+
+    async def read_video_frame(self):
+        """
+        Reads a video frame from the given MediaStreamTrack, converts it to RGB,
+        and returns it as a NumPy array.
+        """
+        while self._video_input_track is not None:
+            frame = await self._video_input_track.recv()  # Get a video frame
+
+            if frame is None or not isinstance(frame, VideoFrame):
+                # If no valid frame, sleep for a bit
+                await asyncio.sleep(0.01)
+                continue
+
+            # If you want to see the frame size or other information, you can print it
+            print(f"Received video frame: {frame.width}x{frame.height}, timestamp: {frame.time}, format: {frame.format.name}")
+
+            image_frame = InputImageRawFrame(
+                image=frame.to_rgb().to_image().tobytes(),
+                size=(frame.width, frame.height),
+                format="RGB",
+            )
+
+            yield image_frame
 
     async def read_audio_frame(self):
         """
@@ -180,6 +207,7 @@ class PipecatWebRTCClient:
 
     async def _handle_client_connected(self):
         self._audio_input_track = self._webrtcConnection.audio_input_track()
+        self._video_input_track = self._webrtcConnection.video_input_track()
         await self._callbacks.on_client_connected(self._webrtcConnection)
 
     async def _handle_client_disconnected(self):
@@ -211,6 +239,7 @@ class PipecatWebRTCInputTransport(BaseInputTransport):
         self._client = client
         self._params = params
         self._receive_audio_task = None
+        self._receive_video_task = None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -218,11 +247,16 @@ class PipecatWebRTCInputTransport(BaseInputTransport):
         await self._client.connect()
         if not self._receive_audio_task:
             self._receive_audio_task = self.create_task(self._receive_audio())
+        if not self._receive_video_task:
+            self._receive_video_task = self.create_task(self._receive_video())
 
     async def _stop_tasks(self):
         if self._receive_audio_task:
             await self.cancel_task(self._receive_audio_task)
             self._receive_audio_task = None
+        if self._receive_video_task:
+            await self.cancel_task(self._receive_video_task)
+            self._receive_video_task = None
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -239,6 +273,15 @@ class PipecatWebRTCInputTransport(BaseInputTransport):
             async for audio_frame in self._client.read_audio_frame():
                 if audio_frame:
                     await self.push_audio_frame(audio_frame)
+
+        except Exception as e:
+            logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
+
+    async def _receive_video(self):
+        try:
+            async for video_frame in self._client.read_video_frame():
+                if video_frame:
+                    await self.push_frame(video_frame)
 
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")

@@ -103,5 +103,15 @@ class PipecatWebRTCConnection(EventEmitter):
 
         return audio_transceiver.receiver.track
 
+    def video_input_track(self):
+        # Transceivers always appear in creation-order for both peers
+        # For now we are only considering that we are going to have 02 transceivers,
+        # one for audio and one for video
+        video_transceiver = self.pc.getTransceivers()[1]
+        if not video_transceiver:
+            return None
+
+        return video_transceiver.receiver.track
+
     def tracks(self):
         return self._tracks
