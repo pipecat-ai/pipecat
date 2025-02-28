@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import cv2
 import asyncio
 from collections import deque
 from typing import Awaitable, Callable, Optional
@@ -137,11 +138,25 @@ class PipecatWebRTCClient:
                 await asyncio.sleep(0.01)
                 continue
 
-            # If you want to see the frame size or other information, you can print it
-            print(f"Received video frame: {frame.width}x{frame.height}, timestamp: {frame.time}, format: {frame.format.name}")
+            format_name = frame.format.name
+
+            # Convert frame to NumPy array in its native format
+            frame_array = frame.to_ndarray(format=format_name)
+
+            # Handle different formats dynamically
+            if format_name == "yuv420p":
+                frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_YUV2RGB_I420)
+            elif format_name == "nv12":
+                frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_YUV2RGB_NV12)
+            elif format_name == "gray":
+                frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_GRAY2RGB)
+            elif format_name.startswith("rgb"):  # Already RGB, no conversion needed
+                frame_rgb = frame_array
+            else:
+                raise ValueError(f"Unsupported format: {format_name}")
 
             image_frame = InputImageRawFrame(
-                image=frame.to_rgb().to_image().tobytes(),
+                image=frame_rgb.tobytes(),
                 size=(frame.width, frame.height),
                 format="RGB",
             )

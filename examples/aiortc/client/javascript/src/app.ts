@@ -8,8 +8,8 @@ class WebRTCConnection {
     private declare audioCodec: HTMLSelectElement;
     private declare videoCodec: HTMLSelectElement;
 
-    private declare video: HTMLVideoElement;
-    private declare audio: HTMLAudioElement;
+    private declare videoElement: HTMLVideoElement;
+    private declare audioElement: HTMLAudioElement;
 
     private pc: RTCPeerConnection | null = null;
     private dc: RTCDataChannel | null = null;
@@ -33,8 +33,8 @@ class WebRTCConnection {
         this.audioCodec = document.getElementById('audio-codec') as HTMLSelectElement;
         this.videoCodec = document.getElementById('video-codec') as HTMLSelectElement;
 
-        this.video = document.getElementById('bot-video') as HTMLVideoElement;
-        this.audio = document.getElementById('bot-audio') as HTMLAudioElement;
+        this.videoElement = document.getElementById('bot-video') as HTMLVideoElement;
+        this.audioElement = document.getElementById('bot-audio') as HTMLAudioElement;
 
         this.debugLog = document.getElementById('debug-log');
         this.statusSpan = document.getElementById('connection-status');
@@ -97,9 +97,10 @@ class WebRTCConnection {
         pc.addEventListener('track', (evt: RTCTrackEvent) => {
             this.log(`Received new track ${evt.track.kind}`)
             if (evt.track.kind === 'video') {
-                this.video.srcObject = evt.streams[0];
+                //TODO: fixme, showing only the local video for now.
+                //this.videoElement.srcObject = evt.streams[0];
             } else {
-                this.audio.srcObject = evt.streams[0];
+                this.audioElement.srcObject = evt.streams[0];
             }
         });
 
@@ -123,8 +124,9 @@ class WebRTCConnection {
 
         //Since we are using transceivers, the event with a new track is not triggered
         this.log("onConnectedHandler, trying to setup the tracks")
-        this.audio.srcObject = new MediaStream([this.getAudioTransceiver().receiver.track]);
-        this.video.srcObject = new MediaStream([this.getVideoTransceiver().receiver.track]);
+        this.audioElement.srcObject = new MediaStream([this.getAudioTransceiver().receiver.track]);
+        //TODO: showing only the local video for now
+        //this.videoElement.srcObject = new MediaStream([this.getVideoTransceiver().receiver.track]);
     }
 
     private onDisconnectedHandler() {
@@ -257,6 +259,7 @@ class WebRTCConnection {
 
                 let videoTrack = stream.getVideoTracks()[0]
                 await this.getVideoTransceiver().sender.replaceTrack(videoTrack);
+                this.videoElement.srcObject = new MediaStream([videoTrack]);
             } catch (err) {
                 alert(`Could not acquire media: ${err}`);
             }
