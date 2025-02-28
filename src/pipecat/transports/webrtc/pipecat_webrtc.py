@@ -102,6 +102,10 @@ class PipecatWebRTCClient:
         self._in_sample_rate = None
         self._out_sample_rate = None
 
+        # We are always resampling it for 16000 if the sample_rate that we receive is bigger than that.
+        # otherwise we face issues with Silero VAD
+        self._pipecat_resampler = AudioResampler("s16", "mono", 16000)
+
         @self._webrtcConnection.on("connected")
         async def on_connected():
             logger.info("Peer connection established.")
@@ -129,21 +133,26 @@ class PipecatWebRTCClient:
                 await asyncio.sleep(0.01)
                 continue
 
-            # Convert the frame to an ndarray
-            samples = frame.to_ndarray()
-
-            # Ensure mono channel
-            if samples.ndim > 1:
-                samples = samples[0]  # Take the first channel if stereo
-
-            # Convert to 16-bit PCM bytes
-            pcm_bytes = samples.astype(np.int16).tobytes()
-
-            audio_frame = InputAudioRawFrame(
-                audio=pcm_bytes, sample_rate=self._in_sample_rate, num_channels=self._audio_in_channels
-            )
-
-            yield audio_frame  # Yield the 20ms audio chunk
+            if frame.sample_rate > self._in_sample_rate:
+                resampled_frames = self._pipecat_resampler.resample(frame)
+                for resampled_frame in resampled_frames:
+                    # 16-bit PCM bytes
+                    pcm_bytes = resampled_frame.to_ndarray().astype(np.int16).tobytes()
+                    audio_frame = InputAudioRawFrame(
+                        audio=pcm_bytes,
+                        sample_rate=resampled_frame.sample_rate,
+                        num_channels=self._audio_in_channels,
+                    )
+                    yield audio_frame
+            else:
+                # 16-bit PCM bytes
+                pcm_bytes = frame.to_ndarray().astype(np.int16).tobytes()
+                audio_frame = InputAudioRawFrame(
+                    audio=pcm_bytes,
+                    sample_rate=frame.sample_rate,
+                    num_channels=self._audio_in_channels,
+                )
+                yield audio_frame
 
     async def write_raw_audio_frames(self, data: bytes):
         if self._can_send():
