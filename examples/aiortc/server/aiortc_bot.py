@@ -61,14 +61,7 @@ async def run_bot(webrtc_connection):
         system_instruction=SYSTEM_INSTRUCTION,
     )
 
-    context = OpenAILLMContext(
-        [
-            {
-                "role": "user",
-                "content": "Start by greeting the user warmly and introducing yourself.",
-            }
-        ],
-    )
+    context = OpenAILLMContext()
     context_aggregator = llm.create_context_aggregator(context)
 
     # RTVI events for Pipecat client UI

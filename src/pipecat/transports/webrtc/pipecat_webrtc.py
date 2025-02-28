@@ -4,11 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import cv2
 import asyncio
 from collections import deque
 from typing import Awaitable, Callable, Optional
 
+import cv2
 import numpy as np
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VideoFrame
