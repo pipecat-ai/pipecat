@@ -31,16 +31,16 @@ class PipecatWebRTCConnection(EventEmitter):
                 await self.close()
 
         @self.pc.on("track")
-        def on_track(track):
+        async def on_track(track):
             logger.info(f"Track {track.kind} received")
             self._tracks.add(track)
-            self.emit("track-started", track)
+            await self.emit("track-started", track)
 
             @track.on("ended")
             async def on_ended():
                 logger.info(f"Track {track.kind} ended")
                 self._tracks.discard(track)
-                self.emit("track-ended", track)
+                await self.emit("track-ended", track)
 
     async def initialize(self, sdp: str, type: str):
         offer = RTCSessionDescription(sdp=sdp, type=type)
@@ -92,6 +92,16 @@ class PipecatWebRTCConnection(EventEmitter):
 
     def is_connected(self):
         return self.pc.connectionState == "connected"
+
+    def audio_input_track(self):
+        # Transceivers always appear in creation-order for both peers
+        # For now we are only considering that we are going to have 02 transceivers,
+        # one for audio and one for video
+        audio_transceiver = self.pc.getTransceivers()[0]
+        if not audio_transceiver:
+            return None
+
+        return audio_transceiver.receiver.track
 
     def tracks(self):
         return self._tracks

@@ -5,6 +5,7 @@
 #
 
 import asyncio
+from collections import deque
 from typing import Awaitable, Callable, Optional
 
 import numpy as np
@@ -12,7 +13,6 @@ from aiortc import MediaStreamTrack
 from av import AudioFrame, AudioResampler
 from loguru import logger
 from pydantic import BaseModel
-from collections import deque
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -88,8 +88,6 @@ class RawAudioTrack(MediaStreamTrack):
 
 
 class PipecatWebRTCClient:
-
-    # TODO: should receive the params, so we can get the sample_rate
     def __init__(
         self, webrtc_connection: PipecatWebRTCConnection, callbacks: PipecatWebRTCCallbacks
     ):
@@ -97,57 +95,87 @@ class PipecatWebRTCClient:
         self._closing = False
         self._callbacks = callbacks
 
-        self._audio_track = None
+        self._audio_output_track = None
+        self._audio_input_track = None
+
+        self._audio_in_channels = None
         self._in_sample_rate = None
         self._out_sample_rate = None
 
         @self._webrtcConnection.on("connected")
         async def on_connected():
             logger.info("Peer connection established.")
-            await self.trigger_client_connected()
+            await self._handle_client_connected()
 
         @self._webrtcConnection.on("disconnected")
         async def on_disconnected():
             logger.info("Peer connection lost.")
-            await self.trigger_client_disconnected()
+            await self._handle_client_disconnected()
 
         @self._webrtcConnection.on("closed")
         async def on_closed():
             logger.info("Client connection closed.")
-            await self.trigger_client_closed()
+            await self._handle_client_closed()
 
-    # TODO implement to receive the audio
+    async def read_audio_frame(self):
+        """
+        Reads 20ms of audio from the given MediaStreamTrack and returns raw PCM bytes.
+        """
+        while self._audio_input_track is not None:
+            frame = await self._audio_input_track.recv()  # Get an audio frame
+            if frame is None or not isinstance(frame, AudioFrame):
+                continue
 
-    async def write_raw_audio_frames(self, data:bytes):
+            # Convert the frame to an ndarray
+            samples = frame.to_ndarray()
+
+            # Ensure mono channel
+            if samples.ndim > 1:
+                samples = samples[0]  # Take the first channel if stereo
+
+            # Convert to 16-bit PCM bytes
+            pcm_bytes = samples.astype(np.int16).tobytes()
+
+            audio_frame = InputAudioRawFrame(
+                audio=pcm_bytes, sample_rate=self._in_sample_rate, num_channels=self._audio_in_channels
+            )
+
+            yield audio_frame  # Yield the 20ms audio chunk
+
+            await asyncio.sleep(0.02)  # Maintain real-time sync
+
+    async def write_raw_audio_frames(self, data: bytes):
         if self._can_send():
-            self._audio_track.add_audio_bytes(data)
+            self._audio_output_track.add_audio_bytes(data)
 
     async def setup(self, _params, frame):
+        self._audio_in_channels = _params.audio_in_channels
         self._in_sample_rate = _params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = _params.audio_out_sample_rate or frame.audio_out_sample_rate
 
     async def connect(self):
-        if self._audio_track:
+        if self._audio_output_track:
             # already initialized
             return
 
         logger.info(f"Connecting to Pipecat WebRTC")
-        self._audio_track = RawAudioTrack(sample_rate=self._out_sample_rate)
-        self._webrtcConnection.replace_audio_track(self._audio_track)
+        self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
+        self._webrtcConnection.replace_audio_track(self._audio_output_track)
 
     async def disconnect(self):
         if self.is_connected and not self.is_closing:
             self._closing = True
             await self._webrtcConnection.close()
-            await self.trigger_client_disconnected()
+            await self._handle_client_disconnected()
 
-    async def trigger_client_disconnected(self):
-        await self._callbacks.on_client_disconnected(self._webrtcConnection)
-
-    async def trigger_client_connected(self):
+    async def _handle_client_connected(self):
+        self._audio_input_track = self._webrtcConnection.audio_input_track()
         await self._callbacks.on_client_connected(self._webrtcConnection)
 
-    async def trigger_client_closed(self):
+    async def _handle_client_disconnected(self):
+        await self._callbacks.on_client_disconnected(self._webrtcConnection)
+
+    async def _handle_client_closed(self):
         await self._callbacks.on_client_closed(self._webrtcConnection)
 
     def _can_send(self):
@@ -172,19 +200,19 @@ class PipecatWebRTCInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        self._receive_task = None
+        self._receive_audio_task = None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._client.setup(self._params, frame)
         await self._client.connect()
-        if not self._receive_task:
-            self._receive_task = self.create_task(self._receive_messages())
+        if not self._receive_audio_task:
+            self._receive_audio_task = self.create_task(self._receive_audio())
 
     async def _stop_tasks(self):
-        if self._receive_task:
-            await self.cancel_task(self._receive_task)
-            self._receive_task = None
+        if self._receive_audio_task:
+            await self.cancel_task(self._receive_audio_task)
+            self._receive_audio_task = None
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -196,9 +224,14 @@ class PipecatWebRTCInputTransport(BaseInputTransport):
         await self._stop_tasks()
         await self._client.disconnect()
 
-    async def _receive_messages(self):
-        # TODO: implement to read the audio and push a new InputRawAudioFrame
-        pass
+    async def _receive_audio(self):
+        try:
+            async for audio_frame in self._client.read_audio_frame():
+                if audio_frame:
+                    await self.push_audio_frame(audio_frame)
+
+        except Exception as e:
+            logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
 
 class PipecatWebRTCOutputTransport(BaseOutputTransport):
