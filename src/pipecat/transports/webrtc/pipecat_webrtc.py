@@ -123,7 +123,10 @@ class PipecatWebRTCClient:
         """
         while self._audio_input_track is not None:
             frame = await self._audio_input_track.recv()  # Get an audio frame
+
             if frame is None or not isinstance(frame, AudioFrame):
+                # If we don't read any audio let's sleep for a little bit (i.e. busy wait).
+                await asyncio.sleep(0.01)
                 continue
 
             # Convert the frame to an ndarray
@@ -141,8 +144,6 @@ class PipecatWebRTCClient:
             )
 
             yield audio_frame  # Yield the 20ms audio chunk
-
-            await asyncio.sleep(0.02)  # Maintain real-time sync
 
     async def write_raw_audio_frames(self, data: bytes):
         if self._can_send():
