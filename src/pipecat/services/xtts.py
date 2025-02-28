@@ -118,7 +118,7 @@ class XTTSService(TTSService):
             self._studio_speakers = await r.json()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         if not self._studio_speakers:
             logger.error(f"{self} no studio speakers available")

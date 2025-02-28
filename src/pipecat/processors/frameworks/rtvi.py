@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     MetricsFrame,
+    ServerMessageFrame,
     StartFrame,
     SystemFrame,
     TranscriptionFrame,
@@ -375,6 +376,12 @@ class RTVIMetricsMessage(BaseModel):
     data: Mapping[str, Any]
 
 
+class RTVIServerMessage(BaseModel):
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["server-message"] = "server-message"
+    data: Any
+
+
 class RTVIFrameProcessor(FrameProcessor):
     def __init__(self, direction: FrameDirection = FrameDirection.DOWNSTREAM, **kwargs):
         super().__init__(**kwargs)
@@ -710,6 +717,9 @@ class RTVIObserver(BaseObserver):
                 mark_as_seen = False
         elif isinstance(frame, MetricsFrame):
             await self._handle_metrics(frame)
+        elif isinstance(frame, ServerMessageFrame):
+            message = RTVIServerMessage(data=frame.data)
+            await self.push_transport_message_urgent(message)
 
         if mark_as_seen:
             self._frames_seen.add(frame.id)

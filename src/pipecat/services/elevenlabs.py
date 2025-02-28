@@ -395,7 +395,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
             await self._websocket.send(json.dumps(msg))
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             if not self._websocket:
@@ -521,7 +521,7 @@ class ElevenLabsHttpTTSService(TTSService):
         Yields:
             Frames containing audio data and status information
         """
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         url = f"{self._base_url}/v1/text-to-speech/{self._voice_id}/stream"
 

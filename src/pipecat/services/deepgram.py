@@ -70,7 +70,7 @@ class DeepgramTTSService(TTSService):
         return True
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         options = SpeakOptions(
             model=self._voice_id,

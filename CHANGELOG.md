@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new frame, `ServerMessageFrame`, and RTVI message `RTVIServerMessage`
+  which provides a generic mechanism for sending custom messages from server to
+  client. The `ServerMessageFrame` is processed by the `RTVIObserver` and will
+  be delivered to the client's `onServerMessage` callback or `ServerMessage`
+  event.
+
 - Added `GoogleLLMOpenAIBetaService` for Google LLM integration with an
   OpenAI-compatible interface. Added foundational example
   `14o-function-calling-gemini-openai-format.py`.

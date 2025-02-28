@@ -309,7 +309,7 @@ class RimeTTSService(AudioContextWordTTSService):
         Yields:
             Frames containing audio data and timing information.
         """
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             if not self._websocket:
                 await self._connect()
@@ -376,7 +376,7 @@ class RimeHttpTTSService(TTSService):
         return True
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         headers = {
             "Accept": "audio/pcm",
