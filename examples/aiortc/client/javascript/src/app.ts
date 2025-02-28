@@ -7,7 +7,6 @@ class WebRTCConnection {
     private declare videoInput: HTMLSelectElement;
     private declare audioCodec: HTMLSelectElement;
     private declare videoCodec: HTMLSelectElement;
-    private declare videoResolution: HTMLSelectElement;
 
     private declare video: HTMLVideoElement;
     private declare audio: HTMLAudioElement;
@@ -33,7 +32,6 @@ class WebRTCConnection {
         this.videoInput = document.getElementById('video-input') as HTMLSelectElement;
         this.audioCodec = document.getElementById('audio-codec') as HTMLSelectElement;
         this.videoCodec = document.getElementById('video-codec') as HTMLSelectElement;
-        this.videoResolution = document.getElementById('video-resolution') as HTMLSelectElement;
 
         this.video = document.getElementById('bot-video') as HTMLVideoElement;
         this.audio = document.getElementById('bot-audio') as HTMLAudioElement;
@@ -317,13 +315,6 @@ class WebRTCConnection {
         const videoConstraints: MediaTrackConstraints = {};
         const videoDevice = this.videoInput.value;
         if (videoDevice) videoConstraints.deviceId = { exact: videoDevice };
-
-        const resolution = this.videoResolution.value;
-        if (resolution) {
-            const [width, height] = resolution.split('x').map(Number);
-            videoConstraints.width = width;
-            videoConstraints.height = height;
-        }
 
         constraints.video = Object.keys(videoConstraints).length ? videoConstraints : true;
 
