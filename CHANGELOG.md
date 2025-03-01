@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Allow passing user (`user_kwargs`) and assistant (`assistant_kwargs`) context
+  aggregator parameters when using `create_context_aggregator()`. The values are
+  passed as a mapping that will then be converted to arguments.
+
 - Added `speed` as an `InputParam` for both `ElevenLabsTTSService` and
   `ElevenLabsHttpTTSService`.
 
