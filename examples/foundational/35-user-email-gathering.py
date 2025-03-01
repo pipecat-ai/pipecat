@@ -56,6 +56,7 @@ async def main():
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
             aiohttp_session=session,
+            eos_skip_tags=[("<spell>", "</spell>")],
         )
 
         # Rime offers a function `spell()` that we can use to ask the user
@@ -65,6 +66,7 @@ async def main():
         #     api_key=os.getenv("RIME_API_KEY", ""),
         #     voice_id="eva",
         #     aiohttp_session=session,
+        #     eos_skip_tags=[("spell(", ")")],
         # )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
