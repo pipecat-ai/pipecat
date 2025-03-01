@@ -6,7 +6,7 @@
 
 import unittest
 
-from pipecat.utils.string import match_endofsentence
+from pipecat.utils.string import match_endofsentence, parse_start_end_tags
 
 
 class TestUtilsString(unittest.IsolatedAsyncioTestCase):
@@ -23,6 +23,7 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         assert match_endofsentence("My emails are foo@pipecat.ai and bar@pipecat.ai.") == 48
         assert match_endofsentence("My email is foo.bar@pipecat.ai.") == 31
         assert match_endofsentence("My email is spell(foo.bar@pipecat.ai).") == 38
+        assert match_endofsentence("My email is <spell>foo.bar@pipecat.ai</spell>.") == 46
         assert match_endofsentence("The number pi is 3.14159.") == 25
         assert match_endofsentence("Valid scientific notation 1.23e4.") == 33
         assert match_endofsentence("Valid scientific notation 0.e4.") == 31
@@ -60,3 +61,50 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         for i in hindi_sentences:
             assert match_endofsentence(i)
         assert not match_endofsentence("हैलो，")
+
+
+class TestStartEndTags(unittest.IsolatedAsyncioTestCase):
+    async def test_empty(self):
+        assert parse_start_end_tags("", [], None, 0) == (None, 0)
+        assert parse_start_end_tags("Hello from Pipecat!", [], None, 0) == (None, 0)
+
+    async def test_simple(self):
+        # (<a>, </a>)
+        assert parse_start_end_tags("Hello from <a>Pipecat</a>!", [("<a>", "</a>")], None, 0) == (
+            None,
+            26,
+        )
+        assert parse_start_end_tags("Hello from <a>Pipecat", [("<a>", "</a>")], None, 0) == (
+            ("<a>", "</a>"),
+            21,
+        )
+        assert parse_start_end_tags("Hello from <a>Pipecat", [("<a>", "</a>")], None, 6) == (
+            ("<a>", "</a>"),
+            21,
+        )
+
+        # (spell(, ))
+        assert parse_start_end_tags("Hello from spell(Pipecat)!", [("spell(", ")")], None, 0) == (
+            None,
+            26,
+        )
+        assert parse_start_end_tags("Hello from spell(Pipecat", [("spell(", ")")], None, 0) == (
+            ("spell(", ")"),
+            24,
+        )
+
+    async def test_multiple(self):
+        # (<a>, </a>)
+        assert parse_start_end_tags(
+            "Hello from <a>Pipecat</a>! Hello <a>World</a>!", [("<a>", "</a>")], None, 0
+        ) == (
+            None,
+            46,
+        )
+
+        assert parse_start_end_tags(
+            "Hello from <a>Pipecat</a>! Hello <a>World", [("<a>", "</a>")], None, 0
+        ) == (
+            ("<a>", "</a>"),
+            41,
+        )
