@@ -21,7 +21,7 @@ except ModuleNotFoundError as e:
 
 
 class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
-    """Subclass ofOpenAI Realtime API Service with adjustments for Azure's wss connection."""
+    """Subclass of OpenAI Realtime API Service with adjustments for Azure's wss connection."""
 
     def __init__(
         self,
@@ -35,8 +35,6 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
         Note that the following are required arguments:
             api_key: The API key for the Azure OpenAI service.
             base_url: The base URL for the Azure OpenAI service.
-
-        All other constructor args are passed to the parent class OpenAIRealtimeBetaLLMService.
 
         base_url should be set to the full Azure endpoint URL including the api-version and the deployment name. For example,
 
