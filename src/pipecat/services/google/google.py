@@ -56,7 +56,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService, LLMService, STTService, TTSService
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.openai import (
-    BaseOpenAILLMService,
     OpenAIAssistantContextAggregator,
     OpenAILLMService,
     OpenAIUnhandledFunctionException,
@@ -1317,8 +1316,9 @@ class GoogleVertexAIService(OpenAILLMService):
     class InputParams(OpenAILLMService.InputParams):
         """Input parameters specific to Vertex AI."""
 
+        # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations
+        location: str = "us-east4"
         project_id: str
-        location: str
 
     def __init__(
         self,
