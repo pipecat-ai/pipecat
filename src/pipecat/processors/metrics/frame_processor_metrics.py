@@ -47,7 +47,7 @@ class FrameProcessorMetrics:
             return None
 
         value = time.time() - self._start_ttfb_time
-        logger.debug(f"{self._processor_name()} TTFB: {value}")
+        logger.info(f"{self._processor_name()} TTFB: {value}")
         ttfb = TTFBMetricsData(
             processor=self._processor_name(), value=value, model=self._model_name()
         )
@@ -62,7 +62,7 @@ class FrameProcessorMetrics:
             return None
 
         value = time.time() - self._start_processing_time
-        logger.debug(f"{self._processor_name()} processing time: {value}")
+        logger.info(f"{self._processor_name()} processing time: {value}")
         processing = ProcessingMetricsData(
             processor=self._processor_name(), value=value, model=self._model_name()
         )
