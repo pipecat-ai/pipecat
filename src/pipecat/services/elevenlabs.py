@@ -145,6 +145,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         similarity_boost: Optional[float] = None
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
+        speed: Optional[float] = None
         auto_mode: Optional[bool] = True
 
         @model_validator(mode="after")
@@ -202,6 +203,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
+            "speed": params.speed,
             "auto_mode": str(params.auto_mode).lower(),
         }
         self.set_model_name(model)
@@ -235,6 +237,8 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                 voice_settings["style"] = self._settings["style"]
             if self._settings["use_speaker_boost"] is not None:
                 voice_settings["use_speaker_boost"] = self._settings["use_speaker_boost"]
+            if self._settings["speed"] is not None:
+                voice_settings["speed"] = self._settings["speed"]
         else:
             if self._settings["style"] is not None:
                 logger.warning(
@@ -243,6 +247,10 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
             if self._settings["use_speaker_boost"] is not None:
                 logger.warning(
                     "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+                )
+            if self._settings["speed"] is not None:
+                logger.warning(
+                    "'speed' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
                 )
 
         return voice_settings or None
@@ -441,6 +449,7 @@ class ElevenLabsHttpTTSService(TTSService):
         similarity_boost: Optional[float] = None
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
+        speed: Optional[float] = None
 
     def __init__(
         self,
@@ -470,6 +479,7 @@ class ElevenLabsHttpTTSService(TTSService):
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
+            "speed": params.speed,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -490,12 +500,14 @@ class ElevenLabsHttpTTSService(TTSService):
             self._settings["stability"] is not None
             and self._settings["similarity_boost"] is not None
         ):
-            voice_settings["stability"] = float(self._settings["stability"])
-            voice_settings["similarity_boost"] = float(self._settings["similarity_boost"])
+            voice_settings["stability"] = self._settings["stability"]
+            voice_settings["similarity_boost"] = self._settings["similarity_boost"]
             if self._settings["style"] is not None:
-                voice_settings["style"] = float(self._settings["style"])
+                voice_settings["style"] = self._settings["style"]
             if self._settings["use_speaker_boost"] is not None:
-                voice_settings["use_speaker_boost"] = bool(self._settings["use_speaker_boost"])
+                voice_settings["use_speaker_boost"] = self._settings["use_speaker_boost"]
+            if self._settings["speed"] is not None:
+                voice_settings["speed"] = self._settings["speed"]
         else:
             if self._settings["style"] is not None:
                 logger.warning(
@@ -504,6 +516,10 @@ class ElevenLabsHttpTTSService(TTSService):
             if self._settings["use_speaker_boost"] is not None:
                 logger.warning(
                     "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+                )
+            if self._settings["speed"] is not None:
+                logger.warning(
+                    "'speed' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
                 )
 
         return voice_settings or None
