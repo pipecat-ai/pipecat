@@ -81,7 +81,8 @@ class BaseLLMResponseAggregator(FrameProcessor):
     @abstractmethod
     def reset(self):
         """Reset the internals of this aggregator. This should not modify the
-        internal messages."""
+        internal messages.
+        """
         pass
 
     @abstractmethod
@@ -220,7 +221,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     def __init__(
         self,
         context: OpenAILLMContext,
-        aggregation_timeout: float = 1.0,
+        aggregation_timeout: float = 0,
         bot_interruption_timeout: float = 2.0,
         **kwargs,
     ):
@@ -266,8 +267,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
-        elif isinstance(frame, InterimTranscriptionFrame):
-            await self._handle_interim_transcription(frame)
+        # elif isinstance(frame, InterimTranscriptionFrame):
+        #     await self._handle_interim_transcription(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
             self.add_messages(frame.messages)
         elif isinstance(frame, LLMMessagesUpdateFrame):
@@ -325,7 +326,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         while True:
             try:
                 await asyncio.wait_for(self._aggregation_event.wait(), self._aggregation_timeout)
-                await self._maybe_push_bot_interruption()
+                # await self._maybe_push_bot_interruption()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
                     await self.push_aggregation()
