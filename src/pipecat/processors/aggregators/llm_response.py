@@ -27,6 +27,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+import copy
 
 
 class LLMResponseAggregator(FrameProcessor):
@@ -338,21 +339,33 @@ class LLMUserContextAggregator(LLMContextAggregator):
             # for messages in self._context.get_messages():
             #     new_messages 
 
+            msgs = []
+            for message in self._context.messages:
+                msg = copy.deepcopy(message)
+                if "content" in msg:
+                    if isinstance(msg["content"], list):
+                        continue
+                if "mime_type" in msg and msg["mime_type"].startswith("image/"):
+                    continue
+                msgs.append(msg)
+        
+        
+            self._context.set_messages(msgs)
             
-            # self._context.set_messages(new_messages)
+            # this is where we flush old images
 
             vision_substrings = ["see", "look", "frame", "vision", "view"]
-            image_prompt = "if the user wants information about what the drone sees or to take action based on whats in the image, use this image as context. If the user doesn't reference the image at all, ignore it completely and just do as the user asks. User ask: "
+            image_prompt = "if the user wants information about what the drone sees or to take action based on whats in the image, use this image as context. If the user doesn't reference the image or what the drone sees, ignore it completely and just do as the user asks. ignore the timestamp in the top corner"
             if self.latest_cached_frame and any(sub in self._aggregation.lower() for sub in vision_substrings) :
                 self._context.add_image_frame_message(
                     format=self.latest_cached_frame.format,
                     size=self.latest_cached_frame.size,
                     image=self.latest_cached_frame.image,
-                    text=image_prompt + self._aggregation,
+                    text=image_prompt,
                 )
                 self.latest_cached_frame = None
-            else:
-                self._context.add_message({"role": self._role, "content": self._aggregation})
+
+            self._context.add_message({"role": self._role, "content": self._aggregation})
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
