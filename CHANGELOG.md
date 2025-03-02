@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `speed` as an `InputParam` for both `ElevenLabsTTSService` and
+  `ElevenLabsHttpTTSService`.
+
 - Added new `LLMFullResponseAggregator` to aggregate full LLM completions. At
   every completion the `on_completion` event handler is triggered.
 
