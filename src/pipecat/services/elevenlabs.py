@@ -116,6 +116,44 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
     return "pcm_16000"
 
 
+def build_elevenlabs_voice_settings(
+    settings: Dict[str, Any],
+) -> Optional[Dict[str, Union[float, bool]]]:
+    """Build voice settings dictionary for ElevenLabs based on provided settings.
+
+    Args:
+        settings: Dictionary containing voice settings parameters
+
+    Returns:
+        Dictionary of voice settings or None if required parameters are missing
+    """
+    voice_settings = {}
+    if settings["stability"] is not None and settings["similarity_boost"] is not None:
+        voice_settings["stability"] = settings["stability"]
+        voice_settings["similarity_boost"] = settings["similarity_boost"]
+        if settings["style"] is not None:
+            voice_settings["style"] = settings["style"]
+        if settings["use_speaker_boost"] is not None:
+            voice_settings["use_speaker_boost"] = settings["use_speaker_boost"]
+        if settings["speed"] is not None:
+            voice_settings["speed"] = settings["speed"]
+    else:
+        if settings["style"] is not None:
+            logger.warning(
+                "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+            )
+        if settings["use_speaker_boost"] is not None:
+            logger.warning(
+                "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+            )
+        if settings["speed"] is not None:
+            logger.warning(
+                "'speed' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+            )
+
+    return voice_settings or None
+
+
 def calculate_word_times(
     alignment_info: Mapping[str, Any], cumulative_time: float
 ) -> List[Tuple[str, float]]:
@@ -226,34 +264,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         return language_to_elevenlabs_language(language)
 
     def _set_voice_settings(self):
-        voice_settings = {}
-        if (
-            self._settings["stability"] is not None
-            and self._settings["similarity_boost"] is not None
-        ):
-            voice_settings["stability"] = self._settings["stability"]
-            voice_settings["similarity_boost"] = self._settings["similarity_boost"]
-            if self._settings["style"] is not None:
-                voice_settings["style"] = self._settings["style"]
-            if self._settings["use_speaker_boost"] is not None:
-                voice_settings["use_speaker_boost"] = self._settings["use_speaker_boost"]
-            if self._settings["speed"] is not None:
-                voice_settings["speed"] = self._settings["speed"]
-        else:
-            if self._settings["style"] is not None:
-                logger.warning(
-                    "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-                )
-            if self._settings["use_speaker_boost"] is not None:
-                logger.warning(
-                    "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-                )
-            if self._settings["speed"] is not None:
-                logger.warning(
-                    "'speed' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-                )
-
-        return voice_settings or None
+        return build_elevenlabs_voice_settings(self._settings)
 
     async def set_model(self, model: str):
         await super().set_model(model)
@@ -489,40 +500,8 @@ class ElevenLabsHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def _set_voice_settings(self) -> Optional[Dict[str, Union[float, bool]]]:
-        """Configure voice settings if stability and similarity_boost are provided.
-
-        Returns:
-            Dictionary of voice settings or None if required parameters are missing.
-        """
-        voice_settings: Dict[str, Union[float, bool]] = {}
-        if (
-            self._settings["stability"] is not None
-            and self._settings["similarity_boost"] is not None
-        ):
-            voice_settings["stability"] = self._settings["stability"]
-            voice_settings["similarity_boost"] = self._settings["similarity_boost"]
-            if self._settings["style"] is not None:
-                voice_settings["style"] = self._settings["style"]
-            if self._settings["use_speaker_boost"] is not None:
-                voice_settings["use_speaker_boost"] = self._settings["use_speaker_boost"]
-            if self._settings["speed"] is not None:
-                voice_settings["speed"] = self._settings["speed"]
-        else:
-            if self._settings["style"] is not None:
-                logger.warning(
-                    "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-                )
-            if self._settings["use_speaker_boost"] is not None:
-                logger.warning(
-                    "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-                )
-            if self._settings["speed"] is not None:
-                logger.warning(
-                    "'speed' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-                )
-
-        return voice_settings or None
+    def _set_voice_settings(self):
+        return build_elevenlabs_voice_settings(self._settings)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
