@@ -5,7 +5,7 @@
 #
 
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 from pipecat.audio.utils import create_default_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
@@ -107,23 +107,37 @@ class AudioBufferProcessor(FrameProcessor):
             self._bot_audio_buffer
         )
 
-    def merge_audio_buffers(self) -> bytes:
+    def merge_audio_buffers(self) -> Tuple[bytes, bytes, bytes]:
         """Merge user and bot audio buffers into a single audio stream.
 
         For mono output, audio is mixed. For stereo output, user audio is placed
         on the left channel and bot audio on the right channel.
 
         Returns:
-            bytes: Mixed audio data
+            Tuple[bytes, bytes, bytes]: (merged_audio, user_audio_chunk, bot_audio_chunk)
         """
+        # Split the buffers to the same size
+        min_buffer_size = min(len(self._user_audio_buffer), len(self._bot_audio_buffer))
+
+        user_audio_buffer = self._user_audio_buffer[:min_buffer_size]
+        bot_audio_buffer = self._bot_audio_buffer[:min_buffer_size]
+
+        # Save the remaining parts
+        self._user_audio_buffer = self._user_audio_buffer[min_buffer_size:]
+        self._bot_audio_buffer = self._bot_audio_buffer[min_buffer_size:]
+
+        merged_audio_buffer = b""
+
         if self._num_channels == 1:
-            return mix_audio(bytes(self._user_audio_buffer), bytes(self._bot_audio_buffer))
+            merged_audio_buffer = mix_audio(bytes(user_audio_buffer), bytes(bot_audio_buffer))
         elif self._num_channels == 2:
-            return interleave_stereo_audio(
-                bytes(self._user_audio_buffer), bytes(self._bot_audio_buffer)
+            merged_audio_buffer = interleave_stereo_audio(
+                bytes(user_audio_buffer), bytes(bot_audio_buffer)
             )
         else:
-            return b""
+            merged_audio_buffer = b""
+
+        return merged_audio_buffer, user_audio_buffer, bot_audio_buffer
 
     async def start_recording(self):
         """Start recording audio from both user and bot.
@@ -206,21 +220,20 @@ class AudioBufferProcessor(FrameProcessor):
             return
 
         # Call original handler with merged audio
-        merged_audio = self.merge_audio_buffers()
+        merged_audio_buffer, user_audio_buffer, bot_audio_buffer = self.merge_audio_buffers()
+
         await self._call_event_handler(
-            "on_audio_data", merged_audio, self._sample_rate, self._num_channels
+            "on_audio_data", merged_audio_buffer, self._sample_rate, self._num_channels
         )
 
         # Call new handler with separate tracks
         await self._call_event_handler(
             "on_track_audio_data",
-            bytes(self._user_audio_buffer),
-            bytes(self._bot_audio_buffer),
+            bytes(user_audio_buffer),
+            bytes(bot_audio_buffer),
             self._sample_rate,
             self._num_channels,
         )
-
-        self._reset_audio_buffers()
 
     def _buffer_has_audio(self, buffer: bytearray) -> bool:
         return buffer is not None and len(buffer) > 0
@@ -231,8 +244,8 @@ class AudioBufferProcessor(FrameProcessor):
         self._last_bot_frame_at = time.time()
 
     def _reset_audio_buffers(self):
-        self._user_audio_buffer = bytearray()
-        self._bot_audio_buffer = bytearray()
+        self._user_audio_buffer.clear()
+        self._bot_audio_buffer.clear()
 
     async def _resample_audio(self, frame: AudioRawFrame) -> bytes:
         return await self._resampler.resample(frame.audio, frame.sample_rate, self._sample_rate)
