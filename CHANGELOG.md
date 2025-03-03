@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenAI-compatible interface. Added foundational example
   `14o-function-calling-gemini-openai-format.py`.
 
+- Added `AzureRealtimeBetaLLMService` to support Azure's OpeanAI Realtime API. Added
+  foundational example `19a-azure-realtime-beta.py`.
+
 ## [0.0.58] - 2025-02-26
 
 ### Added
