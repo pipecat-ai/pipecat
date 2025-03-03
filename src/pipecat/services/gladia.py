@@ -137,8 +137,6 @@ class GladiaSTTService(STTService):
         audio_enhancer: Optional[bool] = None
         words_accurate_timestamps: Optional[bool] = None
         speech_threshold: Optional[float] = .99
-        
-
     def __init__(
         self,
         *,
@@ -146,8 +144,7 @@ class GladiaSTTService(STTService):
         url: str = "https://api.gladia.io/v2/live",
         confidence: float = 0.5,
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
-        
+        params: InputParams = InputParams(),        
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
