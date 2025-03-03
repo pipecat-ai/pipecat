@@ -153,10 +153,17 @@ class FunctionHandlers:
 
 
 async def terminate_call(
-    function_name, tool_call_id, args, llm: LLMService, context, result_callback
+    function_name,
+    tool_call_id,
+    args,
+    llm: LLMService,
+    context,
+    result_callback,
+    call_state=None,
 ):
     """Function the bot can call to terminate the call upon completion of the call."""
-
+    if call_state:
+        call_state.bot_terminated_call = True
     await llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
 
@@ -193,6 +200,12 @@ async def main(
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
         )
+
+    class CallState:
+        participant_left_early = False
+        bot_terminated_call = False
+
+    call_state = CallState()
 
     transport = DailyTransport(
         room_url,
@@ -270,7 +283,10 @@ async def main(
     voicemail_detection_llm.register_function(
         "switch_to_human_conversation", handlers.human_conversation
     )
-    voicemail_detection_llm.register_function("terminate_call", terminate_call)
+    voicemail_detection_llm.register_function(
+        "terminate_call",
+        lambda *args, **kwargs: terminate_call(*args, **kwargs, call_state=call_state),
+    )
 
     voicemail_detection_audio_collector = UserAudioCollector(
         voicemail_detection_context, voicemail_detection_context_aggregator.user()
@@ -349,11 +365,19 @@ async def main(
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
+        call_state.participant_left_early = True
         await voicemail_detection_pipeline_task.queue_frame(EndFrame())
 
     print("!!! starting voicemail detection pipeline")
     await runner.run(voicemail_detection_pipeline_task)
     print("!!! Done with voicemail detection pipeline")
+
+    if call_state.participant_left_early or call_state.bot_terminated_call:
+        if call_state.participant_left_early:
+            print("!!! Participant left early; terminating call")
+        elif call_state.bot_terminated_call:
+            print("!!! Bot terminated call; not proceeding to human conversation")
+        return
 
     ### HUMAN CONVERSATION PIPELINE
 
@@ -383,7 +407,10 @@ async def main(
         human_conversation_context
     )
 
-    human_conversation_llm.register_function("terminate_call", terminate_call)
+    human_conversation_llm.register_function(
+        "terminate_call",
+        lambda *args, **kwargs: terminate_call(*args, **kwargs, call_state=call_state),
+    )
 
     human_conversation_pipeline = Pipeline(
         [
