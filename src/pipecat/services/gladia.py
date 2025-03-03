@@ -148,7 +148,6 @@ class GladiaSTTService(STTService):
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
-
         self._api_key = api_key
         self._url = url
         self._settings = {
