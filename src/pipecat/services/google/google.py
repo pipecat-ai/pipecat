@@ -19,7 +19,7 @@ from openai.types.chat import ChatCompletionChunk
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, Union
 
 from loguru import logger
 from PIL import Image
@@ -1182,14 +1182,34 @@ class GoogleLLMService(LLMService):
 
     @staticmethod
     def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        context: OpenAILLMContext,
+        *,
+        user_kwargs: Mapping[str, Any] = {},
+        assistant_kwargs: Mapping[str, Any] = {},
     ) -> GoogleContextAggregatorPair:
+        """Create an instance of GoogleContextAggregatorPair from an
+        OpenAILLMContext. Constructor keyword arguments for both the user and
+        assistant aggregators can be provided.
+
+        Args:
+            context (OpenAILLMContext): The LLM context.
+            user_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the user context aggregator constructor. Defaults
+                to an empty mapping.
+            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the assistant context aggregator
+                constructor. Defaults to an empty mapping.
+
+        Returns:
+            GoogleContextAggregatorPair: A pair of context aggregators, one for
+            the user and one for the assistant, encapsulated in an
+            GoogleContextAggregatorPair.
+
+        """
         if isinstance(context, OpenAILLMContext):
             context = GoogleLLMContext.upgrade_to_google(context)
-        user = GoogleUserContextAggregator(context)
-        assistant = GoogleAssistantContextAggregator(
-            context, expect_stripped_words=assistant_expect_stripped_words
-        )
+        user = GoogleUserContextAggregator(context, **user_kwargs)
+        assistant = GoogleAssistantContextAggregator(context, **assistant_kwargs)
         return GoogleContextAggregatorPair(_user=user, _assistant=assistant)
 
 

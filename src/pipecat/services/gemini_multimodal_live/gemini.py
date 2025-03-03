@@ -9,7 +9,7 @@ import base64
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import websockets
 from loguru import logger
@@ -701,11 +701,37 @@ class GeminiMultimodalLiveLLMService(LLMService):
         await self.push_frame(TTSStoppedFrame())
 
     def create_context_aggregator(
-        self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = False
+        self,
+        context: OpenAILLMContext,
+        *,
+        user_kwargs: Mapping[str, Any] = {},
+        assistant_kwargs: Mapping[str, Any] = {},
     ) -> GeminiMultimodalLiveContextAggregatorPair:
+        """Create an instance of GeminiMultimodalLiveContextAggregatorPair from
+        an OpenAILLMContext. Constructor keyword arguments for both the user and
+        assistant aggregators can be provided.
+
+        Args:
+            context (OpenAILLMContext): The LLM context.
+            user_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the user context aggregator constructor. Defaults
+                to an empty mapping.
+            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the assistant context aggregator
+                constructor. Defaults to an empty mapping.
+
+        Returns:
+            GeminiMultimodalLiveContextAggregatorPair: A pair of context
+            aggregators, one for the user and one for the assistant,
+            encapsulated in an GeminiMultimodalLiveContextAggregatorPair.
+
+        """
         GeminiMultimodalLiveContext.upgrade(context)
-        user = GeminiMultimodalLiveUserContextAggregator(context)
+        user = GeminiMultimodalLiveUserContextAggregator(context, **user_kwargs)
+
+        default_assistant_kwargs = {"expect_stripped_words": False}
+        default_assistant_kwargs.update(assistant_kwargs)
         assistant = GeminiMultimodalLiveAssistantContextAggregator(
-            context, expect_stripped_words=assistant_expect_stripped_words
+            context, **default_assistant_kwargs
         )
         return GeminiMultimodalLiveContextAggregatorPair(_user=user, _assistant=assistant)

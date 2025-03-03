@@ -11,7 +11,7 @@ import io
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Union
 
 import httpx
 from loguru import logger
@@ -125,14 +125,34 @@ class AnthropicLLMService(LLMService):
 
     @staticmethod
     def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        context: OpenAILLMContext,
+        *,
+        user_kwargs: Mapping[str, Any] = {},
+        assistant_kwargs: Mapping[str, Any] = {},
     ) -> AnthropicContextAggregatorPair:
+        """Create an instance of AnthropicContextAggregatorPair from an
+        OpenAILLMContext. Constructor keyword arguments for both the user and
+        assistant aggregators can be provided.
+
+        Args:
+            context (OpenAILLMContext): The LLM context.
+            user_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the user context aggregator constructor. Defaults
+                to an empty mapping.
+            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the assistant context aggregator
+                constructor. Defaults to an empty mapping.
+
+        Returns:
+            AnthropicContextAggregatorPair: A pair of context aggregators, one
+            for the user and one for the assistant, encapsulated in an
+            AnthropicContextAggregatorPair.
+
+        """
         if isinstance(context, OpenAILLMContext):
             context = AnthropicLLMContext.from_openai_context(context)
-        user = AnthropicUserContextAggregator(context)
-        assistant = AnthropicAssistantContextAggregator(
-            context, expect_stripped_words=assistant_expect_stripped_words
-        )
+        user = AnthropicUserContextAggregator(context, **user_kwargs)
+        assistant = AnthropicAssistantContextAggregator(context, **assistant_kwargs)
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
     async def _process_context(self, context: OpenAILLMContext):
