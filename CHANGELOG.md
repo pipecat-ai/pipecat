@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenAI-compatible interface. Added foundational example
   `14o-function-calling-gemini-openai-format.py`.
 
+- Introduced `GoogleVertexAIService`, a new class for integrating with Vertex AI
+  Gemini models. Added foundational example
+  `14p-function-calling-gemini-vertex-ai.py`.
+
 ## [0.0.58] - 2025-02-26
 
 ### Added
