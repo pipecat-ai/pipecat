@@ -328,17 +328,22 @@ async def main(
     else:
         logger.debug("+++++ No dialout number; assuming dialin")
 
-        @transport.event_handler("on_dialin_connected")
-        async def on_dialin_connected(transport, data):
-            # This event is not firing for some reason
-            logger.debug("+++++ Dial-in connected")
-
         # Different handlers for dialin
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             # This event is not firing for some reason
             await transport.capture_participant_transcription(participant["id"])
-            logger.debug("+++++ Dialed in; capturing participant transcription")
+            dialin_instructions = """Always call the function switch_to_human_conversation"""
+            messages = [
+                {
+                    "role": "system",
+                    "content": dialin_instructions,
+                }
+            ]
+            voicemail_detection_context_aggregator.user().set_messages(messages)
+            await voicemail_detection_pipeline_task.queue_frames(
+                [voicemail_detection_context_aggregator.user().get_context_frame()]
+            )
 
     runner = PipelineRunner()
 
