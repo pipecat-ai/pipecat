@@ -58,6 +58,7 @@ export default function Call() {
 
       setState("started");
     } catch (error) {
+      console.log("caught error:", error)
       setState("error");
     }
   }

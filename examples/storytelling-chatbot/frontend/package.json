@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@daily-co/daily-js": "^0.62.0",
+    "@daily-co/daily-js": "^0.74.0",
     "@daily-co/daily-react": "^0.18.0",
     "@radix-ui/react-select": "^2.1.2",
     "@radix-ui/react-slot": "^1.0.2",

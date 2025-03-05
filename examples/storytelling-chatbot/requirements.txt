@@ -3,3 +3,4 @@ fastapi
 uvicorn
 python-dotenv
 pipecat-ai[daily,silero,openai,fal,cartesia,google]~=0.0.55
+pipecatcloud @ git+https://github.com/daily-co/pipecat-cloud@main
