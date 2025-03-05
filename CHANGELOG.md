@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new parameter `eos_skip_tags` to `TTSService` to prevent breaking a
+  sentence prematurely. The new `eos_skip_tags` is a list of tuples where each
+  tuple has a start and an end tag. For example, the tuple ("<email>",
+  "</email>") would prevent the dot in "<email>foo@pipecat.ai</email>" to be
+  considered an end-of-sentence. Note that Pipecat aggregates LLM tokens as fast
+  as they come and provides sentences to the TTS service. Sometimes it's
+  possible that the LLM, for example considering the previous example, returns
+  the following tokens: "foo", then "@pipecat" and finally ".ai" which makes it
+  hard to decide end-of-sentence limits.
+
 - Added `speech_threshold` parameter to `GladiaSTTService`.
 
 - Allow passing user (`user_kwargs`) and assistant (`assistant_kwargs`) context
@@ -33,6 +43,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `AzureRealtimeBetaLLMService` to support Azure's OpeanAI Realtime API. Added
   foundational example `19a-azure-realtime-beta.py`.
+
+### Other
+
+- Added a new example `examples/foundational/35-user-email-gathering.py` to show
+  how to gather user emails. The example uses's Cartesia's `<spell></spell>`
+  tags and Rime `spell()` function to spell out the emails for confirmation.
+
+### Other
+
+- Added a new example `examples/foundational/35-user-email-gathering.py` to show
+  how to gather user emails. The example uses's Rime `spell()` function to spell
+  out the emails for confirmation.
 
 ## [0.0.58] - 2025-02-26
 

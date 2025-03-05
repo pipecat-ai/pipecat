@@ -97,6 +97,7 @@ class RimeTTSService(AudioContextWordTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            eos_skip_tags=[("spell(", ")")],
             **kwargs,
         )
 

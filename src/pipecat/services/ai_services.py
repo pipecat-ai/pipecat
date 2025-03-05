@@ -8,7 +8,7 @@ import asyncio
 import io
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from loguru import logger
 
@@ -43,7 +43,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.string import match_endofsentence
+from pipecat.utils.string import EndOfSenteceSkipTags, match_endofsentence, parse_eos_skip_tags
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.time import seconds_to_nanoseconds
 
@@ -222,7 +222,10 @@ class TTSService(AIService):
         pause_frame_processing: bool = False,
         # TTS output sample rate
         sample_rate: Optional[int] = None,
+        # Text filter before passing text to the TTS service
         text_filter: Optional[BaseTextFilter] = None,
+        # List of end-of-sent
+        eos_skip_tags: Sequence[EndOfSenteceSkipTags] = [],
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -238,12 +241,15 @@ class TTSService(AIService):
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
         self._text_filter: Optional[BaseTextFilter] = text_filter
+        self._eos_skip_tags = eos_skip_tags
 
         self._stop_frame_task: Optional[asyncio.Task] = None
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
-        self._current_sentence: str = ""
         self._processing_text: bool = False
+        self._current_sentence: str = ""
+        self._current_eos_skip_tag: Optional[EndOfSenteceSkipTags] = None
+        self._current_eos_skip_tag_index: int = 0
 
     @property
     def sample_rate(self) -> int:
@@ -326,8 +332,7 @@ class TTSService(AIService):
             await self._maybe_pause_frame_processing()
 
             sentence = self._current_sentence
-            self._current_sentence = ""
-            self._processing_text = False
+            self._reset()
             await self._push_tts_frames(sentence)
             if isinstance(frame, LLMFullResponseEndFrame):
                 if self._push_text_frames:
@@ -370,9 +375,14 @@ class TTSService(AIService):
         ):
             await self._stop_frame_queue.put(frame)
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    def _reset(self):
         self._current_sentence = ""
         self._processing_text = False
+        self._current_eos_skip_tag = None
+        self._current_eos_skip_tag_index = 0
+
+    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+        self._reset()
         if self._text_filter:
             self._text_filter.handle_interruption()
 
@@ -390,10 +400,17 @@ class TTSService(AIService):
             text = frame.text
         else:
             self._current_sentence += frame.text
-            eos_end_marker = match_endofsentence(self._current_sentence)
-            if eos_end_marker:
-                text = self._current_sentence[:eos_end_marker]
-                self._current_sentence = self._current_sentence[eos_end_marker:]
+            (self._current_eos_skip_tag_index, self._current_eos_skip_tag) = parse_eos_skip_tags(
+                self._current_sentence,
+                self._eos_skip_tags,
+                self._current_eos_skip_tag,
+                self._current_eos_skip_tag_index,
+            )
+            if not self._current_eos_skip_tag:
+                eos_end_marker = match_endofsentence(self._current_sentence)
+                if eos_end_marker:
+                    text = self._current_sentence[:eos_end_marker]
+                    self._current_sentence = self._current_sentence[eos_end_marker:]
 
         if text:
             await self._push_tts_frames(text)
