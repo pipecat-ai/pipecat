@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional
 
@@ -33,7 +33,7 @@ class VADParams(BaseModel):
     min_volume: float = VAD_MIN_VOLUME
 
 
-class VADAnalyzer:
+class VADAnalyzer(ABC):
     def __init__(self, *, sample_rate: Optional[int] = None, params: VADParams):
         self._init_sample_rate = sample_rate
         self._sample_rate = 0

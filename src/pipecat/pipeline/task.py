@@ -32,7 +32,6 @@ from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.asyncio import BaseTaskManager, TaskManager
-from pipecat.utils.utils import obj_count, obj_id
 
 HEARTBEAT_SECONDS = 1.0
 HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 5
@@ -138,9 +137,7 @@ class PipelineTask(BaseTask):
         task_manager: Optional[BaseTaskManager] = None,
         check_dangling_tasks: bool = True,
     ):
-        self._id: int = obj_id()
-        self._name: str = f"{self.__class__.__name__}#{obj_count(self)}"
-
+        super().__init__()
         self._pipeline = pipeline
         self._clock = clock
         self._params = params
@@ -179,16 +176,6 @@ class PipelineTask(BaseTask):
         self._task_manager = task_manager or TaskManager()
 
         self._observer = TaskObserver(observers=observers, task_manager=self._task_manager)
-
-    @property
-    def id(self) -> int:
-        """Returns the unique indetifier for this task."""
-        return self._id
-
-    @property
-    def name(self) -> str:
-        """Returns the name of this task."""
-        return self._name
 
     @property
     def params(self) -> PipelineParams:
@@ -434,6 +421,3 @@ class PipelineTask(BaseTask):
         tasks = [t.get_name() for t in self._task_manager.current_tasks()]
         if tasks:
             logger.warning(f"Dangling tasks detected: {tasks}")
-
-    def __str__(self):
-        return self.name
