@@ -170,13 +170,13 @@ async def terminate_call(
 async def main(
     room_url: str,
     token: str,
-    callId: str,
-    callDomain: str,
+    callId: Optional[str],
+    callDomain: Optional[str],
     detect_voicemail: bool,
     dialout_number: Optional[str],
 ):
     dialin_settings = None
-    if callId != "None" and callDomain != "None":
+    if callId and callDomain:
         dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
         transport_params = DailyParams(
             api_url=daily_api_url,
