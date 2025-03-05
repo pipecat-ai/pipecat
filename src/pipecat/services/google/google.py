@@ -15,6 +15,8 @@ from google.api_core.exceptions import DeadlineExceeded
 from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -950,6 +952,9 @@ class GoogleLLMService(LLMService):
     franca for all LLM services, so that it is easy to switch between different LLMs.
     """
 
+    # Overriding the default adapter to use the Gemini one.
+    adapter_class = GeminiLLMAdapter
+
     class InputParams(BaseModel):
         max_tokens: Optional[int] = Field(default=4096, ge=1)
         temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
@@ -1180,8 +1185,8 @@ class GoogleLLMService(LLMService):
         if context:
             await self._process_context(context)
 
-    @staticmethod
     def create_context_aggregator(
+        self,
         context: OpenAILLMContext,
         *,
         user_kwargs: Mapping[str, Any] = {},
@@ -1206,6 +1211,8 @@ class GoogleLLMService(LLMService):
             GoogleContextAggregatorPair.
 
         """
+        context.set_llm_adapter(self.get_llm_adapter())
+
         if isinstance(context, OpenAILLMContext):
             context = GoogleLLMContext.upgrade_to_google(context)
         user = GoogleUserContextAggregator(context, **user_kwargs)

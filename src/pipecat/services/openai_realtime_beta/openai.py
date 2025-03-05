@@ -12,6 +12,8 @@ from typing import Any, Mapping
 
 from loguru import logger
 
+from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
+
 try:
     import websockets
 except ModuleNotFoundError as e:
@@ -76,6 +78,9 @@ class OpenAIUnhandledFunctionException(Exception):
 
 
 class OpenAIRealtimeBetaLLMService(LLMService):
+    # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
+    adapter_class = OpenAIRealtimeLLMAdapter
+
     def __init__(
         self,
         *,
@@ -596,6 +601,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             OpenAIContextAggregatorPair.
 
         """
+        context.set_llm_adapter(self.get_llm_adapter())
+
         OpenAIRealtimeLLMContext.upgrade_to_realtime(context)
         user = OpenAIRealtimeUserContextAggregator(context, **user_kwargs)
 
