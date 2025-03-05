@@ -2005,3 +2005,4 @@ class GoogleSTTService(STTService):
 
         except Exception as e:
             logger.error(f"Error processing Google STT responses: {e}")
+            raise
