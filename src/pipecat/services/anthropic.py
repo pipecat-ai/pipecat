@@ -18,6 +18,7 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
@@ -85,6 +86,9 @@ class AnthropicLLMService(LLMService):
     use `AsyncAnthropicBedrock` and `AsyncAnthropicVertex` clients
     """
 
+    # Overriding the default adapter to use the Anthropic one.
+    adapter_class = AnthropicLLMAdapter
+
     class InputParams(BaseModel):
         enable_prompt_caching_beta: Optional[bool] = False
         max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
@@ -123,8 +127,8 @@ class AnthropicLLMService(LLMService):
     def enable_prompt_caching_beta(self) -> bool:
         return self._enable_prompt_caching_beta
 
-    @staticmethod
     def create_context_aggregator(
+        self,
         context: OpenAILLMContext,
         *,
         user_kwargs: Mapping[str, Any] = {},
@@ -149,6 +153,8 @@ class AnthropicLLMService(LLMService):
             AnthropicContextAggregatorPair.
 
         """
+        context.set_llm_adapter(self.get_llm_adapter())
+
         if isinstance(context, OpenAILLMContext):
             context = AnthropicLLMContext.from_openai_context(context)
         user = AnthropicUserContextAggregator(context, **user_kwargs)
@@ -382,6 +388,7 @@ class AnthropicLLMContext(OpenAILLMContext):
             tools=openai_context.tools,
             tool_choice=openai_context.tool_choice,
         )
+        self.set_llm_adapter(openai_context.get_llm_adapter())
         self._restructure_from_openai_messages()
         return self
 
