@@ -20,6 +20,8 @@ from openai.types.chat import (
 )
 from PIL import Image
 
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
@@ -44,13 +46,20 @@ class OpenAILLMContext:
     def __init__(
         self,
         messages: Optional[List[ChatCompletionMessageParam]] = None,
-        tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN,
+        tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = NOT_GIVEN,
         tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN,
     ):
         self._messages: List[ChatCompletionMessageParam] = messages if messages else []
         self._tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
-        self._tools: List[ChatCompletionToolParam] | NotGiven = tools
+        self._tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = tools
         self._user_image_request_context = {}
+        self._llm_adapter: Optional[BaseLLMAdapter] = None
+
+    def get_llm_adapter(self) -> Optional[BaseLLMAdapter]:
+        return self._llm_adapter
+
+    def set_llm_adapter(self, llm_adapter: BaseLLMAdapter):
+        self._llm_adapter = llm_adapter
 
     @staticmethod
     def from_messages(messages: List[dict]) -> "OpenAILLMContext":
@@ -67,7 +76,9 @@ class OpenAILLMContext:
         return self._messages
 
     @property
-    def tools(self) -> List[ChatCompletionToolParam] | NotGiven:
+    def tools(self) -> List[ChatCompletionToolParam] | NotGiven | List[Any]:
+        if self._llm_adapter:
+            return self._llm_adapter.from_standard_tools(self._tools)
         return self._tools
 
     @property
@@ -152,7 +163,7 @@ class OpenAILLMContext:
     def set_tool_choice(self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven):
         self._tool_choice = tool_choice
 
-    def set_tools(self, tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN):
+    def set_tools(self, tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = NOT_GIVEN):
         if tools != NOT_GIVEN and len(tools) == 0:
             tools = NOT_GIVEN
         self._tools = tools

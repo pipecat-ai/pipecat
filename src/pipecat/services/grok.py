@@ -206,8 +206,8 @@ class GrokLLMService(OpenAILLMService):
         if tokens.completion_tokens > self._completion_tokens:
             self._completion_tokens = tokens.completion_tokens
 
-    @staticmethod
     def create_context_aggregator(
+        self,
         context: OpenAILLMContext,
         *,
         user_kwargs: Mapping[str, Any] = {},
@@ -232,6 +232,8 @@ class GrokLLMService(OpenAILLMService):
             GrokContextAggregatorPair.
 
         """
+        context.set_llm_adapter(self.get_llm_adapter())
+
         user = OpenAIUserContextAggregator(context, **user_kwargs)
         assistant = GrokAssistantContextAggregator(context, **assistant_kwargs)
         return GrokContextAggregatorPair(_user=user, _assistant=assistant)

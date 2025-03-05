@@ -343,8 +343,8 @@ class OpenAILLMService(BaseOpenAILLMService):
     ):
         super().__init__(model=model, params=params, **kwargs)
 
-    @staticmethod
     def create_context_aggregator(
+        self,
         context: OpenAILLMContext,
         *,
         user_kwargs: Mapping[str, Any] = {},
@@ -369,6 +369,7 @@ class OpenAILLMService(BaseOpenAILLMService):
             OpenAIContextAggregatorPair.
 
         """
+        context.set_llm_adapter(self.get_llm_adapter())
         user = OpenAIUserContextAggregator(context, **user_kwargs)
         assistant = OpenAIAssistantContextAggregator(context, **assistant_kwargs)
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
