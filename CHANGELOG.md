@@ -9,26 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added support for a unified format for specifying function calling across all LLM services.
-  ```python
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location"],
-    )
-    tools = ToolsSchema(standard_tools=[weather_function])
-  ```
+- Added new base class `BaseObject` which is now the base class of
+  `FrameProcessor`, `PipelineRunner`, `PipelineTask` and `BaseTransport`. The
+  new `BaseObject` adds supports for event handlers.
+
+- Added support for a unified format for specifying function calling across all
+  LLM services.
+
+```python
+  weather_function = FunctionSchema(
+      name="get_current_weather",
+      description="Get the current weather",
+      properties={
+          "location": {
+              "type": "string",
+              "description": "The city and state, e.g. San Francisco, CA",
+          },
+          "format": {
+              "type": "string",
+              "enum": ["celsius", "fahrenheit"],
+              "description": "The temperature unit to use. Infer this from the user's location.",
+          },
+      },
+      required=["location"],
+  )
+  tools = ToolsSchema(standard_tools=[weather_function])
+```
 
 - Added `speech_threshold` parameter to `GladiaSTTService`.
 
