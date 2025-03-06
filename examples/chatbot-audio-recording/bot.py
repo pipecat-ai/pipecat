@@ -33,9 +33,11 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def save_audio(audio: bytes, sample_rate: int, num_channels: int):
+async def save_audio(audio: bytes, sample_rate: int, num_channels: int, name: str):
     if len(audio) > 0:
-        filename = f"conversation_recording{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+        filename = (
+            f"{name}_conversation_recording{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+        )
         with io.BytesIO() as buffer:
             with wave.open(buffer, "wb") as wf:
                 wf.setsampwidth(2)
@@ -110,7 +112,7 @@ async def main():
 
         # NOTE: Watch out! This will save all the conversation in memory. You
         # can pass `buffer_size` to get periodic callbacks.
-        audiobuffer = AudioBufferProcessor()
+        audiobuffer = AudioBufferProcessor(enable_turn_audio=True)
 
         pipeline = Pipeline(
             [
@@ -128,7 +130,15 @@ async def main():
 
         @audiobuffer.event_handler("on_audio_data")
         async def on_audio_data(buffer, audio, sample_rate, num_channels):
-            await save_audio(audio, sample_rate, num_channels)
+            await save_audio(audio, sample_rate, num_channels, "full")
+
+        @audiobuffer.event_handler("on_user_turn_audio_data")
+        async def on_user_turn_audio_data(buffer, audio, sample_rate, num_channels):
+            await save_audio(audio, sample_rate, num_channels, "user")
+
+        @audiobuffer.event_handler("on_bot_turn_audio_data")
+        async def on_bot_turn_audio_data(buffer, audio, sample_rate, num_channels):
+            await save_audio(audio, sample_rate, num_channels, "bot")
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
