@@ -28,7 +28,7 @@ from pipecat.frames.frames import (
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.webrtc.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 
 class SmallWebRTCCallbacks(BaseModel):
@@ -91,9 +91,7 @@ class RawAudioTrack(MediaStreamTrack):
 
 
 class SmallWebRTCClient:
-    def __init__(
-        self, webrtc_connection: SmallWebRTCConnection, callbacks: SmallWebRTCCallbacks
-    ):
+    def __init__(self, webrtc_connection: SmallWebRTCConnection, callbacks: SmallWebRTCCallbacks):
         self._webrtcConnection = webrtc_connection
         self._closing = False
         self._callbacks = callbacks
