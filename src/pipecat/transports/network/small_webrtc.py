@@ -91,6 +91,53 @@ class RawAudioTrack(MediaStreamTrack):
         return frame
 
 
+class RawVideoTrack(MediaStreamTrack):
+    kind = "video"
+
+    def __init__(self, width, height, fps):
+        super().__init__()
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.frame_time = int(1e6 / fps)  # Convert fps to microseconds per frame
+        self.time = 0
+        self.video_buffer = deque()  # Buffer to store frames
+
+    def add_video_frame(self, frame: OutputImageRawFrame):
+        """
+        Adds a raw video frame (ImageRawFrame) to the buffer.
+        The frame image should be in bytes and properly formatted.
+        """
+        self.video_buffer.append(frame)
+
+    async def recv(self):
+        """
+        Returns the next video frame, generating a black frame if needed.
+        """
+        await asyncio.sleep(1 / self.fps)  # Simulate real-time delay
+
+        if self.video_buffer:
+            raw_frame = self.video_buffer.popleft()
+            frame_data = np.frombuffer(raw_frame.image, dtype=np.uint8).reshape(
+                (self.height, self.width, 3)
+            )
+            # Convert format if necessary
+            # if raw_frame.format == "bgr24":
+            #    frame_data = cv2.cvtColor(frame_data, cv2.COLOR_BGR2RGB)
+            # elif raw_frame.format == "gray":
+            #    frame_data = cv2.cvtColor(frame_data, cv2.COLOR_GRAY2RGB)
+        else:
+            frame_data = np.zeros((self.height, self.width, 3), dtype=np.uint8)  # Black frame
+
+        # Create VideoFrame
+        frame = VideoFrame.from_ndarray(frame_data, format="rgb24")
+        frame.pts = self.time
+        frame.time_base = "1e6"  # Microseconds
+
+        self.time += self.frame_time
+        return frame
+
+
 class SmallWebRTCClient:
     def __init__(self, webrtc_connection: SmallWebRTCConnection, callbacks: SmallWebRTCCallbacks):
         self._webrtcConnection = webrtc_connection
@@ -98,9 +145,11 @@ class SmallWebRTCClient:
         self._callbacks = callbacks
 
         self._audio_output_track = None
+        self._video_output_track = None
         self._audio_input_track = None
         self._video_input_track = None
 
+        self._params = None
         self._audio_in_channels = None
         self._in_sample_rate = None
         self._out_sample_rate = None
@@ -201,14 +250,13 @@ class SmallWebRTCClient:
 
     async def write_frame_to_camera(self, frame: OutputImageRawFrame):
         if self._can_send():
-            # logger.info(f"Need to send frame to camera: {frame}")
-            # await self._client.write_frame_to_camera(frame)
-            pass
+            self._video_output_track.add_video_frame(frame)
 
     async def setup(self, _params, frame):
         self._audio_in_channels = _params.audio_in_channels
         self._in_sample_rate = _params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = _params.audio_out_sample_rate or frame.audio_out_sample_rate
+        self._params = _params
 
     async def connect(self):
         if self._audio_output_track:
@@ -218,6 +266,13 @@ class SmallWebRTCClient:
         logger.info(f"Connecting to Small WebRTC")
         self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
         self._webrtcConnection.replace_audio_track(self._audio_output_track)
+
+        self._video_output_track = RawVideoTrack(
+            width=self._params.camera_out_width,
+            height=self._params.camera_out_height,
+            fps=self._params.camera_out_framerate,
+        )
+        self._webrtcConnection.replace_video_track(self._video_output_track)
 
     async def disconnect(self):
         if self.is_connected and not self.is_closing:

@@ -97,8 +97,7 @@ class WebRTCConnection {
         pc.addEventListener('track', (evt: RTCTrackEvent) => {
             this.log(`Received new track ${evt.track.kind}`)
             if (evt.track.kind === 'video') {
-                //TODO: fixme, showing only the local video for now.
-                //this.videoElement.srcObject = evt.streams[0];
+                this.videoElement.srcObject = evt.streams[0];
             } else {
                 this.audioElement.srcObject = evt.streams[0];
             }
@@ -125,8 +124,7 @@ class WebRTCConnection {
         //Since we are using transceivers, the event with a new track is not triggered
         this.log("onConnectedHandler, trying to setup the tracks")
         this.audioElement.srcObject = new MediaStream([this.getAudioTransceiver().receiver.track]);
-        //TODO: showing only the local video for now
-        //this.videoElement.srcObject = new MediaStream([this.getVideoTransceiver().receiver.track]);
+        this.videoElement.srcObject = new MediaStream([this.getVideoTransceiver().receiver.track]);
     }
 
     private onDisconnectedHandler() {
@@ -259,7 +257,6 @@ class WebRTCConnection {
 
                 let videoTrack = stream.getVideoTracks()[0]
                 await this.getVideoTransceiver().sender.replaceTrack(videoTrack);
-                this.videoElement.srcObject = new MediaStream([videoTrack]);
             } catch (err) {
                 alert(`Could not acquire media: ${err}`);
             }
