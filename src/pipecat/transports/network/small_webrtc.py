@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     EndFrame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    OutputImageRawFrame,
     StartFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
@@ -198,6 +199,12 @@ class SmallWebRTCClient:
         if self._can_send():
             self._audio_output_track.add_audio_bytes(data)
 
+    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
+        if self._can_send():
+            # logger.info(f"Need to send frame to camera: {frame}")
+            # await self._client.write_frame_to_camera(frame)
+            pass
+
     async def setup(self, _params, frame):
         self._audio_in_channels = _params.audio_in_channels
         self._in_sample_rate = _params.audio_in_sample_rate or frame.audio_in_sample_rate
@@ -330,6 +337,9 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
 
     async def write_raw_audio_frames(self, frames: bytes):
         await self._client.write_raw_audio_frames(frames)
+
+    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
+        await self._client.write_frame_to_camera(frame)
 
 
 class SmallWebRTCTransport(BaseTransport):

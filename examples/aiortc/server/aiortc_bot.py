@@ -13,12 +13,15 @@ from aiortc.contrib.media import MediaBlackhole, MediaRelay
 from av import AudioFrame
 from dotenv import load_dotenv
 from loguru import logger
+from PIL import Image
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import Frame, InputImageRawFrame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.gemini_multimodal_live import GeminiMultimodalLiveLLMService
 from pipecat.transports.base_transport import TransportParams
@@ -29,6 +32,33 @@ load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+
+class MirrorProcessor(FrameProcessor):
+    def __init__(self, camera_out_width, camera_out_height: int):
+        super().__init__()
+        self._camera_out_width = camera_out_width
+        self._camera_out_height = camera_out_height
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, InputImageRawFrame):
+            desired_size = (self._camera_out_width, self._camera_out_height)
+
+            if frame.size != desired_size:
+                image = Image.frombytes(frame.format, frame.size, frame.image)
+                resized_image = image.resize(desired_size)
+                frame = OutputImageRawFrame(
+                    resized_image.tobytes(), resized_image.size, resized_image.format
+                )
+                await self.push_frame(frame)
+            else:
+                await self.push_frame(
+                    OutputImageRawFrame(image=frame.image, size=frame.size, format=frame.format)
+                )
+        else:
+            await self.push_frame(frame, direction)
 
 
 SYSTEM_INSTRUCTION = f"""
@@ -43,14 +73,16 @@ Respond to what the user said in a creative and helpful way. Keep your responses
 
 
 async def run_bot(webrtc_connection):
+    transport_params = TransportParams(
+        audio_out_enabled=True,
+        camera_out_enabled=True,
+        vad_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+        vad_audio_passthrough=True,
+    )
+
     pipecat_transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_out_enabled=True,
-            vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
-        ),
+        webrtc_connection=webrtc_connection, params=transport_params
     )
 
     llm = GeminiMultimodalLiveLLMService(
@@ -73,6 +105,9 @@ async def run_bot(webrtc_connection):
             context_aggregator.user(),
             rtvi,
             llm,  # LLM
+            MirrorProcessor(
+                transport_params.camera_out_width, transport_params.camera_out_height
+            ),  # Sending the video back to the user
             pipecat_transport.output(),
             context_aggregator.assistant(),
         ]
@@ -152,7 +187,7 @@ class AudioBeepStreamTrack(MediaStreamTrack):
         return frame
 
 
-async def run_aiortc_bot(pipecat_connection: SmallWebRTCConnection):
+async def run_aiortc_directly(pipecat_connection: SmallWebRTCConnection):
     relay = MediaRelay()
     recorder = MediaBlackhole()
     await recorder.start()
