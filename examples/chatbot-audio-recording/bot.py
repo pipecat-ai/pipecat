@@ -32,11 +32,15 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
+# Create the recordings directory if it doesn't exist
+os.makedirs("recordings", exist_ok=True)
+
 
 async def save_audio(audio: bytes, sample_rate: int, num_channels: int, name: str):
     if len(audio) > 0:
-        filename = (
-            f"{name}_conversation_recording{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+        filename = os.path.join(
+            "recordings",
+            f"{name}_conversation_recording{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav",
         )
         with io.BytesIO() as buffer:
             with wave.open(buffer, "wb") as wf:
