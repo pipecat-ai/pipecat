@@ -11,6 +11,9 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -73,45 +76,34 @@ async def main():
         llm.register_function("get_weather", get_weather, start_fetch_weather)
         llm.register_function("get_image", get_image)
 
-        tools = [
-            {
-                "function_declarations": [
-                    {
-                        "name": "get_weather",
-                        "description": "Get the current weather",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "location": {
-                                    "type": "string",
-                                    "description": "The city and state, e.g. San Francisco, CA",
-                                },
-                                "format": {
-                                    "type": "string",
-                                    "enum": ["celsius", "fahrenheit"],
-                                    "description": "The temperature unit to use. Infer this from the users location.",
-                                },
-                            },
-                            "required": ["location", "format"],
-                        },
-                    },
-                    {
-                        "name": "get_image",
-                        "description": "Get and image from the camera or video stream.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "question": {
-                                    "type": "string",
-                                    "description": "The question to to use when running inference on the acquired image.",
-                                },
-                            },
-                            "required": ["question"],
-                        },
-                    },
-                ]
-            }
-        ]
+        weather_function = FunctionSchema(
+            name="get_weather",
+            description="Get the current weather",
+            properties={
+                "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["celsius", "fahrenheit"],
+                    "description": "The temperature unit to use. Infer this from the user's location.",
+                },
+            },
+            required=["location", "format"],
+        )
+        get_image_function = FunctionSchema(
+            name="get_image",
+            description="Get an image from the video stream.",
+            properties={
+                "question": {
+                    "type": "string",
+                    "description": "The question that the user is asking about the image.",
+                }
+            },
+            required=["question"],
+        )
+        tools = ToolsSchema(standard_tools=[weather_function, get_image_function])
 
         system_prompt = """\
 You are a helpful assistant who converses with a user and answers questions. Respond concisely to general questions.

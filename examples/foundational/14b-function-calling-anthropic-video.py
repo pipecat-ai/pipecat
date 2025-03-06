@@ -11,6 +11,9 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -72,36 +75,29 @@ async def main():
         llm.register_function("get_weather", get_weather)
         llm.register_function("get_image", get_image)
 
-        tools = [
-            {
-                "name": "get_weather",
-                "description": "Get the current weather in a given location",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "location": {
-                            "type": "string",
-                            "description": "The city and state, e.g. San Francisco, CA",
-                        }
-                    },
-                    "required": ["location"],
+        weather_function = FunctionSchema(
+            name="get_weather",
+            description="Get the current weather",
+            properties={
+                "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA",
                 },
             },
-            {
-                "name": "get_image",
-                "description": "Get an image from the video stream.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "question": {
-                            "type": "string",
-                            "description": "The question that the user is asking about the image.",
-                        }
-                    },
-                    "required": ["question"],
-                },
+            required=["location"],
+        )
+        get_image_function = FunctionSchema(
+            name="get_image",
+            description="Get an image from the video stream.",
+            properties= {
+                "question": {
+                    "type": "string",
+                    "description": "The question that the user is asking about the image.",
+                }
             },
-        ]
+            required=["question"],
+        )
+        tools = ToolsSchema(standard_tools=[weather_function, get_image_function])
 
         # todo: test with very short initial user message
 
