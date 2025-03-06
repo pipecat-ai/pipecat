@@ -11,6 +11,9 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -59,22 +62,18 @@ async def main():
         )
         llm.register_function("get_weather", get_weather)
 
-        tools = [
-            {
-                "name": "get_weather",
-                "description": "Get the current weather in a given location",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "location": {
-                            "type": "string",
-                            "description": "The city and state, e.g. San Francisco, CA",
-                        }
-                    },
-                    "required": ["location"],
+        weather_function = FunctionSchema(
+            name="get_weather",
+            description="Get the current weather",
+            properties={
+                "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA",
                 },
-            }
-        ]
+            },
+            required=["location"],
+        )
+        tools = ToolsSchema(standard_tools=[weather_function])
 
         # todo: test with very short initial user message
 
