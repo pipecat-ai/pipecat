@@ -22,8 +22,8 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.gemini_multimodal_live import GeminiMultimodalLiveLLMService
 from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.webrtc.pipecat_webrtc import PipecatWebRTCTransport
-from pipecat.transports.webrtc.webrtc_connection import PipecatWebRTCConnection
+from pipecat.transports.webrtc.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.webrtc.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
@@ -43,7 +43,7 @@ Respond to what the user said in a creative and helpful way. Keep your responses
 
 
 async def run_bot(webrtc_connection):
-    pipecat_transport = PipecatWebRTCTransport(
+    pipecat_transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
         params=TransportParams(
             audio_out_enabled=True,
@@ -152,7 +152,7 @@ class AudioBeepStreamTrack(MediaStreamTrack):
         return frame
 
 
-async def run_aiortc_bot(pipecat_connection: PipecatWebRTCConnection):
+async def run_aiortc_bot(pipecat_connection: SmallWebRTCConnection):
     relay = MediaRelay()
     recorder = MediaBlackhole()
     await recorder.start()

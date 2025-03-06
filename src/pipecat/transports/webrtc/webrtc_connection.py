@@ -6,7 +6,7 @@ from loguru import logger
 from pipecat.utils.event_emitter import EventEmitter
 
 
-class PipecatWebRTCConnection(EventEmitter):
+class SmallWebRTCConnection(EventEmitter):
     def __init__(self):
         super().__init__()
         self.pc = RTCPeerConnection()

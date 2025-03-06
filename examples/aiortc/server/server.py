@@ -8,7 +8,7 @@ from aiortc_bot import run_bot
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
 
-from pipecat.transports.webrtc.webrtc_connection import PipecatWebRTCConnection
+from pipecat.transports.webrtc.webrtc_connection import SmallWebRTCConnection
 
 # Load environment variables
 load_dotenv(override=True)
@@ -23,7 +23,7 @@ pcs = set()
 
 @app.post("/api/offer")
 async def offer(request: dict, background_tasks: BackgroundTasks):
-    pipecat_connection = PipecatWebRTCConnection()
+    pipecat_connection = SmallWebRTCConnection()
     await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
 
     pcs.add(pipecat_connection)

@@ -28,13 +28,13 @@ from pipecat.frames.frames import (
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.webrtc.webrtc_connection import PipecatWebRTCConnection
+from pipecat.transports.webrtc.webrtc_connection import SmallWebRTCConnection
 
 
-class PipecatWebRTCCallbacks(BaseModel):
-    on_client_connected: Callable[[PipecatWebRTCConnection], Awaitable[None]]
-    on_client_disconnected: Callable[[PipecatWebRTCConnection], Awaitable[None]]
-    on_client_closed: Callable[[PipecatWebRTCConnection], Awaitable[None]]
+class SmallWebRTCCallbacks(BaseModel):
+    on_client_connected: Callable[[SmallWebRTCConnection], Awaitable[None]]
+    on_client_disconnected: Callable[[SmallWebRTCConnection], Awaitable[None]]
+    on_client_closed: Callable[[SmallWebRTCConnection], Awaitable[None]]
 
 
 class RawAudioTrack(MediaStreamTrack):
@@ -90,9 +90,9 @@ class RawAudioTrack(MediaStreamTrack):
         return frame
 
 
-class PipecatWebRTCClient:
+class SmallWebRTCClient:
     def __init__(
-        self, webrtc_connection: PipecatWebRTCConnection, callbacks: PipecatWebRTCCallbacks
+        self, webrtc_connection: SmallWebRTCConnection, callbacks: SmallWebRTCCallbacks
     ):
         self._webrtcConnection = webrtc_connection
         self._closing = False
@@ -210,7 +210,7 @@ class PipecatWebRTCClient:
             # already initialized
             return
 
-        logger.info(f"Connecting to Pipecat WebRTC")
+        logger.info(f"Connecting to Small WebRTC")
         self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
         self._webrtcConnection.replace_audio_track(self._audio_output_track)
 
@@ -243,10 +243,10 @@ class PipecatWebRTCClient:
         return self._closing
 
 
-class PipecatWebRTCInputTransport(BaseInputTransport):
+class SmallWebRTCInputTransport(BaseInputTransport):
     def __init__(
         self,
-        client: PipecatWebRTCClient,
+        client: SmallWebRTCClient,
         params: TransportParams,
         **kwargs,
     ):
@@ -302,10 +302,10 @@ class PipecatWebRTCInputTransport(BaseInputTransport):
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
 
-class PipecatWebRTCOutputTransport(BaseOutputTransport):
+class SmallWebRTCOutputTransport(BaseOutputTransport):
     def __init__(
         self,
-        client: PipecatWebRTCClient,
+        client: SmallWebRTCClient,
         params: TransportParams,
         **kwargs,
     ):
@@ -334,10 +334,10 @@ class PipecatWebRTCOutputTransport(BaseOutputTransport):
         await self._client.write_raw_audio_frames(frames)
 
 
-class PipecatWebRTCTransport(BaseTransport):
+class SmallWebRTCTransport(BaseTransport):
     def __init__(
         self,
-        webrtc_connection: PipecatWebRTCConnection,
+        webrtc_connection: SmallWebRTCConnection,
         params: TransportParams,
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
@@ -345,16 +345,16 @@ class PipecatWebRTCTransport(BaseTransport):
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
 
-        self._callbacks = PipecatWebRTCCallbacks(
+        self._callbacks = SmallWebRTCCallbacks(
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
             on_client_closed=self._on_client_closed,
         )
 
-        self._client = PipecatWebRTCClient(webrtc_connection, self._callbacks)
+        self._client = SmallWebRTCClient(webrtc_connection, self._callbacks)
 
-        self._input = PipecatWebRTCInputTransport(self._client, self._params, name=self._input_name)
-        self._output = PipecatWebRTCOutputTransport(
+        self._input = SmallWebRTCInputTransport(self._client, self._params, name=self._input_name)
+        self._output = SmallWebRTCOutputTransport(
             self._client, self._params, name=self._output_name
         )
 
@@ -364,16 +364,16 @@ class PipecatWebRTCTransport(BaseTransport):
         self._register_event_handler("on_client_disconnected")
         self._register_event_handler("on_client_closed")
 
-    def input(self) -> PipecatWebRTCInputTransport:
+    def input(self) -> SmallWebRTCInputTransport:
         if not self._input:
-            self._input = PipecatWebRTCInputTransport(
+            self._input = SmallWebRTCInputTransport(
                 self._client, self._params, name=self._input_name
             )
         return self._input
 
-    def output(self) -> PipecatWebRTCOutputTransport:
+    def output(self) -> SmallWebRTCOutputTransport:
         if not self._output:
-            self._output = PipecatWebRTCOutputTransport(
+            self._output = SmallWebRTCOutputTransport(
                 self._client, self._params, name=self._input_name
             )
         return self._output
