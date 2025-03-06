@@ -78,7 +78,11 @@ async def main():
         runner = PipelineRunner()
 
         task = PipelineTask(
-            pipeline, PipelineParams(audio_in_sample_rate=24000, audio_out_sample_rate=24000)
+            pipeline,
+            params=PipelineParams(
+                audio_in_sample_rate=24000,
+                audio_out_sample_rate=24000,
+            ),
         )
 
         await runner.run(task)

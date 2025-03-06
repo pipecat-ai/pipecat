@@ -578,7 +578,7 @@ class AzureTTSService(AzureBaseTTSService):
         self._audio_queue.put_nowait(None)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             if self._speech_synthesizer is None:
@@ -645,7 +645,7 @@ class AzureHttpTTSService(AzureBaseTTSService):
         )
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         await self.start_ttfb_metrics()
 

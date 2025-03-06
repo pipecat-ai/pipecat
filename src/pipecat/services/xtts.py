@@ -118,7 +118,7 @@ class XTTSService(TTSService):
             self._studio_speakers = await r.json()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         if not self._studio_speakers:
             logger.error(f"{self} no studio speakers available")
@@ -150,8 +150,10 @@ class XTTSService(TTSService):
 
             yield TTSStartedFrame()
 
+            CHUNK_SIZE = 1024
+
             buffer = bytearray()
-            async for chunk in r.content.iter_chunked(1024):
+            async for chunk in r.content.iter_chunked(CHUNK_SIZE):
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
                     # Append new chunk to the buffer.

@@ -178,7 +178,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 logger.error(f"Error processing message: {e}")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating Fish TTS: [{text}]")
+        logger.debug(f"{self}: Generating Fish TTS: [{text}]")
         try:
             if not self._websocket or self._websocket.closed:
                 await self._connect()

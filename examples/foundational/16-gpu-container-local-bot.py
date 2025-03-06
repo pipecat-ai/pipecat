@@ -85,7 +85,13 @@ async def main():
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                allow_interruptions=True,
+                enable_metrics=True,
+            ),
+        )
 
         # When a participant joins, start transcription for that participant so the
         # bot can "hear" and respond to them.

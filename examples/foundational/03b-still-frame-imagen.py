@@ -44,7 +44,8 @@ async def main():
         runner = PipelineRunner()
 
         task = PipelineTask(
-            Pipeline([imagegen, transport.output()]), PipelineParams(enable_metrics=True)
+            Pipeline([imagegen, transport.output()]),
+            params=PipelineParams(enable_metrics=True),
         )
 
         @transport.event_handler("on_first_participant_joined")

@@ -32,7 +32,7 @@ async def main():
 
     pipeline = Pipeline([NullProcessor()])
 
-    task = PipelineTask(pipeline, PipelineParams(enable_heartbeats=True))
+    task = PipelineTask(pipeline, params=PipelineParams(enable_heartbeats=True))
 
     runner = PipelineRunner()
 

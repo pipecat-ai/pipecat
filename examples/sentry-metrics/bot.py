@@ -90,7 +90,7 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(allow_interruptions=True, enable_metrics=True),
+            params=PipelineParams(allow_interruptions=True, enable_metrics=True),
         )
 
         @transport.event_handler("on_first_participant_joined")

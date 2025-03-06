@@ -8,10 +8,12 @@ import asyncio
 import io
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Tuple, Type
 
 from loguru import logger
 
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -137,10 +139,23 @@ class AIService(FrameProcessor):
 class LLMService(AIService):
     """This class is a no-op but serves as a base class for LLM services."""
 
+    # OpenAILLMAdapter is used as the default adapter since it aligns with most LLM implementations.
+    # However, subclasses should override this with a more specific adapter when necessary.
+    adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._callbacks = {}
         self._start_callbacks = {}
+        self._adapter = self.adapter_class()
+
+    def get_llm_adapter(self) -> BaseLLMAdapter:
+        return self._adapter
+
+    def create_context_aggregator(
+        self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+    ) -> Any:
+        pass
 
         self._register_event_handler("on_completion_timeout")
 
@@ -652,7 +667,12 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
-        await self._stop_audio_context_task()
+        if self._audio_context_task:
+            # Indicate no more audio contexts are available. this will end the
+            # task cleanly after all contexts have been processed.
+            await self._contexts_queue.put(None)
+            await self.wait_for_task(self._audio_context_task)
+            self._audio_context_task = None
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
@@ -676,21 +696,28 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
 
     async def _audio_context_task_handler(self):
         """In this task we process audio contexts in order."""
-        while True:
+        running = True
+        while running:
             context_id = await self._contexts_queue.get()
 
-            # Process the audio context until the context doesn't have more
-            # audio available (i.e. we find None).
-            await self._handle_audio_context(context_id)
+            if context_id:
+                # Process the audio context until the context doesn't have more
+                # audio available (i.e. we find None).
+                await self._handle_audio_context(context_id)
 
-            # We just finished processing the context, so we can safely remove it.
-            del self._contexts[context_id]
+                # We just finished processing the context, so we can safely remove it.
+                del self._contexts[context_id]
+
+                # Append some silence between sentences.
+                silence = b"\x00" * self.sample_rate
+                frame = TTSAudioRawFrame(
+                    audio=silence, sample_rate=self.sample_rate, num_channels=1
+                )
+                await self.push_frame(frame)
+            else:
+                running = False
+
             self._contexts_queue.task_done()
-
-            # Append some silence between sentences.
-            silence = b"\x00" * self.sample_rate
-            frame = TTSAudioRawFrame(audio=silence, sample_rate=self.sample_rate, num_channels=1)
-            await self.push_frame(frame)
 
     async def _handle_audio_context(self, context_id: str):
         # If we don't receive any audio during this time, we consider the context finished.

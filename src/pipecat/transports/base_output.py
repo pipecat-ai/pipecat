@@ -232,6 +232,9 @@ class BaseOutputTransport(FrameProcessor):
             await self.push_frame(BotStoppedSpeakingFrame())
             await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
             self._bot_speaking = False
+            # Clean audio buffer (there could be tiny left overs if not multiple
+            # to our output chunk size).
+            self._audio_buffer = bytearray()
 
     #
     # Sink tasks

@@ -5,25 +5,14 @@
 #
 
 import asyncio
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import AsyncIterable, Iterable
 
 from pipecat.frames.frames import Frame
+from pipecat.utils.base_object import BaseObject
 
 
-class BaseTask(ABC):
-    @property
-    @abstractmethod
-    def id(self) -> int:
-        """Returns the unique indetifier for this task."""
-        pass
-
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Returns the name of this task."""
-        pass
-
+class BaseTask(BaseObject):
     @abstractmethod
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         """Sets the event loop that this task will run on."""

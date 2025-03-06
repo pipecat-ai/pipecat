@@ -568,7 +568,8 @@ class UserStoppedSpeakingFrame(SystemFrame):
 @dataclass
 class EmulateUserStartedSpeakingFrame(SystemFrame):
     """Emitted by internal processors upstream to emulate VAD behavior when a
-    user starts speaking."""
+    user starts speaking.
+    """
 
     pass
 
@@ -576,7 +577,8 @@ class EmulateUserStartedSpeakingFrame(SystemFrame):
 @dataclass
 class EmulateUserStoppedSpeakingFrame(SystemFrame):
     """Emitted by internal processors upstream to emulate VAD behavior when a
-    user stops speaking."""
+    user stops speaking.
+    """
 
     pass
 
