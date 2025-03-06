@@ -11,11 +11,10 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+from runner import configure
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from runner import configure
-
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -89,7 +88,7 @@ async def main():
         get_image_function = FunctionSchema(
             name="get_image",
             description="Get an image from the video stream.",
-            properties= {
+            properties={
                 "question": {
                     "type": "string",
                     "description": "The question that the user is asking about the image.",
