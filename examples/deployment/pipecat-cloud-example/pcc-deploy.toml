@@ -1,0 +1,6 @@
+agent_name = "my-first-agent"
+image = "your-username/my-first-agent:0.1"
+secret_set = "my-first-agent-secrets"
+
+[scaling]
+	min_instances = 0
