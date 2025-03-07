@@ -5,13 +5,15 @@
 #
 
 import asyncio
+import fractions
+import time
 from collections import deque
 from typing import Awaitable, Callable, Optional
 
 import cv2
 import numpy as np
-from aiortc import MediaStreamTrack, VideoStreamTrack
-from aiortc.mediastreams import VideoFrame
+from aiortc import VideoStreamTrack
+from aiortc.mediastreams import AudioStreamTrack, VideoFrame
 from av import AudioFrame, AudioResampler
 from loguru import logger
 from pydantic import BaseModel
@@ -38,15 +40,14 @@ class SmallWebRTCCallbacks(BaseModel):
     on_client_closed: Callable[[SmallWebRTCConnection], Awaitable[None]]
 
 
-class RawAudioTrack(MediaStreamTrack):
-    kind = "audio"
-
+class RawAudioTrack(AudioStreamTrack):
     def __init__(self, sample_rate=48000):
         super().__init__()
         self.sample_rate = sample_rate
         self.samples_per_frame = self.sample_rate // 50  # 20ms per frame
-        self.time = 0
+        self.time = 0  # Timestamp in samples
         self.audio_buffer = deque()  # Efficient buffer storage
+        self._start = time.time()
 
     def add_audio_bytes(self, audio_bytes: bytes):
         """
@@ -61,8 +62,11 @@ class RawAudioTrack(MediaStreamTrack):
         """
         Returns the next audio frame, generating silence if needed.
         """
-
-        await asyncio.sleep(0.02)  # Simulate real-time delay (20ms)
+        # Compute required wait time for synchronization
+        if self.time > 0:
+            wait = self._start + (self.time / self.sample_rate) - time.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
 
         # Check if we have enough data
         needed_bytes = self.samples_per_frame * 2  # 16-bit (2 bytes per sample)
@@ -71,29 +75,25 @@ class RawAudioTrack(MediaStreamTrack):
             chunk = bytearray()
             while len(chunk) < needed_bytes:
                 chunk.extend(self.audio_buffer.popleft())
-
-            # Trim excess bytes in case the last deque element exceeded needed_bytes
-            chunk = bytes(chunk[:needed_bytes])
-
+            chunk = bytes(chunk[:needed_bytes])  # Trim excess bytes
         else:
-            # Not enough data, generate silent frame
-            chunk = bytes(needed_bytes)
+            chunk = bytes(needed_bytes)  # Generate silent frame
 
         # Convert the byte data to an ndarray of int16 samples
         samples = np.frombuffer(chunk, dtype=np.int16)
 
         # Create AudioFrame
         frame = AudioFrame.from_ndarray(samples[None, :], layout="mono")
-        frame.sample_rate = self.sample_rate
-        frame.pts = self.time
 
         self.time += self.samples_per_frame
+        frame.pts = self.time
+        frame.sample_rate = self.sample_rate
+        frame.time_base = fractions.Fraction(1, self.sample_rate)
+
         return frame
 
 
 class RawVideoTrack(VideoStreamTrack):
-    kind = "video"
-
     def __init__(self, width, height):
         super().__init__()
         self.width = width
