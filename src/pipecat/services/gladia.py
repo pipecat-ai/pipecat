@@ -179,6 +179,17 @@ class GladiaSTTService(STTService):
     def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_gladia_language(language)
 
+    async def set_language(self, language: Language):
+        """Placeholder: Set the speech recognition language."""
+        logger.info(f"Set language name to '{language}' has not been implemented yet")
+
+    async def set_model(self, model: str):
+        """Set the speech recognition model."""
+        self.set_model_name(model)
+        logger.info(
+            f"Set model name to '{model}' for metrics (Gladia doesn't support model switching)"
+        )
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
         if self._websocket:

@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a `flush_audio()` method to `AzureTTSService`, `FishTTSService`, and
   `PlayHTTTSService`.
 
-- Added `set_language()` and `set_model()` to `AzureSTTService` and
-  `AssemblySTTService`.
+- Added `set_language()` and `set_model()` to `AzureSTTService`,
+  `AssemblySTTService`, and `GladiaSTTService`.
 
 - Added `on_user_turn_audio_data` and `on_bot_turn_audio_data` to
   `AudioBufferProcessor`. This gives the ability to grab the audio of only that
