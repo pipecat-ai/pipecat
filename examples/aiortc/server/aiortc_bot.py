@@ -137,6 +137,7 @@ async def run_bot(webrtc_connection):
 
     @rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
+        logger.info("Pipecat client ready.")
         await rtvi.set_bot_ready()
 
     @pipecat_transport.event_handler("on_client_connected")

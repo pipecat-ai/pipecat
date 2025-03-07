@@ -1,4 +1,6 @@
+import json
 import uuid
+from typing import Any
 
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from loguru import logger
@@ -13,15 +15,16 @@ class SmallWebRTCConnection(EventEmitter):
         self.pc_id = "PeerConnection(%s)" % uuid.uuid4()
         self._setup_listeners()
         self._tracks = set()
+        self._data_channel = None
 
     def _setup_listeners(self):
         @self.pc.on("datachannel")
         def on_datachannel(channel):
-            # TODO: we should probably refactor and remove it from here
+            self._data_channel = channel
+
             @channel.on("message")
-            def on_message(message):
-                if isinstance(message, str) and message.startswith("ping"):
-                    channel.send("pong to: " + message)
+            async def on_message(message):
+                await self.emit("appMessage", message)
 
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():
@@ -115,3 +118,8 @@ class SmallWebRTCConnection(EventEmitter):
 
     def tracks(self):
         return self._tracks
+
+    def send_app_message(self, message: Any):
+        if self._data_channel:
+            json_message = json.dumps(message)
+            self._data_channel.send(json_message)

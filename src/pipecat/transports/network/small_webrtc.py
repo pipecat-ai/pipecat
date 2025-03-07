@@ -8,7 +8,7 @@ import asyncio
 import fractions
 import time
 from collections import deque
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 import cv2
 import numpy as np
@@ -35,6 +35,7 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 
 class SmallWebRTCCallbacks(BaseModel):
+    on_app_message: Callable[[Any], Awaitable[None]]
     on_client_connected: Callable[[SmallWebRTCConnection], Awaitable[None]]
     on_client_disconnected: Callable[[SmallWebRTCConnection], Awaitable[None]]
     on_client_closed: Callable[[SmallWebRTCConnection], Awaitable[None]]
@@ -156,6 +157,10 @@ class SmallWebRTCClient:
             logger.info("Client connection closed.")
             await self._handle_client_closed()
 
+        @self._webrtcConnection.on("appMessage")
+        async def on_connected(message: Any):
+            await self._handle_app_message(message)
+
     # TODO: implement something to request a keyframe the first time
     # We should probably send a signal to the client to send a keyframe, using the datachanel
     async def read_video_frame(self):
@@ -267,6 +272,10 @@ class SmallWebRTCClient:
             await self._webrtcConnection.close()
             await self._handle_client_disconnected()
 
+    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+        if self._can_send():
+            self._webrtcConnection.send_app_message(frame.message)
+
     async def _handle_client_connected(self):
         self._audio_input_track = self._webrtcConnection.audio_input_track()
         self._video_input_track = self._webrtcConnection.video_input_track()
@@ -277,6 +286,9 @@ class SmallWebRTCClient:
 
     async def _handle_client_closed(self):
         await self._callbacks.on_client_closed(self._webrtcConnection)
+
+    async def _handle_app_message(self, message: Any):
+        await self._callbacks.on_app_message(message)
 
     def _can_send(self):
         return self.is_connected and not self.is_closing
@@ -307,7 +319,9 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         await super().start(frame)
         await self._client.setup(self._params, frame)
         await self._client.connect()
-        if not self._receive_audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if not self._receive_audio_task and (
+            self._params.audio_in_enabled or self._params.vad_enabled
+        ):
             self._receive_audio_task = self.create_task(self._receive_audio())
         if not self._receive_video_task and self._params.camera_in_enabled:
             self._receive_video_task = self.create_task(self._receive_video())
@@ -348,6 +362,10 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
+    async def push_app_message(self, message: Any):
+        logger.info(f"Received app message inside SmallWebRTCInputTransport  {message}")
+        # TODO implement to push the message
+
 
 class SmallWebRTCOutputTransport(BaseOutputTransport):
     def __init__(
@@ -374,8 +392,7 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         await self._client.disconnect()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
-        # TODO: implement it, we should send through the datachannel
-        pass
+        await self._client.send_message(frame)
 
     async def write_raw_audio_frames(self, frames: bytes):
         await self._client.write_raw_audio_frames(frames)
@@ -396,6 +413,7 @@ class SmallWebRTCTransport(BaseTransport):
         self._params = params
 
         self._callbacks = SmallWebRTCCallbacks(
+            on_app_message=self._on_app_message,
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
             on_client_closed=self._on_client_closed,
@@ -410,6 +428,7 @@ class SmallWebRTCTransport(BaseTransport):
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
+        self._register_event_handler("on_app_message")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
         self._register_event_handler("on_client_closed")
@@ -427,6 +446,11 @@ class SmallWebRTCTransport(BaseTransport):
                 self._client, self._params, name=self._input_name
             )
         return self._output
+
+    async def _on_app_message(self, message: Any):
+        if self._input:
+            await self._input.push_app_message(message)
+        await self._call_event_handler("on_app_message", message)
 
     async def _on_client_connected(self, webrtc_connection):
         await self._call_event_handler("on_client_connected", webrtc_connection)

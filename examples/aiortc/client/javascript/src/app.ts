@@ -13,7 +13,6 @@ class WebRTCConnection {
 
     private pc: RTCPeerConnection | null = null;
     private dc: RTCDataChannel | null = null;
-    private dcInterval: number | null = null;
 
     private debugLog: HTMLElement | null = null;
     private statusSpan: HTMLElement | null = null;
@@ -277,27 +276,18 @@ class WebRTCConnection {
         };
 
         dc.addEventListener('close', () => {
-            if (this.dcInterval) clearInterval(this.dcInterval);
             this.log("datachannel closed")
         });
 
         dc.addEventListener('open', () => {
             this.log("datachannel opened")
-            // @ts-ignore
-            this.dcInterval = setInterval(() => {
-                const message = `ping ${getCurrentTimestamp()}`;
-                //this.log(`Sending datachannel message: ${message}}`)
-                dc.send(message);
-            }, 1000);
+            // Sending message that the client is ready
+            dc.send(JSON.stringify({type:'client-ready'}))
         });
 
         dc.addEventListener('message', (evt: MessageEvent) => {
             let message = evt.data
-            //this.log(`Received datachannel message: ${message}`)
-            if (message.startsWith('pong')) {
-                const elapsedMs = getCurrentTimestamp() - parseInt(evt.data.substring(5), 10);
-                //this.log(` RTT ${elapsedMs} ms`);
-            }
+            this.log(message)
         });
 
         return dc;
