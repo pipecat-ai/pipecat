@@ -10,12 +10,16 @@ from typing import Optional
 from pipecat.audio.utils import create_default_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -30,12 +34,15 @@ class AudioBufferProcessor(FrameProcessor):
     Events:
         on_audio_data: Triggered when buffer_size is reached, providing merged audio
         on_track_audio_data: Triggered when buffer_size is reached, providing separate tracks
+        on_user_turn_audio_data: Triggered when user turn has ended, providing that user turn's audio
+        on_bot_turn_audio_data: Triggered when bot turn has ended, providing that bot turn's audio
 
     Args:
         sample_rate (Optional[int]): Desired output sample rate. If None, uses source rate
         num_channels (int): Number of channels (1 for mono, 2 for stereo). Defaults to 1
         buffer_size (int): Size of buffer before triggering events. 0 for no buffering
         user_continuous_stream (bool): Whether user audio is continuous or speech-only
+        enable_turn_audio (bool): Whether turn audio event handlers should be triggered
 
     Audio handling:
         - Mono output (num_channels=1): User and bot audio are mixed
@@ -56,17 +63,25 @@ class AudioBufferProcessor(FrameProcessor):
         num_channels: int = 1,
         buffer_size: int = 0,
         user_continuous_stream: bool = True,
+        enable_turn_audio: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
+        self._audio_buffer_size_1s = 0
         self._num_channels = num_channels
         self._buffer_size = buffer_size
         self._user_continuous_stream = user_continuous_stream
+        self._enable_turn_audio = enable_turn_audio
 
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
+
+        self._user_speaking = False
+        self._bot_speaking = False
+        self._user_turn_audio_buffer = bytearray()
+        self._bot_turn_audio_buffer = bytearray()
 
         # Intermittent (non continous user stream variables)
         self._last_user_frame_at = 0
@@ -78,6 +93,8 @@ class AudioBufferProcessor(FrameProcessor):
 
         self._register_event_handler("on_audio_data")
         self._register_event_handler("on_track_audio_data")
+        self._register_event_handler("on_user_turn_audio_data")
+        self._register_event_handler("on_bot_turn_audio_data")
 
     @property
     def sample_rate(self) -> int:
@@ -150,13 +167,9 @@ class AudioBufferProcessor(FrameProcessor):
             self._update_sample_rate(frame)
 
         if self._recording:
-            if self._user_continuous_stream:
-                await self._handle_continuous_stream(frame)
-            else:
-                await self._handle_intermittent_stream(frame)
-
-        if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
-            await self._call_on_audio_data_handler()
+            await self._process_recording(frame)
+            if self._enable_turn_audio:
+                await self._process_turn_recording(frame)
 
         if isinstance(frame, (CancelFrame, EndFrame)):
             await self.stop_recording()
@@ -165,6 +178,50 @@ class AudioBufferProcessor(FrameProcessor):
 
     def _update_sample_rate(self, frame: StartFrame):
         self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
+        self._audio_buffer_size_1s = self._sample_rate * 2
+
+    async def _process_recording(self, frame: Frame):
+        if self._user_continuous_stream:
+            await self._handle_continuous_stream(frame)
+        else:
+            await self._handle_intermittent_stream(frame)
+
+        if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
+            await self._call_on_audio_data_handler()
+
+    async def _process_turn_recording(self, frame: Frame):
+        if isinstance(frame, UserStartedSpeakingFrame):
+            self._user_speaking = True
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._call_event_handler(
+                "on_user_turn_audio_data", self._user_turn_audio_buffer, self.sample_rate, 1
+            )
+            self._user_speaking = False
+            self._user_turn_audio_buffer = bytearray()
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._call_event_handler(
+                "on_bot_turn_audio_data", self._bot_turn_audio_buffer, self.sample_rate, 1
+            )
+            self._bot_speaking = False
+            self._bot_turn_audio_buffer = bytearray()
+
+        if isinstance(frame, InputAudioRawFrame):
+            resampled = await self._resample_audio(frame)
+            self._user_turn_audio_buffer += resampled
+            # In the case of the user, we need to keep a short buffer of audio
+            # since VAD notification of when the user starts speaking comes
+            # later.
+            if (
+                not self._user_speaking
+                and len(self._user_turn_audio_buffer) > self._audio_buffer_size_1s
+            ):
+                discarded = len(self._user_turn_audio_buffer) - self._audio_buffer_size_1s
+                self._user_turn_audio_buffer = self._user_turn_audio_buffer[discarded:]
+        elif self._bot_speaking and isinstance(frame, OutputAudioRawFrame):
+            resampled = await self._resample_audio(frame)
+            self._bot_turn_audio_buffer += resampled
 
     async def _handle_continuous_stream(self, frame: Frame):
         if isinstance(frame, InputAudioRawFrame):
@@ -233,6 +290,8 @@ class AudioBufferProcessor(FrameProcessor):
     def _reset_audio_buffers(self):
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
+        self._user_turn_audio_buffer = bytearray()
+        self._bot_turn_audio_buffer = bytearray()
 
     async def _resample_audio(self, frame: AudioRawFrame) -> bytes:
         return await self._resampler.resample(frame.audio, frame.sample_rate, self._sample_rate)

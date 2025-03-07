@@ -11,9 +11,10 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -69,30 +70,23 @@ async def main():
         # sent to the same callback with an additional function_name parameter.
         llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
 
-        tools = [
-            ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "get_current_weather",
-                    "description": "Returns the current weather at a location, if one is specified, and defaults to the user's location.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "location": {
-                                "type": "string",
-                                "description": "The location to find the weather of, or if not provided, it's the default location.",
-                            },
-                            "format": {
-                                "type": "string",
-                                "enum": ["celsius", "fahrenheit"],
-                                "description": "Whether to use SI or USCS units (celsius or fahrenheit).",
-                            },
-                        },
-                        "required": ["location", "format"],
-                    },
+        weather_function = FunctionSchema(
+            name="get_current_weather",
+            description="Get the current weather",
+            properties={
+                "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA",
                 },
-            )
-        ]
+                "format": {
+                    "type": "string",
+                    "enum": ["celsius", "fahrenheit"],
+                    "description": "The temperature unit to use. Infer this from the user's location.",
+                },
+            },
+            required=["location", "format"],
+        )
+        tools = ToolsSchema(standard_tools=[weather_function])
         messages = [
             {
                 "role": "system",

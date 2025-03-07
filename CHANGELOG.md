@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `on_user_turn_audio_data` and `on_bot_turn_audio_data` to
+  `AudioBufferProcessor`. This gives the ability to grab the audio of only that
+  turn for both the user and the bot.
+
 - Added new base class `BaseObject` which is now the base class of
   `FrameProcessor`, `PipelineRunner`, `PipelineTask` and `BaseTransport`. The
   new `BaseObject` adds supports for event handlers.
