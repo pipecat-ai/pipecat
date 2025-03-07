@@ -94,47 +94,46 @@ class RawAudioTrack(MediaStreamTrack):
 class RawVideoTrack(VideoStreamTrack):
     kind = "video"
 
-    def __init__(self, width, height, fps):
+    def __init__(self, width, height):
         super().__init__()
         self.width = width
         self.height = height
-        self.fps = fps
-        self.frame_time = int(1 / fps)
-        self.video_buffer = deque()  # Buffer to store frames
+        self.video_buffer = asyncio.Queue()  # Async queue for storing frames
+        self.frame_available = asyncio.Event()  # Event to signal availability of frame
 
     def add_video_frame(self, frame: OutputImageRawFrame):
         """
         Adds a raw video frame (ImageRawFrame) to the buffer.
         The frame image should be in bytes and properly formatted.
         """
-        self.video_buffer.append(frame)
+        self.video_buffer.put_nowait(frame)
+        self.frame_available.set()  # Signal that a frame is available
 
     async def recv(self):
         """
-        Returns the next video frame, generating a black frame if needed.
+        Returns the next video frame, waits if buffer is empty.
         """
-        await asyncio.sleep(self.frame_time)  # Simulate real-time delay
+        await self.frame_available.wait()  # Wait until a frame is available
 
-        if self.video_buffer:
-            raw_frame = self.video_buffer.popleft()
+        try:
+            raw_frame = self.video_buffer.get_nowait()
+
             frame_data = np.frombuffer(raw_frame.image, dtype=np.uint8).reshape(
                 (self.height, self.width, 3)
             )
-            # Convert format if necessary
-            # if raw_frame.format == "bgr24":
-            #    frame_data = cv2.cvtColor(frame_data, cv2.COLOR_BGR2RGB)
-            # elif raw_frame.format == "gray":
-            #    frame_data = cv2.cvtColor(frame_data, cv2.COLOR_GRAY2RGB)
-        else:
-            frame_data = np.zeros((self.height, self.width, 3), dtype=np.uint8)  # Black frame
 
-        frame = VideoFrame.from_ndarray(frame_data, format="rgb24")
+            frame = VideoFrame.from_ndarray(frame_data, format="rgb24")
 
-        pts, time_base = await self.next_timestamp()
-        frame.pts = pts
-        frame.time_base = time_base
+            pts, time_base = await self.next_timestamp()
+            frame.pts = pts
+            frame.time_base = time_base
 
-        return frame
+            self.frame_available.clear()  # Clear the event after processing
+
+            return frame
+        except asyncio.QueueEmpty:
+            # In case of unexpected empty queue (shouldn't happen due to `wait()`)
+            return None
 
 
 class SmallWebRTCClient:
@@ -268,8 +267,7 @@ class SmallWebRTCClient:
 
         self._video_output_track = RawVideoTrack(
             width=self._params.camera_out_width,
-            height=self._params.camera_out_height,
-            fps=self._params.camera_out_framerate,
+            height=self._params.camera_out_height
         )
         self._webrtcConnection.replace_video_track(self._video_output_track)
 
