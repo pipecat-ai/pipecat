@@ -45,8 +45,8 @@ class RawAudioTrack(AudioStreamTrack):
         super().__init__()
         self._sample_rate = sample_rate
         self._samples_per_frame = self._sample_rate // 50  # 20ms per frame
-        self._timestamp = 0  # Timestamp in samples
-        self._audio_buffer = deque()  # Efficient buffer storage
+        self._timestamp = 0
+        self._audio_buffer = deque()
         self._start = time.time()
 
     def add_audio_bytes(self, audio_bytes: bytes):
@@ -98,42 +98,27 @@ class RawVideoTrack(VideoStreamTrack):
         super().__init__()
         self._width = width
         self._height = height
-        self._video_buffer = asyncio.Queue()  # Async queue for storing frames
-        self._frame_available = asyncio.Event()  # Event to signal availability of frame
+        self._video_buffer = asyncio.Queue()
 
-    def add_video_frame(self, frame: OutputImageRawFrame):
-        """
-        Adds a raw video frame (ImageRawFrame) to the buffer.
-        The frame image should be in bytes and properly formatted.
-        """
+    def add_video_frame(self, frame):
+        """Adds a raw video frame to the buffer."""
         self._video_buffer.put_nowait(frame)
-        self._frame_available.set()  # Signal that a frame is available
 
     async def recv(self):
-        """
-        Returns the next video frame, waits if buffer is empty.
-        """
-        await self._frame_available.wait()  # Wait until a frame is available
+        """Returns the next video frame, waiting if the buffer is empty."""
+        raw_frame = await self._video_buffer.get()
 
-        try:
-            raw_frame = self._video_buffer.get_nowait()
+        # Convert bytes to NumPy array
+        frame_data = np.frombuffer(raw_frame.image, dtype=np.uint8).reshape(
+            (self._height, self._width, 3)
+        )
 
-            frame_data = np.frombuffer(raw_frame.image, dtype=np.uint8).reshape(
-                (self._height, self._width, 3)
-            )
+        frame = VideoFrame.from_ndarray(frame_data, format="rgb24")
 
-            frame = VideoFrame.from_ndarray(frame_data, format="rgb24")
+        # Assign timestamp
+        frame.pts, frame.time_base = await self.next_timestamp()
 
-            pts, time_base = await self.next_timestamp()
-            frame.pts = pts
-            frame.time_base = time_base
-
-            self._frame_available.clear()  # Clear the event after processing
-
-            return frame
-        except asyncio.QueueEmpty:
-            # In case of unexpected empty queue (shouldn't happen due to `wait()`)
-            return None
+        return frame
 
 
 class SmallWebRTCClient:
