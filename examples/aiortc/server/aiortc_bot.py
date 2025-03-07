@@ -7,13 +7,13 @@ import asyncio
 import os
 import sys
 
+import cv2
 import numpy as np
 from aiortc import MediaStreamTrack
 from aiortc.contrib.media import MediaBlackhole, MediaRelay
 from av import AudioFrame
 from dotenv import load_dotenv
 from loguru import logger
-import cv2
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, InputImageRawFrame, OutputImageRawFrame
@@ -56,9 +56,7 @@ class EdgeDetectionProcessor(FrameProcessor):
             desired_size = (self._camera_out_width, self._camera_out_height)
             if frame.size != desired_size:
                 resized_image = cv2.resize(img, desired_size)
-                frame = OutputImageRawFrame(
-                    resized_image.tobytes(), desired_size, frame.format
-                )
+                frame = OutputImageRawFrame(resized_image.tobytes(), desired_size, frame.format)
                 await self.push_frame(frame)
             else:
                 await self.push_frame(
