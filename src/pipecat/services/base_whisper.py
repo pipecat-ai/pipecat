@@ -138,6 +138,15 @@ class BaseWhisperSTTService(SegmentedSTTService):
     def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_whisper_language(language)
 
+    async def set_language(self, language: Language):
+        """Set the language for transcription.
+
+        Args:
+            language: The Language enum value to use for transcription.
+        """
+        logger.info(f"Switching STT language to: [{language}]")
+        self._language = language
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         try:
             await self.start_processing_metrics()

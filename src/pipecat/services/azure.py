@@ -577,6 +577,9 @@ class AzureTTSService(AzureBaseTTSService):
         logger.error(f"Speech synthesis canceled: {evt.result.cancellation_details.reason}")
         self._audio_queue.put_nowait(None)
 
+    async def flush_audio(self):
+        logger.trace(f"{self}: flushing audio")
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
