@@ -241,6 +241,14 @@ class PlayHTTTSService(InterruptibleTTSService):
         await self.stop_all_metrics()
         self._request_id = None
 
+    async def flush_audio(self):
+        """Flush any pending audio in the buffer.
+
+        PlayHT's API doesn't provide a mechanism for flushing audio buffers,
+        so this method is a no-op.
+        """
+        logger.trace(f"{self}: flush_audio is a no-op for PlayHT")
+
     async def _receive_messages(self):
         async for message in self._get_websocket():
             if isinstance(message, bytes):
