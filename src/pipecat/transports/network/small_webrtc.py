@@ -10,7 +10,7 @@ from typing import Awaitable, Callable, Optional
 
 import cv2
 import numpy as np
-from aiortc import MediaStreamTrack
+from aiortc import MediaStreamTrack, VideoStreamTrack
 from aiortc.mediastreams import VideoFrame
 from av import AudioFrame, AudioResampler
 from loguru import logger
@@ -91,7 +91,7 @@ class RawAudioTrack(MediaStreamTrack):
         return frame
 
 
-class RawVideoTrack(MediaStreamTrack):
+class RawVideoTrack(VideoStreamTrack):
     kind = "video"
 
     def __init__(self, width, height, fps):
@@ -99,8 +99,7 @@ class RawVideoTrack(MediaStreamTrack):
         self.width = width
         self.height = height
         self.fps = fps
-        self.frame_time = int(1e6 / fps)  # Convert fps to microseconds per frame
-        self.time = 0
+        self.frame_time = int(1 / fps)
         self.video_buffer = deque()  # Buffer to store frames
 
     def add_video_frame(self, frame: OutputImageRawFrame):
@@ -114,7 +113,7 @@ class RawVideoTrack(MediaStreamTrack):
         """
         Returns the next video frame, generating a black frame if needed.
         """
-        await asyncio.sleep(1 / self.fps)  # Simulate real-time delay
+        await asyncio.sleep(self.frame_time)  # Simulate real-time delay
 
         if self.video_buffer:
             raw_frame = self.video_buffer.popleft()
@@ -129,12 +128,12 @@ class RawVideoTrack(MediaStreamTrack):
         else:
             frame_data = np.zeros((self.height, self.width, 3), dtype=np.uint8)  # Black frame
 
-        # Create VideoFrame
         frame = VideoFrame.from_ndarray(frame_data, format="rgb24")
-        frame.pts = self.time
-        frame.time_base = "1e6"  # Microseconds
 
-        self.time += self.frame_time
+        pts, time_base = await self.next_timestamp()
+        frame.pts = pts
+        frame.time_base = time_base
+
         return frame
 
 
