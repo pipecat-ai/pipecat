@@ -57,6 +57,17 @@ class AssemblyAISTTService(STTService):
         logger.info(f"Switching STT language to: [{language}]")
         self._settings["language"] = language
 
+    async def set_model(self, model: str):
+        """Set the speech recognition model name for metrics.
+
+        Args:
+            model: Model name for metrics tracking
+        """
+        self.set_model_name(model)
+        logger.info(
+            f"Set model name to '{model}' for metrics (AssemblyAI real-time API doesn't support model selection)"
+        )
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._connect()
@@ -90,7 +101,6 @@ class AssemblyAISTTService(STTService):
         This method sets up the necessary callback functions and initializes the
         AssemblyAI transcriber.
         """
-
         if self._transcriber:
             return
 
