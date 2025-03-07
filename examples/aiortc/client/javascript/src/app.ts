@@ -2,7 +2,6 @@ const SIGNALLING_TYPE = "signalling";
 
 enum SignallingMessage {
     RENEGOTIATE = "renegotiate",
-    SEND_KEY_FRAME = "sendKeyFrame"
 }
 
 // Interface for the structure of the signalling message
@@ -132,11 +131,6 @@ class WebRTCConnection {
         this.updateStatus('Connected');
         if (this.connectBtn) this.connectBtn.disabled = true;
         if (this.disconnectBtn) this.disconnectBtn.disabled = false;
-
-        //Since we are using transceivers, the event with a new track is not triggered
-        this.log("onConnectedHandler, trying to setup the tracks")
-        this.audioElement.srcObject = new MediaStream([this.getAudioTransceiver().receiver.track]);
-        this.videoElement.srcObject = new MediaStream([this.getVideoTransceiver().receiver.track]);
     }
 
     private onDisconnectedHandler() {
@@ -303,11 +297,6 @@ class WebRTCConnection {
         switch (signallingMessage.message) {
             case SignallingMessage.RENEGOTIATE:
                 this.log("Handling renegotiation...");
-                // TODO: implement it
-                break;
-
-            case SignallingMessage.SEND_KEY_FRAME:
-                this.log("Sending key frame...");
                 // TODO: implement it
                 break;
 

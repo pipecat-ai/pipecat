@@ -135,8 +135,3 @@ class SmallWebRTCConnection(EventEmitter):
         if self._data_channel:
             json_message = json.dumps(message)
             self._data_channel.send(json_message)
-
-    def request_key_frame(self):
-        self.send_app_message(
-            {"type": SIGNALLING_TYPE, "message": SignallingMessage.SEND_KEY_FRAME.value}
-        )
