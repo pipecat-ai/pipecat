@@ -161,8 +161,6 @@ class SmallWebRTCClient:
         async def on_connected(message: Any):
             await self._handle_app_message(message)
 
-    # TODO: implement something to request a keyframe the first time
-    # We should probably send a signal to the client to send a keyframe, using the datachanel
     async def read_video_frame(self):
         """
         Reads a video frame from the given MediaStreamTrack, converts it to RGB,
@@ -301,6 +299,9 @@ class SmallWebRTCClient:
     def is_closing(self) -> bool:
         return self._closing
 
+    def request_key_frame(self):
+        self._webrtcConnection.request_key_frame()
+
 
 class SmallWebRTCInputTransport(BaseInputTransport):
     def __init__(
@@ -325,6 +326,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             self._receive_audio_task = self.create_task(self._receive_audio())
         if not self._receive_video_task and self._params.camera_in_enabled:
             self._receive_video_task = self.create_task(self._receive_video())
+            self._client.request_key_frame()
 
     async def _stop_tasks(self):
         if self._receive_audio_task:

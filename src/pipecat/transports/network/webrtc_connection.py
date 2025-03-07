@@ -1,11 +1,19 @@
 import json
 import uuid
+from enum import Enum
 from typing import Any
 
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from loguru import logger
 
 from pipecat.utils.event_emitter import EventEmitter
+
+SIGNALLING_TYPE = "signalling"
+
+
+class SignallingMessage(Enum):
+    RENEGOTIATE = "renegotiate"
+    SEND_KEY_FRAME = "sendKeyFrame"
 
 
 class SmallWebRTCConnection(EventEmitter):
@@ -127,3 +135,8 @@ class SmallWebRTCConnection(EventEmitter):
         if self._data_channel:
             json_message = json.dumps(message)
             self._data_channel.send(json_message)
+
+    def request_key_frame(self):
+        self.send_app_message(
+            {"type": SIGNALLING_TYPE, "message": SignallingMessage.SEND_KEY_FRAME.value}
+        )

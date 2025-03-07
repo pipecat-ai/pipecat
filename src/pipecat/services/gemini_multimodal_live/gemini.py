@@ -7,10 +7,10 @@
 import asyncio
 import base64
 import json
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Union
-import time
 
 import websockets
 from loguru import logger
