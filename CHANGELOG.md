@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added a `flush_audio()` method to `FishTTSService` and `LmntTTSService`.
 
+- Added a `set_language` convenience method for `GoogleSTTService`, allowing
+  you to set a single language. This is in addition to the `set_languages`
+  method which allows you to set a list of languages.
+
 - Added `on_user_turn_audio_data` and `on_bot_turn_audio_data` to
   `AudioBufferProcessor`. This gives the ability to grab the audio of only that
   turn for both the user and the bot.

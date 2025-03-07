@@ -58,7 +58,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService, LLMService, STTService, TTSService
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.openai import (
-    BaseOpenAILLMService,
     OpenAIAssistantContextAggregator,
     OpenAILLMService,
     OpenAIUnhandledFunctionException,
@@ -1729,6 +1728,17 @@ class GoogleSTTService(STTService):
             logger.debug("Reconnecting stream due to configuration changes")
             await self._disconnect()
             await self._connect()
+
+    async def set_language(self, language: Language):
+        """Update the service's recognition language.
+
+        A convenience method for setting a single language.
+
+        Args:
+            language: New language for recognition.
+        """
+        logger.debug(f"Switching STT language to: {language}")
+        await self.set_languages([language])
 
     async def set_languages(self, languages: List[Language]):
         """Update the service's recognition languages.
