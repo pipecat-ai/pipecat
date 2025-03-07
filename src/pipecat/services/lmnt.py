@@ -170,6 +170,11 @@ class LmntTTSService(InterruptibleTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
+    async def flush_audio(self):
+        if not self._websocket:
+            return
+        await self._get_websocket().send(json.dumps({"flush": True}))
+
     async def _receive_messages(self):
         """Receive messages from LMNT websocket."""
         async for message in self._get_websocket():
