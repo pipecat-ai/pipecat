@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added a `flush_audio()` method to `AzureTTSService`, `FishTTSService`, and
-  `PlayHTTTSService`.
+- Added a `flush_audio()` method to `AzureTTSService`, `FishTTSService`,
+  `PlayHTTTSService`, and `LMNTTTSService`.
 
 - Added `set_language()` and `set_model()` to `AzureSTTService`,
   `AssemblySTTService`, and `GladiaSTTService`.
