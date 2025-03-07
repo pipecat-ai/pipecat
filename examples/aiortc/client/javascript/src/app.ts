@@ -331,22 +331,9 @@ class WebRTCConnection {
             sender.track?.stop();
         });
 
-        this.log(`Before closing: 
-            connectionState=${this.pc.connectionState}, 
-            iceConnectionState=${this.pc.iceConnectionState}, 
-            signalingState=${this.pc.signalingState}`
-        );
-
         this.pc.close();
 
-        this.log(`After closing: 
-            connectionState=${this.pc.connectionState}, 
-            iceConnectionState=${this.pc.iceConnectionState}, 
-            signalingState=${this.pc.signalingState}`
-        );
-
-        // TODO: For some reason after we close the peer connection, it is not trigerring the listeners
-        // need to investigate why. For now, forcing it here.
+        // For some reason after we close the peer connection, it is not triggering the listeners
         this.onDisconnectedHandler()
     }
 
