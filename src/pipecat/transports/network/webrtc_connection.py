@@ -24,7 +24,11 @@ class SmallWebRTCConnection(EventEmitter):
 
             @channel.on("message")
             async def on_message(message):
-                await self.emit("appMessage", message)
+                try:
+                    json_message = json.loads(message)
+                    await self.emit("appMessage", json_message)
+                except Exception as e:
+                    logger.exception(f"Error parsing JSON message {message}, {e}")
 
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():

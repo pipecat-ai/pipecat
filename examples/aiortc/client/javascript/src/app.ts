@@ -281,8 +281,8 @@ class WebRTCConnection {
 
         dc.addEventListener('open', () => {
             this.log("datachannel opened")
-            // Sending message that the client is ready
-            dc.send(JSON.stringify({type:'client-ready'}))
+            // Sending message that the client is ready, just for testing
+            dc.send(JSON.stringify({id: 'clientReady', label: 'rtvi-ai', type:'client-ready'}))
         });
 
         dc.addEventListener('message', (evt: MessageEvent) => {

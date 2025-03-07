@@ -364,7 +364,8 @@ class SmallWebRTCInputTransport(BaseInputTransport):
 
     async def push_app_message(self, message: Any):
         logger.info(f"Received app message inside SmallWebRTCInputTransport  {message}")
-        # TODO implement to push the message
+        frame = TransportMessageUrgentFrame(message=message)
+        await self.push_frame(frame)
 
 
 class SmallWebRTCOutputTransport(BaseOutputTransport):
