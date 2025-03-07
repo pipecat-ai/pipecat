@@ -266,8 +266,7 @@ class SmallWebRTCClient:
         self._webrtcConnection.replace_audio_track(self._audio_output_track)
 
         self._video_output_track = RawVideoTrack(
-            width=self._params.camera_out_width,
-            height=self._params.camera_out_height
+            width=self._params.camera_out_width, height=self._params.camera_out_height
         )
         self._webrtcConnection.replace_video_track(self._video_output_track)
 
