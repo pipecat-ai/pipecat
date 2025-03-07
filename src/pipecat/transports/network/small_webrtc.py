@@ -43,10 +43,10 @@ class SmallWebRTCCallbacks(BaseModel):
 class RawAudioTrack(AudioStreamTrack):
     def __init__(self, sample_rate=48000):
         super().__init__()
-        self.sample_rate = sample_rate
-        self.samples_per_frame = self.sample_rate // 50  # 20ms per frame
-        self.time = 0  # Timestamp in samples
-        self.audio_buffer = deque()  # Efficient buffer storage
+        self._sample_rate = sample_rate
+        self._samples_per_frame = self._sample_rate // 50  # 20ms per frame
+        self._timestamp = 0  # Timestamp in samples
+        self._audio_buffer = deque()  # Efficient buffer storage
         self._start = time.time()
 
     def add_audio_bytes(self, audio_bytes: bytes):
@@ -56,25 +56,25 @@ class RawAudioTrack(AudioStreamTrack):
         """
         if len(audio_bytes) % 2 != 0:
             raise ValueError("Audio bytes length must be even (16-bit samples).")
-        self.audio_buffer.append(audio_bytes)
+        self._audio_buffer.append(audio_bytes)
 
     async def recv(self):
         """
         Returns the next audio frame, generating silence if needed.
         """
         # Compute required wait time for synchronization
-        if self.time > 0:
-            wait = self._start + (self.time / self.sample_rate) - time.time()
+        if self._timestamp > 0:
+            wait = self._start + (self._timestamp / self._sample_rate) - time.time()
             if wait > 0:
                 await asyncio.sleep(wait)
 
         # Check if we have enough data
-        needed_bytes = self.samples_per_frame * 2  # 16-bit (2 bytes per sample)
-        if sum(map(len, self.audio_buffer)) >= needed_bytes:
+        needed_bytes = self._samples_per_frame * 2  # 16-bit (2 bytes per sample)
+        if sum(map(len, self._audio_buffer)) >= needed_bytes:
             # Extract data from deque
             chunk = bytearray()
             while len(chunk) < needed_bytes:
-                chunk.extend(self.audio_buffer.popleft())
+                chunk.extend(self._audio_buffer.popleft())
             chunk = bytes(chunk[:needed_bytes])  # Trim excess bytes
         else:
             chunk = bytes(needed_bytes)  # Generate silent frame
@@ -85,10 +85,10 @@ class RawAudioTrack(AudioStreamTrack):
         # Create AudioFrame
         frame = AudioFrame.from_ndarray(samples[None, :], layout="mono")
 
-        self.time += self.samples_per_frame
-        frame.pts = self.time
-        frame.sample_rate = self.sample_rate
-        frame.time_base = fractions.Fraction(1, self.sample_rate)
+        self._timestamp += self._samples_per_frame
+        frame.pts = self._timestamp
+        frame.sample_rate = self._sample_rate
+        frame.time_base = fractions.Fraction(1, self._sample_rate)
 
         return frame
 
@@ -96,30 +96,30 @@ class RawAudioTrack(AudioStreamTrack):
 class RawVideoTrack(VideoStreamTrack):
     def __init__(self, width, height):
         super().__init__()
-        self.width = width
-        self.height = height
-        self.video_buffer = asyncio.Queue()  # Async queue for storing frames
-        self.frame_available = asyncio.Event()  # Event to signal availability of frame
+        self._width = width
+        self._height = height
+        self._video_buffer = asyncio.Queue()  # Async queue for storing frames
+        self._frame_available = asyncio.Event()  # Event to signal availability of frame
 
     def add_video_frame(self, frame: OutputImageRawFrame):
         """
         Adds a raw video frame (ImageRawFrame) to the buffer.
         The frame image should be in bytes and properly formatted.
         """
-        self.video_buffer.put_nowait(frame)
-        self.frame_available.set()  # Signal that a frame is available
+        self._video_buffer.put_nowait(frame)
+        self._frame_available.set()  # Signal that a frame is available
 
     async def recv(self):
         """
         Returns the next video frame, waits if buffer is empty.
         """
-        await self.frame_available.wait()  # Wait until a frame is available
+        await self._frame_available.wait()  # Wait until a frame is available
 
         try:
-            raw_frame = self.video_buffer.get_nowait()
+            raw_frame = self._video_buffer.get_nowait()
 
             frame_data = np.frombuffer(raw_frame.image, dtype=np.uint8).reshape(
-                (self.height, self.width, 3)
+                (self._height, self._width, 3)
             )
 
             frame = VideoFrame.from_ndarray(frame_data, format="rgb24")
@@ -128,7 +128,7 @@ class RawVideoTrack(VideoStreamTrack):
             frame.pts = pts
             frame.time_base = time_base
 
-            self.frame_available.clear()  # Clear the event after processing
+            self._frame_available.clear()  # Clear the event after processing
 
             return frame
         except asyncio.QueueEmpty:
