@@ -79,8 +79,10 @@ Respond to what the user said in a creative and helpful way. Keep your responses
 
 async def run_bot(webrtc_connection):
     transport_params = TransportParams(
-        audio_out_enabled=True,
+        camera_in_enabled=True,
         camera_out_enabled=True,
+        audio_in_enabled=True,
+        audio_out_enabled=True,
         vad_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
         vad_audio_passthrough=True,
