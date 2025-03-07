@@ -41,7 +41,7 @@ class SmallWebRTCCallbacks(BaseModel):
 
 
 class RawAudioTrack(AudioStreamTrack):
-    def __init__(self, sample_rate=48000):
+    def __init__(self, sample_rate):
         super().__init__()
         self._sample_rate = sample_rate
         self._samples_per_frame = self._sample_rate // 50  # 20ms per frame

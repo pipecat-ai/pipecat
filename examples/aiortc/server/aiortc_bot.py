@@ -13,7 +13,7 @@ from aiortc.contrib.media import MediaBlackhole, MediaRelay
 from av import AudioFrame
 from dotenv import load_dotenv
 from loguru import logger
-from PIL import Image
+import cv2
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, InputImageRawFrame, OutputImageRawFrame
@@ -34,7 +34,7 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-class MirrorProcessor(FrameProcessor):
+class EdgeDetectionProcessor(FrameProcessor):
     def __init__(self, camera_out_width, camera_out_height: int):
         super().__init__()
         self._camera_out_width = camera_out_width
@@ -44,18 +44,25 @@ class MirrorProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, InputImageRawFrame):
-            desired_size = (self._camera_out_width, self._camera_out_height)
+            # Convert bytes to NumPy array
+            img = np.frombuffer(frame.image, dtype=np.uint8).reshape(
+                (frame.size[1], frame.size[0], 3)
+            )
 
+            # perform edge detection
+            img = cv2.cvtColor(cv2.Canny(img, 100, 200), cv2.COLOR_GRAY2BGR)
+
+            # convert the size if needed
+            desired_size = (self._camera_out_width, self._camera_out_height)
             if frame.size != desired_size:
-                image = Image.frombytes(frame.format, frame.size, frame.image)
-                resized_image = image.resize(desired_size)
+                resized_image = cv2.resize(img, desired_size)
                 frame = OutputImageRawFrame(
-                    resized_image.tobytes(), resized_image.size, resized_image.format
+                    resized_image.tobytes(), desired_size, frame.format
                 )
                 await self.push_frame(frame)
             else:
                 await self.push_frame(
-                    OutputImageRawFrame(image=frame.image, size=frame.size, format=frame.format)
+                    OutputImageRawFrame(image=img.tobytes(), size=frame.size, format=frame.format)
                 )
         else:
             await self.push_frame(frame, direction)
@@ -112,7 +119,7 @@ async def run_bot(webrtc_connection):
             context_aggregator.user(),
             rtvi,
             llm,  # LLM
-            MirrorProcessor(
+            EdgeDetectionProcessor(
                 transport_params.camera_out_width, transport_params.camera_out_height
             ),  # Sending the video back to the user
             pipecat_transport.output(),
