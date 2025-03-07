@@ -1372,6 +1372,9 @@ class GoogleTTSService(TTSService):
             credentials, credentials_path
         )
 
+    async def flush_audio(self):
+        logger.trace(f"{self}: flushing audio")
+
     def _create_client(
         self, credentials: Optional[str], credentials_path: Optional[str]
     ) -> texttospeech_v1.TextToSpeechAsyncClient:
@@ -1727,7 +1730,7 @@ class GoogleSTTService(STTService):
             await self._disconnect()
             await self._connect()
 
-    async def set_languages(self, languages: List[Language]):
+    async def set_language(self, languages: List[Language]):
         """Update the service's recognition languages.
 
         Args:

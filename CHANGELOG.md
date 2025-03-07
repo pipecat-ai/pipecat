@@ -65,6 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `AzureRealtimeBetaLLMService` to support Azure's OpeanAI Realtime API. Added
   foundational example `19a-azure-realtime-beta.py`.
 
+### Fixed
+
+- Fixed an issue in `GoogleSTTService`, where `set_language` was misspelled as
+  `set_languages`. The base STTService class requires a `set_language` method,
+  which `GoogleSTTService` was missing.
+
 ## [0.0.58] - 2025-02-26
 
 ### Added
