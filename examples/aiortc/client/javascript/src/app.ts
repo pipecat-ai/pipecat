@@ -1,3 +1,16 @@
+const SIGNALLING_TYPE = "signalling";
+
+enum SignallingMessage {
+    RENEGOTIATE = "renegotiate",
+    SEND_KEY_FRAME = "sendKeyFrame"
+}
+
+// Interface for the structure of the signalling message
+interface SignallingMessageObject {
+    type: string;
+    message: SignallingMessage;
+}
+
 class WebRTCConnection {
 
     private declare connectBtn: HTMLButtonElement;
@@ -263,6 +276,46 @@ class WebRTCConnection {
         await this.negotiate();
     }
 
+    // Method to handle a general message (this can be expanded for other types of messages)
+    handleMessage(message: string): void {
+        try {
+            this.log(message)
+
+            const messageObj = JSON.parse(message); // Type is `any` initially
+
+            // Check if it's a signalling message
+            if (messageObj.type === SIGNALLING_TYPE) {
+                this.handleSignallingMessage(messageObj as SignallingMessageObject); // Delegate to handleSignallingMessage
+            } else {
+                // implement to handle the other messages in the future
+            }
+        } catch (error) {
+            console.error("Failed to parse JSON message:", error);
+        }
+    }
+
+    // Method to handle signalling messages specifically
+    handleSignallingMessage(messageObj: SignallingMessageObject): void {
+        // Cast the object to the correct type after verification
+        const signallingMessage = messageObj as SignallingMessageObject;
+
+        // Handle different signalling message types
+        switch (signallingMessage.message) {
+            case SignallingMessage.RENEGOTIATE:
+                this.log("Handling renegotiation...");
+                // TODO: implement it
+                break;
+
+            case SignallingMessage.SEND_KEY_FRAME:
+                this.log("Sending key frame...");
+                // TODO: implement it
+                break;
+
+            default:
+                console.warn("Unknown signalling message:", signallingMessage.message);
+        }
+    }
+
     private createDataChannel(label: string, options: RTCDataChannelInit): RTCDataChannel {
         const dc = this.pc!.createDataChannel(label, options);
         let timeStart: number | null = null;
@@ -287,7 +340,7 @@ class WebRTCConnection {
 
         dc.addEventListener('message', (evt: MessageEvent) => {
             let message = evt.data
-            this.log(message)
+            this.handleMessage(message)
         });
 
         return dc;
