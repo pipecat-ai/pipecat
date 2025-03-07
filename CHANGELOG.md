@@ -65,6 +65,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `AzureRealtimeBetaLLMService` to support Azure's OpeanAI Realtime API. Added
   foundational example `19a-azure-realtime-beta.py`.
 
+### Changed
+
+- Moved `flush_audio()` from the `TTSService` base class to
+  `WebsocketTTSService`.
+
+### Fixed
+
+- Fixed an issue in `GoogleSTTService`, where it didn't have a `set_language`
+  function. This required a name change from `set_languages` to `set_language`.
+
 ## [0.0.58] - 2025-02-26
 
 ### Added
