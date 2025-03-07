@@ -1727,7 +1727,7 @@ class GoogleSTTService(STTService):
             await self._disconnect()
             await self._connect()
 
-    async def set_languages(self, languages: List[Language]):
+    async def set_language(self, languages: List[Language]):
         """Update the service's recognition languages.
 
         Args:
