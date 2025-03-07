@@ -148,6 +148,14 @@ class FishAudioTTSService(InterruptibleTTSService):
         except Exception as e:
             logger.error(f"Error closing websocket: {e}")
 
+    async def flush_audio(self):
+        """Flush any buffered audio by sending a flush event to Fish Audio."""
+        logger.trace(f"{self}: Flushing audio buffers")
+        if not self._websocket:
+            return
+        flush_message = {"event": "flush"}
+        await self._get_websocket().send(ormsgpack.packb(flush_message))
+
     def _get_websocket(self):
         if self._websocket:
             return self._websocket
