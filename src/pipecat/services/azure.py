@@ -563,6 +563,22 @@ class AzureTTSService(AzureBaseTTSService):
         self._speech_synthesizer.synthesis_completed.connect(self._handle_completed)
         self._speech_synthesizer.synthesis_canceled.connect(self._handle_canceled)
 
+    async def flush_audio(self):
+        """Flush any pending audio in the queue.
+
+        This method clears the audio queue and ensures any pending synthesis
+        is properly cleaned up.
+        """
+        logger.trace(f"{self}: Flushing audio queue")
+
+        # Clear the queue
+        while not self._audio_queue.empty():
+            try:
+                self._audio_queue.get_nowait()
+                self._audio_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
+
     def _handle_synthesizing(self, evt):
         """Handle audio chunks as they arrive"""
         if evt.result and evt.result.audio_data:
@@ -576,9 +592,6 @@ class AzureTTSService(AzureBaseTTSService):
         """Handle synthesis cancellation"""
         logger.error(f"Speech synthesis canceled: {evt.result.cancellation_details.reason}")
         self._audio_queue.put_nowait(None)
-
-    async def flush_audio(self):
-        logger.trace(f"{self}: flushing audio")
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
@@ -691,6 +704,55 @@ class AzureSTTService(STTService):
 
         self._audio_stream = None
         self._speech_recognizer = None
+
+    async def set_language(self, language: Language):
+        """Set the language for speech recognition.
+
+        Args:
+            language: The language to use for recognition
+        """
+        azure_language = language_to_azure_language(language)
+        if not azure_language:
+            logger.warning(f"Unsupported language for Azure STT: {language}")
+            return
+
+        logger.info(f"Switching STT language to: [{language}] ({azure_language})")
+
+        # Update the speech config language
+        self._speech_config.speech_recognition_language = azure_language
+
+        # Disconnect and reconnect to apply the changes
+        if self._speech_recognizer:
+            # Stop the current recognizer
+            self._speech_recognizer.stop_continuous_recognition_async()
+            self._speech_recognizer = None
+
+            # Reconnect with new settings
+            if self._audio_stream:
+                audio_config = AudioConfig(stream=self._audio_stream)
+                self._speech_recognizer = SpeechRecognizer(
+                    speech_config=self._speech_config, audio_config=audio_config
+                )
+                self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+                self._speech_recognizer.start_continuous_recognition_async()
+                logger.debug("Reconnected with new language settings")
+
+    async def set_model(self, model: str):
+        """Set the speech recognition model.
+
+        In Azure Speech Service, there isn't a direct concept of switching between
+        named models. This method sets the model name for metrics purposes and
+        logs a message, but doesn't change the actual recognition behavior.
+
+        To customize recognition behavior, use speech_config properties instead.
+
+        Args:
+            model: Model name for metrics
+        """
+        self.set_model_name(model)
+        logger.info(
+            f"Set model name to '{model}' for metrics (Azure STT doesn't support model switching)"
+        )
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_processing_metrics()
