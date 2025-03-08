@@ -114,6 +114,7 @@ class SmallWebRTCConnection(EventEmitter):
         # one for audio and one for video
         audio_transceiver = self.pc.getTransceivers()[0]
         if not audio_transceiver:
+            logger.warning(f"No audio transceiver is available")
             return None
 
         return audio_transceiver.receiver.track
@@ -124,6 +125,7 @@ class SmallWebRTCConnection(EventEmitter):
         # one for audio and one for video
         video_transceiver = self.pc.getTransceivers()[1]
         if not video_transceiver:
+            logger.warning(f"No video transceiver is available")
             return None
 
         return video_transceiver.receiver.track
