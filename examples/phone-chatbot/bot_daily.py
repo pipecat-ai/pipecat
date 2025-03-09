@@ -8,7 +8,7 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import List, Optional
+from typing import Optional
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -20,10 +20,7 @@ from pipecat.frames.frames import (
     EndTaskFrame,
     Frame,
     InterimTranscriptionFrame,
-    SystemFrame,
     TranscriptionFrame,
-    TranscriptionMessage,
-    TranscriptionUpdateFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
@@ -31,14 +28,10 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
-    OpenAILLMContextFrame,
 )
 from pipecat.processors.filters.function_filter import FunctionFilter
-from pipecat.processors.filters.null_filter import NullFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.services.ai_services import LLMService
-from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
