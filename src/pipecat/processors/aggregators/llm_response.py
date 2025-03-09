@@ -321,8 +321,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
-        # elif isinstance(frame, InterimTranscriptionFrame):
-        #     await self._handle_interim_transcription(frame)
+        elif isinstance(frame, InterimTranscriptionFrame):
+            await self._handle_interim_transcription(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
             self.add_messages(frame.messages)
         elif isinstance(frame, LLMMessagesUpdateFrame):
