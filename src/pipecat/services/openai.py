@@ -8,7 +8,7 @@ import base64
 import io
 import json
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Dict, List, Literal, Optional
+from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional
 
 import aiohttp
 import httpx
@@ -180,7 +180,7 @@ class BaseOpenAILLMService(LLMService):
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
-        logger.debug(f"Generating chat: {context.get_messages_for_logging()}")
+        logger.debug(f"{self}: Generating chat [{context.get_messages_for_logging()}]")
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
 
@@ -345,14 +345,35 @@ class OpenAILLMService(BaseOpenAILLMService):
     ):
         super().__init__(model=model, params=params, **kwargs)
 
-    @staticmethod
     def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        self,
+        context: OpenAILLMContext,
+        *,
+        user_kwargs: Mapping[str, Any] = {},
+        assistant_kwargs: Mapping[str, Any] = {},
     ) -> OpenAIContextAggregatorPair:
-        user = OpenAIUserContextAggregator(context)
-        assistant = OpenAIAssistantContextAggregator(
-            context, expect_stripped_words=assistant_expect_stripped_words
-        )
+        """Create an instance of OpenAIContextAggregatorPair from an
+        OpenAILLMContext. Constructor keyword arguments for both the user and
+        assistant aggregators can be provided.
+
+        Args:
+            context (OpenAILLMContext): The LLM context.
+            user_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the user context aggregator constructor. Defaults
+                to an empty mapping.
+            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the assistant context aggregator
+                constructor. Defaults to an empty mapping.
+
+        Returns:
+            OpenAIContextAggregatorPair: A pair of context aggregators, one for
+            the user and one for the assistant, encapsulated in an
+            OpenAIContextAggregatorPair.
+
+        """
+        context.set_llm_adapter(self.get_llm_adapter())
+        user = OpenAIUserContextAggregator(context, **user_kwargs)
+        assistant = OpenAIAssistantContextAggregator(context, **assistant_kwargs)
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
 
@@ -510,7 +531,7 @@ class OpenAITTSService(TTSService):
             )
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             await self.start_ttfb_metrics()
 

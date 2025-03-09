@@ -5,6 +5,66 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added `on_user_turn_audio_data` and `on_bot_turn_audio_data` to
+  `AudioBufferProcessor`. This gives the ability to grab the audio of only that
+  turn for both the user and the bot.
+
+- Added new base class `BaseObject` which is now the base class of
+  `FrameProcessor`, `PipelineRunner`, `PipelineTask` and `BaseTransport`. The
+  new `BaseObject` adds supports for event handlers.
+
+- Added support for a unified format for specifying function calling across all
+  LLM services.
+
+```python
+  weather_function = FunctionSchema(
+      name="get_current_weather",
+      description="Get the current weather",
+      properties={
+          "location": {
+              "type": "string",
+              "description": "The city and state, e.g. San Francisco, CA",
+          },
+          "format": {
+              "type": "string",
+              "enum": ["celsius", "fahrenheit"],
+              "description": "The temperature unit to use. Infer this from the user's location.",
+          },
+      },
+      required=["location"],
+  )
+  tools = ToolsSchema(standard_tools=[weather_function])
+```
+
+- Added `speech_threshold` parameter to `GladiaSTTService`.
+
+- Allow passing user (`user_kwargs`) and assistant (`assistant_kwargs`) context
+  aggregator parameters when using `create_context_aggregator()`. The values are
+  passed as a mapping that will then be converted to arguments.
+
+- Added `speed` as an `InputParam` for both `ElevenLabsTTSService` and
+  `ElevenLabsHttpTTSService`.
+
+- Added new `LLMFullResponseAggregator` to aggregate full LLM completions. At
+  every completion the `on_completion` event handler is triggered.
+
+- Added a new frame, `RTVIServerMessageFrame`, and RTVI message
+  `RTVIServerMessage` which provides a generic mechanism for sending custom
+  messages from server to client. The `RTVIServerMessageFrame` is processed by
+  the `RTVIObserver` and will be delivered to the client's `onServerMessage`
+  callback or `ServerMessage` event.
+
+- Added `GoogleLLMOpenAIBetaService` for Google LLM integration with an
+  OpenAI-compatible interface. Added foundational example
+  `14o-function-calling-gemini-openai-format.py`.
+
+- Added `AzureRealtimeBetaLLMService` to support Azure's OpeanAI Realtime API. Added
+  foundational example `19a-azure-realtime-beta.py`.
+
 ## [0.0.58] - 2025-02-26
 
 ### Added

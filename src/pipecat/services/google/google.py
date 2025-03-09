@@ -12,12 +12,16 @@ import os
 import time
 
 from google.api_core.exceptions import DeadlineExceeded
+from openai import AsyncStream
+from openai.types.chat import ChatCompletionChunk
+
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Union
+from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, Union
 
 from loguru import logger
 from PIL import Image
@@ -54,7 +58,10 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import ImageGenService, LLMService, STTService, TTSService
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.openai import (
+    BaseOpenAILLMService,
     OpenAIAssistantContextAggregator,
+    OpenAILLMService,
+    OpenAIUnhandledFunctionException,
     OpenAIUserContextAggregator,
 )
 from pipecat.transcriptions.language import Language
@@ -945,6 +952,9 @@ class GoogleLLMService(LLMService):
     franca for all LLM services, so that it is easy to switch between different LLMs.
     """
 
+    # Overriding the default adapter to use the Gemini one.
+    adapter_class = GeminiLLMAdapter
+
     class InputParams(BaseModel):
         max_tokens: Optional[int] = Field(default=4096, ge=1)
         temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
@@ -998,8 +1008,8 @@ class GoogleLLMService(LLMService):
 
         try:
             logger.debug(
-                # f"Generating chat: {self._system_instruction} | {context.get_messages_for_logging()}"
-                f"Generating chat: {context.get_messages_for_logging()}"
+                # f"{self}: Generating chat [{self._system_instruction}] | [{context.get_messages_for_logging()}]"
+                f"{self}: Generating chat [{context.get_messages_for_logging()}]"
             )
 
             messages = context.messages
@@ -1175,17 +1185,153 @@ class GoogleLLMService(LLMService):
         if context:
             await self._process_context(context)
 
-    @staticmethod
     def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        self,
+        context: OpenAILLMContext,
+        *,
+        user_kwargs: Mapping[str, Any] = {},
+        assistant_kwargs: Mapping[str, Any] = {},
     ) -> GoogleContextAggregatorPair:
+        """Create an instance of GoogleContextAggregatorPair from an
+        OpenAILLMContext. Constructor keyword arguments for both the user and
+        assistant aggregators can be provided.
+
+        Args:
+            context (OpenAILLMContext): The LLM context.
+            user_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the user context aggregator constructor. Defaults
+                to an empty mapping.
+            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the assistant context aggregator
+                constructor. Defaults to an empty mapping.
+
+        Returns:
+            GoogleContextAggregatorPair: A pair of context aggregators, one for
+            the user and one for the assistant, encapsulated in an
+            GoogleContextAggregatorPair.
+
+        """
+        context.set_llm_adapter(self.get_llm_adapter())
+
         if isinstance(context, OpenAILLMContext):
             context = GoogleLLMContext.upgrade_to_google(context)
-        user = GoogleUserContextAggregator(context)
-        assistant = GoogleAssistantContextAggregator(
-            context, expect_stripped_words=assistant_expect_stripped_words
-        )
+        user = GoogleUserContextAggregator(context, **user_kwargs)
+        assistant = GoogleAssistantContextAggregator(context, **assistant_kwargs)
         return GoogleContextAggregatorPair(_user=user, _assistant=assistant)
+
+
+class GoogleLLMOpenAIBetaService(OpenAILLMService):
+    """This class implements inference with Google's AI LLM models using the OpenAI format.
+    Ref - https://ai.google.dev/gemini-api/docs/openai
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/",
+        model: str = "gemini-2.0-flash",
+        **kwargs,
+    ):
+        super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
+
+    async def _process_context(self, context: OpenAILLMContext):
+        functions_list = []
+        arguments_list = []
+        tool_id_list = []
+        func_idx = 0
+        function_name = ""
+        arguments = ""
+        tool_call_id = ""
+
+        await self.start_ttfb_metrics()
+
+        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
+            context
+        )
+
+        async for chunk in chunk_stream:
+            if chunk.usage:
+                tokens = LLMTokenUsage(
+                    prompt_tokens=chunk.usage.prompt_tokens,
+                    completion_tokens=chunk.usage.completion_tokens,
+                    total_tokens=chunk.usage.total_tokens,
+                )
+                await self.start_llm_usage_metrics(tokens)
+
+            if chunk.choices is None or len(chunk.choices) == 0:
+                continue
+
+            await self.stop_ttfb_metrics()
+
+            if not chunk.choices[0].delta:
+                continue
+
+            if chunk.choices[0].delta.tool_calls:
+                # We're streaming the LLM response to enable the fastest response times.
+                # For text, we just yield each chunk as we receive it and count on consumers
+                # to do whatever coalescing they need (eg. to pass full sentences to TTS)
+                #
+                # If the LLM is a function call, we'll do some coalescing here.
+                # If the response contains a function name, we'll yield a frame to tell consumers
+                # that they can start preparing to call the function with that name.
+                # We accumulate all the arguments for the rest of the streamed response, then when
+                # the response is done, we package up all the arguments and the function name and
+                # yield a frame containing the function name and the arguments.
+                logger.debug(f"Tool call: {chunk.choices[0].delta.tool_calls}")
+                tool_call = chunk.choices[0].delta.tool_calls[0]
+                if tool_call.index != func_idx:
+                    functions_list.append(function_name)
+                    arguments_list.append(arguments)
+                    tool_id_list.append(tool_call_id)
+                    function_name = ""
+                    arguments = ""
+                    tool_call_id = ""
+                    func_idx += 1
+                if tool_call.function and tool_call.function.name:
+                    function_name += tool_call.function.name
+                    tool_call_id = tool_call.id
+                if tool_call.function and tool_call.function.arguments:
+                    # Keep iterating through the response to collect all the argument fragments
+                    arguments += tool_call.function.arguments
+            elif chunk.choices[0].delta.content:
+                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+
+        # if we got a function name and arguments, check to see if it's a function with
+        # a registered handler. If so, run the registered callback, save the result to
+        # the context, and re-prompt to get a chat answer. If we don't have a registered
+        # handler, raise an exception.
+        if function_name and arguments:
+            # added to the list as last function name and arguments not added to the list
+            functions_list.append(function_name)
+            arguments_list.append(arguments)
+            tool_id_list.append(tool_call_id)
+
+            logger.debug(
+                f"Function list: {functions_list}, Arguments list: {arguments_list}, Tool ID list: {tool_id_list}"
+            )
+            for index, (function_name, arguments, tool_id) in enumerate(
+                zip(functions_list, arguments_list, tool_id_list), start=1
+            ):
+                if function_name == "":
+                    # TODO: Remove the _process_context method once Google resolves the bug
+                    # where the index is incorrectly set to None instead of returning the actual index,
+                    # which currently results in an empty function name('').
+                    continue
+                if self.has_function(function_name):
+                    run_llm = False
+                    arguments = json.loads(arguments)
+                    await self.call_function(
+                        context=context,
+                        function_name=function_name,
+                        arguments=arguments,
+                        tool_call_id=tool_id,
+                        run_llm=run_llm,
+                    )
+                else:
+                    raise OpenAIUnhandledFunctionException(
+                        f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
+                    )
 
 
 class GoogleTTSService(TTSService):
@@ -1297,7 +1443,7 @@ class GoogleTTSService(TTSService):
         return ssml
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             await self.start_ttfb_metrics()

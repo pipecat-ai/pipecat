@@ -7,7 +7,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from loguru import logger
 
@@ -206,12 +206,34 @@ class GrokLLMService(OpenAILLMService):
         if tokens.completion_tokens > self._completion_tokens:
             self._completion_tokens = tokens.completion_tokens
 
-    @staticmethod
     def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        self,
+        context: OpenAILLMContext,
+        *,
+        user_kwargs: Mapping[str, Any] = {},
+        assistant_kwargs: Mapping[str, Any] = {},
     ) -> GrokContextAggregatorPair:
-        user = OpenAIUserContextAggregator(context)
-        assistant = GrokAssistantContextAggregator(
-            context, expect_stripped_words=assistant_expect_stripped_words
-        )
+        """Create an instance of GrokContextAggregatorPair from an
+        OpenAILLMContext. Constructor keyword arguments for both the user and
+        assistant aggregators can be provided.
+
+        Args:
+            context (OpenAILLMContext): The LLM context.
+            user_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the user context aggregator constructor. Defaults
+                to an empty mapping.
+            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the assistant context aggregator
+                constructor. Defaults to an empty mapping.
+
+        Returns:
+            GrokContextAggregatorPair: A pair of context aggregators, one for
+            the user and one for the assistant, encapsulated in an
+            GrokContextAggregatorPair.
+
+        """
+        context.set_llm_adapter(self.get_llm_adapter())
+
+        user = OpenAIUserContextAggregator(context, **user_kwargs)
+        assistant = GrokAssistantContextAggregator(context, **assistant_kwargs)
         return GrokContextAggregatorPair(_user=user, _assistant=assistant)
