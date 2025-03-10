@@ -10,6 +10,7 @@ from typing import Optional
 
 from loguru import logger
 
+from pipecat.audio.turn.base_turn_analyzer import BaseEndOfTurnAnalyzer, EndOfTurnState
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
+    UserEndOfTurnFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
@@ -64,12 +66,19 @@ class BaseInputTransport(FrameProcessor):
     def vad_analyzer(self) -> Optional[VADAnalyzer]:
         return self._params.vad_analyzer
 
+    @property
+    def end_of_turn_analyzer(self) -> Optional[BaseEndOfTurnAnalyzer]:
+        return self._params.end_of_turn_analyzer
+
     async def start(self, frame: StartFrame):
         self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
 
         # Configure VAD analyzer.
         if self._params.vad_enabled and self._params.vad_analyzer:
             self._params.vad_analyzer.set_sample_rate(self._sample_rate)
+        # Configure End of turn analyzer.
+        if self._params.end_of_turn_analyzer:
+            self._params.end_of_turn_analyzer.set_sample_rate(self._sample_rate)
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
@@ -198,8 +207,25 @@ class BaseInputTransport(FrameProcessor):
             vad_state = new_vad_state
         return vad_state
 
+    async def _end_of_turn_analyze(self, audio_frame: InputAudioRawFrame) -> EndOfTurnState:
+        state = EndOfTurnState.INCOMPLETE
+        if self.end_of_turn_analyzer:
+            state = await self.get_event_loop().run_in_executor(
+                self._executor, self.end_of_turn_analyzer.analyze_audio, audio_frame.audio
+            )
+        return state
+
+    async def _handle_end_of_turn(
+        self, audio_frame: InputAudioRawFrame, end_of_turn_state: EndOfTurnState
+    ):
+        new_eot_state = await self._end_of_turn_analyze(audio_frame)
+        if new_eot_state != end_of_turn_state:
+            await self.push_frame(UserEndOfTurnFrame())
+        return new_eot_state
+
     async def _audio_task_handler(self):
         vad_state: VADState = VADState.QUIET
+        end_of_turn_state: EndOfTurnState = EndOfTurnState.INCOMPLETE
         while True:
             frame: InputAudioRawFrame = await self._audio_in_queue.get()
 
@@ -214,6 +240,9 @@ class BaseInputTransport(FrameProcessor):
             if self._params.vad_enabled:
                 vad_state = await self._handle_vad(frame, vad_state)
                 audio_passthrough = self._params.vad_audio_passthrough
+
+            if self._params.end_of_turn_analyzer:
+                end_of_turn_state = await self._handle_end_of_turn(frame, end_of_turn_state)
 
             # Push audio downstream if passthrough.
             if audio_passthrough:

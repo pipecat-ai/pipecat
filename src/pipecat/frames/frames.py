@@ -584,6 +584,18 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
+class UserEndOfTurnFrame(SystemFrame):
+    """Emitted by VAD to indicate that a user has started speaking. This can be
+    used for interruptions or other times when detecting that someone is
+    speaking is more important than knowing what they're saying (as you will
+    with a TranscriptionFrame)
+
+    """
+
+    pass
+
+
+@dataclass
 class BotInterruptionFrame(SystemFrame):
     """Emitted by when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the
