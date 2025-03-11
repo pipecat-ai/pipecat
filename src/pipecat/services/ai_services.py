@@ -270,10 +270,6 @@ class TTSService(AIService):
     def set_voice(self, voice: str):
         self._voice_id = voice
 
-    @abstractmethod
-    async def flush_audio(self):
-        pass
-
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -539,6 +535,9 @@ class WebsocketTTSService(TTSService, WebsocketService):
         TTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self)
 
+    async def flush_audio(self):
+        pass
+
 
 class InterruptibleTTSService(WebsocketTTSService):
     """This is a base class for websocket-based TTS services that don't support
@@ -762,11 +761,9 @@ class STTService(AIService):
     def sample_rate(self) -> int:
         return self._sample_rate
 
-    @abstractmethod
     async def set_model(self, model: str):
         self.set_model_name(model)
 
-    @abstractmethod
     async def set_language(self, language: Language):
         pass
 
