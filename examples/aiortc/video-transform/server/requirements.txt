@@ -1,0 +1,6 @@
+python-dotenv
+fastapi[all]
+uvicorn
+aiortc
+opencv-python
+pipecat-ai[google,silero]
