@@ -199,6 +199,10 @@ class BaseOpenAILLMService(LLMService):
                 del message["data"]
                 del message["mime_type"]
 
+        if len(messages) > 10:
+            logger.debug(f"{self}: Reducing number of messages to 10")
+            messages = messages[:1] + messages[-9:]
+
         chunks = await self.get_chat_completions(context, messages)
 
         return chunks
