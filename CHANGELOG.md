@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for Chirp voices in `GoogleTTSService`.
+
 - Added `on_user_turn_audio_data` and `on_bot_turn_audio_data` to
   `AudioBufferProcessor`. This gives the ability to grab the audio of only that
   turn for both the user and the bot.
