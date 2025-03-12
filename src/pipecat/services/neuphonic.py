@@ -105,7 +105,6 @@ class NeuphonicTTSService(WordTTSService, WebsocketService):
             "lang_code": self.language_to_service_language(params.language),
             "speed": params.speed,
             "encoding": encoding,
-            "model": model,
             "sampling_rate": sample_rate,
         }
         self.set_model_name(model)
@@ -315,7 +314,6 @@ class NeuphonicHttpTTSService(TTSService):
             "lang_code": self.language_to_service_language(params.language),
             "speed": params.speed,
             "encoding": encoding,
-            "model": model,
             "sampling_rate": sample_rate,
         }
         self.set_model_name(model)
@@ -326,6 +324,9 @@ class NeuphonicHttpTTSService(TTSService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+    async def flush_audio(self):
+        pass
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Neuphonic streaming API.
@@ -351,7 +352,7 @@ class NeuphonicHttpTTSService(TTSService):
             yield TTSStartedFrame()
 
             async for message in response:
-                if response.status_code != 200:
+                if message.status_code != 200:
                     logger.error(f"{self} error: {message.errors}")
                     yield ErrorFrame(error=f"Neuphonic API error: {message.errors}")
 
