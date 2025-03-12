@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import Dict
 
 import uvicorn
 from aiortc_bot import run_bot
@@ -17,33 +18,42 @@ logger = logging.getLogger("pc")
 
 app = FastAPI()
 
-
-pcs = set()
+# Store connections by pc_id
+pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
 
 @app.post("/api/offer")
 async def offer(request: dict, background_tasks: BackgroundTasks):
-    pipecat_connection = SmallWebRTCConnection()
-    await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
+    pc_id = request.get("pc_id")
 
-    pcs.add(pipecat_connection)
+    if pc_id and pc_id in pcs_map:
+        pipecat_connection = pcs_map[pc_id]
+        logger.info(f"Reusing existing connection for pc_id: {pc_id}")
+        await pipecat_connection.renegotiate(sdp=request["sdp"], type=request["type"])
+    else:
+        pipecat_connection = SmallWebRTCConnection()
+        await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
 
-    @pipecat_connection.on("closed")
-    async def handle_disconnected():
-        logger.info("Discarding the peer connection.")
-        pcs.discard(pipecat_connection)
+        @pipecat_connection.on("closed")
+        async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
+            logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
+            pcs_map.pop(webrtc_connection.pc_id, None)
 
-    background_tasks.add_task(run_bot, pipecat_connection)
+        background_tasks.add_task(run_bot, pipecat_connection)
 
-    return pipecat_connection.get_answer()
+    answer = pipecat_connection.get_answer()
+    # Updating the peer connection inside the map
+    pcs_map[answer["pc_id"]] = pipecat_connection
+
+    return answer
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield  # Run app
-    coros = [pc.close() for pc in pcs]
+    coros = [pc.close() for pc in pcs_map.values()]
     await asyncio.gather(*coros)
-    pcs.clear()
+    pcs_map.clear()
 
 
 if __name__ == "__main__":

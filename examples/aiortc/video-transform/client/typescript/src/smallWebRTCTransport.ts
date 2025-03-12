@@ -27,6 +27,9 @@ export class SmallWebRTCTransport {
 
     private pc: RTCPeerConnection | null = null;
     private dc: RTCDataChannel | null = null;
+    private audioCodec: string | null = null;
+    private videoCodec: string | null = null;
+    private pc_id: string | null = null;
 
     constructor(callbacks: SmallWebRTCTransportCallbacks) {
         this._callbacks = callbacks
@@ -78,7 +81,7 @@ export class SmallWebRTCTransport {
         return pc;
     }
 
-    private async negotiate(audioCodec: string, videoCodec: string): Promise<void> {
+    private async negotiate(): Promise<void> {
         if (!this.pc) {
             return Promise.reject('Peer connection is not initialized');
         }
@@ -107,22 +110,25 @@ export class SmallWebRTCTransport {
             let codec: string;
 
             // Filter audio codec
-            if (audioCodec !== 'default') {
+            if (this.audioCodec && this.audioCodec !== 'default') {
                 // @ts-ignore
-                offerSdp.sdp = this.sdpFilterCodec('audio', audioCodec, offerSdp.sdp);
+                offerSdp.sdp = this.sdpFilterCodec('audio', this.audioCodec, offerSdp.sdp);
             }
 
             // Filter video codec
-            if (videoCodec !== 'default') {
+            if (this.videoCodec && this.videoCodec !== 'default') {
                 // @ts-ignore
-                offerSdp.sdp = this.sdpFilterCodec('video', videoCodec, offerSdp.sdp);
+                offerSdp.sdp = this.sdpFilterCodec('video', this.videoCodec, offerSdp.sdp);
             }
+
+            this.log(`Will create offer for peerId: ${this.pc_id}`)
 
             // Send offer to server
             const response = await fetch('/api/offer', {
                 body: JSON.stringify({
                     sdp: offerSdp.sdp,
                     type: offerSdp.type,
+                    pc_id: this.pc_id
                 }),
                 headers: {
                     'Content-Type': 'application/json',
@@ -131,6 +137,8 @@ export class SmallWebRTCTransport {
             });
 
             const answer: RTCSessionDescriptionInit = await response.json();
+            // @ts-ignore
+            this.pc_id = answer.pc_id
             // @ts-ignore
             this.log(`Received answer for peer connection id ${answer.pc_id}`)
             await this.pc!.setRemoteDescription(answer);
@@ -164,7 +172,9 @@ export class SmallWebRTCTransport {
         this.addInitialTransceivers();
         this.dc = this.createDataChannel('chat', { ordered: true });
         await this.addUserMedias(audioDevice, videoDevice);
-        await this.negotiate(audioCodec, videoCodec);
+        this.audioCodec = audioCodec
+        this.videoCodec = videoCodec
+        await this.negotiate();
     }
 
     private async addUserMedias(audioDevice: string|undefined, videoDevice:string|undefined): Promise<void> {
@@ -195,7 +205,7 @@ export class SmallWebRTCTransport {
 
             // Check if it's a signalling message
             if (messageObj.type === SIGNALLING_TYPE) {
-                this.handleSignallingMessage(messageObj as SignallingMessageObject); // Delegate to handleSignallingMessage
+                void this.handleSignallingMessage(messageObj as SignallingMessageObject); // Delegate to handleSignallingMessage
             } else {
                 // implement to handle the other messages in the future
             }
@@ -205,15 +215,14 @@ export class SmallWebRTCTransport {
     }
 
     // Method to handle signalling messages specifically
-    handleSignallingMessage(messageObj: SignallingMessageObject): void {
+    async handleSignallingMessage(messageObj: SignallingMessageObject): Promise<void> {
         // Cast the object to the correct type after verification
         const signallingMessage = messageObj as SignallingMessageObject;
 
         // Handle different signalling message types
         switch (signallingMessage.message) {
             case SignallingMessage.RENEGOTIATE:
-                this.log("Handling renegotiation...");
-                // TODO: implement it
+                await this.negotiate()
                 break;
 
             default:
