@@ -78,6 +78,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated the default mode for `CartesiaTTSService` and
   `CartesiaHttpTTSService` to `sonic-2`.
 
+### Fixed
+
+- Fixed an issue in `RimeTTSService` where the last line of text sent didn't result in an audio output being generated.
+
 ## [0.0.58] - 2025-02-26
 
 ### Added
