@@ -189,7 +189,7 @@ class SmallWebRTCClient:
             except asyncio.TimeoutError:
                 if self._webrtcConnection.is_connected():
                     logger.warning("Timeout: No video frame received within the specified time.")
-                    self._webrtcConnection.ask_to_renegotiate()
+                    # self._webrtcConnection.ask_to_renegotiate()
                 frame = None
 
             if frame is None or not isinstance(frame, VideoFrame):
