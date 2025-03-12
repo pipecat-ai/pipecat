@@ -129,6 +129,9 @@ class WebRTCApp {
     private async start(): Promise<void> {
         this.clearAllLogs()
 
+        this.connectBtn.disabled = true;
+        this.updateStatus("Connecting")
+
         const audioDevice = this.audioInput.value;
         const audioCodec = this.audioCodec.value;
         const videoDevice = this.videoInput.value;
