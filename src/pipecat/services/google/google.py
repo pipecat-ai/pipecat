@@ -1448,10 +1448,13 @@ class GoogleTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
+            # Check if the voice is a Chirp voice (including Chirp 3) or Journey voice
+            is_chirp_voice = "chirp" in self._voice_id.lower()
             is_journey_voice = "journey" in self._voice_id.lower()
 
             # Create synthesis input based on voice_id
-            if is_journey_voice:
+            if is_chirp_voice or is_journey_voice:
+                # Chirp and Journey voices don't support SSML, use plain text
                 synthesis_input = texttospeech_v1.SynthesisInput(text=text)
             else:
                 ssml = self._construct_ssml(text)
