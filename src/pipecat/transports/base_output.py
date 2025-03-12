@@ -377,7 +377,7 @@ class BaseOutputTransport(FrameProcessor):
         desired_size = (self._params.camera_out_width, self._params.camera_out_height)
 
         if frame.size != desired_size:
-            image = Image.frombytes(frame.format, frame.size, frame.image)
+            image = Image.frombytes("RGB", frame.size, frame.image)
             resized_image = image.resize(desired_size)
             logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
             frame = OutputImageRawFrame(

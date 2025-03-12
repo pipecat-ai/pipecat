@@ -172,7 +172,7 @@ class OpenAILLMContext:
         self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
     ):
         buffer = io.BytesIO()
-        Image.frombytes(format, size, image).save(buffer, format="JPEG")
+        Image.frombytes("RGB", size, image).save(buffer, format="JPEG")
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
         content = []
