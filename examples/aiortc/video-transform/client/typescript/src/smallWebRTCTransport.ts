@@ -31,6 +31,10 @@ export class SmallWebRTCTransport {
     private videoCodec: string | null = null;
     private pc_id: string | null = null;
 
+    private reconnectionAttempts = 0;
+    private maxReconnectionAttempts = 3;
+    private isReconnecting = false;
+
     constructor(callbacks: SmallWebRTCTransportCallbacks) {
         this._callbacks = callbacks
     }
@@ -52,10 +56,10 @@ export class SmallWebRTCTransport {
         });
         this.log(`iceGatheringState: ${pc.iceGatheringState}`)
 
-        pc.addEventListener('iceconnectionstatechange', () => {
-            let connectionState = this.pc!.iceConnectionState
-            this.log(`iceConnectionState: ${connectionState}`)
-        });
+        pc.addEventListener("iceconnectionstatechange", () => this.handleICEConnectionStateChange());
+
+        pc.addEventListener("connectionstatechange", () => this.handleConnectionStateChange());
+
         this.log(`iceConnectionState: ${pc.iceConnectionState}`)
 
         pc.addEventListener('signalingstatechange', () => {
@@ -68,27 +72,64 @@ export class SmallWebRTCTransport {
             this._callbacks.onTrackStarted(evt.track)
         });
 
-        pc.onconnectionstatechange = () => {
-            let connectionState = this.pc?.connectionState
-            this.log(`connectionState: ${connectionState}`)
-            if (connectionState == 'connected') {
-                this._callbacks.onConnected()
-            } else if (connectionState == 'disconnected') {
-                this.handleDisconnected()
-            }
-        }
-
         return pc;
     }
 
-    private async negotiate(): Promise<void> {
+    private handleICEConnectionStateChange(): void {
+        if (!this.pc) return;
+        this.log(`ICE Connection State: ${this.pc.iceConnectionState}`);
+
+        if (this.pc.iceConnectionState === "failed") {
+            this.log("ICE connection failed, attempting restart.");
+            void this.attemptReconnection(true);
+        } else if (this.pc.iceConnectionState === "disconnected") {
+            // Waiting before trying to reconnect to see if it handles it automatically
+            setTimeout(() => {
+                if (this.pc?.iceConnectionState === "disconnected") {
+                    this.log("Still disconnected, attempting reconnection.");
+                    void this.attemptReconnection(true);
+                }
+            }, 5000);
+        }
+    }
+
+    private handleConnectionStateChange(): void {
+        if (!this.pc) return;
+        this.log(`Connection State: ${this.pc.connectionState}`);
+
+        if (this.pc.connectionState === "connected") {
+            this.reconnectionAttempts = 0;
+            this.isReconnecting = false;
+            this._callbacks.onConnected();
+        } else if (this.pc.connectionState === "failed") {
+            void this.attemptReconnection(true);
+        }
+    }
+
+    private async attemptReconnection(iceRestart: boolean = false): Promise<void> {
+        if (this.isReconnecting) {
+            this.log("Reconnection already in progress, skipping.");
+            return;
+        }
+        if (this.reconnectionAttempts >= this.maxReconnectionAttempts) {
+            this.log("Max reconnection attempts reached. Stopping transport.");
+            this.stop();
+            return;
+        }
+        this.isReconnecting = true;
+        this.reconnectionAttempts++;
+        this.log(`Reconnection attempt ${this.reconnectionAttempts}...`);
+        await this.negotiate(iceRestart);
+    }
+
+    private async negotiate(iceRestart: boolean = false): Promise<void> {
         if (!this.pc) {
             return Promise.reject('Peer connection is not initialized');
         }
 
         try {
             // Create offer
-            const offer = await this.pc.createOffer();
+            const offer = await this.pc.createOffer({iceRestart});
             await this.pc.setLocalDescription(offer);
 
             // Wait for ICE gathering to complete
@@ -143,7 +184,9 @@ export class SmallWebRTCTransport {
             this.log(`Received answer for peer connection id ${answer.pc_id}`)
             await this.pc!.setRemoteDescription(answer);
         } catch (e) {
-            alert(e);
+            this.log(`Reconnection attempt ${this.reconnectionAttempts} failed: ${e}`);
+            this.isReconnecting = false
+            setTimeout(() => this.attemptReconnection(true), 2000);
         }
     }
 
@@ -165,11 +208,6 @@ export class SmallWebRTCTransport {
         // Transceivers always appear in creation-order for both peers
         // Look at addInitialTransceivers
         return this.pc!.getTransceivers()[1];
-    }
-
-    private handleDisconnected() {
-        this.pc_id = null
-        this._callbacks.onDisconnected()
     }
 
     async start(audioDevice: string | undefined, audioCodec: string, videoCodec: string, videoDevice: string | undefined): Promise<void> {
@@ -227,7 +265,7 @@ export class SmallWebRTCTransport {
         // Handle different signalling message types
         switch (signallingMessage.message) {
             case SignallingMessage.RENEGOTIATE:
-                await this.negotiate()
+                void this.attemptReconnection(false)
                 break;
 
             default:
@@ -304,7 +342,10 @@ export class SmallWebRTCTransport {
         this.pc.close();
 
         // For some reason after we close the peer connection, it is not triggering the listeners
-        this.handleDisconnected()
+        this.pc_id = null
+        this.reconnectionAttempts = 0
+        this.isReconnecting = false;
+        this._callbacks.onDisconnected()
     }
 
     private async getAllDevices() {
