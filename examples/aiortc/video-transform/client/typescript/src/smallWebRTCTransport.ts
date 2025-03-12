@@ -74,7 +74,7 @@ export class SmallWebRTCTransport {
             if (connectionState == 'connected') {
                 this._callbacks.onConnected()
             } else if (connectionState == 'disconnected') {
-                this._callbacks.onDisconnected()
+                this.handleDisconnected()
             }
         }
 
@@ -165,6 +165,11 @@ export class SmallWebRTCTransport {
         // Transceivers always appear in creation-order for both peers
         // Look at addInitialTransceivers
         return this.pc!.getTransceivers()[1];
+    }
+
+    private handleDisconnected() {
+        this.pc_id = null
+        this._callbacks.onDisconnected()
     }
 
     async start(audioDevice: string | undefined, audioCodec: string, videoCodec: string, videoDevice: string | undefined): Promise<void> {
@@ -299,7 +304,7 @@ export class SmallWebRTCTransport {
         this.pc.close();
 
         // For some reason after we close the peer connection, it is not triggering the listeners
-        this._callbacks.onDisconnected()
+        this.handleDisconnected()
     }
 
     private async getAllDevices() {
