@@ -156,17 +156,17 @@ class SmallWebRTCClient:
         self._pipecat_resampler = AudioResampler("s16", "mono", 16000)
 
         @self._webrtcConnection.on("connected")
-        async def on_connected():
+        async def on_connected(connection: SmallWebRTCConnection):
             logger.info("Peer connection established.")
             await self._handle_client_connected()
 
         @self._webrtcConnection.on("disconnected")
-        async def on_disconnected():
+        async def on_disconnected(connection: SmallWebRTCConnection):
             logger.info("Peer connection lost.")
             await self._handle_client_disconnected()
 
         @self._webrtcConnection.on("closed")
-        async def on_closed():
+        async def on_closed(connection: SmallWebRTCConnection):
             logger.info("Client connection closed.")
             await self._handle_client_closed()
 
@@ -188,9 +188,8 @@ class SmallWebRTCClient:
                 frame = await asyncio.wait_for(self._video_input_track.recv(), timeout=1.0)
             except asyncio.TimeoutError:
                 logger.warning("Timeout: No video frame received within the specified time.")
-                # TODO maybe we should ask to renegotiate in this case. Need to test.
-                # self._webrtcConnection.renegotiate()
                 frame = None
+                self._webrtcConnection.ask_to_renegotiate()
 
             if frame is None or not isinstance(frame, VideoFrame):
                 # If no valid frame, sleep for a bit

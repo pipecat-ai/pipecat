@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from enum import Enum
@@ -24,6 +25,7 @@ class SmallWebRTCConnection(EventEmitter):
         self._setup_listeners()
         self._tracks = set()
         self._data_channel = None
+        self._renegotiation_in_progress = False
 
     def _setup_listeners(self):
         @self.pc.on("datachannel")
@@ -41,7 +43,7 @@ class SmallWebRTCConnection(EventEmitter):
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():
             logger.info(f"Connection state is {self.pc.connectionState}")
-            await self.emit(self.pc.connectionState)
+            await self.emit(self.pc.connectionState, self)
             if self.pc.connectionState == "failed":
                 await self.close()
 
@@ -57,7 +59,7 @@ class SmallWebRTCConnection(EventEmitter):
                 self._tracks.discard(track)
                 await self.emit("track-ended", track)
 
-    async def initialize(self, sdp: str, type: str):
+    async def _create_answer(self, sdp: str, type: str):
         offer = RTCSessionDescription(sdp=sdp, type=type)
         await self.pc.setRemoteDescription(offer)
 
@@ -67,10 +69,25 @@ class SmallWebRTCConnection(EventEmitter):
 
         self.answer = await self.pc.createAnswer()
 
-        return self.pc
+    async def initialize(self, sdp: str, type: str):
+        await self._create_answer(sdp, type)
 
     async def connect(self):
         await self.pc.setLocalDescription(self.answer)
+
+    async def renegotiate(self, sdp: str, type: str):
+        logger.info(f"Renegotiating {self.pc_id}")
+        await self._create_answer(sdp, type)
+        await self.pc.setLocalDescription(self.answer)
+
+        # TODO maybe we should refactor to receive a message from the client side when the renegotiation is completed.
+        # or look at the peer connection listeners
+        # but this is good enough for now for testing.
+        async def delayed_task():
+            await asyncio.sleep(2)
+            self._renegotiation_in_progress = False
+
+        asyncio.create_task(delayed_task())
 
     def force_transceivers_to_send_recv(self):
         for transceiver in self.pc.getTransceivers():
@@ -149,7 +166,11 @@ class SmallWebRTCConnection(EventEmitter):
             json_message = json.dumps(message)
             self._data_channel.send(json_message)
 
-    def renegotiate(self):
+    def ask_to_renegotiate(self):
+        if self._renegotiation_in_progress:
+            return
+
+        self._renegotiation_in_progress = True
         self.send_app_message(
             {"type": SIGNALLING_TYPE, "message": SignallingMessage.RENEGOTIATE.value}
         )
