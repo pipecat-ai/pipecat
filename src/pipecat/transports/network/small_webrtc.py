@@ -56,12 +56,13 @@ class RawAudioTrack(AudioStreamTrack):
 
     def add_audio_bytes(self, audio_bytes: bytes):
         """
-        Adds bytes to the audio buffer.
-        Ensures that only full 16-bit samples are stored.
+        Adds bytes to the audio buffer and returns a Future that completes when the data is processed.
         """
         if len(audio_bytes) % 2 != 0:
             raise ValueError("Audio bytes length must be even (16-bit samples).")
-        self._audio_buffer.append(audio_bytes)
+        future = asyncio.get_running_loop().create_future()
+        self._audio_buffer.append((audio_bytes, future))
+        return future
 
     async def recv(self):
         """
@@ -75,11 +76,15 @@ class RawAudioTrack(AudioStreamTrack):
 
         # Check if we have enough data
         needed_bytes = self._samples_per_frame * 2  # 16-bit (2 bytes per sample)
-        if sum(map(len, self._audio_buffer)) >= needed_bytes:
+        available_bytes = sum(len(audio_bytes) for audio_bytes, _ in self._audio_buffer)
+        consumed_futures = []  # Track futures for processed data
+        if available_bytes >= needed_bytes:
             # Extract data from deque
             chunk = bytearray()
             while len(chunk) < needed_bytes:
-                chunk.extend(self._audio_buffer.popleft())
+                audio_bytes, future = self._audio_buffer.popleft()
+                chunk.extend(audio_bytes)
+                consumed_futures.append(future)  # Track the future
             chunk = bytes(chunk[:needed_bytes])  # Trim excess bytes
         else:
             chunk = bytes(needed_bytes)  # Generate silent frame
@@ -89,11 +94,15 @@ class RawAudioTrack(AudioStreamTrack):
 
         # Create AudioFrame
         frame = AudioFrame.from_ndarray(samples[None, :], layout="mono")
-
         self._timestamp += self._samples_per_frame
         frame.pts = self._timestamp
         frame.sample_rate = self._sample_rate
         frame.time_base = fractions.Fraction(1, self._sample_rate)
+
+        # Resolve all futures corresponding to consumed data
+        for future in consumed_futures:
+            if not future.done():
+                future.set_result(True)
 
         return frame
 
@@ -256,7 +265,7 @@ class SmallWebRTCClient:
 
     async def write_raw_audio_frames(self, data: bytes):
         if self._can_send():
-            self._audio_output_track.add_audio_bytes(data)
+            await self._audio_output_track.add_audio_bytes(data)
 
     async def write_frame_to_camera(self, frame: OutputImageRawFrame):
         if self._can_send():
