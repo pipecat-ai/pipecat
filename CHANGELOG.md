@@ -69,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `AzureRealtimeBetaLLMService` to support Azure's OpeanAI Realtime API. Added
   foundational example `19a-azure-realtime-beta.py`.
 
+- Added `DTMFAggregator` processor - Aggregates DTMF digits, outputs 
+  `TranscriptionFrame` on timeout or `"#"`. This processor is useful for 
+  telephony services like exotel, twilio, etc. where DTMF tones are 
+  used to control the conversation.
+
 ### Changed
 
 - Updated the default mode for `CartesiaTTSService` and
