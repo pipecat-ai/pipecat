@@ -76,6 +76,7 @@ async def run_bot(webrtc_connection):
     transport_params = TransportParams(
         camera_in_enabled=True,
         camera_out_enabled=True,
+        camera_out_is_live=True,
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_enabled=True,
