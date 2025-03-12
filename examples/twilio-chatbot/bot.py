@@ -74,7 +74,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, testing: bool):
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Lady
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         push_silence_after_stop=testing,
     )
 
