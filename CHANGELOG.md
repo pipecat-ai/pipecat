@@ -69,6 +69,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `AzureRealtimeBetaLLMService` to support Azure's OpeanAI Realtime API. Added
   foundational example `19a-azure-realtime-beta.py`.
 
+- Added `LLMMutefilter` as a general-purpose filter to mute transcript frames
+  to reach context aggregators and eventually the LLM service. This can be used
+  to prevent the LLM from processing unwanted audio or cases where we want to
+  mute the user's audio basis some condition like end of call or back to back 
+  user utterances like `Hello, Hi`, etc.
+
 ### Changed
 
 - Updated the default mode for `CartesiaTTSService` and

@@ -23,3 +23,7 @@ ENDOFSENTENCE_PATTERN = re.compile(ENDOFSENTENCE_PATTERN_STR, re.VERBOSE)
 def match_endofsentence(text: str) -> int:
     match = ENDOFSENTENCE_PATTERN.search(text.rstrip())
     return match.end() if match else 0
+
+
+def detect_voice_mail(text: str) -> bool:
+    return bool(re.compile(r"(?i)voice[\s_-]*mail").search(text))
