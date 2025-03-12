@@ -185,7 +185,7 @@ class SmallWebRTCClient:
                 continue
 
             try:
-                frame = await asyncio.wait_for(self._video_input_track.recv(), timeout=1.0)
+                frame = await asyncio.wait_for(self._video_input_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
                 if self._webrtcConnection.is_connected():
                     logger.warning("Timeout: No video frame received within the specified time.")
@@ -232,7 +232,7 @@ class SmallWebRTCClient:
                 continue
 
             try:
-                frame = await asyncio.wait_for(self._audio_input_track.recv(), timeout=1.0)
+                frame = await asyncio.wait_for(self._audio_input_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
                 if self._webrtcConnection.is_connected():
                     logger.warning("Timeout: No audio frame received within the specified time.")
