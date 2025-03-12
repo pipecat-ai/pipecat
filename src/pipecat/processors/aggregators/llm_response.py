@@ -275,7 +275,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     def __init__(
         self,
         context: OpenAILLMContext,
-        aggregation_timeout: float = 0,
+        aggregation_timeout: float = 1.0,
         bot_interruption_timeout: float = 2.0,
         **kwargs,
     ):
@@ -284,12 +284,12 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._bot_interruption_timeout = bot_interruption_timeout
 
         self._seen_interim_results = False
-        self._user_speaking = False
-        self._last_user_speaking_time = 0
-        self._emulating_vad = False
+        # self._user_speaking = False
+        # self._last_user_speaking_time = 0
+        # self._emulating_vad = False
 
-        self._aggregation_event = asyncio.Event()
-        self._aggregation_task = None
+        # self._aggregation_event = asyncio.Event()
+        # self._aggregation_task = None
 
         self.reset()
 
@@ -300,26 +300,27 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartFrame):
-            # Push StartFrame before start(), because we want StartFrame to be
-            # processed by every processor before any other frame is processed.
-            await self.push_frame(frame, direction)
-            await self._start(frame)
-        elif isinstance(frame, EndFrame):
-            # Push EndFrame before stop(), because stop() waits on the task to
-            # finish and the task finishes when EndFrame is processed.
-            await self.push_frame(frame, direction)
-            await self._stop(frame)
-        elif isinstance(frame, CancelFrame):
-            await self._cancel(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, UserStartedSpeakingFrame):
-            await self._handle_user_started_speaking(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            await self._handle_user_stopped_speaking(frame)
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, TranscriptionFrame):
+        # if isinstance(frame, StartFrame):
+        #     # Push StartFrame before start(), because we want StartFrame to be
+        #     # processed by every processor before any other frame is processed.
+        #     await self.push_frame(frame, direction)
+        #     # await self._start(frame)
+        # elif isinstance(frame, EndFrame):
+        #     # Push EndFrame before stop(), because stop() waits on the task to
+        #     # finish and the task finishes when EndFrame is processed.
+        #     await self.push_frame(frame, direction)
+        #     # await self._stop(frame)
+        # elif isinstance(frame, CancelFrame):
+        #     # await self._cancel(frame)
+        #     await self.push_frame(frame, direction)
+        # elif isinstance(frame, UserStartedSpeakingFrame):
+        #     # await self._handle_user_started_speaking(frame)
+        #     await self.push_frame(frame, direction)
+        # elif isinstance(frame, UserStoppedSpeakingFrame):
+        #     # await self._handle_user_stopped_speaking(frame)
+        #     # await self.push_aggregation()
+        #     await self.push_frame(frame, direction)
+        if isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
         elif isinstance(frame, InterimTranscriptionFrame):
             await self._handle_interim_transcription(frame)
@@ -332,24 +333,24 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         else:
             await self.push_frame(frame, direction)
 
-    async def _start(self, frame: StartFrame):
-        self._create_aggregation_task()
+    # async def _start(self, frame: StartFrame):
+    #     self._create_aggregation_task()
 
-    async def _stop(self, frame: EndFrame):
-        await self._cancel_aggregation_task()
+    # async def _stop(self, frame: EndFrame):
+    #     await self._cancel_aggregation_task()
 
-    async def _cancel(self, frame: CancelFrame):
-        await self._cancel_aggregation_task()
+    # async def _cancel(self, frame: CancelFrame):
+    #     await self._cancel_aggregation_task()
 
-    async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
-        self._last_user_speaking_time = time.time()
-        self._user_speaking = True
+    # async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
+    #     self._last_user_speaking_time = time.time()
+    #     self._user_speaking = True
 
-    async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
-        self._last_user_speaking_time = time.time()
-        self._user_speaking = False
-        if not self._seen_interim_results:
-            await self.push_aggregation()
+    # async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
+    #     self._last_user_speaking_time = time.time()
+    #     self._user_speaking = False
+    #     if not self._seen_interim_results:
+    #         await self.push_aggregation()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
@@ -362,56 +363,57 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         # We just got a final result, so let's reset interim results.
         self._seen_interim_results = False
         # Reset aggregation timer.
-        self._aggregation_event.set()
+        await self.push_aggregation()
+        # self._aggregation_event.set()
 
     async def _handle_interim_transcription(self, _: InterimTranscriptionFrame):
         self._seen_interim_results = True
 
-    def _create_aggregation_task(self):
-        if not self._aggregation_task:
-            self._aggregation_task = self.create_task(self._aggregation_task_handler())
+    # def _create_aggregation_task(self):
+    #     if not self._aggregation_task:
+    #         self._aggregation_task = self.create_task(self._aggregation_task_handler())
 
-    async def _cancel_aggregation_task(self):
-        if self._aggregation_task:
-            await self.cancel_task(self._aggregation_task)
-            self._aggregation_task = None
+    # async def _cancel_aggregation_task(self):
+    #     if self._aggregation_task:
+    #         await self.cancel_task(self._aggregation_task)
+    #         self._aggregation_task = None
 
-    async def _aggregation_task_handler(self):
-        while True:
-            try:
-                await asyncio.wait_for(self._aggregation_event.wait(), self._aggregation_timeout)
-                # await self._maybe_push_bot_interruption()
-            except asyncio.TimeoutError:
-                if not self._user_speaking:
-                    await self.push_aggregation()
+    # async def _aggregation_task_handler(self):
+    #     while True:
+    #         try:
+    #             await asyncio.wait_for(self._aggregation_event.wait(), self._aggregation_timeout)
+    #             await self._maybe_push_bot_interruption()
+    #         except asyncio.TimeoutError:
+    #             if not self._user_speaking:
+    #                 await self.push_aggregation()
 
-                # If we are emulating VAD we still need to send the user stopped
-                # speaking frame.
-                if self._emulating_vad:
-                    await self.push_frame(
-                        EmulateUserStoppedSpeakingFrame(), FrameDirection.UPSTREAM
-                    )
-                    self._emulating_vad = False
-            finally:
-                self._aggregation_event.clear()
+    #             # If we are emulating VAD we still need to send the user stopped
+    #             # speaking frame.
+    #             if self._emulating_vad:
+    #                 await self.push_frame(
+    #                     EmulateUserStoppedSpeakingFrame(), FrameDirection.UPSTREAM
+    #                 )
+    #                 self._emulating_vad = False
+    #         finally:
+    #             self._aggregation_event.clear()
 
-    async def _maybe_push_bot_interruption(self):
-        """If the user stopped speaking a while back and we got a transcription
-        frame we might want to interrupt the bot.
+    # async def _maybe_push_bot_interruption(self):
+    #     """If the user stopped speaking a while back and we got a transcription
+    #     frame we might want to interrupt the bot.
 
-        """
-        if not self._user_speaking:
-            diff_time = time.time() - self._last_user_speaking_time
-            if diff_time > self._bot_interruption_timeout:
-                # If we reach this case we received a transcription but VAD was
-                # not able to detect voice (e.g. when you whisper a short
-                # utterance). So, we need to emulate VAD (i.e. user
-                # start/stopped speaking).
-                await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
-                self._emulating_vad = True
+    #     """
+    #     if not self._user_speaking:
+    #         diff_time = time.time() - self._last_user_speaking_time
+    #         if diff_time > self._bot_interruption_timeout:
+    #             # If we reach this case we received a transcription but VAD was
+    #             # not able to detect voice (e.g. when you whisper a short
+    #             # utterance). So, we need to emulate VAD (i.e. user
+    #             # start/stopped speaking).
+    #             await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+    #             self._emulating_vad = True
 
-                # Reset time so we don't interrupt again right away.
-                self._last_user_speaking_time = time.time()
+    #             # Reset time so we don't interrupt again right away.
+    #             self._last_user_speaking_time = time.time()
 
 
 class LLMAssistantContextAggregator(LLMContextResponseAggregator):
