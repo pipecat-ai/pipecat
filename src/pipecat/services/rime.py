@@ -249,7 +249,7 @@ class RimeTTSService(AudioContextWordTTSService):
     async def flush_audio(self):
         if not self._context_id or not self._websocket:
             return
-        
+
         logger.trace(f"{self}: flushing audio")
         await self._get_websocket().send(json.dumps({"text": " "}))
         self._context_id = None
