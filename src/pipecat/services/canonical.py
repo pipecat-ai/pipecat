@@ -78,9 +78,8 @@ class CanonicalMetricsService(AIService):
         self._assistant = assistant
         self._assistant_speaks_first = assistant_speaks_first
         self._output_dir = output_dir
-        self.sub_dir = uuid.uuid4().hex
+        self._sub_dir = uuid.uuid4().hex
         self._context = context
-        self._audio_filename = self._get_output_filename()
         self._chunk_counter = 0  # Add a counter for naming chunks sequentially
 
     async def stop(self, frame: EndFrame):
@@ -98,13 +97,13 @@ class CanonicalMetricsService(AIService):
     async def process_audio_buffer(self, audio_buffer: bytes, sample_rate: int, num_channels: int):
         # Create output directory if it doesn't exist
         os.makedirs(self._output_dir, exist_ok=True)
-        os.makedirs(f"{self._output_dir}/{self.sub_dir}", exist_ok=True)
+        os.makedirs(f"{self._output_dir}/{self._sub_dir}", exist_ok=True)
 
         # Use sequential numbering for chunk filenames
         self._chunk_counter += 1
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         audio_chunk_filename = (
-            f"{self._output_dir}/{self.sub_dir}/{timestamp}_{self._chunk_counter:06d}.wav"
+            f"{self._output_dir}/{self._sub_dir}/{timestamp}_{self._chunk_counter:06d}.wav"
         )
 
         try:
@@ -151,17 +150,18 @@ class CanonicalMetricsService(AIService):
             return
         try:
             # Combine all audio chunks into a single file
-            await self._combine_audio_chunks()
-            await self._multipart_upload(self._audio_filename)
+            audio_filename = await self._combine_audio_chunks()
+            await self._multipart_upload(audio_filename)
             # Clean up temporary files after successful upload
-            # await aiofiles.os.remove(self._audio_filename)
+            await aiofiles.os.remove(audio_filename)
         except Exception as e:
             logger.error(f"Failed to upload recording: {e}")
 
     async def _combine_audio_chunks(self):
         """Combine all audio chunks in the sub_dir into a single WAV file."""
         logger.debug("Combining audio chunks into a single file")
-        chunks_dir = f"{self._output_dir}/{self.sub_dir}"
+        audio_filename = self._get_output_filename()
+        chunks_dir = f"{self._output_dir}/{self._sub_dir}"
         audio_chunks = sorted(os.listdir(chunks_dir))
 
         if not audio_chunks:
@@ -173,7 +173,7 @@ class CanonicalMetricsService(AIService):
             params = wf.getparams()
 
         # Create a new WAV file with the same parameters
-        with wave.open(self._audio_filename, "wb") as output_wav:
+        with wave.open(audio_filename, "wb") as output_wav:
             output_wav.setparams(params)
 
             # Append each chunk's audio data
@@ -182,19 +182,20 @@ class CanonicalMetricsService(AIService):
                 with wave.open(chunk_path, "rb") as chunk_wav:
                     output_wav.writeframes(chunk_wav.readframes(chunk_wav.getnframes()))
 
-        logger.debug(f"Combined {len(audio_chunks)} audio chunks into {self._audio_filename}")
+        logger.debug(f"Combined {len(audio_chunks)} audio chunks into {audio_filename}")
 
         # Optionally clean up individual chunk files
-        # for chunk_file in audio_chunks:
-        #     await aiofiles.os.remove(f"{chunks_dir}/{chunk_file}")
-        # await aiofiles.os.rmdir(chunks_dir)
+        for chunk_file in audio_chunks:
+            await aiofiles.os.remove(f"{chunks_dir}/{chunk_file}")
+        await aiofiles.os.rmdir(chunks_dir)
+        return audio_filename
 
     def _has_audio(self):
-        sub_dir_exists = os.path.exists(f"{self._output_dir}/{self.sub_dir}")
+        sub_dir_exists = os.path.exists(f"{self._output_dir}/{self._sub_dir}")
         if not sub_dir_exists:
             logger.error(f"No audio chunks, nothing to upload.")
             return False
-        audio_chunks = os.listdir(f"{self._output_dir}/{self.sub_dir}")
+        audio_chunks = os.listdir(f"{self._output_dir}/{self._sub_dir}")
         if len(audio_chunks) == 0:
             logger.error(f"No audio chunks, nothing to upload.")
             return False

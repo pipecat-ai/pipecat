@@ -96,6 +96,7 @@ async def main():
         call completion, CanonicalMetrics will send the audio buffer to Canonical for
         analysis. Visit https://voice.canonical.chat to learn more.
         """
+        # buffer to about 20 seconds of audio
         audio_buffer_processor = AudioBufferProcessor(num_channels=2, buffer_size=1000000)
         canonical = CanonicalMetricsService(
             aiohttp_session=session,
