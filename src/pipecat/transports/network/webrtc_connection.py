@@ -1,6 +1,7 @@
 import asyncio
 import json
 import uuid
+import time
 from enum import Enum
 from typing import Any, Optional
 
@@ -26,6 +27,7 @@ class SmallWebRTCConnection(EventEmitter):
         self._tracks = set()
         self._data_channel = None
         self._renegotiation_in_progress = False
+        self._last_received_time = None
 
     def _setup_listeners(self):
         @self.pc.on("datachannel")
@@ -35,17 +37,29 @@ class SmallWebRTCConnection(EventEmitter):
             @channel.on("message")
             async def on_message(message):
                 try:
-                    json_message = json.loads(message)
-                    await self.emit("appMessage", json_message)
+                    # aiortc does not provide any way so we can be aware when we are disconnected,
+                    # so we are using this keep alive message as a way to implement that
+                    if isinstance(message, str) and message.startswith("ping"):
+                        self._last_received_time = time.time()
+                    else:
+                        json_message = json.loads(message)
+                        await self.emit("appMessage", json_message)
                 except Exception as e:
                     logger.exception(f"Error parsing JSON message {message}, {e}")
 
+        # Despite the fact that aiortc provides this listener, they don't have a status for "disconnected"
+        # So, in case we loose connection, this event will not be triggered
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():
-            logger.info(f"Connection state is {self.pc.connectionState}")
-            await self.emit(self.pc.connectionState, self)
-            if self.pc.connectionState == "failed":
-                await self.close()
+            await self._handle_new_connection_state()
+
+        # Despite the fact that aiortc provides this listener, they don't have a status for "disconnected"
+        # So, in case we loose connection, this event will not be triggered
+        @self.pc.on("iceconnectionstatechange")
+        async def on_iceconnectionstatechange():
+            logger.info(
+                f"Ice connection state is {self.pc.iceConnectionState}, connection is {self.pc.connectionState}"
+            )
 
         @self.pc.on("track")
         async def on_track(track):
@@ -80,7 +94,7 @@ class SmallWebRTCConnection(EventEmitter):
         await self._create_answer(sdp, type)
         await self.pc.setLocalDescription(self.answer)
 
-        # TODO maybe we should refactor to receive a message from the client side when the renegotiation is completed.
+        # Maybe we should refactor to receive a message from the client side when the renegotiation is completed.
         # or look at the peer connection listeners
         # but this is good enough for now for testing.
         async def delayed_task():
@@ -133,8 +147,24 @@ class SmallWebRTCConnection(EventEmitter):
             "pc_id": self.pc_id,
         }
 
+    async def _handle_new_connection_state(self):
+        state = self.pc.connectionState
+        logger.info(f"Connection state changed to: {state}")
+        await self.emit(state, self)
+        if state == "failed":
+            logger.warning("Connection failed, closing peer connection.")
+            await self.close()
+
+    # Despite the fact that aiortc provides this listener, they don't have a status for "disconnected"
+    # So, there is no advantage in looking at self.pc.connectionState
+    # That is why we are trying to keep our own state
     def is_connected(self):
-        return self.pc.connectionState == "connected"
+        if self._last_received_time is None:
+            # if we have never received a message, it is probably because the client has not created a data channel
+            # so we are going to trust aiortc in this case
+            return self.pc.connectionState == "connected"
+        # Checks if the last received ping was within the last 3 seconds.
+        return (time.time() - self._last_received_time) < 3
 
     def audio_input_track(self):
         # Transceivers always appear in creation-order for both peers
