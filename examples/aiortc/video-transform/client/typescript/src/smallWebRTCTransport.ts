@@ -135,8 +135,12 @@ export class SmallWebRTCTransport {
         // aiortc it is not working fine when just trying to restart the ice
         // so in this case we are creating a new peer connection on both sides
         if (recreatePeerConnection) {
-            //this.pc?.close()
+            const oldPC = this.pc
             await this.startNewPeerConnection(recreatePeerConnection)
+            if (oldPC) {
+                this.log("closing old peer connection")
+                this.closePeerConnection(oldPC)
+            }
         } else {
             await this.negotiate();
         }
@@ -356,6 +360,20 @@ export class SmallWebRTCTransport {
         return constraints;
     }
 
+    private closePeerConnection(pc:RTCPeerConnection) {
+        pc.getTransceivers().forEach((transceiver) => {
+            if (transceiver.stop) {
+                transceiver.stop();
+            }
+        });
+
+        pc.getSenders().forEach((sender) => {
+            sender.track?.stop();
+        });
+
+        pc.close();
+    }
+
     stop(): void {
         if (!this.pc) {
             this.log("Peer connection is already closed or null.");
@@ -366,17 +384,7 @@ export class SmallWebRTCTransport {
             this.dc.close();
         }
 
-        this.pc.getTransceivers().forEach((transceiver) => {
-            if (transceiver.stop) {
-                transceiver.stop();
-            }
-        });
-
-        this.pc.getSenders().forEach((sender) => {
-            sender.track?.stop();
-        });
-
-        this.pc.close();
+        this.closePeerConnection(this.pc)
 
         // For some reason after we close the peer connection, it is not triggering the listeners
         this.pc_id = null
