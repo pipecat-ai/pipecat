@@ -96,7 +96,6 @@ class CanonicalMetricsService(AIService):
         await self.push_frame(frame, direction)
 
     async def process_audio_buffer(self, audio_buffer: bytes, sample_rate: int, num_channels: int):
-        logger.debug("Processing audio buffer")
         # Create output directory if it doesn't exist
         os.makedirs(self._output_dir, exist_ok=True)
         os.makedirs(f"{self._output_dir}/{self.sub_dir}", exist_ok=True)

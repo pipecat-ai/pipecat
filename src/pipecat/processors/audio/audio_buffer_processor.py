@@ -266,7 +266,6 @@ class AudioBufferProcessor(FrameProcessor):
 
         # Call original handler with merged audio
         merged_audio = self.merge_audio_buffers()
-        logger.debug(f"Calling on_audio_data handler with merged audio length: {len(merged_audio)}")
         await self._call_event_handler(
             "on_audio_data", merged_audio, self._sample_rate, self._num_channels
         )
