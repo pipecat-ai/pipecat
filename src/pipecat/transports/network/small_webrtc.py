@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable, Optional
 import cv2
 import numpy as np
 from aiortc import VideoStreamTrack
-from aiortc.mediastreams import AudioStreamTrack, VideoFrame
+from aiortc.mediastreams import AudioStreamTrack, MediaStreamError, VideoFrame
 from av import AudioFrame, AudioResampler
 from loguru import logger
 from pydantic import BaseModel
@@ -191,6 +191,9 @@ class SmallWebRTCClient:
                     logger.warning("Timeout: No video frame received within the specified time.")
                     self._webrtcConnection.ask_to_renegotiate()
                 frame = None
+            except MediaStreamError:
+                logger.warning("Received an unexpected media stream error while reading the audio.")
+                frame = None
 
             if frame is None or not isinstance(frame, VideoFrame):
                 # If no valid frame, sleep for a bit
@@ -237,6 +240,9 @@ class SmallWebRTCClient:
                 if self._webrtcConnection.is_connected():
                     logger.warning("Timeout: No audio frame received within the specified time.")
                 frame = None
+            except MediaStreamError:
+                logger.warning("Received an unexpected media stream error while reading the audio.")
+                frame = None
 
             if frame is None or not isinstance(frame, AudioFrame):
                 # If we don't read any audio let's sleep for a little bit (i.e. busy wait).
@@ -265,11 +271,11 @@ class SmallWebRTCClient:
                 yield audio_frame
 
     async def write_raw_audio_frames(self, data: bytes):
-        if self._can_send():
+        if self._can_send() and self._audio_output_track:
             await self._audio_output_track.add_audio_bytes(data)
 
     async def write_frame_to_camera(self, frame: OutputImageRawFrame):
-        if self._can_send():
+        if self._can_send() and self._video_output_track:
             self._video_output_track.add_video_frame(frame)
 
     async def setup(self, _params: TransportParams, frame):
@@ -279,23 +285,13 @@ class SmallWebRTCClient:
         self._params = _params
 
     async def connect(self):
-        if self._audio_output_track or self._video_output_track:
+        if self._webrtcConnection.is_connected() or self._webrtcConnection.is_connecting():
             # already initialized
             return
 
+        logger.info(f"Connecting to Small WebRTC")
         await self._webrtcConnection.connect()
 
-        logger.info(f"Connecting to Small WebRTC")
-
-        if self._params.audio_out_enabled:
-            self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
-            self._webrtcConnection.replace_audio_track(self._audio_output_track)
-
-        if self._params.camera_out_enabled:
-            self._video_output_track = RawVideoTrack(
-                width=self._params.camera_out_width, height=self._params.camera_out_height
-            )
-            self._webrtcConnection.replace_video_track(self._video_output_track)
 
     async def disconnect(self):
         if self.is_connected and not self.is_closing:
@@ -311,12 +307,30 @@ class SmallWebRTCClient:
     async def _handle_client_connected(self):
         self._audio_input_track = self._webrtcConnection.audio_input_track()
         self._video_input_track = self._webrtcConnection.video_input_track()
+        if self._params.audio_out_enabled:
+            self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
+            self._webrtcConnection.replace_audio_track(self._audio_output_track)
+
+        if self._params.camera_out_enabled:
+            self._video_output_track = RawVideoTrack(
+                width=self._params.camera_out_width, height=self._params.camera_out_height
+            )
+            self._webrtcConnection.replace_video_track(self._video_output_track)
+
         await self._callbacks.on_client_connected(self._webrtcConnection)
 
     async def _handle_client_disconnected(self):
+        self._audio_input_track = None
+        self._video_input_track = None
+        self._audio_output_track = None
+        self._video_output_track = None
         await self._callbacks.on_client_disconnected(self._webrtcConnection)
 
     async def _handle_client_closed(self):
+        self._audio_input_track = None
+        self._video_input_track = None
+        self._audio_output_track = None
+        self._video_output_track = None
         await self._callbacks.on_client_closed(self._webrtcConnection)
 
     async def _handle_app_message(self, message: Any):

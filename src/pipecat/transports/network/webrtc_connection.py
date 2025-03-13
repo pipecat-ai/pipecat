@@ -1,7 +1,7 @@
 import asyncio
 import json
-import uuid
 import time
+import uuid
 from enum import Enum
 from typing import Any, Optional
 
@@ -20,6 +20,11 @@ class SignallingMessage(Enum):
 class SmallWebRTCConnection(EventEmitter):
     def __init__(self):
         super().__init__()
+        self._is_connecting = False
+        self._initialize()
+
+    def _initialize(self):
+        logger.info("Initializing new peer connection")
         self.answer: Optional[RTCSessionDescription] = None
         self.pc = RTCPeerConnection()
         self.pc_id = "PeerConnection(%s)" % uuid.uuid4()
@@ -87,10 +92,21 @@ class SmallWebRTCConnection(EventEmitter):
         await self._create_answer(sdp, type)
 
     async def connect(self):
+        self._is_connecting = True
         await self.pc.setLocalDescription(self.answer)
 
-    async def renegotiate(self, sdp: str, type: str):
+    async def renegotiate(self, sdp: str, type: str, restart_pc: bool = False):
         logger.info(f"Renegotiating {self.pc_id}")
+
+        if restart_pc:
+            await self.emit("disconnected", self)
+            logger.info("Closing old peer connection")
+            # removing the listeners to prevent the bot from closing
+            self.pc.remove_all_listeners()
+            await self.close()
+            # we are initializing a new peer connection in this case.
+            self._initialize()
+
         await self._create_answer(sdp, type)
         await self.pc.setLocalDescription(self.answer)
 
@@ -136,6 +152,7 @@ class SmallWebRTCConnection(EventEmitter):
     async def close(self):
         if self.pc:
             await self.pc.close()
+        self._is_connecting = False
 
     def get_answer(self):
         if not self.answer:
@@ -165,6 +182,9 @@ class SmallWebRTCConnection(EventEmitter):
             return self.pc.connectionState == "connected"
         # Checks if the last received ping was within the last 3 seconds.
         return (time.time() - self._last_received_time) < 3
+
+    def is_connecting(self):
+        return self._is_connecting
 
     def audio_input_track(self):
         # Transceivers always appear in creation-order for both peers
