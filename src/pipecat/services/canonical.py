@@ -107,7 +107,6 @@ class CanonicalMetricsService(AIService):
         )
 
         try:
-            # First write: create file with WAV header
             with io.BytesIO() as buffer:
                 with wave.open(buffer, "wb") as wf:
                     wf.setsampwidth(2)  # 16-bit audio
@@ -118,7 +117,6 @@ class CanonicalMetricsService(AIService):
                     await file.write(buffer.getvalue())
         except Exception as e:
             logger.error(f"Failed to write audio buffer: {e}")
-            return
 
     async def _process_completion(self):
         logger.debug("Processing completion")
@@ -184,7 +182,6 @@ class CanonicalMetricsService(AIService):
 
         logger.debug(f"Combined {len(audio_chunks)} audio chunks into {audio_filename}")
 
-        # Optionally clean up individual chunk files
         for chunk_file in audio_chunks:
             await aiofiles.os.remove(f"{chunks_dir}/{chunk_file}")
         await aiofiles.os.rmdir(chunks_dir)
