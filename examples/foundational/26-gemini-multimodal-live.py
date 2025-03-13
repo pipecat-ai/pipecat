@@ -77,7 +77,7 @@ async def main():
                     LLMMessagesAppendFrame(
                         messages=[
                             {
-                                "role": "assistant",
+                                "role": "user",
                                 "content": "Greet the user.",
                             }
                         ]
