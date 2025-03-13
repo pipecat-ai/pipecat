@@ -29,7 +29,9 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
     if pc_id and pc_id in pcs_map:
         pipecat_connection = pcs_map[pc_id]
         logger.info(f"Reusing existing connection for pc_id: {pc_id}")
-        await pipecat_connection.renegotiate(sdp=request["sdp"], type=request["type"])
+        await pipecat_connection.renegotiate(
+            sdp=request["sdp"], type=request["type"], restart_pc=request.get("restart_pc", False)
+        )
     else:
         pipecat_connection = SmallWebRTCConnection()
         await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])

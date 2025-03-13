@@ -35,9 +35,14 @@ export class SmallWebRTCTransport {
     private maxReconnectionAttempts = 3;
     private isReconnecting = false;
     private keepAliveInterval: number | null = null;
+    private audioDevice: string | undefined;
+    private videoDevice: string | undefined;
 
     constructor(callbacks: SmallWebRTCTransportCallbacks) {
         this._callbacks = callbacks
+        // for testing reconnections
+        // @ts-ignore
+        window.attemptReconnection = this.attemptReconnection.bind(this)
     }
 
     private log(message: string): void {
@@ -65,6 +70,9 @@ export class SmallWebRTCTransport {
 
         pc.addEventListener('signalingstatechange', () => {
             this.log(`signalingState: ${this.pc!.signalingState}`)
+            if (this.pc!.signalingState == 'stable') {
+                this.handleReconnectionCompleted()
+            }
         });
         this.log(`signalingState: ${pc.signalingState}`)
 
@@ -94,20 +102,24 @@ export class SmallWebRTCTransport {
         }
     }
 
+    private handleReconnectionCompleted() {
+        this.reconnectionAttempts = 0;
+        this.isReconnecting = false;
+    }
+
     private handleConnectionStateChange(): void {
         if (!this.pc) return;
         this.log(`Connection State: ${this.pc.connectionState}`);
 
         if (this.pc.connectionState === "connected") {
-            this.reconnectionAttempts = 0;
-            this.isReconnecting = false;
+            this.handleReconnectionCompleted()
             this._callbacks.onConnected();
         } else if (this.pc.connectionState === "failed") {
             void this.attemptReconnection(true);
         }
     }
 
-    private async attemptReconnection(iceRestart: boolean = false): Promise<void> {
+    private async attemptReconnection(recreatePeerConnection: boolean = false): Promise<void> {
         if (this.isReconnecting) {
             this.log("Reconnection already in progress, skipping.");
             return;
@@ -120,17 +132,24 @@ export class SmallWebRTCTransport {
         this.isReconnecting = true;
         this.reconnectionAttempts++;
         this.log(`Reconnection attempt ${this.reconnectionAttempts}...`);
-        await this.negotiate(iceRestart);
+        // aiortc it is not working fine when just trying to restart the ice
+        // so in this case we are creating a new peer connection on both sides
+        if (recreatePeerConnection) {
+            //this.pc?.close()
+            await this.startNewPeerConnection(recreatePeerConnection)
+        } else {
+            await this.negotiate();
+        }
     }
 
-    private async negotiate(iceRestart: boolean = false): Promise<void> {
+    private async negotiate(recreatePeerConnection: boolean = false): Promise<void> {
         if (!this.pc) {
             return Promise.reject('Peer connection is not initialized');
         }
 
         try {
             // Create offer
-            const offer = await this.pc.createOffer({iceRestart});
+            const offer = await this.pc.createOffer();
             await this.pc.setLocalDescription(offer);
 
             // Wait for ICE gathering to complete
@@ -170,7 +189,8 @@ export class SmallWebRTCTransport {
                 body: JSON.stringify({
                     sdp: offerSdp.sdp,
                     type: offerSdp.type,
-                    pc_id: this.pc_id
+                    pc_id: this.pc_id,
+                    restart_pc: recreatePeerConnection
                 }),
                 headers: {
                     'Content-Type': 'application/json',
@@ -212,18 +232,24 @@ export class SmallWebRTCTransport {
     }
 
     async start(audioDevice: string | undefined, audioCodec: string, videoCodec: string, videoDevice: string | undefined): Promise<void> {
+        this.audioDevice = audioDevice
+        this.videoDevice = videoDevice
+        this.audioCodec = audioCodec
+        this.videoCodec = videoCodec
+        await this.startNewPeerConnection()
+    }
+
+    private async startNewPeerConnection(recreatePeerConnection: boolean = false) {
         this.pc = this.createPeerConnection();
         this.addInitialTransceivers();
         this.dc = this.createDataChannel('chat', { ordered: true });
-        await this.addUserMedias(audioDevice, videoDevice);
-        this.audioCodec = audioCodec
-        this.videoCodec = videoCodec
-        await this.negotiate();
+        await this.addUserMedias();
+        await this.negotiate(recreatePeerConnection);
     }
 
-    private async addUserMedias(audioDevice: string|undefined, videoDevice:string|undefined): Promise<void> {
+    private async addUserMedias(): Promise<void> {
         this.log("Will send the audio and video");
-        const constraints = this.createMediaConstraints(audioDevice, videoDevice);
+        const constraints = this.createMediaConstraints();
 
         if (constraints.audio || constraints.video) {
             try {
@@ -314,16 +340,16 @@ export class SmallWebRTCTransport {
         return dc;
     }
 
-    private createMediaConstraints(audioDevice: string|undefined, videoDevice:string|undefined): MediaStreamConstraints {
+    private createMediaConstraints(): MediaStreamConstraints {
         const constraints: MediaStreamConstraints = { audio: false, video: false };
 
         const audioConstraints: MediaTrackConstraints = {};
-        if (audioDevice) audioConstraints.deviceId = { exact: audioDevice };
+        if (this.audioDevice) audioConstraints.deviceId = { exact: this.audioDevice };
 
         constraints.audio = Object.keys(audioConstraints).length ? audioConstraints : true;
 
         const videoConstraints: MediaTrackConstraints = {};
-        if (videoDevice) videoConstraints.deviceId = { exact: videoDevice };
+        if (this.videoDevice) videoConstraints.deviceId = { exact: this.videoDevice };
 
         constraints.video = Object.keys(videoConstraints).length ? videoConstraints : true;
 
