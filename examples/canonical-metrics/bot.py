@@ -99,7 +99,6 @@ async def main():
         audio_buffer_processor = AudioBufferProcessor(num_channels=2, buffer_size=1000000)
         canonical = CanonicalMetricsService(
             aiohttp_session=session,
-            api_url=os.getenv("CANONICAL_API_URL"),
             api_key=os.getenv("CANONICAL_API_KEY"),
             call_id=str(uuid.uuid4()),
             assistant="pipecat-chatbot",
