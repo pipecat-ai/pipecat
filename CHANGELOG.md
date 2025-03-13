@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `on_frame_reached_upstream` and `on_frame_reached_downstream` event
+  handlers to `PipelineTask`. Those events will be called when a frame reaches
+  the beginning or end of the pipeline respectively.
+
 - Added support for Chirp voices in `GoogleTTSService`.
 
 - Added a `flush_audio()` method to `FishTTSService` and `LmntTTSService`.
@@ -80,7 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed an issue in `RimeTTSService` where the last line of text sent didn't result in an audio output being generated.
+- Fixed an issue in `RimeTTSService` where the last line of text sent didn't
+  result in an audio output being generated.
 
 ## [0.0.58] - 2025-02-26
 
