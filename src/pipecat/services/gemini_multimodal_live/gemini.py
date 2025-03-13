@@ -9,12 +9,14 @@ import base64
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Union
 
 import websockets
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -115,10 +117,10 @@ class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         # We don't want to store any images in the context. Revisit this later when the API evolves.
         self._pending_image_frame_message = None
-        await super()._push_aggregation()
+        await super().push_aggregation()
 
 
 @dataclass
@@ -152,6 +154,9 @@ class InputParams(BaseModel):
 
 
 class GeminiMultimodalLiveLLMService(LLMService):
+    # Overriding the default adapter to use the Gemini one.
+    adapter_class = GeminiLLMAdapter
+
     def __init__(
         self,
         *,
@@ -162,7 +167,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         system_instruction: Optional[str] = None,
-        tools: Optional[List[dict]] = None,
+        tools: Optional[Union[List[dict], ToolsSchema]] = None,
         transcribe_user_audio: bool = False,
         transcribe_model_audio: bool = False,
         params: InputParams = InputParams(),
@@ -202,6 +207,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
         self._bot_text_buffer = ""
+
+        self._sample_rate = 24000
 
         self._settings = {
             "frequency_penalty": params.frequency_penalty,
@@ -433,7 +440,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 )
             if self._tools:
                 logger.debug(f"Gemini is configuring to use tools{self._tools}")
-                config.setup.tools = self._tools
+                config.setup.tools = self.get_llm_adapter().from_standard_tools(self._tools)
             await self.send_client_event(config)
 
         except Exception as e:
@@ -521,7 +528,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if self._audio_input_paused:
             return
         # Send all audio to Gemini
-        evt = events.AudioInputMessage.from_raw_audio(frame.audio)
+        evt = events.AudioInputMessage.from_raw_audio(frame.audio, frame.sample_rate)
         await self.send_client_event(evt)
         # Manage a buffer of audio to use for transcription
         audio = frame.audio
@@ -650,7 +657,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         inline_data = part.inlineData
         if not inline_data:
             return
-        if inline_data.mimeType != "audio/pcm;rate=24000":
+        if inline_data.mimeType != f"audio/pcm;rate={self._sample_rate}":
             logger.warning(f"Unrecognized server_content format {inline_data.mimeType}")
             return
 
@@ -665,7 +672,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_audio_buffer.extend(audio)
         frame = TTSAudioRawFrame(
             audio=audio,
-            sample_rate=24000,
+            sample_rate=self._sample_rate,
             num_channels=1,
         )
         await self.push_frame(frame)
@@ -699,11 +706,39 @@ class GeminiMultimodalLiveLLMService(LLMService):
         await self.push_frame(TTSStoppedFrame())
 
     def create_context_aggregator(
-        self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = False
+        self,
+        context: OpenAILLMContext,
+        *,
+        user_kwargs: Mapping[str, Any] = {},
+        assistant_kwargs: Mapping[str, Any] = {},
     ) -> GeminiMultimodalLiveContextAggregatorPair:
+        """Create an instance of GeminiMultimodalLiveContextAggregatorPair from
+        an OpenAILLMContext. Constructor keyword arguments for both the user and
+        assistant aggregators can be provided.
+
+        Args:
+            context (OpenAILLMContext): The LLM context.
+            user_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the user context aggregator constructor. Defaults
+                to an empty mapping.
+            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the assistant context aggregator
+                constructor. Defaults to an empty mapping.
+
+        Returns:
+            GeminiMultimodalLiveContextAggregatorPair: A pair of context
+            aggregators, one for the user and one for the assistant,
+            encapsulated in an GeminiMultimodalLiveContextAggregatorPair.
+
+        """
+        context.set_llm_adapter(self.get_llm_adapter())
+
         GeminiMultimodalLiveContext.upgrade(context)
-        user = GeminiMultimodalLiveUserContextAggregator(context)
+        user = GeminiMultimodalLiveUserContextAggregator(context, **user_kwargs)
+
+        default_assistant_kwargs = {"expect_stripped_words": False}
+        default_assistant_kwargs.update(assistant_kwargs)
         assistant = GeminiMultimodalLiveAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
+            context, **default_assistant_kwargs
         )
         return GeminiMultimodalLiveContextAggregatorPair(_user=user, _assistant=assistant)

@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import io
 import os
 from typing import AsyncGenerator, Dict, Optional, Union
@@ -42,7 +43,7 @@ class FalImageGenService(ImageGenService):
         params: InputParams,
         aiohttp_session: aiohttp.ClientSession,
         model: str = "fal-ai/fast-sdxl",
-        key: str | None = None,
+        key: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -53,6 +54,11 @@ class FalImageGenService(ImageGenService):
             os.environ["FAL_KEY"] = key
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
+        def load_image_bytes(encoded_image: bytes):
+            buffer = io.BytesIO(encoded_image)
+            image = Image.open(buffer)
+            return (image.tobytes(), image.size, image.format)
+
         logger.debug(f"Generating image from prompt: {prompt}")
 
         response = await fal_client.run_async(
@@ -73,10 +79,8 @@ class FalImageGenService(ImageGenService):
         logger.debug(f"Downloading image {image_url} ...")
         async with self._aiohttp_session.get(image_url) as response:
             logger.debug(f"Downloaded image {image_url}")
-            image_stream = io.BytesIO(await response.content.read())
-            image = Image.open(image_stream)
+            encoded_image = await response.content.read()
+            (image_bytes, size, format) = await asyncio.to_thread(load_image_bytes, encoded_image)
 
-            frame = URLImageRawFrame(
-                url=image_url, image=image.tobytes(), size=image.size, format=image.format
-            )
+            frame = URLImageRawFrame(url=image_url, image=image_bytes, size=size, format=format)
             yield frame

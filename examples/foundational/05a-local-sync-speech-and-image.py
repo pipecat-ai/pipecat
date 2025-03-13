@@ -30,8 +30,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaHttpTTSService
 from pipecat.services.fal import FalImageGenService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.tk import TkLocalTransport, TkOutputTransport
+from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
 load_dotenv(override=True)
 
@@ -98,7 +97,7 @@ async def main():
 
             tts = CartesiaHttpTTSService(
                 api_key=os.getenv("CARTESIA_API_KEY"),
-                voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+                voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
             )
 
             imagegen = FalImageGenService(
@@ -152,7 +151,7 @@ async def main():
 
         transport = TkLocalTransport(
             tk_root,
-            TransportParams(
+            TkTransportParams(
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_width=1024,

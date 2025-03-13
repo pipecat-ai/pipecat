@@ -2,13 +2,14 @@ import argparse
 import asyncio
 import os
 import sys
+from typing import Optional
 
 from dotenv import load_dotenv
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, EndTaskFrame
+from pipecat.frames.frames import EndTaskFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -42,13 +43,17 @@ async def main(
     callId: str,
     callDomain: str,
     detect_voicemail: bool,
-    dialout_number: str | None,
+    dialout_number: Optional[str],
 ):
     # dialin_settings are only needed if Daily's SIP URI is used
     # If you are handling this via Twilio, Telnyx, set this to None
     # and handle call-forwarding when on_dialin_ready fires.
 
-    dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
+    # We don't want to specify dial-in settings if we're not dialing in
+    dialin_settings = None
+    if callId and callDomain:
+        dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
+
     transport = DailyTransport(
         room_url,
         token,
@@ -95,21 +100,31 @@ async def main(
             - **"Please leave a message after the beep."**
             - **"No one is available to take your call."**
             - **"Record your message after the tone."**
+            - **"Please leave a message after the beep"**
+            - **"You have reached voicemail for..."**
+            - **"You have reached [phone number]"**
+            - **"[phone number] is unavailable"**
+            - **"The person you are trying to reach..."**
+            - **"The number you have dialed..."**
+            - **"Your call has been forwarded to an automated voice messaging system"**
             - **Any phrase that suggests an answering machine or voicemail.**
             - **ASSUME IT IS A VOICEMAIL. DO NOT WAIT FOR MORE CONFIRMATION.**
+            - **IF THE CALL SAYS "PLEASE LEAVE A MESSAGE AFTER THE BEEP", WAIT FOR THE BEEP BEFORE LEAVING A MESSAGE.**
 
             #### **Step 2: Leave a Voicemail Message**
-            - Immediately say:  
+            - Immediately say:
             *"Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."*
             - **IMMEDIATELY AFTER LEAVING THE MESSAGE, CALL `terminate_call`.**
             - **DO NOT SPEAK AFTER CALLING `terminate_call`.**
             - **FAILURE TO CALL `terminate_call` IMMEDIATELY IS A MISTAKE.**
 
             #### **Step 3: If Speaking to a Human**
-            - If the call is answered by a human, say:  
+            - If the call is answered by a human, say:
             *"Oh, hello! I'm a friendly chatbot. Is there anything I can help you with?"*
             - Keep responses **brief and helpful**.
-            - If the user no longer needs assistance, **call `terminate_call` immediately.**
+            - If the user no longer needs assistance, say:
+            *"Okay, thank you! Have a great day!"*
+            -**Then call `terminate_call` immediately.**
 
             ---
 
@@ -135,7 +150,7 @@ async def main(
         ]
     )
 
-    task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
     if dialout_number:
         logger.debug("dialout number detected; doing dialout")

@@ -11,11 +11,13 @@ from pipecat.utils.string import match_endofsentence
 
 class TestUtilsString(unittest.IsolatedAsyncioTestCase):
     async def test_endofsentence(self):
-        assert match_endofsentence("This is a sentence.")
-        assert match_endofsentence("This is a sentence! ")
-        assert match_endofsentence("This is a sentence?")
-        assert match_endofsentence("This is a sentence:")
-        assert match_endofsentence("This is a sentence;")
+        assert match_endofsentence("This is a sentence.") == 19
+        assert match_endofsentence("This is a sentence!") == 19
+        assert match_endofsentence("This is a sentence?") == 19
+        assert match_endofsentence("This is a sentence;") == 19
+        assert match_endofsentence("This is a sentence...") == 21
+        assert match_endofsentence("This is a sentence . . .") == 24
+        assert match_endofsentence("This is a sentence. ..") == 22
         assert not match_endofsentence("This is not a sentence")
         assert not match_endofsentence("This is not a sentence,")
         assert not match_endofsentence("This is not a sentence, ")
@@ -33,7 +35,6 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
             "你好！",
             "吃了吗？",
             "安全第一；",
-            "他说：",
         ]
         for i in chinese_sentences:
             assert match_endofsentence(i)

@@ -5,7 +5,7 @@
 #
 
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 
@@ -21,8 +21,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.ai_services import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for LMNT configuration needed
@@ -36,7 +35,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_lmnt_language(language: Language) -> str | None:
+def language_to_lmnt_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.DE: "de",
         Language.EN: "en",
@@ -60,37 +59,36 @@ def language_to_lmnt_language(language: Language) -> str | None:
     return result
 
 
-class LmntTTSService(TTSService, WebsocketService):
+class LmntTTSService(InterruptibleTTSService):
     def __init__(
         self,
         *,
         api_key: str,
         voice_id: str,
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         language: Language = Language.EN,
         **kwargs,
     ):
-        TTSService.__init__(
-            self,
+        super().__init__(
             push_stop_frames=True,
+            pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._voice_id = voice_id
         self._settings = {
-            "sample_rate": sample_rate,
             "language": self.language_to_service_language(language),
             "format": "raw",  # Use raw format for direct PCM data
         }
         self._started = False
+        self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_lmnt_language(language)
 
     async def start(self, frame: StartFrame):
@@ -113,18 +111,22 @@ class LmntTTSService(TTSService, WebsocketService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
 
     async def _disconnect(self):
-        await self._disconnect_websocket()
-
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
+        await self._disconnect_websocket()
+
     async def _connect_websocket(self):
         """Connect to LMNT websocket."""
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to LMNT")
 
             # Build initial connection message
@@ -132,7 +134,7 @@ class LmntTTSService(TTSService, WebsocketService):
                 "X-API-Key": self._api_key,
                 "voice": self._voice_id,
                 "format": self._settings["format"],
-                "sample_rate": self._settings["sample_rate"],
+                "sample_rate": self.sample_rate,
                 "language": self._settings["language"],
             }
 
@@ -153,8 +155,9 @@ class LmntTTSService(TTSService, WebsocketService):
 
             if self._websocket:
                 logger.debug("Disconnecting from LMNT")
-                # Send EOF message before closing
-                await self._websocket.send(json.dumps({"eof": True}))
+                # NOTE(aleix): sending EOF message before closing is causing
+                # errors on the websocket, so we just skip it for now.
+                # await self._websocket.send(json.dumps({"eof": True}))
                 await self._websocket.close()
                 self._websocket = None
 
@@ -167,6 +170,11 @@ class LmntTTSService(TTSService, WebsocketService):
             return self._websocket
         raise Exception("Websocket not connected")
 
+    async def flush_audio(self):
+        if not self._websocket:
+            return
+        await self._get_websocket().send(json.dumps({"flush": True}))
+
     async def _receive_messages(self):
         """Receive messages from LMNT websocket."""
         async for message in self._get_websocket():
@@ -175,7 +183,7 @@ class LmntTTSService(TTSService, WebsocketService):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
                     audio=message,
-                    sample_rate=self._settings["sample_rate"],
+                    sample_rate=self.sample_rate,
                     num_channels=1,
                 )
                 await self.push_frame(frame)
@@ -193,7 +201,7 @@ class LmntTTSService(TTSService, WebsocketService):
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio from text."""
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             if not self._websocket:

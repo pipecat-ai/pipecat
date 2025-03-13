@@ -6,6 +6,7 @@
 
 import argparse
 import os
+from typing import Optional
 
 import aiohttp
 
@@ -18,7 +19,7 @@ async def configure(aiohttp_session: aiohttp.ClientSession):
 
 
 async def configure_with_args(
-    aiohttp_session: aiohttp.ClientSession, parser: argparse.ArgumentParser | None = None
+    aiohttp_session: aiohttp.ClientSession, parser: Optional[argparse.ArgumentParser] = None
 ):
     if not parser:
         parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")

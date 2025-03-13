@@ -78,7 +78,7 @@ async def main():
 
         british_lady = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
         barbershop_man = CartesiaTTSService(
@@ -125,7 +125,10 @@ async def main():
                 llm,  # LLM
                 ParallelPipeline(  # TTS (one of the following vocies)
                     [FunctionFilter(news_lady_filter), news_lady],  # News Lady voice
-                    [FunctionFilter(british_lady_filter), british_lady],  # British Lady voice
+                    [
+                        FunctionFilter(british_lady_filter),
+                        british_lady,
+                    ],  # British Reading Lady voice
                     [FunctionFilter(barbershop_man_filter), barbershop_man],  # Barbershop Man voice
                 ),
                 transport.output(),  # Transport bot output
@@ -133,7 +136,7 @@ async def main():
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+        task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

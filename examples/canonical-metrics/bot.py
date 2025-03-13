@@ -65,7 +65,6 @@ async def main():
             # English
             #
             voice_id="cgSgspJ2msm6clMCkdW9",
-            aiohttp_session=session,
             #
             # Spanish
             #
@@ -99,8 +98,8 @@ async def main():
         """
         audio_buffer_processor = AudioBufferProcessor(num_channels=2, buffer_size=1000000)
         canonical = CanonicalMetricsService(
-            audio_buffer_processor=audio_buffer_processor,
             aiohttp_session=session,
+            api_url=os.getenv("CANONICAL_API_URL"),
             api_key=os.getenv("CANONICAL_API_KEY"),
             call_id=str(uuid.uuid4()),
             assistant="pipecat-chatbot",
@@ -115,17 +114,18 @@ async def main():
                 tts,
                 transport.output(),
                 audio_buffer_processor,  # captures audio into a buffer
+                canonical,  # uploads audio buffer to Canonical AI for metrics
                 context_aggregator.assistant(),
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+        task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
         @audio_buffer_processor.event_handler("on_audio_data")
         async def on_audio_data(
-            audio_buffer: bytes, sample_rate: int, num_channels: int, end_of_audio: bool
+            buffer: AudioBufferProcessor, audio_buffer: bytes, sample_rate: int, num_channels: int
         ):
-            canonical.process_audio_buffer(audio_buffer, sample_rate, num_channels, end_of_audio)
+            await canonical.process_audio_buffer(audio_buffer, sample_rate, num_channels)
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

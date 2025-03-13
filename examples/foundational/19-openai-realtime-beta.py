@@ -80,9 +80,7 @@ async def main():
             "Respond bot",
             DailyParams(
                 audio_in_enabled=True,
-                audio_in_sample_rate=24000,
                 audio_out_enabled=True,
-                audio_out_sample_rate=24000,
                 transcription_enabled=False,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
@@ -156,7 +154,7 @@ Remember, your responses should be short. Just one or two sentences, usually."""
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,

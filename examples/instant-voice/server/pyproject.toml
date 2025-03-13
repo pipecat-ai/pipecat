@@ -1,0 +1,11 @@
+[tool.ruff]
+exclude = [".git", "*_pb2.py"]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "I", # Import rules
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

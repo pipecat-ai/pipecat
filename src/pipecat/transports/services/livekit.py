@@ -27,7 +27,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 
 try:
     from livekit import rtc
@@ -40,12 +40,12 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class LiveKitTransportMessageFrame(TransportMessageFrame):
-    participant_id: str | None = None
+    participant_id: Optional[str] = None
 
 
 @dataclass
 class LiveKitTransportMessageUrgentFrame(TransportMessageUrgentFrame):
-    participant_id: str | None = None
+    participant_id: Optional[str] = None
 
 
 class LiveKitParams(TransportParams):
@@ -79,16 +79,16 @@ class LiveKitTransportClient:
         self._params = params
         self._callbacks = callbacks
         self._transport_name = transport_name
-        self._room: rtc.Room | None = None
+        self._room: Optional[rtc.Room] = None
         self._participant_id: str = ""
         self._connected = False
         self._disconnect_counter = 0
-        self._audio_source: rtc.AudioSource | None = None
-        self._audio_track: rtc.LocalAudioTrack | None = None
+        self._audio_source: Optional[rtc.AudioSource] = None
+        self._audio_track: Optional[rtc.LocalAudioTrack] = None
         self._audio_tracks = {}
         self._audio_queue = asyncio.Queue()
         self._other_participant_has_joined = False
-        self._task_manager: Optional[TaskManager] = None
+        self._task_manager: Optional[BaseTaskManager] = None
 
     @property
     def participant_id(self) -> str:
@@ -101,6 +101,7 @@ class LiveKitTransportClient:
         return self._room
 
     async def setup(self, frame: StartFrame):
+        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
         if not self._task_manager:
             self._task_manager = frame.task_manager
             self._room = rtc.Room(loop=self._task_manager.get_event_loop())
@@ -138,7 +139,7 @@ class LiveKitTransportClient:
 
             # Set up audio source and track
             self._audio_source = rtc.AudioSource(
-                self._params.audio_out_sample_rate, self._params.audio_out_channels
+                self._out_sample_rate, self._params.audio_out_channels
             )
             self._audio_track = rtc.LocalAudioTrack.create_audio_track(
                 "pipecat-audio", self._audio_source
@@ -171,7 +172,7 @@ class LiveKitTransportClient:
         logger.info(f"Disconnected from {self._room_name}")
         await self._callbacks.on_disconnected()
 
-    async def send_data(self, data: bytes, participant_id: str | None = None):
+    async def send_data(self, data: bytes, participant_id: Optional[str] = None):
         if not self._connected:
             return
 
@@ -348,14 +349,18 @@ class LiveKitInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._audio_in_task = None
-        self._vad_analyzer: VADAnalyzer | None = params.vad_analyzer
+        self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
         self._resampler = create_default_resampler()
+
+    @property
+    def vad_analyzer(self) -> Optional[VADAnalyzer]:
+        return self._vad_analyzer
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._client.setup(frame)
         await self._client.connect()
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if not self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
         logger.info("LiveKitInputTransport started")
 
@@ -371,9 +376,6 @@ class LiveKitInputTransport(BaseInputTransport):
         await self._client.disconnect()
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             await self.cancel_task(self._audio_in_task)
-
-    def vad_analyzer(self) -> VADAnalyzer | None:
-        return self._vad_analyzer
 
     async def push_app_message(self, message: Any, sender: str):
         frame = LiveKitTransportMessageUrgentFrame(message=message, participant_id=sender)
@@ -401,12 +403,12 @@ class LiveKitInputTransport(BaseInputTransport):
         audio_frame = audio_frame_event.frame
 
         audio_data = await self._resampler.resample(
-            audio_frame.data.tobytes(), audio_frame.sample_rate, self._params.audio_in_sample_rate
+            audio_frame.data.tobytes(), audio_frame.sample_rate, self.sample_rate
         )
 
         return AudioRawFrame(
             audio=audio_data,
-            sample_rate=self._params.audio_in_sample_rate,
+            sample_rate=self.sample_rate,
             num_channels=audio_frame.num_channels,
         )
 
@@ -448,7 +450,7 @@ class LiveKitOutputTransport(BaseOutputTransport):
 
         return rtc.AudioFrame(
             data=pipecat_audio,
-            sample_rate=self._params.audio_out_sample_rate,
+            sample_rate=self.sample_rate,
             num_channels=self._params.audio_out_channels,
             samples_per_channel=samples_per_channel,
         )
@@ -461,8 +463,8 @@ class LiveKitTransport(BaseTransport):
         token: str,
         room_name: str,
         params: LiveKitParams = LiveKitParams(),
-        input_name: str | None = None,
-        output_name: str | None = None,
+        input_name: Optional[str] = None,
+        output_name: Optional[str] = None,
     ):
         super().__init__(input_name=input_name, output_name=output_name)
 
@@ -481,8 +483,8 @@ class LiveKitTransport(BaseTransport):
         self._client = LiveKitTransportClient(
             url, token, room_name, self._params, callbacks, self.name
         )
-        self._input: LiveKitInputTransport | None = None
-        self._output: LiveKitOutputTransport | None = None
+        self._input: Optional[LiveKitInputTransport] = None
+        self._output: Optional[LiveKitOutputTransport] = None
 
         self._register_event_handler("on_connected")
         self._register_event_handler("on_disconnected")
@@ -560,12 +562,12 @@ class LiveKitTransport(BaseTransport):
             await self._input.push_app_message(data.decode(), participant_id)
         await self._call_event_handler("on_data_received", data, participant_id)
 
-    async def send_message(self, message: str, participant_id: str | None = None):
+    async def send_message(self, message: str, participant_id: Optional[str] = None):
         if self._output:
             frame = LiveKitTransportMessageFrame(message=message, participant_id=participant_id)
             await self._output.send_message(frame)
 
-    async def send_message_urgent(self, message: str, participant_id: str | None = None):
+    async def send_message_urgent(self, message: str, participant_id: Optional[str] = None):
         if self._output:
             frame = LiveKitTransportMessageUrgentFrame(
                 message=message, participant_id=participant_id

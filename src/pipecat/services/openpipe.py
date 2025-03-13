@@ -4,15 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from loguru import logger
+from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai import OpenAILLMService
 
 try:
-    from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
     from openpipe import AsyncOpenAI as OpenPipeAI
     from openpipe import AsyncStream
 except ModuleNotFoundError as e:
@@ -28,11 +28,11 @@ class OpenPipeLLMService(OpenAILLMService):
         self,
         *,
         model: str = "gpt-4o",
-        api_key: str | None = None,
-        base_url: str | None = None,
-        openpipe_api_key: str | None = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        openpipe_api_key: Optional[str] = None,
         openpipe_base_url: str = "https://app.openpipe.ai/api/v1",
-        tags: Dict[str, str] | None = None,
+        tags: Optional[Dict[str, str]] = None,
         **kwargs,
     ):
         super().__init__(

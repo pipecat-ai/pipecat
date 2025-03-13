@@ -16,8 +16,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.audio import LocalAudioTransport
+from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 
 load_dotenv(override=True)
 
@@ -26,11 +25,11 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def main():
-    transport = LocalAudioTransport(TransportParams(audio_out_enabled=True))
+    transport = LocalAudioTransport(LocalAudioTransportParams(audio_out_enabled=True))
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
     pipeline = Pipeline([tts, transport.output()])
@@ -41,7 +40,7 @@ async def main():
         await asyncio.sleep(1)
         await task.queue_frames([TTSSpeakFrame("Hello there, how is it going!"), EndFrame()])
 
-    runner = PipelineRunner()
+    runner = PipelineRunner(handle_sigint=False if sys.platform == "win32" else True)
 
     await asyncio.gather(runner.run(task), say_something())
 
