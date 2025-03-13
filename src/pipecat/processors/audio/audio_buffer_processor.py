@@ -7,8 +7,6 @@
 import time
 from typing import Optional
 
-from loguru import logger
-
 from pipecat.audio.utils import create_default_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
     AudioRawFrame,
