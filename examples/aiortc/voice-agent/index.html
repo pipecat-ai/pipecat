@@ -59,7 +59,6 @@
             peerConnection= await createSmallWebRTCConnection(audioStream.getAudioTracks()[0])
             peerConnection.onconnectionstatechange = () => {
                 let connectionState = peerConnection?.connectionState
-                statusEl.textContent = connectionState
                 if (connectionState === 'connected') {
                     _onConnected()
                 } else if (connectionState === 'disconnected') {
@@ -69,11 +68,13 @@
         }
 
         const _onConnected = () => {
+            statusEl.textContent = "Connected"
             buttonEl.textContent = "Disconnect"
             connected = true
         }
 
         const _onDisconnected = () => {
+            statusEl.textContent = "Disconnected"
             buttonEl.textContent = "Connect"
             connected = false
         }
