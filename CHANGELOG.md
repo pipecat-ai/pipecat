@@ -90,6 +90,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `TranscriptProcessor` to support text output from
+  `OpenAIRealtimeBetaLLMService`.
+
+- `OpenAIRealtimeBetaLLMService` now pushes a `TTSTextFrame`.
+
 - Updated the default mode for `CartesiaTTSService` and
   `CartesiaHttpTTSService` to `sonic-2`.
 
