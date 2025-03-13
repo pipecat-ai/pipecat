@@ -153,6 +153,10 @@ class AudioBufferProcessor(FrameProcessor):
         self._reset_recording()
 
     async def stop_recording(self):
+        """Stop recording and trigger final audio data handlers.
+
+        Calls audio handlers with any remaining buffered audio before stopping.
+        """
         await self._call_on_audio_data_handler()
         self._recording = False
 
@@ -255,12 +259,6 @@ class AudioBufferProcessor(FrameProcessor):
             self._bot_audio_buffer.extend(resampled)
             # Save time of frame so we can compute silence.
             self._last_bot_frame_at = time.time()
-
-        if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
-            await self._call_on_audio_data_handler()
-
-        if isinstance(frame, (CancelFrame, EndFrame)):
-            await self.stop_recording()
 
     async def _call_on_audio_data_handler(self):
         if not self.has_audio() or not self._recording:
