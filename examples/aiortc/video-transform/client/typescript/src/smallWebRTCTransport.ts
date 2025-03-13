@@ -34,6 +34,7 @@ export class SmallWebRTCTransport {
     private reconnectionAttempts = 0;
     private maxReconnectionAttempts = 3;
     private isReconnecting = false;
+    private keepAliveInterval: number | null = null;
 
     constructor(callbacks: SmallWebRTCTransportCallbacks) {
         this._callbacks = callbacks
@@ -287,12 +288,22 @@ export class SmallWebRTCTransport {
 
         dc.addEventListener('close', () => {
             this.log("datachannel closed")
+            if (this.keepAliveInterval) {
+                clearInterval(this.keepAliveInterval)
+                this.keepAliveInterval = null
+            }
         });
 
         dc.addEventListener('open', () => {
             this.log("datachannel opened")
             // Sending message that the client is ready, just for testing
             dc.send(JSON.stringify({id: 'clientReady', label: 'rtvi-ai', type:'client-ready'}))
+            // @ts-ignore
+            this.keepAliveInterval = setInterval(() => {
+                const message = 'ping: ' + new Date().getTime()
+                dc.send(message);
+            }, 1000);
+
         });
 
         dc.addEventListener('message', (evt: MessageEvent) => {
