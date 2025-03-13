@@ -17,9 +17,9 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.services.ultravox import UltravoxSTTService
 from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.ultravox import UltravoxSTTService
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -30,12 +30,13 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-#Want to initialize the ultravox processor since it takes time to load the model and dont
-#want to load it every time the pipeline is run
+# Want to initialize the ultravox processor since it takes time to load the model and dont
+# want to load it every time the pipeline is run
 ultravox_processor = UltravoxSTTService(
     model_size="fixie-ai/ultravox-v0_4_1-llama-3_1-8b",
     hf_token=os.getenv("HF_TOKEN"),
 )
+
 
 async def main():
     async with aiohttp.ClientSession() as session:
@@ -56,11 +57,9 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.environ.get("CARTESIA_API_KEY"),
-            voice_id='97f4b8fb-f2fe-444b-bb9a-c109783a857a',
-
+            voice_id="97f4b8fb-f2fe-444b-bb9a-c109783a857a",
         )
 
-        
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
@@ -89,5 +88,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
