@@ -119,12 +119,25 @@ class PipelineTaskSink(FrameProcessor):
 class PipelineTask(BaseTask):
     """Manages the execution of a pipeline, handling frame processing and task lifecycle.
 
+    It has a couple of event handlers `on_frame_reached_upstream` and
+    `on_frame_reached_downstream` that are called when upstream frames or
+    downstream frames reach both ends of pipeline.
+
+       @task.event_handler("on_frame_reached_upstream")
+       async def on_frame_reached_upstream(task, frame):
+           ...
+
+       @task.event_handler("on_frame_reached_downstream")
+       async def on_frame_reached_downstream(task, frame):
+           ...
+
     Args:
         pipeline: The pipeline to execute.
         params: Configuration parameters for the pipeline.
         observers: List of observers for monitoring pipeline execution.
         clock: Clock implementation for timing operations.
         check_dangling_tasks: Whether to check for processors' tasks finishing properly.
+
     """
 
     def __init__(
@@ -176,6 +189,9 @@ class PipelineTask(BaseTask):
         self._task_manager = task_manager or TaskManager()
 
         self._observer = TaskObserver(observers=observers, task_manager=self._task_manager)
+
+        self._register_event_handler("on_frame_reached_upstream")
+        self._register_event_handler("on_frame_reached_downstream")
 
     @property
     def params(self) -> PipelineParams:
@@ -356,6 +372,9 @@ class PipelineTask(BaseTask):
         """
         while True:
             frame = await self._up_queue.get()
+
+            await self._call_event_handler("on_frame_reached_upstream", frame)
+
             if isinstance(frame, EndTaskFrame):
                 # Tell the task we should end nicely.
                 await self.queue_frame(EndFrame())
@@ -383,6 +402,9 @@ class PipelineTask(BaseTask):
         """
         while True:
             frame = await self._down_queue.get()
+
+            await self._call_event_handler("on_frame_reached_downstream", frame)
+
             if isinstance(frame, (EndFrame, StopFrame)):
                 self._pipeline_end_event.set()
             elif isinstance(frame, HeartbeatFrame):
