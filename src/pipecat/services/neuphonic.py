@@ -27,8 +27,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService, WordTTSService
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.ai_services import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for Neuphonic configuration needed
@@ -71,7 +70,7 @@ def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
     return result
 
 
-class NeuphonicTTSService(WordTTSService, WebsocketService):
+class NeuphonicTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
@@ -88,7 +87,7 @@ class NeuphonicTTSService(WordTTSService, WebsocketService):
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        WordTTSService.__init__(
+        super().__init__(
             self,
             aggregate_sentences=True,
             push_text_frames=False,
@@ -97,7 +96,6 @@ class NeuphonicTTSService(WordTTSService, WebsocketService):
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._url = url
@@ -232,7 +230,6 @@ class NeuphonicTTSService(WordTTSService, WebsocketService):
                 msg = json.loads(message)
                 if msg.get("data", {}).get("audio") is not None:
                     await self.stop_ttfb_metrics()
-                    self.start_word_timestamps()
 
                     audio = base64.b64decode(msg["data"]["audio"])
                     frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
