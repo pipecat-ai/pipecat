@@ -45,8 +45,9 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.string import match_endofsentence
+from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
+from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 from pipecat.utils.time import seconds_to_nanoseconds
 
 
@@ -237,6 +238,9 @@ class TTSService(AIService):
         pause_frame_processing: bool = False,
         # TTS output sample rate
         sample_rate: Optional[int] = None,
+        # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
+        text_aggregator: Optional[BaseTextAggregator] = None,
+        # Text filter executed after text has been aggregated.
         text_filter: Optional[BaseTextFilter] = None,
         **kwargs,
     ):
@@ -252,12 +256,12 @@ class TTSService(AIService):
         self._sample_rate = 0
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
+        self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
         self._text_filter: Optional[BaseTextFilter] = text_filter
 
         self._stop_frame_task: Optional[asyncio.Task] = None
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
-        self._current_sentence: str = ""
         self._processing_text: bool = False
 
     @property
@@ -279,6 +283,9 @@ class TTSService(AIService):
         return Language(language)
 
     async def update_setting(self, key: str, value: Any):
+        pass
+
+    async def flush_audio(self):
         pass
 
     async def start(self, frame: StartFrame):
@@ -336,8 +343,8 @@ class TTSService(AIService):
             # pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
 
-            sentence = self._current_sentence
-            self._current_sentence = ""
+            sentence = self._text_aggregator.text
+            self._text_aggregator.reset()
             self._processing_text = False
             await self._push_tts_frames(sentence)
             if isinstance(frame, LLMFullResponseEndFrame):
@@ -382,8 +389,8 @@ class TTSService(AIService):
             await self._stop_frame_queue.put(frame)
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
-        self._current_sentence = ""
         self._processing_text = False
+        self._text_aggregator.handle_interruption()
         if self._text_filter:
             self._text_filter.handle_interruption()
 
@@ -400,11 +407,7 @@ class TTSService(AIService):
         if not self._aggregate_sentences:
             text = frame.text
         else:
-            self._current_sentence += frame.text
-            eos_end_marker = match_endofsentence(self._current_sentence)
-            if eos_end_marker:
-                text = self._current_sentence[:eos_end_marker]
-                self._current_sentence = self._current_sentence[eos_end_marker:]
+            text = self._text_aggregator.aggregate(frame.text)
 
         if text:
             await self._push_tts_frames(text)
@@ -534,9 +537,6 @@ class WebsocketTTSService(TTSService, WebsocketService):
     def __init__(self, **kwargs):
         TTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self)
-
-    async def flush_audio(self):
-        pass
 
 
 class InterruptibleTTSService(WebsocketTTSService):
