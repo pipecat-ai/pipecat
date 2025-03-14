@@ -285,6 +285,9 @@ class TTSService(AIService):
     async def update_setting(self, key: str, value: Any):
         pass
 
+    async def flush_audio(self):
+        pass
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
         self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
@@ -534,9 +537,6 @@ class WebsocketTTSService(TTSService, WebsocketService):
     def __init__(self, **kwargs):
         TTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self)
-
-    async def flush_audio(self):
-        pass
 
 
 class InterruptibleTTSService(WebsocketTTSService):
