@@ -82,6 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- All event handlers are now executed in separate tasks in order to prevent
+  blocking the pipeline. It is possible that event handlers take some time to
+  execute in which case the pipeline would be blocked waiting for the event
+  handler to complete.
+
 - Updated the default mode for `CartesiaTTSService` and
   `CartesiaHttpTTSService` to `sonic-2`.
 
