@@ -102,6 +102,8 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline)
         task.set_event_loop(asyncio.get_event_loop())
+        task.set_reached_upstream_filter((TextFrame,))
+        task.set_reached_downstream_filter((TextFrame,))
 
         @task.event_handler("on_frame_reached_upstream")
         async def on_frame_reached_upstream(task, frame):
