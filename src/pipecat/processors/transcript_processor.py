@@ -90,9 +90,50 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         self._aggregation_start_time: Optional[str] = None
 
     async def _emit_aggregated_text(self):
-        """Emit aggregated text as a transcript message."""
+        """Emit aggregated text as a transcript message.
+
+        This method intelligently joins text fragments to create natural spacing,
+        handling both word-by-word and pre-spaced text fragments appropriately.
+
+        The implementation handles two common patterns from TTS services:
+
+        1. Word-by-word fragments without spacing:
+        ```
+        TTSTextFrame: ['Hello.']
+        TTSTextFrame: ['How']
+        TTSTextFrame: ['can']
+        TTSTextFrame: ['I']
+        TTSTextFrame: ['assist']
+        TTSTextFrame: ['you']
+        TTSTextFrame: ['today?']
+        ```
+        Result: "Hello. How can I assist you today?"
+
+        2. Pre-spaced fragments:
+        ```
+        TTSTextFrame: ['Hello']
+        TTSTextFrame: [' there']
+        TTSTextFrame: ['!']
+        TTSTextFrame: [' How']
+        TTSTextFrame: ["'s"]
+        TTSTextFrame: [' it']
+        TTSTextFrame: [' going']
+        TTSTextFrame: ['?']
+        ```
+        Result: "Hello there! How's it going?"
+        """
         if self._current_text_parts and self._aggregation_start_time:
-            content = " ".join(self._current_text_parts).strip()
+            # Build content with intelligent spacing
+            content = ""
+            for i, part in enumerate(self._current_text_parts):
+                # Add a space only when the current part doesn't start with
+                # whitespace or punctuation/special characters
+                if i > 0 and not part.startswith((" ", ".", ",", "!", "?", ";", ":", "'", '"')):
+                    content += " "
+                content += part
+
+            content = content.strip()
+
             if content:
                 logger.debug(f"Emitting aggregated assistant message: {content}")
                 message = TranscriptionMessage(

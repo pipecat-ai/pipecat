@@ -38,6 +38,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -312,6 +313,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # context.add_message({"role": "assistant", "content": [{"type": "text", "text": text}]})
         await self.push_frame(LLMFullResponseStartFrame())
         await self.push_frame(LLMTextFrame(text=text))
+        await self.push_frame(TTSTextFrame(text=text))
         await self.push_frame(LLMFullResponseEndFrame())
 
     async def _transcribe_audio(self, audio, context):
