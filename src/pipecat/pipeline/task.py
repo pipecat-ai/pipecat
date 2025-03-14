@@ -354,6 +354,10 @@ class PipelineTask(BaseTask):
         self._pipeline_end_event.clear()
 
     async def _cleanup(self, cleanup_pipeline: bool):
+        # Cleanup base object.
+        await self.cleanup()
+
+        # Cleanup pipeline processors.
         await self._source.cleanup()
         if cleanup_pipeline:
             await self._pipeline.cleanup()
