@@ -93,6 +93,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated the default mode for `CartesiaTTSService` and
   `CartesiaHttpTTSService` to `sonic-2`.
 
+### Removed
+
+- Removed deprecated `audio.resample_audio()`, use `create_default_resampler()`
+  instead.
+
+- Removed deprecated`stt_service` parameter from `STTMuteFilter`.
+
+- Removed deprecated RTVI processors, use an `RTVIObserver` instead.
+
+- Removed deprecated `AWSTTSService`, use `PollyTTSService` instead.
+
+- Removed deprecated field `tier` from `DailyTranscriptionSettings`, use `model`
+  instead.
+
+- Removed deprecated `pipecat.vad` package, use `pipecat.audio.vad` instead.
+
 ### Fixed
 
 - Fixed an issue in `RimeTTSService` where the last line of text sent didn't

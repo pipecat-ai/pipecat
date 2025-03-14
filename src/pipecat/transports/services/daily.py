@@ -6,7 +6,6 @@
 
 import asyncio
 import time
-import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, Optional
@@ -18,7 +17,7 @@ from daily import (
     VirtualSpeakerDevice,
 )
 from loguru import logger
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
@@ -124,7 +123,6 @@ class DailyTranscriptionSettings(BaseModel):
 
     Attributes:
         language: ISO language code for transcription (e.g. "en").
-        tier: Deprecated. Use model instead.
         model: Transcription model to use (e.g. "nova-2-general").
         profanity_filter: Whether to filter profanity from transcripts.
         redact: Whether to redact sensitive information.
@@ -135,7 +133,6 @@ class DailyTranscriptionSettings(BaseModel):
     """
 
     language: str = "en"
-    tier: Optional[str] = None
     model: str = "nova-2-general"
     profanity_filter: bool = True
     redact: bool = False
@@ -143,16 +140,6 @@ class DailyTranscriptionSettings(BaseModel):
     punctuate: bool = True
     includeRawResponse: bool = True
     extra: Mapping[str, Any] = {"interim_results": True}
-
-    @model_validator(mode="before")
-    def check_deprecated_fields(cls, values):
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            if "tier" in values:
-                warnings.warn(
-                    "Field 'tier' is deprecated, use 'model' instead.", DeprecationWarning
-                )
-        return values
 
 
 class DailyParams(TransportParams):
