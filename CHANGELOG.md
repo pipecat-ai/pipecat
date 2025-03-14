@@ -14,7 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `on_frame_reached_upstream` and `on_frame_reached_downstream` event
   handlers to `PipelineTask`. Those events will be called when a frame reaches
-  the beginning or end of the pipeline respectively.
+  the beginning or end of the pipeline respectively. Note that by default, the
+  event handlers will not be called unless a filter is set with
+  `PipelineTask.set_reached_upstream_filter()` or
+  `PipelineTask.set_reached_downstream_filter()`.
 
 - Added support for Chirp voices in `GoogleTTSService`.
 
