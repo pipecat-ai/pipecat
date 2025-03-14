@@ -41,12 +41,6 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
-# Models that support language codes
-NEUPHONIC_MULTILINGUAL_MODELS = {
-    "neu_fast",
-    "neu_hq",
-}
-
 
 def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
@@ -80,7 +74,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         *,
         api_key: str,
         voice_id: Optional[str] = None,
-        model: str = "neu_hq",
         url: str = "wss://api.neuphonic.com",
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
@@ -88,7 +81,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         **kwargs,
     ):
         super().__init__(
-            self,
             aggregate_sentences=True,
             push_text_frames=False,
             push_stop_frames=True,
@@ -105,7 +97,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
             "encoding": encoding,
             "sampling_rate": sample_rate,
         }
-        self.set_model_name(model)
         self.set_voice(voice_id)
 
         # Indicates if we have sent TTSStartedFrame. It will reset to False when
@@ -118,12 +109,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_neuphonic_lang_code(language)
-
-    async def set_model(self, model: str):
-        await super().set_model(model)
-        logger.info(f"Switching TTS model to: [{model}]")
-        await self._disconnect()
-        await self._connect()
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         if "voice_id" in settings:
@@ -155,8 +140,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
             self._started = False
-            if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -195,7 +178,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
             tts_config = {
                 **self._settings,
                 "voice_id": self._voice_id,
-                "model": self.model_name,
             }
 
             query_params = [f"api_key={self._api_key}"]
@@ -279,7 +261,6 @@ class NeuphonicHttpTTSService(TTSService):
     Args:
         api_key: Neuphonic API key
         voice_id: ID of the voice to use
-        model: Neuphonic model to use (default: "neu_hq")
         url: Base URL for the Neuphonic API (default: "https://api.neuphonic.com")
         sample_rate: Sample rate for audio output (default: 22050Hz)
         encoding: Audio encoding format (default: "pcm_linear")
@@ -296,7 +277,6 @@ class NeuphonicHttpTTSService(TTSService):
         *,
         api_key: str,
         voice_id: Optional[str] = None,
-        model: str = "neu_hq",
         url: str = "https://api.neuphonic.com",
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
@@ -313,7 +293,6 @@ class NeuphonicHttpTTSService(TTSService):
             "encoding": encoding,
             "sampling_rate": sample_rate,
         }
-        self.set_model_name(model)
         self.set_voice(voice_id)
 
     def can_generate_metrics(self) -> bool:
@@ -341,9 +320,7 @@ class NeuphonicHttpTTSService(TTSService):
 
         try:
             await self.start_ttfb_metrics()
-            response = sse.send(
-                text, TTSConfig(**self._settings, model=self.model_name, voice_id=self._voice_id)
-            )
+            response = sse.send(text, TTSConfig(**self._settings, voice_id=self._voice_id))
 
             await self.start_tts_usage_metrics(text)
             yield TTSStartedFrame()
