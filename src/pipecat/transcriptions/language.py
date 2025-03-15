@@ -54,6 +54,9 @@ class Language(StrEnum):
     AZ = "az"
     AZ_AZ = "az-AZ"
 
+    # Bashkir
+    BA = "ba"
+
     # Belarusian
     BE = "be"
 
@@ -65,6 +68,12 @@ class Language(StrEnum):
     BN = "bn"
     BN_BD = "bn-BD"
     BN_IN = "bn-IN"
+
+    # Tibetan
+    BO = "bo"
+
+    # Breton
+    BR = "br"
 
     # Bosnian
     BS = "bs"
@@ -159,6 +168,9 @@ class Language(StrEnum):
     FIL = "fil"
     FIL_PH = "fil-PH"
 
+    # Faroese
+    FO = "fo"
+
     # French
     FR = "fr"
     FR_BE = "fr-BE"
@@ -178,6 +190,9 @@ class Language(StrEnum):
     GU = "gu"
     GU_IN = "gu-IN"
 
+    # Hausa
+    HA = "ha"
+
     # Hebrew
     HE = "he"
     HE_IL = "he-IL"
@@ -189,6 +204,9 @@ class Language(StrEnum):
     # Croatian
     HR = "hr"
     HR_HR = "hr-HR"
+
+    # Haitian Creole
+    HT = "ht"
 
     # Hungarian
     HU = "hu"
@@ -224,6 +242,7 @@ class Language(StrEnum):
     # Javanese
     JV = "jv"
     JV_ID = "jv-ID"
+    JW = "jw"  # Fal requires for Javanese
 
     # Georgian
     KA = "ka"
@@ -245,6 +264,15 @@ class Language(StrEnum):
     KO = "ko"
     KO_KR = "ko-KR"
 
+    # Latin
+    LA = "la"
+
+    # Luxembourgish
+    LB = "lb"
+
+    # Lingala
+    LN = "ln"
+
     # Lao
     LO = "lo"
     LO_LA = "lo-LA"
@@ -256,6 +284,9 @@ class Language(StrEnum):
     # Latvian
     LV = "lv"
     LV_LV = "lv-LV"
+
+    # Malagasy
+    MG = "mg"
 
     # Macedonian
     MK = "mk"
@@ -289,9 +320,10 @@ class Language(StrEnum):
     MY_MM = "my-MM"
 
     # Norwegian
-    NB = "nb"
+    NB = "nb"  # Norwegian Bokmål
     NB_NO = "nb-NO"
     NO = "no"
+    NN = "nn"  # Norwegian Nynorsk
 
     # Nepali
     NE = "ne"
@@ -301,6 +333,9 @@ class Language(StrEnum):
     NL = "nl"
     NL_BE = "nl-BE"
     NL_NL = "nl-NL"
+
+    # Occitan
+    OC = "oc"
 
     # Odia
     OR = "or"
@@ -331,6 +366,12 @@ class Language(StrEnum):
     RU = "ru"
     RU_RU = "ru-RU"
 
+    # Sanskrit
+    SA = "sa"
+
+    # Sindhi
+    SD = "sd"
+
     # Sinhala
     SI = "si"
     SI_LK = "si-LK"
@@ -342,6 +383,9 @@ class Language(StrEnum):
     # Slovenian
     SL = "sl"
     SL_SI = "sl-SI"
+
+    # Shona
+    SN = "sn"
 
     # Somali
     SO = "so"
@@ -384,13 +428,22 @@ class Language(StrEnum):
     TE = "te"
     TE_IN = "te-IN"
 
+    # Tajik
+    TG = "tg"
+
     # Thai
     TH = "th"
     TH_TH = "th-TH"
 
+    # Turkmen
+    TK = "tk"
+
     # Turkish
     TR = "tr"
     TR_TR = "tr-TR"
+
+    # Tatar
+    TT = "tt"
 
     # Ukrainian
     UK = "uk"
@@ -412,6 +465,12 @@ class Language(StrEnum):
     # Wu Chinese
     WUU = "wuu"
     WUU_CN = "wuu-CN"
+
+    # Yiddish
+    YI = "yi"
+
+    # Yoruba
+    YO = "yo"
 
     # Yue Chinese
     YUE = "yue"
