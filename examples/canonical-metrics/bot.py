@@ -96,9 +96,9 @@ async def main():
         call completion, CanonicalMetrics will send the audio buffer to Canonical for
         analysis. Visit https://voice.canonical.chat to learn more.
         """
-        audio_buffer_processor = AudioBufferProcessor(num_channels=2)
+        # buffer to about 20 seconds of audio
+        audio_buffer_processor = AudioBufferProcessor(num_channels=2, buffer_size=1000000)
         canonical = CanonicalMetricsService(
-            audio_buffer_processor=audio_buffer_processor,
             aiohttp_session=session,
             api_key=os.getenv("CANONICAL_API_KEY"),
             call_id=str(uuid.uuid4()),
@@ -113,13 +113,19 @@ async def main():
                 llm,
                 tts,
                 transport.output(),
-                canonical,  # uploads audio buffer to Canonical AI for metrics
                 audio_buffer_processor,  # captures audio into a buffer
+                canonical,  # uploads audio buffer to Canonical AI for metrics
                 context_aggregator.assistant(),
             ]
         )
 
         task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+
+        @audio_buffer_processor.event_handler("on_audio_data")
+        async def on_audio_data(
+            buffer: AudioBufferProcessor, audio_buffer: bytes, sample_rate: int, num_channels: int
+        ):
+            await canonical.process_audio_buffer(audio_buffer, sample_rate, num_channels)
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
