@@ -4,6 +4,8 @@
 
 A template voice agent for [Pipecat Cloud](https://www.daily.co/products/pipecat-cloud/) that demonstrates building and deploying a conversational AI agent.
 
+> **For a detailed step-by-step guide, see our [Quickstart Documentation](https://docs.pipecat.daily.co/quickstart).**
+
 ## Prerequisites
 
 - Python 3.10+
@@ -14,25 +16,9 @@ A template voice agent for [Pipecat Cloud](https://www.daily.co/products/pipecat
 
 > **Note**: If you haven't installed Docker yet, follow the official installation guides for your platform ([Linux](https://docs.docker.com/engine/install/), [Mac](https://docs.docker.com/desktop/setup/install/mac-install/), [Windows](https://docs.docker.com/desktop/setup/install/windows-install/)). For Docker Hub, [create a free account](https://hub.docker.com/signup) and log in via terminal with `docker login`.
 
-## Getting Started
+## Get Started
 
-### 1. Set up Python environment
-
-We recommend using a virtual environment to manage your Python dependencies.
-
-```bash
-# Create a virtual environment
-python -m venv venv
-
-# Activate it
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-pip install pipecatcloud
-```
-
-### 2. Get the starter project
+### 1. Get the starter project
 
 Clone the starter project from GitHub:
 
@@ -41,11 +27,19 @@ git clone https://github.com/daily-co/pipecat-cloud-starter
 cd pipecat-cloud-starter
 ```
 
-or use the Pipecat Cloud CLI to initialize a new project:
+### 2. Set up your Python environment
+
+We recommend using a virtual environment to manage your Python dependencies.
 
 ```bash
-mkdir pipecat-cloud-starter && cd pipecat-cloud-starter
-pcc init
+# Create a virtual environment
+python -m venv .venv
+
+# Activate it
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install the Pipecat Cloud CLI
+pip install pipecatcloud
 ```
 
 ### 3. Authenticate with Pipecat Cloud
@@ -66,13 +60,24 @@ This starter requires the following API keys:
 
 You can test your agent locally before deploying to Pipecat Cloud:
 
-- `DAILY_API_KEY` value can be found at [https://pipecat.daily.co](https://pipecat.daily.co) Under the `Settings` menu of your agent, in the `Daily` tab.
-
 ```bash
 # Set environment variables with your API keys
 export CARTESIA_API_KEY="your_cartesia_key"
 export DAILY_API_KEY="your_daily_key"
 export OPENAI_API_KEY="your_openai_key"
+```
+
+> Your `DAILY_API_KEY` can be found at [https://pipecat.daily.co](https://pipecat.daily.co) under the `Settings` in the `Daily (WebRTC)` tab.
+
+First install requirements:
+
+```bash
+pip install -r requirements.txt
+```
+
+Then, launch the bot.py script locally:
+
+```bash
 LOCAL_RUN=1 python bot.py
 ```
 
@@ -118,7 +123,7 @@ pcc secrets set my-first-agent-secrets \
 ### 3. Deploy to Pipecat Cloud
 
 ```bash
-pcc deploy my-first-agent your-username/my-first-agent:0.1
+pcc deploy my-first-agent your-username/my-first-agent:0.1 --secrets my-first-agent-secrets
 ```
 
 > **Note (Optional)**: For a more maintainable approach, you can use the included `pcc-deploy.toml` file:
@@ -137,7 +142,7 @@ pcc deploy my-first-agent your-username/my-first-agent:0.1
 > **Note**: If your repository is private, you'll need to add credentials:
 >
 > ```bash
-> # Create pull secret (you'll be prompted for credentials)
+> # Create pull secret (you’ll be prompted for credentials)
 > pcc secrets image-pull-secret pull-secret https://index.docker.io/v1/
 >
 > # Deploy with credentials
