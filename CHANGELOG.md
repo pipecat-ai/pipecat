@@ -89,7 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   foundational example `19a-azure-realtime-beta.py`.
 
 - Introduced `GoogleVertexAIService`, a new class for integrating with Vertex AI
-  Gemini models.
+  Gemini models. Added foundational example
+  `14p-function-calling-gemini-vertex-ai.py`.
 
 ### Changed
 
