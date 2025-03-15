@@ -184,6 +184,12 @@ class BaseOpenAILLMService(LLMService):
         logger.debug(f"{self}: Generating chat [{context.get_messages_for_logging()}]")
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
+        # logger.debug(messages)
+        # if len(messages) > 20:
+        #     logger.debug(f"{self}: Reducing number of messages to 16")
+        #     messages = messages[:1] + messages[-15:]
+        #     context.set_messages(messages)
+        # logger.debug(messages)
 
         # base64 encode any images
         for message in messages:
@@ -199,10 +205,6 @@ class BaseOpenAILLMService(LLMService):
                 ]
                 del message["data"]
                 del message["mime_type"]
-
-        if len(messages) > 10:
-            logger.debug(f"{self}: Reducing number of messages to 10")
-            messages = messages[:1] + messages[-9:]
 
         chunks = await self.get_chat_completions(context, messages)
 
