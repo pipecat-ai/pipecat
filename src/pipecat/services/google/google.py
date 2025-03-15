@@ -1343,15 +1343,16 @@ class GoogleVertexAIService(OpenAILLMService):
     class InputParams(OpenAILLMService.InputParams):
         """Input parameters specific to Vertex AI."""
 
+        # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations
+        location: str = "us-east4"
         project_id: str
-        location: str
 
     def __init__(
         self,
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        model: str = "google/gemini-1.5-flash",
+        model: str = "google/gemini-2.0-flash-001",
         params: InputParams = OpenAILLMService.InputParams(),
         **kwargs,
     ):
@@ -1359,7 +1360,7 @@ class GoogleVertexAIService(OpenAILLMService):
         Args:
             credentials (Optional[str]): JSON string of service account credentials.
             credentials_path (Optional[str]): Path to the service account JSON file.
-            model (str): Model identifier. Defaults to "google/gemini-1.5-flash".
+            model (str): Model identifier. Defaults to "google/gemini-2.0-flash-001".
             params (InputParams): Vertex AI input parameters.
             **kwargs: Additional arguments for OpenAILLMService.
         """
