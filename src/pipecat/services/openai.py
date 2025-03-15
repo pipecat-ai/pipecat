@@ -134,6 +134,7 @@ class BaseOpenAILLMService(LLMService):
         self._client = self.create_client(
             api_key=api_key, base_url=base_url, organization=organization, project=project, **kwargs
         )
+        logger.info(f"{self}: using model {self.model_name}")
 
     def create_client(self, api_key=None, base_url=None, organization=None, project=None, **kwargs):
         return AsyncOpenAI(
