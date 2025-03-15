@@ -102,11 +102,13 @@ class FastAPIWebsocketClient:
 class FastAPIWebsocketInputTransport(BaseInputTransport):
     def __init__(
         self,
+        transport: BaseTransport,
         client: FastAPIWebsocketClient,
         params: FastAPIWebsocketParams,
         **kwargs,
     ):
         super().__init__(params, **kwargs)
+        self._transport = transport
         self._client = client
         self._params = params
         self._receive_task = None
@@ -139,6 +141,10 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         await self._stop_tasks()
         await self._client.disconnect()
 
+    async def cleanup(self):
+        await super().cleanup()
+        await self._transport.cleanup()
+
     async def _receive_messages(self):
         try:
             async for message in self._client.receive():
@@ -165,11 +171,14 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 class FastAPIWebsocketOutputTransport(BaseOutputTransport):
     def __init__(
         self,
+        transport: BaseTransport,
         client: FastAPIWebsocketClient,
         params: FastAPIWebsocketParams,
         **kwargs,
     ):
         super().__init__(params, **kwargs)
+
+        self._transport = transport
         self._client = client
         self._params = params
 
@@ -193,6 +202,10 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._client.disconnect()
+
+    async def cleanup(self):
+        await super().cleanup()
+        await self._transport.cleanup()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -266,6 +279,7 @@ class FastAPIWebsocketTransport(BaseTransport):
         output_name: Optional[str] = None,
     ):
         super().__init__(input_name=input_name, output_name=output_name)
+
         self._params = params
 
         self._callbacks = FastAPIWebsocketCallbacks(
@@ -278,10 +292,10 @@ class FastAPIWebsocketTransport(BaseTransport):
         self._client = FastAPIWebsocketClient(websocket, is_binary, self._callbacks)
 
         self._input = FastAPIWebsocketInputTransport(
-            self._client, self._params, name=self._input_name
+            self, self._client, self._params, name=self._input_name
         )
         self._output = FastAPIWebsocketOutputTransport(
-            self._client, self._params, name=self._output_name
+            self, self._client, self._params, name=self._output_name
         )
 
         # Register supported handlers. The user will only be able to register

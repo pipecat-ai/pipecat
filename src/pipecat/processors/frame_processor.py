@@ -164,6 +164,7 @@ class FrameProcessor(BaseObject):
         await self._task_manager.wait_for_task(task, timeout)
 
     async def cleanup(self):
+        await super().cleanup()
         await self.__cancel_input_task()
         await self.__cancel_push_task()
 

@@ -40,12 +40,18 @@ class PipelineRunner(BaseObject):
         task.set_event_loop(self._loop)
         await task.run()
         del self._tasks[task.name]
+
+        # Cleanup base object.
+        await self.cleanup()
+
         # If we are cancelling through a signal, make sure we wait for it so
         # everything gets cleaned up nicely.
         if self._sig_task:
             await self._sig_task
+
         if self._force_gc:
             self._gc_collect()
+
         logger.debug(f"Runner {self} finished running {task}")
 
     async def stop_when_done(self):

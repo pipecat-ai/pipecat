@@ -345,9 +345,17 @@ class LiveKitTransportClient:
 
 
 class LiveKitInputTransport(BaseInputTransport):
-    def __init__(self, client: LiveKitTransportClient, params: LiveKitParams, **kwargs):
+    def __init__(
+        self,
+        transport: BaseTransport,
+        client: LiveKitTransportClient,
+        params: LiveKitParams,
+        **kwargs,
+    ):
         super().__init__(params, **kwargs)
+        self._transport = transport
         self._client = client
+
         self._audio_in_task = None
         self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
         self._resampler = create_default_resampler()
@@ -376,6 +384,10 @@ class LiveKitInputTransport(BaseInputTransport):
         await self._client.disconnect()
         if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
             await self.cancel_task(self._audio_in_task)
+
+    async def cleanup(self):
+        await super().cleanup()
+        await self._transport.cleanup()
 
     async def push_app_message(self, message: Any, sender: str):
         frame = LiveKitTransportMessageUrgentFrame(message=message, participant_id=sender)
@@ -414,8 +426,15 @@ class LiveKitInputTransport(BaseInputTransport):
 
 
 class LiveKitOutputTransport(BaseOutputTransport):
-    def __init__(self, client: LiveKitTransportClient, params: LiveKitParams, **kwargs):
+    def __init__(
+        self,
+        transport: BaseTransport,
+        client: LiveKitTransportClient,
+        params: LiveKitParams,
+        **kwargs,
+    ):
         super().__init__(params, **kwargs)
+        self._transport = transport
         self._client = client
 
     async def start(self, frame: StartFrame):
@@ -432,6 +451,10 @@ class LiveKitOutputTransport(BaseOutputTransport):
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._client.disconnect()
+
+    async def cleanup(self):
+        await super().cleanup()
+        await self._transport.cleanup()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         if isinstance(frame, (LiveKitTransportMessageFrame, LiveKitTransportMessageUrgentFrame)):
@@ -499,13 +522,15 @@ class LiveKitTransport(BaseTransport):
 
     def input(self) -> LiveKitInputTransport:
         if not self._input:
-            self._input = LiveKitInputTransport(self._client, self._params, name=self._input_name)
+            self._input = LiveKitInputTransport(
+                self, self._client, self._params, name=self._input_name
+            )
         return self._input
 
     def output(self) -> LiveKitOutputTransport:
         if not self._output:
             self._output = LiveKitOutputTransport(
-                self._client, self._params, name=self._output_name
+                self, self._client, self._params, name=self._output_name
             )
         return self._output
 
