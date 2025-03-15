@@ -1,0 +1,5 @@
+python-dotenv
+fastapi[all]
+uvicorn
+aiortc
+pipecat-ai[google,silero]
