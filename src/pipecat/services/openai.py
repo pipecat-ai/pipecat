@@ -181,15 +181,7 @@ class BaseOpenAILLMService(LLMService):
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
-        logger.debug(f"{self}: Generating chat [{context.get_messages_for_logging()}]")
-
-        messages: List[ChatCompletionMessageParam] = context.get_messages()
-        # logger.debug(messages)
-        # if len(messages) > 20:
-        #     logger.debug(f"{self}: Reducing number of messages to 16")
-        #     messages = messages[:1] + messages[-15:]
-        #     context.set_messages(messages)
-        # logger.debug(messages)
+        # logger.debug(f"{self}: Generating chat [{context.get_messages_for_logging()}]")
 
         # base64 encode any images
         for message in messages:
