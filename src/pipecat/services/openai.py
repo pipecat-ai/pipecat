@@ -183,6 +183,8 @@ class BaseOpenAILLMService(LLMService):
     ) -> AsyncStream[ChatCompletionChunk]:
         # logger.debug(f"{self}: Generating chat [{context.get_messages_for_logging()}]")
 
+        messages: List[ChatCompletionMessageParam] = context.get_messages()
+
         # base64 encode any images
         for message in messages:
             if message.get("mime_type") == "image/jpeg":
