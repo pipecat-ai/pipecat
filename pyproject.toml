@@ -65,6 +65,7 @@ langchain = [ "langchain~=0.3.14", "langchain-community~=0.3.14", "langchain-ope
 livekit = [ "livekit~=0.19.1", "livekit-api~=0.8.1", "tenacity~=9.0.0" ]
 lmnt = [ "websockets~=13.1" ]
 local = [ "pyaudio~=0.2.14" ]
+mlx-whisper = [ "mlx-whisper~=0.4.2" ]
 moondream = [ "einops~=0.8.0", "timm~=1.0.13", "transformers~=4.48.0" ]
 nim = []
 noisereduce = [ "noisereduce~=3.0.3" ]
