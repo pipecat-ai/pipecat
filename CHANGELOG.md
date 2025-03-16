@@ -116,6 +116,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Update the `34-audio-recording.py` example to include an STT processor.
+
 - Added a Pipecat Cloud deployment example to the `examples` directory.
 
 ## [0.0.58] - 2025-02-26
