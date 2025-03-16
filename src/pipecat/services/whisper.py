@@ -9,6 +9,7 @@
 import asyncio
 from enum import Enum
 from typing import AsyncGenerator, Optional
+from typing_extensions import TYPE_CHECKING, override
 
 import numpy as np
 from loguru import logger
@@ -18,12 +19,20 @@ from pipecat.services.ai_services import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
-try:
-    from faster_whisper import WhisperModel
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
-    raise Exception(f"Missing module: {e}")
+if TYPE_CHECKING:
+    try:
+        from faster_whisper import WhisperModel
+    except ModuleNotFoundError as e:
+        logger.error(f"Exception: {e}")
+        logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
+        raise Exception(f"Missing module: {e}")
+    
+    try:
+        import mlx_whisper
+    except ModuleNotFoundError as e:
+        logger.error(f"Exception: {e}")
+        logger.error("In order to use Whisper, you need to `pip install pipecat-ai[mlx-whisper]`.")
+        raise Exception(f"Missing module: {e}")
 
 
 class Model(Enum):
@@ -50,6 +59,28 @@ class Model(Enum):
 
     # English-only models
     DISTIL_MEDIUM_EN = "Systran/faster-distil-whisper-medium.en"
+
+
+class MLXModel(Enum):
+    """Class of MLX Whisper model selection options.
+
+    Available models:
+        Multilingual models:
+            TINY: Smallest multilingual model
+            MEDIUM: Good balance for multilingual
+            LARGE_V3: Best quality multilingual
+            LARGE_V3_TURBO: Finetuned, pruned Whisper large-v3, much faster, slightly lower quality
+            DISTIL_LARGE_V3: Fast multilingual
+            LARGE_V3_TURBO_Q4: LARGE_V3_TURBO, quantized to Q4
+    """
+
+    # Multilingual models
+    TINY = "mlx-community/whisper-tiny"
+    MEDIUM = "mlx-community/whisper-medium-mlx"
+    LARGE_V3 = "mlx-community/whisper-large-v3-mlx"
+    LARGE_V3_TURBO = "mlx-community/whisper-large-v3-turbo"
+    DISTIL_LARGE_V3 = "mlx-community/distil-whisper-large-v3"
+    LARGE_V3_TURBO_Q4 = "mlx-community/whisper-large-v3-turbo-q4"
 
 
 def language_to_whisper_language(language: Language) -> Optional[str]:
@@ -299,11 +330,17 @@ class WhisperSTTService(SegmentedSTTService):
             If this is the first time this model is being run,
             it will take time to download from the Hugging Face model hub.
         """
-        logger.debug("Loading Whisper model...")
-        self._model = WhisperModel(
-            self.model_name, device=self._device, compute_type=self._compute_type
-        )
-        logger.debug("Loaded Whisper model")
+        try:
+            from faster_whisper import WhisperModel
+            logger.debug("Loading Whisper model...")
+            self._model = WhisperModel(
+                self.model_name, device=self._device, compute_type=self._compute_type
+            )
+            logger.debug("Loaded Whisper model")
+        except ModuleNotFoundError as e:
+            logger.error(f"Exception: {e}")
+            logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
+            self._model = None
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribes given audio using Whisper.
@@ -345,3 +382,104 @@ class WhisperSTTService(SegmentedSTTService):
         if text:
             logger.debug(f"Transcription: [{text}]")
             yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
+
+
+class WhisperSTTServiceMLX(WhisperSTTService):
+    """Subclass of `WhisperSTTService` with MLX Whisper model support.
+
+    This service uses MLX Whisper to perform speech-to-text transcription on audio
+    segments. It's optimized for Apple Silicon and supports multiple languages and quantizations.
+
+    Args:
+        model: The MLX Whisper model to use for transcription. Can be an MLXModel enum or string.
+        no_speech_prob: Probability threshold for filtering out non-speech segments.
+        language: The default language for transcription.
+        temperature: Temperature for sampling. Can be a float or tuple of floats.
+        **kwargs: Additional arguments passed to SegmentedSTTService.
+
+    Attributes:
+        _no_speech_threshold: Threshold for non-speech filtering.
+        _temperature: Temperature for sampling.
+        _settings: Dictionary containing service settings.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str | MLXModel = MLXModel.TINY,
+        no_speech_prob: float = 0.6,
+        language: Language = Language.EN,
+        temperature: float = 0.0,
+        **kwargs,
+    ):
+        # Skip WhisperSTTService.__init__ and call its parent directly
+        SegmentedSTTService.__init__(self, **kwargs)
+        
+        self.set_model_name(model if isinstance(model, str) else model.value)
+        self._no_speech_prob = no_speech_prob
+        self._temperature = temperature
+
+        self._settings = {
+            "language": language,
+        }
+        
+        # No need to call _load() as MLX Whisper loads models on demand
+
+    @override
+    def _load(self):
+        """MLX Whisper loads models on demand, so this is a no-op."""
+        pass
+    
+    @override
+    async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Transcribes given audio using MLX Whisper.
+
+        Args:
+            audio: Raw audio bytes in 16-bit PCM format.
+
+        Yields:
+            Frame: Either a TranscriptionFrame containing the transcribed text
+                  or an ErrorFrame if transcription fails.
+
+        Note:
+            The audio is expected to be 16-bit signed PCM data.
+            MLX Whisper will handle the conversion internally.
+        """
+        try:
+            import mlx_whisper
+            
+            await self.start_processing_metrics()
+            await self.start_ttfb_metrics()
+
+            # Divide by 32768 because we have signed 16-bit data.
+            audio_float = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
+
+            whisper_lang = self.language_to_service_language(self._settings["language"])
+            chunk = await asyncio.to_thread(
+                mlx_whisper.transcribe, audio_float,
+                path_or_hf_repo=self.model_name,
+                temperature=self._temperature,
+                language=whisper_lang
+            )
+            text: str = ""
+            for segment in chunk.get("segments", []):
+                # Drop likely hallucinations
+                if segment.get("compression_ratio", None) == 0.5555555555555556:
+                    continue
+
+                if segment.get("no_speech_prob", 0.0) < self._no_speech_prob:
+                    text += f"{segment.get('text', '')} "
+
+            if len(text.strip()) == 0:
+                text = None
+
+            await self.stop_ttfb_metrics()
+            await self.stop_processing_metrics()
+            
+            if text:
+                logger.debug(f"Transcription: [{text}]")
+                yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
+            
+        except Exception as e:
+            logger.exception(f"MLX Whisper transcription error: {e}")
+            yield ErrorFrame(f"MLX Whisper transcription error: {str(e)}")
