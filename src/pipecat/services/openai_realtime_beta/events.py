@@ -16,19 +16,8 @@ from pydantic import BaseModel, Field
 #
 
 
-class InputAudioTranscriptionModels:
-    class Whisper1(BaseModel):
-        model: Optional[Literal["whisper-1"]] = "whisper-1"
-
-    class GPT4o(BaseModel):
-        model: Optional[Literal["gpt-4o-transcribe-latest"]] = "gpt-4o-transcribe-latest"
-        language: Optional[str] = None
-        prompt: Optional[str] = None
-
-
-InputAudioTranscription = Union[
-    InputAudioTranscriptionModels.Whisper1, InputAudioTranscriptionModels.GPT4o
-]
+class InputAudioTranscription(BaseModel):
+    model: Optional[str] = "whisper-1"
 
 
 class TurnDetection(BaseModel):
