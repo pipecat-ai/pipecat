@@ -42,6 +42,10 @@ class TurnDetection(BaseModel):
     silence_duration_ms: Optional[int] = 800
 
 
+class InputAudioNoiseReduction(BaseModel):
+    type: Optional[Literal["near_field", "far_field"]]
+
+
 class SessionProperties(BaseModel):
     modalities: Optional[List[Literal["text", "audio"]]] = None
     instructions: Optional[str] = None
@@ -49,6 +53,7 @@ class SessionProperties(BaseModel):
     input_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
     output_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
     input_audio_transcription: Optional[InputAudioTranscription] = None
+    input_audio_noise_reduction: Optional[InputAudioNoiseReduction] = None
     # set turn_detection to False to disable turn detection
     turn_detection: Optional[Union[TurnDetection, bool]] = Field(default=None)
     tools: Optional[List[Dict]] = None
