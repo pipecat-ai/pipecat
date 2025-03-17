@@ -468,7 +468,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self._current_assistant_response = None
         # error handling
         if evt.response.status == "failed":
-            await self.push_error(ErrorFrame(error=evt.response.status_details["error"]["message"], fatal=True))
+            await self.push_error(
+                ErrorFrame(error=evt.response.status_details["error"]["message"], fatal=True)
+            )
             return
         # response content
         pair = self._user_and_response_message_tuple
