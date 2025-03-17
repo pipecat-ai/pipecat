@@ -23,7 +23,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai_realtime_beta import (
     AzureRealtimeBetaLLMService,
-    InputAudioTranscription,
+    InputAudioTranscriptionModels,
     SessionProperties,
     TurnDetection,
 )
@@ -90,7 +90,7 @@ async def main():
         )
 
         session_properties = SessionProperties(
-            input_audio_transcription=InputAudioTranscription(),
+            input_audio_transcription=InputAudioTranscriptionModels.Whisper1(),
             # Set openai TurnDetection parameters. Not setting this at all will turn it
             # on by default
             # turn_detection=TurnDetection(silence_duration_ms=1000),
