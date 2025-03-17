@@ -1,7 +1,7 @@
 from .azure import AzureRealtimeBetaLLMService
 from .events import (
-    InputAudioTranscription,
     InputAudioNoiseReduction,
+    InputAudioTranscription,
     SessionProperties,
     TurnDetection,
 )
