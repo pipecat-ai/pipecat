@@ -14,17 +14,17 @@ from pydantic import BaseModel, Field
 #
 # session properties
 #
-InputAudioTranscriptionModelArg = Optional[Literal["whisper-1", "gpt-4o-transcribe-latest"]]
+InputAudioTranscriptionModel = Literal["whisper-1", "gpt-4o-transcribe-latest"]
 
 
 class InputAudioTranscription(BaseModel):
-    model: InputAudioTranscriptionModelArg
+    model: InputAudioTranscriptionModel
     language: Optional[str]
     prompt: Optional[str]
 
     def __init__(
         self,
-        model: InputAudioTranscriptionModelArg = "whisper-1",
+        model: Optional[InputAudioTranscriptionModel] = "whisper-1",
         language: Optional[str] = None,
         prompt: Optional[str] = None,
     ):
