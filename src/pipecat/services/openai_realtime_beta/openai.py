@@ -117,6 +117,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self._messages_added_manually = {}
         self._user_and_response_message_tuple = None
 
+        self._register_event_handler("on_conversation_item_created")
+        self._register_event_handler("on_conversation_item_updated")
+
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -413,6 +416,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             # receive a BotStoppedSpeakingFrame from the output transport.
 
     async def _handle_evt_conversation_item_created(self, evt):
+        await self._call_event_handler("on_conversation_item_created", evt.item.id, evt.item)
+
         # This will get sent from the server every time a new "message" is added
         # to the server's conversation state, whether we create it via the API
         # or the server creates it from LLM output.
@@ -437,6 +442,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             )
 
     async def handle_evt_input_audio_transcription_completed(self, evt):
+        await self._call_event_handler("on_conversation_item_updated", evt.item_id, None)
+
         if self._send_transcription_frames:
             await self.push_frame(
                 # no way to get a language code?
@@ -473,6 +480,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             )
             return
         # response content
+        for item in evt.response.output:
+            await self._call_event_handler("on_conversation_item_updated", item.id, item)
         pair = self._user_and_response_message_tuple
         if pair:
             user, assistant = pair
