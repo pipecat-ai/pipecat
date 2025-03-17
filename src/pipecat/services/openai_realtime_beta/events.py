@@ -42,6 +42,13 @@ class TurnDetection(BaseModel):
     silence_duration_ms: Optional[int] = 800
 
 
+class SemanticTurnDetection(BaseModel):
+    type: Optional[Literal["semantic_vad"]] = "semantic_vad"
+    eagerness: Optional[Literal["low", "medium", "high", "auto"]] = None
+    create_response: Optional[bool] = None
+    interrupt_response: Optional[bool] = None
+
+
 class InputAudioNoiseReduction(BaseModel):
     type: Optional[Literal["near_field", "far_field"]]
 
@@ -55,7 +62,9 @@ class SessionProperties(BaseModel):
     input_audio_transcription: Optional[InputAudioTranscription] = None
     input_audio_noise_reduction: Optional[InputAudioNoiseReduction] = None
     # set turn_detection to False to disable turn detection
-    turn_detection: Optional[Union[TurnDetection, bool]] = Field(default=None)
+    turn_detection: Optional[Union[TurnDetection, SemanticTurnDetection, bool]] = Field(
+        default=None
+    )
     tools: Optional[List[Dict]] = None
     tool_choice: Optional[Literal["auto", "none", "required"]] = None
     temperature: Optional[float] = None
