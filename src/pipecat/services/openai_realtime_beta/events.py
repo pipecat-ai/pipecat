@@ -14,10 +14,25 @@ from pydantic import BaseModel, Field
 #
 # session properties
 #
+InputAudioTranscriptionModelArg = Optional[Literal["whisper-1", "gpt-4o-transcribe-latest"]]
 
 
 class InputAudioTranscription(BaseModel):
-    model: Optional[str] = "whisper-1"
+    model: InputAudioTranscriptionModelArg
+    language: Optional[str]
+    prompt: Optional[str]
+
+    def __init__(
+        self,
+        model: InputAudioTranscriptionModelArg = "whisper-1",
+        language: Optional[str] = None,
+        prompt: Optional[str] = None,
+    ):
+        super().__init__(model=model, language=language, prompt=prompt)
+        if self.model != "gpt-4o-transcribe-latest" and (self.language or self.prompt):
+            raise ValueError(
+                "Fields 'language' and 'prompt' are only supported when model is 'gpt-4o-transcribe-latest'"
+            )
 
 
 class TurnDetection(BaseModel):
