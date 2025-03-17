@@ -26,7 +26,9 @@ class InputAudioTranscriptionModels:
         prompt: Optional[str] = None
 
 
-InputAudioTranscription = Union[InputAudioTranscriptionModels.Whisper1, InputAudioTranscriptionModels.GPT4o]
+InputAudioTranscription = Union[
+    InputAudioTranscriptionModels.Whisper1, InputAudioTranscriptionModels.GPT4o
+]
 
 
 class TurnDetection(BaseModel):
