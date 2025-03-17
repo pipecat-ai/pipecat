@@ -87,7 +87,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gpt-4o-realtime-preview-2024-12-17",
+        # model: str = "gpt-4o-realtime-preview-2024-12-17",
+        model: str = "gpt-4o-realtime-preview-latest",
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: events.SessionProperties = events.SessionProperties(),
         start_audio_paused: bool = False,
@@ -465,6 +466,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self.stop_processing_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
         self._current_assistant_response = None
+        # error handling
+        if evt.response.status == "failed":
+            await self.push_error(ErrorFrame(error=evt.response.status_details["error"]["message"], fatal=True))
+            return
         # response content
         pair = self._user_and_response_message_tuple
         if pair:

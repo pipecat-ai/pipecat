@@ -114,7 +114,6 @@ Remember, your responses should be short. Just one or two sentences, usually."""
 
         llm = OpenAIRealtimeBetaLLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o-realtime-preview-latest",
             session_properties=session_properties,
             start_audio_paused=False,
         )
