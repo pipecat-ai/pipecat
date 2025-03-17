@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterimTranscriptionFrame,
     InputAudioRawFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -354,6 +355,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._handle_evt_audio_done(evt)
             elif evt.type == "conversation.item.created":
                 await self._handle_evt_conversation_item_created(evt)
+            elif evt.type == "conversation.item.input_audio_transcription.delta":
+                await self._handle_evt_input_audio_transcription_delta(evt)
             elif evt.type == "conversation.item.input_audio_transcription.completed":
                 await self.handle_evt_input_audio_transcription_completed(evt)
             elif evt.type == "response.done":
@@ -424,6 +427,13 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         elif evt.item.role == "assistant":
             self._current_assistant_response = evt.item
             await self.push_frame(LLMFullResponseStartFrame())
+
+    async def _handle_evt_input_audio_transcription_delta(self, evt):
+        if self._send_transcription_frames:
+            await self.push_frame(
+                # no way to get a language code?
+                InterimTranscriptionFrame(evt.delta, "", time_now_iso8601())
+            )
 
     async def handle_evt_input_audio_transcription_completed(self, evt):
         if self._send_transcription_frames:

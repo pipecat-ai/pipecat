@@ -193,6 +193,13 @@ class ConversationItemCreated(ServerEvent):
     item: ConversationItem
 
 
+class ConversationItemInputAudioTranscriptionDelta(ServerEvent):
+    type: Literal["conversation.item.input_audio_transcription.delta"]
+    item_id: str
+    content_index: int
+    delta: str
+
+
 class ConversationItemInputAudioTranscriptionCompleted(ServerEvent):
     type: Literal["conversation.item.input_audio_transcription.completed"]
     item_id: str
@@ -400,6 +407,7 @@ _server_event_types = {
     "input_audio_buffer.speech_started": InputAudioBufferSpeechStarted,
     "input_audio_buffer.speech_stopped": InputAudioBufferSpeechStopped,
     "conversation.item.created": ConversationItemCreated,
+    "conversation.item.input_audio_transcription.delta": ConversationItemInputAudioTranscriptionDelta,
     "conversation.item.input_audio_transcription.completed": ConversationItemInputAudioTranscriptionCompleted,
     "conversation.item.input_audio_transcription.failed": ConversationItemInputAudioTranscriptionFailed,
     "conversation.item.truncated": ConversationItemTruncated,
