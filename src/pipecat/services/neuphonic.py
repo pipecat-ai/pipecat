@@ -49,6 +49,11 @@ def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
         Language.ES: "es",
         Language.NL: "nl",
         Language.AR: "ar",
+        Language.FR: "fr",
+        Language.PT: "pt",
+        Language.RU: "ru",
+        Language.HI: "HI",
+        Language.ZH: "zh",
     }
 
     result = BASE_LANGUAGES.get(language)
