@@ -10,6 +10,7 @@ import io
 import json
 import os
 import time
+import uuid
 
 from google.api_core.exceptions import DeadlineExceeded
 from openai import AsyncStream
@@ -33,20 +34,22 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    FunctionCallResultProperties,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
-    OpenAILLMContextAssistantTimestampFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     URLImageRawFrame,
+    UserImageMessageFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -565,91 +568,69 @@ class GoogleUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    async def push_aggregation(self):
-        if not (
-            self._aggregation or self._function_call_result or self._pending_image_frame_message
-        ):
+    async def handle_aggregation(self, aggregation: str):
+        self._context.add_message(glm.Content(role="model", parts=[glm.Part(text=aggregation)]))
+
+    async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
+        self._context.add_message(
+            glm.Content(
+                role="model",
+                parts=[
+                    glm.Part(
+                        function_call=glm.FunctionCall(
+                            id=frame.tool_call_id, name=frame.function_name, args=frame.arguments
+                        )
+                    )
+                ],
+            )
+        )
+        self._context.add_message(
+            glm.Content(
+                role="user",
+                parts=[
+                    glm.Part(
+                        function_response=glm.FunctionResponse(
+                            id=frame.tool_call_id,
+                            name=frame.function_name,
+                            response={"response": "IN_PROGRESS"},
+                        )
+                    )
+                ],
+            )
+        )
+
+    async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+        if not frame.result:
             return
 
-        run_llm = False
-        properties: Optional[FunctionCallResultProperties] = None
+        if not isinstance(frame.result, str):
+            return
 
-        aggregation = self._aggregation.strip()
-        self.reset()
+        response = {"response": frame.result}
 
-        try:
-            if aggregation:
-                self._context.add_message(
-                    glm.Content(role="model", parts=[glm.Part(text=aggregation)])
-                )
+        await self._update_function_call_result(frame.function_name, frame.tool_call_id, response)
 
-            if self._function_call_result:
-                frame = self._function_call_result
-                properties = frame.properties
-                self._function_call_result = None
-                if frame.result:
-                    logger.debug(f"FunctionCallResultFrame result: {frame.arguments}")
-                    self._context.add_message(
-                        glm.Content(
-                            role="model",
-                            parts=[
-                                glm.Part(
-                                    function_call=glm.FunctionCall(
-                                        name=frame.function_name, args=frame.arguments
-                                    )
-                                )
-                            ],
-                        )
-                    )
-                    response = frame.result
-                    if isinstance(response, str):
-                        response = {"response": response}
-                    self._context.add_message(
-                        glm.Content(
-                            role="user",
-                            parts=[
-                                glm.Part(
-                                    function_response=glm.FunctionResponse(
-                                        name=frame.function_name, response=response
-                                    )
-                                )
-                            ],
-                        )
-                    )
-                    if properties and properties.run_llm is not None:
-                        # If the tool call result has a run_llm property, use it
-                        run_llm = properties.run_llm
-                    else:
-                        # Default behavior is to run the LLM if there are no function calls in progress
-                        run_llm = not bool(self._function_calls_in_progress)
+    async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
+        await self._update_function_call_result(
+            frame.function_name, frame.tool_call_id, "CANCELLED"
+        )
 
-            if self._pending_image_frame_message:
-                frame = self._pending_image_frame_message
-                self._pending_image_frame_message = None
-                self._context.add_image_frame_message(
-                    format=frame.user_image_raw_frame.format,
-                    size=frame.user_image_raw_frame.size,
-                    image=frame.user_image_raw_frame.image,
-                    text=frame.text,
-                )
-                run_llm = True
+    async def _update_function_call_result(
+        self, function_name: str, tool_call_id: str, result: Any
+    ):
+        for message in self._context.messages:
+            if message.role == "user":
+                for part in message.parts:
+                    if part.function_response and part.function_response.id == tool_call_id:
+                        part.function_response.response = result
 
-            if run_llm:
-                await self.push_context_frame(FrameDirection.UPSTREAM)
-
-            # Emit the on_context_updated callback once the function call result is added to the context
-            if properties and properties.on_context_updated is not None:
-                await properties.on_context_updated()
-
-            # Push context frame
-            await self.push_context_frame()
-
-            # Push timestamp frame with current time
-            timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
-            await self.push_frame(timestamp_frame)
-
-        except Exception as e:
-            logger.exception(f"Error processing frame: {e}")
+    async def handle_image_frame_message(self, frame: UserImageMessageFrame):
+        self._context.add_image_frame_message(
+            format=frame.user_image_raw_frame.format,
+            size=frame.user_image_raw_frame.size,
+            image=frame.user_image_raw_frame.image,
+            text=frame.text,
+        )
 
 
 @dataclass
@@ -1071,7 +1052,7 @@ class GoogleLLMService(LLMService):
                             args = type(c.function_call).to_dict(c.function_call).get("args", {})
                             await self.call_function(
                                 context=context,
-                                tool_call_id="what_should_this_be",
+                                tool_call_id=str(uuid.uuid4()),
                                 function_name=c.function_call.name,
                                 arguments=args,
                             )

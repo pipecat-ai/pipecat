@@ -634,6 +634,15 @@ class FunctionCallInProgressFrame(SystemFrame):
     function_name: str
     tool_call_id: str
     arguments: str
+    cancel_on_interruption: bool
+
+
+@dataclass
+class FunctionCallCancelFrame(SystemFrame):
+    """A frame to signal a function call has been cancelled."""
+
+    function_name: str
+    tool_call_id: str
 
 
 @dataclass
@@ -704,6 +713,18 @@ class VisionImageRawFrame(InputImageRawFrame):
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, text: [{self.text}], size: {self.size}, format: {self.format})"
+
+
+@dataclass
+class UserImageMessageFrame(SystemFrame):
+    """An image associated to a user."""
+
+    user_image_raw_frame: UserImageRawFrame
+    text: Optional[str] = None
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, image: {self.user_image_raw_frame}, text: {self.text})"
 
 
 #

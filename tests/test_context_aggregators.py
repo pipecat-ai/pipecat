@@ -418,7 +418,7 @@ class BaseTestUserContextAggregator:
 class BaseTestAssistantContextAggreagator:
     CONTEXT_CLASS = None  # To be set in subclasses
     AGGREGATOR_CLASS = None  # To be set in subclasses
-    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
+    EXPECTED_CONTEXT_FRAMES = None  # To be set in subclasses
 
     def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
         assert context.messages[index]["content"] == content
@@ -577,6 +577,7 @@ class TestLLMAssistantContextAggregator(
 ):
     CONTEXT_CLASS = OpenAILLMContext
     AGGREGATOR_CLASS = LLMAssistantContextAggregator
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
 
 
 #
