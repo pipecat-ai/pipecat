@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `PatternPairAggregator` that extends `BaseTextAggregator` to
+  identify content between matching pattern pairs in streamed text. This allows
+  for detection and processing of structured content like XML-style tags that
+  may span across multiple text chunks or sentence boundaries.
+
 - Added new `BaseTextAggregator`. Text aggregators are used by the TTS service
   to aggregate LLM tokens and decide when the aggregated text should be pushed
   to the TTS service. It also allows for the text to be manipulated while it's
@@ -123,6 +128,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Other
 
 - Update the `34-audio-recording.py` example to include an STT processor.
+
+- Added foundational example `35-voice-switching.py` showing how to use the new
+  `PatternPairAggregator`.
 
 - Added a Pipecat Cloud deployment example to the `examples` directory.
 
