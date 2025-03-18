@@ -7,16 +7,22 @@
 import unittest
 
 from pipecat.frames.frames import (
+    EndFrame,
+    Frame,
     ImageRawFrame,
+    InputDTMFFrame,
+    KeypadEntry,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     TextFrame,
+    TranscriptionFrame,
 )
+from pipecat.processors.aggregators.dtmf_aggregator import DTMFAggregator
 from pipecat.processors.aggregators.gated import GatedAggregator
 from pipecat.processors.aggregators.sentence import SentenceAggregator
-from pipecat.tests.utils import run_test
+from pipecat.tests.utils import SleepFrame, run_test
 
 
 class TestSentenceAggregator(unittest.IsolatedAsyncioTestCase):
@@ -73,4 +79,131 @@ class TestGatedAggregator(unittest.IsolatedAsyncioTestCase):
             gated_aggregator,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+        )
+
+
+class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
+    async def test_basic_aggregation(self):
+        aggregator = DTMFAggregator()
+        frames_to_send = [
+            InputDTMFFrame(button=KeypadEntry.ONE),
+            InputDTMFFrame(button=KeypadEntry.TWO),
+            InputDTMFFrame(button=KeypadEntry.THREE),
+            InputDTMFFrame(button=KeypadEntry.POUND),
+        ]
+        expected_returned_frames = [TranscriptionFrame]
+        received_down_frames, _ = received_down_frames, received_up_frames = await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+        self.assertEqual(
+            received_down_frames[0].text,
+            "123#",
+        )
+
+    async def test_timeout_aggregation(self):
+        aggregator = DTMFAggregator(timeout=0.1)
+        frames_to_send = [
+            InputDTMFFrame(button=KeypadEntry.ONE),
+            InputDTMFFrame(button=KeypadEntry.TWO),
+            SleepFrame(sleep=0.2),
+            InputDTMFFrame(button=KeypadEntry.THREE),
+        ]
+        expected_returned_frames = [TranscriptionFrame, TranscriptionFrame]
+        received_down_frames, received_up_frames = await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+        self.assertEqual(
+            received_down_frames[0].text,
+            "12",
+        )
+
+        self.assertEqual(
+            received_down_frames[1].text,
+            "3",
+        )
+
+    async def test_multiple_aggregations(self):
+        aggregator = DTMFAggregator(timeout=0.1)
+        frames_to_send = [
+            InputDTMFFrame(button=KeypadEntry.ONE),
+            InputDTMFFrame(button=KeypadEntry.TWO),
+            InputDTMFFrame(button=KeypadEntry.POUND),
+            InputDTMFFrame(button=KeypadEntry.FOUR),
+            InputDTMFFrame(button=KeypadEntry.FIVE),
+        ]
+        expected_returned_frames = [TranscriptionFrame, TranscriptionFrame]
+        received_down_frames, received_up_frames = await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+        self.assertEqual(
+            received_down_frames[0].text,
+            "12#",
+        )
+
+        self.assertEqual(
+            received_down_frames[1].text,
+            "45",
+        )
+
+    async def test_end_frame_flush(self):
+        aggregator = DTMFAggregator(timeout=1.0)
+        frames_to_send = [
+            InputDTMFFrame(button=KeypadEntry.ONE),
+            InputDTMFFrame(button=KeypadEntry.TWO),
+            EndFrame(),
+        ]
+        expected_returned_frames = [TranscriptionFrame]
+        received_down_frames, received_up_frames = await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+        self.assertEqual(
+            received_down_frames[0].text,
+            "12",
+        )
+
+    async def test_non_dtmf_frame_pass_through(self):
+        aggregator = DTMFAggregator(timeout=0.1)
+        test_frame = Frame()
+        frames_to_send = [
+            InputDTMFFrame(button=KeypadEntry.ONE),
+            test_frame,
+            InputDTMFFrame(button=KeypadEntry.POUND),
+        ]
+        expected_returned_frames = [Frame, TranscriptionFrame]
+        received_down_frames, received_up_frames = await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+        self.assertEqual(
+            received_down_frames[1].text,
+            "1#",
+        )
+
+    async def test_no_dtmf_input(self):
+        aggregator = DTMFAggregator(timeout=0.1)
+        frames_to_send = [Frame(), EndFrame()]
+        expected_returned_frames = [Frame]
+        received_down_frames, received_up_frames = await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+        self.assertEqual(
+            len(received_down_frames),
+            1,
         )
