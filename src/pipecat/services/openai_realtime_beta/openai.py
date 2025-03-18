@@ -119,12 +119,19 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
         self._register_event_handler("on_conversation_item_created")
         self._register_event_handler("on_conversation_item_updated")
+        self._retrieve_conversation_item_futures = {}
 
     def can_generate_metrics(self) -> bool:
         return True
 
     def set_audio_input_paused(self, paused: bool):
         self._audio_input_paused = paused
+
+    async def retrieve_conversation_item(self, item_id: str):
+        future = self.get_event_loop().create_future()
+        self._retrieve_conversation_item_futures[item_id] = future
+        await self.send_client_event(events.ConversationItemRetrieveEvent(item_id=item_id))
+        return await future
 
     #
     # standard AIService frame handling
@@ -363,6 +370,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._handle_evt_input_audio_transcription_delta(evt)
             elif evt.type == "conversation.item.input_audio_transcription.completed":
                 await self.handle_evt_input_audio_transcription_completed(evt)
+            elif evt.type == "conversation.item.retrieved":
+                await self._handle_conversation_item_retrieved(evt)
             elif evt.type == "response.done":
                 await self._handle_evt_response_done(evt)
             elif evt.type == "input_audio_buffer.speech_started":
@@ -460,6 +469,14 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         else:
             # User message without preceding conversation.item.created. Bug?
             logger.warning(f"Transcript for unknown user message: {evt}")
+
+    async def _handle_conversation_item_retrieved(self, evt: events.ConversationItemRetrieved):
+        future = self._retrieve_conversation_item_futures.get(evt.item.id)
+        if future:
+            # print(f"[pk] setting result: {evt.item}")
+            future.set_result(evt.item)
+            # TODO: handle error
+            # TODO: what happens if we try to receive bogus item id?
 
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
