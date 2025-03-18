@@ -131,8 +131,14 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     async def retrieve_conversation_item(self, item_id: str):
         future = self.get_event_loop().create_future()
-        self._retrieve_conversation_item_futures[item_id] = future
-        await self.send_client_event(events.ConversationItemRetrieveEvent(item_id=item_id))
+        retrieval_in_progress = False
+        if not self._retrieve_conversation_item_futures.get(item_id):
+            self._retrieve_conversation_item_futures[item_id] = []
+        else:
+            retrieval_in_progress = True
+        self._retrieve_conversation_item_futures[item_id].append(future)
+        if not retrieval_in_progress:
+            await self.send_client_event(events.ConversationItemRetrieveEvent(item_id=item_id))
         return await future
 
     #
@@ -474,10 +480,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             logger.warning(f"Transcript for unknown user message: {evt}")
 
     async def _handle_conversation_item_retrieved(self, evt: events.ConversationItemRetrieved):
-        future = self._retrieve_conversation_item_futures.pop(evt.item.id, None)
-        if future:
-            # print(f"[pk] setting result: {evt.item}")
-            future.set_result(evt.item)
+        futures = self._retrieve_conversation_item_futures.pop(evt.item.id, None)
+        if futures:
+            for future in futures:
+                future.set_result(evt.item)
 
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
@@ -543,9 +549,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         )
         if match:
             item_id = match.group(1)
-            future = self._retrieve_conversation_item_futures.pop(item_id, None)
-            if future:
-                future.set_exception(Exception(evt.error.message))
+            futures = self._retrieve_conversation_item_futures.pop(item_id, None)
+            if futures:
+                for future in futures:
+                    future.set_exception(Exception(evt.error.message))
             return True
         return False
 
