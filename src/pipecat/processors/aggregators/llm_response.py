@@ -253,7 +253,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     def set_tools(self, tools: List):
         self._context.set_tools(tools)
 
-    def set_tool_choice(self, tool_choice: Literal["none", "auto", "required"]):
+    def set_tool_choice(self, tool_choice: Literal["none", "auto", "required"] | str):
         self._context.set_tool_choice(tool_choice)
 
     def reset(self):
