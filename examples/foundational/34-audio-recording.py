@@ -32,6 +32,7 @@ Requirements:
         OPENAI_API_KEY=your_openai_key
         CARTESIA_API_KEY=your_cartesia_key
         DAILY_API_KEY=your_daily_key
+        DEEPGRAM_API_KEY=your_deepgram_key
 
 The recordings will be saved in a 'recordings' directory with timestamps:
     recordings/
@@ -65,6 +66,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -98,12 +100,13 @@ async def main():
             DailyParams(
                 # audio_in_enabled=True,
                 audio_out_enabled=True,
-                transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True,  # Enable audio passthrough for recording
+                vad_audio_passthrough=True,
             ),
         )
+
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"), audio_passthrough=True)
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
@@ -128,6 +131,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),
+                stt,
                 context_aggregator.user(),
                 llm,
                 tts,
