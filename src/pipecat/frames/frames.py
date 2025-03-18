@@ -362,6 +362,7 @@ class LLMSetToolsFrame(DataFrame):
 
     tools: List[dict]
 
+
 @dataclass
 class LLMSetToolChoiceFrame(DataFrame):
     """A frame containing a tool choice for an LLM to use for function calling."""
