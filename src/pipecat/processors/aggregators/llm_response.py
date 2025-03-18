@@ -7,7 +7,7 @@
 import asyncio
 import time
 from abc import abstractmethod
-from typing import List
+from typing import List, Literal
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
+    LLMSetToolChoiceFrame,
     LLMTextFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -133,6 +134,11 @@ class BaseLLMResponseAggregator(FrameProcessor):
         pass
 
     @abstractmethod
+    def set_tool_choice(self, tool_choice):
+        """Set the tool choice. This should modify the LLM context."""
+        pass
+
+    @abstractmethod
     def reset(self):
         """Reset the internals of this aggregator. This should not modify the
         internal messages."""
@@ -183,6 +189,9 @@ class LLMResponseAggregator(BaseLLMResponseAggregator):
         self._messages.extend(messages)
 
     def set_tools(self, tools):
+        pass
+
+    def set_tool_choice(self, tool_choice):
         pass
 
     def reset(self):
@@ -243,6 +252,9 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
 
     def set_tools(self, tools: List):
         self._context.set_tools(tools)
+
+    def set_tool_choice(self, tool_choice: Literal["none", "auto", "required"]):
+        self._context.set_tool_choice(tool_choice)
 
     def reset(self):
         self._aggregation = ""
@@ -328,6 +340,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             self.set_messages(frame.messages)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
+        elif isinstance(frame, LLMSetToolChoiceFrame):
+            self.set_tool_choice(frame.tool_choice)
         else:
             await self.push_frame(frame, direction)
 
@@ -448,6 +462,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             self.set_messages(frame.messages)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
+        elif isinstance(frame, LLMSetToolChoiceFrame):
+            self.set_tool_choice(frame.tool_choice)
         else:
             await self.push_frame(frame, direction)
 
