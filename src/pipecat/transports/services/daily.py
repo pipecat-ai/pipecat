@@ -811,9 +811,16 @@ class DailyInputTransport(BaseInputTransport):
         params: Configuration parameters.
     """
 
-    def __init__(self, client: DailyTransportClient, params: DailyParams, **kwargs):
+    def __init__(
+        self,
+        transport: BaseTransport,
+        client: DailyTransportClient,
+        params: DailyParams,
+        **kwargs,
+    ):
         super().__init__(params, **kwargs)
 
+        self._transport = transport
         self._client = client
         self._params = params
 
@@ -881,6 +888,7 @@ class DailyInputTransport(BaseInputTransport):
     async def cleanup(self):
         await super().cleanup()
         await self._client.cleanup()
+        await self._transport.cleanup()
 
     #
     # FrameProcessor
@@ -971,9 +979,12 @@ class DailyOutputTransport(BaseOutputTransport):
         params: Configuration parameters.
     """
 
-    def __init__(self, client: DailyTransportClient, params: DailyParams, **kwargs):
+    def __init__(
+        self, transport: BaseTransport, client: DailyTransportClient, params: DailyParams, **kwargs
+    ):
         super().__init__(params, **kwargs)
 
+        self._transport = transport
         self._client = client
 
         # Whether we have seen a StartFrame already.
@@ -1008,6 +1019,7 @@ class DailyOutputTransport(BaseOutputTransport):
     async def cleanup(self):
         await super().cleanup()
         await self._client.cleanup()
+        await self._transport.cleanup()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._client.send_message(frame)
@@ -1109,12 +1121,16 @@ class DailyTransport(BaseTransport):
 
     def input(self) -> DailyInputTransport:
         if not self._input:
-            self._input = DailyInputTransport(self._client, self._params, name=self._input_name)
+            self._input = DailyInputTransport(
+                self, self._client, self._params, name=self._input_name
+            )
         return self._input
 
     def output(self) -> DailyOutputTransport:
         if not self._output:
-            self._output = DailyOutputTransport(self._client, self._params, name=self._output_name)
+            self._output = DailyOutputTransport(
+                self, self._client, self._params, name=self._output_name
+            )
         return self._output
 
     #
