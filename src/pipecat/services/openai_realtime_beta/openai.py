@@ -23,6 +23,8 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
+import re
+
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -381,9 +383,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             elif evt.type == "response.audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "error":
-                await self._handle_evt_error(evt)
-                # errors are fatal, so exit the receive loop
-                return
+                if not await self._maybe_handle_evt_retrieve_conversation_item_error(evt):
+                    await self._handle_evt_error(evt)
+                    # errors are fatal, so exit the receive loop
+                    return
 
     async def _handle_evt_session_created(self, evt):
         # session.created is received right after connecting. Send a message
@@ -471,12 +474,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             logger.warning(f"Transcript for unknown user message: {evt}")
 
     async def _handle_conversation_item_retrieved(self, evt: events.ConversationItemRetrieved):
-        future = self._retrieve_conversation_item_futures.get(evt.item.id)
+        future = self._retrieve_conversation_item_futures.pop(evt.item.id, None)
         if future:
             # print(f"[pk] setting result: {evt.item}")
             future.set_result(evt.item)
-            # TODO: handle error
-            # TODO: what happens if we try to receive bogus item id?
 
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
@@ -529,6 +530,24 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self._stop_interruption()
         await self.push_frame(StopInterruptionFrame())
         await self.push_frame(UserStoppedSpeakingFrame())
+
+    async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt: events.ErrorEvent):
+        """If the given error event is an error retrieving a conversation item:
+        - set an exception on the future that retrieve_conversation_item() is waiting on
+        - return true
+        Otherwise:
+        - return false
+        """
+        match = re.match(
+            r"^Error retrieving item: the item with id '(.*)' does not exist\.$", evt.error.message
+        )
+        if match:
+            item_id = match.group(1)
+            future = self._retrieve_conversation_item_futures.pop(item_id, None)
+            if future:
+                future.set_exception(Exception(evt.error.message))
+            return True
+        return False
 
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
