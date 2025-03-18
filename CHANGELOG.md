@@ -90,6 +90,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `TranscriptProcessor` to support text output from
+  `OpenAIRealtimeBetaLLMService`.
+
+- `OpenAIRealtimeBetaLLMService` and `GeminiMultimodalLiveLLMService` now push
+  a `TTSTextFrame`.
+
 - Updated the default mode for `CartesiaTTSService` and
   `CartesiaHttpTTSService` to `sonic-2`.
 
@@ -119,6 +125,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update the `34-audio-recording.py` example to include an STT processor.
 
 - Added a Pipecat Cloud deployment example to the `examples` directory.
+
+- Removed foundational examples 28b and 28c as the TranscriptProcessor no
+  longer has an LLM depedency. Renamed foundational example 28a to
+  `28-transcript-processor.py`.
 
 ## [0.0.58] - 2025-02-26
 
