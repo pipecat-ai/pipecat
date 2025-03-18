@@ -179,6 +179,11 @@ class ConversationItemDeleteEvent(ClientEvent):
     item_id: str
 
 
+class ConversationItemRetrieveEvent(ClientEvent):
+    type: Literal["conversation.item.retrieve"] = "conversation.item.retrieve"
+    item_id: str
+
+
 class ResponseCreateEvent(ClientEvent):
     type: Literal["response.create"] = "response.create"
     response: Optional[ResponseProperties] = None
@@ -253,6 +258,11 @@ class ConversationItemTruncated(ServerEvent):
 class ConversationItemDeleted(ServerEvent):
     type: Literal["conversation.item.deleted"]
     item_id: str
+
+
+class ConversationItemRetrieved(ServerEvent):
+    type: Literal["conversation.item.retrieved"]
+    item: ConversationItem
 
 
 class ResponseCreated(ServerEvent):
@@ -441,6 +451,7 @@ _server_event_types = {
     "conversation.item.input_audio_transcription.failed": ConversationItemInputAudioTranscriptionFailed,
     "conversation.item.truncated": ConversationItemTruncated,
     "conversation.item.deleted": ConversationItemDeleted,
+    "conversation.item.retrieved": ConversationItemRetrieved,
     "response.created": ResponseCreated,
     "response.done": ResponseDone,
     "response.output_item.added": ResponseOutputItemAdded,
