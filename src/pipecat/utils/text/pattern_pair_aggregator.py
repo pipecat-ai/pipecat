@@ -5,7 +5,7 @@
 #
 
 import re
-from typing import Callable, Dict, Optional, Pattern, Tuple, Union
+from typing import Callable, Optional, Tuple
 
 from loguru import logger
 

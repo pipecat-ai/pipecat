@@ -130,7 +130,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update the `34-audio-recording.py` example to include an STT processor.
 
 - Added foundational example `35-voice-switching.py` showing how to use the new
-  `PatternPairAggregator`.
+  `PatternPairAggregator`. This example shows how to encode information for the
+  LLM to instruct TTS voice changes, but this can be used to encode any
+  information into the LLM response, which you want to parse and use in other
+  parts of your application.
 
 - Added a Pipecat Cloud deployment example to the `examples` directory.
 
