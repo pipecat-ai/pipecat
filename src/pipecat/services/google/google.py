@@ -1316,9 +1316,12 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
 
 
 class GoogleVertexLLMService(OpenAILLMService):
-    """Implements inference with Google's AI models via Vertex AI while maintaining OpenAI API compatibility.
+    """Implements inference with Google's AI models via Vertex AI while
+    maintaining OpenAI API compatibility.
+
     Reference:
     https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library
+
     """
 
     class InputParams(OpenAILLMService.InputParams):

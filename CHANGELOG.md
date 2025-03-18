@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   being aggregated. A text aggregator can be passed via `text_aggregator` to the
   TTS service.
 
+- Added new `sample_rate` constructor parameter to `TavusVideoService` to allow
+  changing the output sample rate.
+
 - Added new `UltravoxSTTService`.
   (see https://github.com/fixie-ai/ultravox)
 
