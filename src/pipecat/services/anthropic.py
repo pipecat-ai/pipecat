@@ -21,17 +21,16 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.frames.frames import (
     Frame,
+    FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    FunctionCallResultProperties,
     LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
-    OpenAILLMContextAssistantTimestampFrame,
-    StartInterruptionFrame,
+    UserImageMessageFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
     VisionImageRawFrame,
@@ -47,7 +46,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
-from pipecat.utils.time import time_now_iso8601
 
 try:
     from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
@@ -58,13 +56,6 @@ except ModuleNotFoundError as e:
         + "Also, set `ANTHROPIC_API_KEY` environment variable."
     )
     raise Exception(f"Missing module: {e}")
-
-
-# internal use only -- todo: refactor
-@dataclass
-class AnthropicImageMessageFrame(Frame):
-    user_image_raw_frame: UserImageRawFrame
-    text: Optional[str] = None
 
 
 @dataclass
@@ -715,7 +706,7 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
                 text = self._context._user_image_request_context.get(frame.user_id) or ""
                 if text:
                     del self._context._user_image_request_context[frame.user_id]
-                frame = AnthropicImageMessageFrame(user_image_raw_frame=frame, text=text)
+                frame = UserImageMessageFrame(user_image_raw_frame=frame, text=text)
                 await self.push_frame(frame)
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
@@ -734,110 +725,61 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
     def __init__(self, context: OpenAILLMContext | AnthropicLLMContext, **kwargs):
         super().__init__(context=context, **kwargs)
-        self._function_call_in_progress = None
-        self._function_call_result = None
-        self._pending_image_frame_message = None
 
-    async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-        # See note above about not calling push_frame() here.
-        if isinstance(frame, StartInterruptionFrame):
-            self._function_call_in_progress = None
-            self._function_call_finished = None
-        elif isinstance(frame, FunctionCallInProgressFrame):
-            self._function_call_in_progress = frame
-        elif isinstance(frame, FunctionCallResultFrame):
-            if (
-                self._function_call_in_progress
-                and self._function_call_in_progress.tool_call_id == frame.tool_call_id
-            ):
-                self._function_call_in_progress = None
-                self._function_call_result = frame
-                await self.push_aggregation()
-            else:
-                logger.warning(
-                    "FunctionCallResultFrame tool_call_id != InProgressFrame tool_call_id"
-                )
-                self._function_call_in_progress = None
-                self._function_call_result = None
-        elif isinstance(frame, AnthropicImageMessageFrame):
-            self._pending_image_frame_message = frame
-            await self.push_aggregation()
+    async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
+        assistant_message = {"role": "assistant", "content": []}
+        assistant_message["content"].append(
+            {
+                "type": "tool_use",
+                "id": frame.tool_call_id,
+                "name": frame.function_name,
+                "input": frame.arguments,
+            }
+        )
+        self._context.add_message(assistant_message)
+        self._context.add_message(
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": frame.tool_call_id,
+                        "content": "IN_PROGRESS",
+                    }
+                ],
+            }
+        )
 
-    async def push_aggregation(self):
-        if not (
-            self._aggregation or self._function_call_result or self._pending_image_frame_message
-        ):
+    async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+        if not frame.result:
             return
 
-        run_llm = False
-        properties: Optional[FunctionCallResultProperties] = None
+        result = json.dumps(frame.result)
 
-        aggregation = self._aggregation.strip()
-        self.reset()
+        await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
 
-        try:
-            if aggregation:
-                self._context.add_message({"role": "assistant", "content": aggregation})
+    async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
+        await self._update_function_call_result(
+            frame.function_name, frame.tool_call_id, "CANCELLED"
+        )
 
-            if self._function_call_result:
-                frame = self._function_call_result
-                properties = frame.properties
-                self._function_call_result = None
-                if frame.result:
-                    assistant_message = {"role": "assistant", "content": []}
-                    assistant_message["content"].append(
-                        {
-                            "type": "tool_use",
-                            "id": frame.tool_call_id,
-                            "name": frame.function_name,
-                            "input": frame.arguments,
-                        }
-                    )
-                    self._context.add_message(assistant_message)
-                    self._context.add_message(
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": frame.tool_call_id,
-                                    "content": json.dumps(frame.result),
-                                }
-                            ],
-                        }
-                    )
-                    if properties and properties.run_llm is not None:
-                        # If the tool call result has a run_llm property, use it
-                        run_llm = properties.run_llm
-                    else:
-                        # Default behavior
-                        run_llm = True
+    async def _update_function_call_result(
+        self, function_name: str, tool_call_id: str, result: str
+    ):
+        for message in self._context.messages:
+            if message["role"] == "user":
+                for content in message["content"]:
+                    if (
+                        isinstance(content, dict)
+                        and content["type"] == "tool_result"
+                        and content["tool_use_id"] == tool_call_id
+                    ):
+                        content["content"] = result
 
-            if self._pending_image_frame_message:
-                frame = self._pending_image_frame_message
-                self._pending_image_frame_message = None
-                self._context.add_image_frame_message(
-                    format=frame.user_image_raw_frame.format,
-                    size=frame.user_image_raw_frame.size,
-                    image=frame.user_image_raw_frame.image,
-                    text=frame.text,
-                )
-                run_llm = True
-
-            if run_llm:
-                await self.push_context_frame(FrameDirection.UPSTREAM)
-
-            # Emit the on_context_updated callback once the function call result is added to the context
-            if properties and properties.on_context_updated is not None:
-                await properties.on_context_updated()
-
-            # Push context frame
-            await self.push_context_frame()
-
-            # Push timestamp frame with current time
-            timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
-            await self.push_frame(timestamp_frame)
-
-        except Exception as e:
-            logger.error(f"Error processing frame: {e}")
+    async def handle_image_frame_message(self, frame: UserImageMessageFrame):
+        self._context.add_image_frame_message(
+            format=frame.user_image_raw_frame.format,
+            size=frame.user_image_raw_frame.size,
+            image=frame.user_image_raw_frame.image,
+            text=frame.text,
+        )
