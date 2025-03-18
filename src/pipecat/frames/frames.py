@@ -367,7 +367,7 @@ class LLMSetToolsFrame(DataFrame):
 class LLMSetToolChoiceFrame(DataFrame):
     """A frame containing a tool choice for an LLM to use for function calling."""
 
-    tool_choice: Literal["none", "auto", "required"]
+    tool_choice: Literal["none", "auto", "required"] | str
 
 
 @dataclass
