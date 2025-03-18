@@ -2046,7 +2046,8 @@ class GoogleSTTService(STTService):
                         break
 
                 except Exception as e:
-                    logger.error(f"Stream error, attempting to reconnect: {e}")
+                    logger.warning(f"{self} Reconnecting: {e}")
+
                     await asyncio.sleep(1)  # Brief delay before reconnecting
                     self._stream_start_time = int(time.time() * 1000)
                     continue
@@ -2099,3 +2100,6 @@ class GoogleSTTService(STTService):
 
         except Exception as e:
             logger.error(f"Error processing Google STT responses: {e}")
+
+            # Re-raise the exception to let it propagate (e.g. in the case of a timeout, propagate to _stream_audio to reconnect)
+            raise
