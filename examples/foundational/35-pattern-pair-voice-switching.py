@@ -4,6 +4,46 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Pattern Pair Voice Switching Example with Pipecat.
+
+This example demonstrates how to use the PatternPairAggregator to dynamically switch
+between different voices in a storytelling application. It showcases how pattern matching
+can be used to control TTS behavior in streaming text from an LLM.
+
+The example:
+    1. Sets up a storytelling bot with three distinct voices (narrator, male, female)
+    2. Uses pattern pairs (<voice>name</voice>) to trigger voice switching
+    3. Processes the patterns in real-time as text streams from the LLM
+    4. Removes the pattern tags before sending text to TTS
+
+The PatternPairAggregator:
+    - Buffers text until complete patterns are detected
+    - Identifies content between start/end pattern pairs
+    - Triggers callbacks when patterns are matched
+    - Processes patterns that may span across multiple text chunks
+    - Returns processed text at sentence boundaries
+
+Example usage (run from pipecat root directory):
+    $ pip install "pipecat-ai[daily,openai,cartesia,silero]"
+    $ pip install -r dev-requirements.txt
+    $ python examples/foundational/35-pattern-pair-voice-switching.py
+
+Requirements:
+    - OpenAI API key (for GPT-4o)
+    - Cartesia API key (for text-to-speech)
+    - Daily API key (for video/audio transport)
+
+    Environment variables (.env file):
+        OPENAI_API_KEY=your_openai_key
+        CARTESIA_API_KEY=your_cartesia_key
+        DAILY_API_KEY=your_daily_key
+
+Note:
+    This example shows one application of PatternPairAggregator (voice switching),
+    but the same approach can be used for various pattern-based text processing needs,
+    such as formatting instructions, command recognition, or structured data extraction.
+"""
+
 import asyncio
 import os
 import sys
@@ -43,19 +83,13 @@ async def main():
         transport = DailyTransport(
             room_url,
             token,
-            "Storytelling Bot",
+            "Multi-voice storyteller",
             DailyParams(
                 audio_out_enabled=True,
                 transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
-        )
-
-        # Initialize TTS with narrator voice as default
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id=VOICE_IDS["narrator"],
         )
 
         # Create pattern pair aggregator for voice switching
@@ -81,8 +115,12 @@ async def main():
 
         pattern_aggregator.on_pattern_match("voice_tag", on_voice_tag)
 
-        # Set the pattern aggregator on the TTS service
-        tts._text_aggregator = pattern_aggregator
+        # Initialize TTS with narrator voice as default
+        tts = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id=VOICE_IDS["narrator"],
+            text_aggregator=pattern_aggregator,
+        )
 
         # Initialize LLM
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
