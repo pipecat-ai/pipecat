@@ -126,6 +126,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with the `GoogleSTTService` where stream timeouts during
+  periods of inactivity were causing connection failures. The service now
+  properly detects timeout errors and handles reconnection gracefully,
+  ensuring continuous operation even after periods of silence or when using an
+  `STTMuteFilter`.
+
 - Fixed an issue in `RimeTTSService` where the last line of text sent didn't
   result in an audio output being generated.
 
