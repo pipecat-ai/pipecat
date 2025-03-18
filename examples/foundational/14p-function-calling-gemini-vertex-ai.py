@@ -21,7 +21,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.google import GoogleVertexAIService
+from pipecat.services.google import GoogleVertexLLMService
 from pipecat.services.openai import OpenAILLMContext
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -62,9 +62,9 @@ async def main():
             voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
         )
 
-        llm = GoogleVertexAIService(
+        llm = GoogleVertexLLMService(
             # credentials="<json-credentials>",
-            params=GoogleVertexAIService.InputParams(
+            params=GoogleVertexLLMService.InputParams(
                 project_id="<google-project-id>",
             )
         )
