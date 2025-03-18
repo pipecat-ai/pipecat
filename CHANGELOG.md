@@ -88,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `AzureRealtimeBetaLLMService` to support Azure's OpeanAI Realtime API. Added
   foundational example `19a-azure-realtime-beta.py`.
 
-- Introduced `GoogleVertexAIService`, a new class for integrating with Vertex AI
+- Introduced `GoogleVertexLLMService`, a new class for integrating with Vertex AI
   Gemini models. Added foundational example
   `14p-function-calling-gemini-vertex-ai.py`.
 
