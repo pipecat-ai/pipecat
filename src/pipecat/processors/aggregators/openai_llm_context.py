@@ -46,7 +46,6 @@ class OpenAILLMContext:
         self._messages: List[ChatCompletionMessageParam] = messages if messages else []
         self._tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
         self._tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = tools
-        self._user_image_request_context = {}
         self._llm_adapter: Optional[BaseLLMAdapter] = None
 
     def get_llm_adapter(self) -> Optional[BaseLLMAdapter]:

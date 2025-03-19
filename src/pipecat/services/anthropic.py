@@ -30,9 +30,7 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
-    UserImageMessageFrame,
     UserImageRawFrame,
-    UserImageRequestFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -674,42 +672,7 @@ class AnthropicLLMContext(OpenAILLMContext):
 
 
 class AnthropicUserContextAggregator(LLMUserContextAggregator):
-    def __init__(self, context: OpenAILLMContext | AnthropicLLMContext, **kwargs):
-        super().__init__(context=context, **kwargs)
-
-    async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-        # Our parent method has already called push_frame(). So we can't interrupt the
-        # flow here and we don't need to call push_frame() ourselves. Possibly something
-        # to talk through (tagging @aleix). At some point we might need to refactor these
-        # context aggregators.
-        try:
-            if isinstance(frame, UserImageRequestFrame):
-                # The LLM sends a UserImageRequestFrame upstream. Cache any context provided with
-                # that frame so we can use it when we assemble the image message in the assistant
-                # context aggregator.
-                if frame.context:
-                    if isinstance(frame.context, str):
-                        self._context._user_image_request_context[frame.user_id] = frame.context
-                    else:
-                        logger.error(
-                            f"Unexpected UserImageRequestFrame context type: {type(frame.context)}"
-                        )
-                        del self._context._user_image_request_context[frame.user_id]
-                else:
-                    if frame.user_id in self._context._user_image_request_context:
-                        del self._context._user_image_request_context[frame.user_id]
-            elif isinstance(frame, UserImageRawFrame):
-                # Push a new AnthropicImageMessageFrame with the text context we cached
-                # downstream to be handled by our assistant context aggregator. This is
-                # necessary so that we add the message to the context in the right order.
-                text = self._context._user_image_request_context.get(frame.user_id) or ""
-                if text:
-                    del self._context._user_image_request_context[frame.user_id]
-                frame = UserImageMessageFrame(user_image_raw_frame=frame, text=text)
-                await self.push_frame(frame)
-        except Exception as e:
-            logger.error(f"Error processing frame: {e}")
+    pass
 
 
 #
@@ -723,9 +686,6 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
 
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, context: OpenAILLMContext | AnthropicLLMContext, **kwargs):
-        super().__init__(context=context, **kwargs)
-
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         assistant_message = {"role": "assistant", "content": []}
         assistant_message["content"].append(
@@ -776,10 +736,13 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                     ):
                         content["content"] = result
 
-    async def handle_image_frame_message(self, frame: UserImageMessageFrame):
+    async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        await self._update_function_call_result(
+            frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
+        )
         self._context.add_image_frame_message(
-            format=frame.user_image_raw_frame.format,
-            size=frame.user_image_raw_frame.size,
-            image=frame.user_image_raw_frame.image,
-            text=frame.text,
+            format=frame.format,
+            size=frame.size,
+            image=frame.image,
+            text=frame.request.context,
         )

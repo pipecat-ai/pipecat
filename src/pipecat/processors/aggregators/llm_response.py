@@ -34,7 +34,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
-    UserImageMessageFrame,
+    UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -401,7 +401,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
     async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
         pass
 
-    async def handle_image_frame_message(self, frame: UserImageMessageFrame):
+    async def handle_user_image_frame(self, frame: UserImageRawFrame):
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -428,8 +428,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             await self._handle_function_call_result(frame)
         elif isinstance(frame, FunctionCallCancelFrame):
             await self._handle_function_call_cancel(frame)
-        elif isinstance(frame, UserImageMessageFrame):
-            await self._handle_image_frame_message(frame)
+        elif isinstance(frame, UserImageRawFrame) and frame.request and frame.request.tool_call_id:
+            await self._handle_user_image_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_aggregation()
         else:
@@ -510,8 +510,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             await self.handle_function_call_cancel(frame)
             del self._function_calls_in_progress[frame.tool_call_id]
 
-    async def _handle_image_frame_message(self, frame: UserImageMessageFrame):
-        await self.handle_image_frame_message(frame)
+    async def _handle_user_image_frame(self, frame: UserImageRawFrame):
+        await self.handle_user_image_frame(frame)
         await self.push_aggregation()
         await self.push_context_frame(FrameDirection.UPSTREAM)
 
