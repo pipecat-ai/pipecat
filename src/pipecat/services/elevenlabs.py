@@ -116,6 +116,42 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
     return "pcm_16000"
 
 
+def build_elevenlabs_voice_settings(
+    settings: Dict[str, Any],
+) -> Optional[Dict[str, Union[float, bool]]]:
+    """Build voice settings dictionary for ElevenLabs based on provided settings.
+    Args:
+        settings: Dictionary containing voice settings parameters
+    Returns:
+        Dictionary of voice settings or None if required parameters are missing
+    """
+    voice_settings = {}
+    if settings["stability"] is not None and settings["similarity_boost"] is not None:
+        voice_settings["stability"] = settings["stability"]
+        voice_settings["similarity_boost"] = settings["similarity_boost"]
+        if settings["style"] is not None:
+            voice_settings["style"] = settings["style"]
+        if settings["use_speaker_boost"] is not None:
+            voice_settings["use_speaker_boost"] = settings["use_speaker_boost"]
+        if settings["speed"] is not None:
+            voice_settings["speed"] = settings["speed"]
+    else:
+        if settings["style"] is not None:
+            logger.warning(
+                "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+            )
+        if settings["use_speaker_boost"] is not None:
+            logger.warning(
+                "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+            )
+        if settings["speed"] is not None:
+            logger.warning(
+                "'speed' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+            )
+
+    return voice_settings or None
+
+
 def calculate_word_times(
     alignment_info: Mapping[str, Any], cumulative_time: float
 ) -> List[Tuple[str, float]]:
