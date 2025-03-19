@@ -584,12 +584,13 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         )
 
     async def handle_function_call_result(self, frame: FunctionCallResultFrame):
-        if not frame.result:
-            return
-
-        result = json.dumps(frame.result)
-
-        await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
+        if frame.result:
+            result = json.dumps(frame.result)
+            await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
+        else:
+            await self._update_function_call_result(
+                frame.function_name, frame.tool_call_id, "COMPLETED"
+            )
 
     async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
         await self._update_function_call_result(
