@@ -494,6 +494,7 @@ class ElevenLabsHttpTTSService(TTSService):
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
+            "speed": params.speed,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
