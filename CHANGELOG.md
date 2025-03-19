@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `SkipTagsAggregator` that extends `BaseTextAggregator` to aggregate
+  text and skips end of sentence matching if aggregated text is between
+  start/end tags.
+
 - Added new `PatternPairAggregator` that extends `BaseTextAggregator` to
   identify content between matching pattern pairs in streamed text. This allows
   for detection and processing of structured content like XML-style tags that
