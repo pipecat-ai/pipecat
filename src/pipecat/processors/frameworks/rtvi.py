@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     DataFrame,
     EndFrame,
+    EndTaskFrame,
     ErrorFrame,
     Frame,
     FunctionCallResultFrame,
@@ -766,7 +767,7 @@ class RTVIProcessor(FrameProcessor):
                     update_config = RTVIUpdateConfig.model_validate(message.data)
                     await self._handle_update_config(message.id, update_config)
                 case "disconnect-bot":
-                    await self.push_frame(EndFrame())
+                    await self.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
                 case "action":
                     action = RTVIActionRun.model_validate(message.data)
                     action_frame = RTVIActionFrame(message_id=message.id, rtvi_action_run=action)
