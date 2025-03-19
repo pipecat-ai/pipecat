@@ -116,44 +116,6 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
     return "pcm_16000"
 
 
-def build_elevenlabs_voice_settings(
-    settings: Dict[str, Any],
-) -> Optional[Dict[str, Union[float, bool]]]:
-    """Build voice settings dictionary for ElevenLabs based on provided settings.
-
-    Args:
-        settings: Dictionary containing voice settings parameters
-
-    Returns:
-        Dictionary of voice settings or None if required parameters are missing
-    """
-    voice_settings = {}
-    if settings["stability"] is not None and settings["similarity_boost"] is not None:
-        voice_settings["stability"] = settings["stability"]
-        voice_settings["similarity_boost"] = settings["similarity_boost"]
-        if settings["style"] is not None:
-            voice_settings["style"] = settings["style"]
-        if settings["use_speaker_boost"] is not None:
-            voice_settings["use_speaker_boost"] = settings["use_speaker_boost"]
-        if settings["speed"] is not None:
-            voice_settings["speed"] = settings["speed"]
-    else:
-        if settings["style"] is not None:
-            logger.warning(
-                "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-            )
-        if settings["use_speaker_boost"] is not None:
-            logger.warning(
-                "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-            )
-        if settings["speed"] is not None:
-            logger.warning(
-                "'speed' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-            )
-
-    return voice_settings or None
-
-
 def calculate_word_times(
     alignment_info: Mapping[str, Any], cumulative_time: float
 ) -> List[Tuple[str, float]]:
@@ -183,7 +145,6 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         similarity_boost: Optional[float] = None
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
-        speed: Optional[float] = None
         auto_mode: Optional[bool] = True
 
         @model_validator(mode="after")
@@ -241,7 +202,6 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
-            "speed": params.speed,
             "auto_mode": str(params.auto_mode).lower(),
         }
         self.set_model_name(model)
@@ -460,7 +420,10 @@ class ElevenLabsHttpTTSService(TTSService):
         similarity_boost: Optional[float] = None
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
-        speed: Optional[float] = None
+        context: Optional[List[dict]] = None
+        """Optionally provide a context for previous_text parameter use"""
+        context_max_previous_text: int = 3
+        """The max number of previous assistant messages that will be used for the previous_text parameter"""
 
     def __init__(
         self,
@@ -490,7 +453,6 @@ class ElevenLabsHttpTTSService(TTSService):
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
-            "speed": params.speed,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -500,8 +462,34 @@ class ElevenLabsHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def _set_voice_settings(self):
-        return build_elevenlabs_voice_settings(self._settings)
+    def _set_voice_settings(self) -> Optional[Dict[str, Union[float, bool]]]:
+        """Configure voice settings if stability and similarity_boost are provided.
+
+        Returns:
+            Dictionary of voice settings or None if required parameters are missing.
+        """
+        voice_settings: Dict[str, Union[float, bool]] = {}
+        if (
+            self._settings["stability"] is not None
+            and self._settings["similarity_boost"] is not None
+        ):
+            voice_settings["stability"] = float(self._settings["stability"])
+            voice_settings["similarity_boost"] = float(self._settings["similarity_boost"])
+            if self._settings["style"] is not None:
+                voice_settings["style"] = float(self._settings["style"])
+            if self._settings["use_speaker_boost"] is not None:
+                voice_settings["use_speaker_boost"] = bool(self._settings["use_speaker_boost"])
+        else:
+            if self._settings["style"] is not None:
+                logger.warning(
+                    "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+                )
+            if self._settings["use_speaker_boost"] is not None:
+                logger.warning(
+                    "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+                )
+
+        return voice_settings or None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -527,6 +515,21 @@ class ElevenLabsHttpTTSService(TTSService):
 
         if self._voice_settings:
             payload["voice_settings"] = self._voice_settings
+
+        if self._params.context:
+            # Get the previous assistant messages
+            previous_assistant_messages = []
+            if self._params.context is not None:
+                previous_assistant_messages = [
+                    msg.get("content")
+                    for msg in self._params.context
+                    if msg.get("role") == "assistant" and isinstance(msg.get("content"), str)
+                ]
+                previous_assistant_messages = previous_assistant_messages[-self._params.context_max_previous_text:]
+
+            if len(previous_assistant_messages) > 0:
+                payload["previous_text"] = " ".join(previous_assistant_messages)
+                logger.debug(f"using TTS previous text: {payload['previous_text']}")
 
         language = self._settings["language"]
         if self._model_name in ELEVENLABS_MULTILINGUAL_MODELS and language:
