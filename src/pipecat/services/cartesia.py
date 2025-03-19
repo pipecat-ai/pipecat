@@ -7,7 +7,7 @@
 import base64
 import json
 import uuid
-from typing import AsyncGenerator, List, Optional, Sequence, Union
+from typing import AsyncGenerator, List, Optional, Union
 
 from loguru import logger
 from pydantic import BaseModel
@@ -91,7 +91,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: InputParams = InputParams(),
-        text_aggregators: Sequence[BaseTextAggregator] = [],
+        text_aggregator: Optional[BaseTextAggregator] = None,
         **kwargs,
     ):
         # Aggregating sentences still gives cleaner-sounding results and fewer
@@ -109,7 +109,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             push_text_frames=False,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            text_aggregators=text_aggregators or [SkipTagsAggregator([("<spell>", "</spell>")])],
+            text_aggregator=text_aggregator or SkipTagsAggregator([("<spell>", "</spell>")]),
             **kwargs,
         )
 

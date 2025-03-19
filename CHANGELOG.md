@@ -21,8 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added new `BaseTextAggregator`. Text aggregators are used by the TTS service
   to aggregate LLM tokens and decide when the aggregated text should be pushed
   to the TTS service. They also allow for the text to be manipulated while it's
-  being aggregated. Multiple text aggregators can be passed with
-  `text_aggregators` to the TTS service.
+  being aggregated. A text aggregator can be passed via `text_aggregator` to the
+  TTS service.
 
 - Added new `UltravoxSTTService`.
   (see https://github.com/fixie-ai/ultravox)

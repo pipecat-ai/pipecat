@@ -7,7 +7,7 @@
 import base64
 import json
 import uuid
-from typing import AsyncGenerator, Optional, Sequence
+from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
@@ -80,7 +80,7 @@ class RimeTTSService(AudioContextWordTTSService):
         model: str = "mistv2",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
-        text_aggregators: Sequence[BaseTextAggregator] = [],
+        text_aggregator: Optional[BaseTextAggregator] = None,
         **kwargs,
     ):
         """Initialize Rime TTS service.
@@ -100,7 +100,7 @@ class RimeTTSService(AudioContextWordTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            text_aggregators=text_aggregators or [SkipTagsAggregator([("spell(", ")")])],
+            text_aggregator=text_aggregator or SkipTagsAggregator([("spell(", ")")]),
             **kwargs,
         )
 
