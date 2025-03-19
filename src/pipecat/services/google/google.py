@@ -600,15 +600,19 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
         )
 
     async def handle_function_call_result(self, frame: FunctionCallResultFrame):
-        if not frame.result:
-            return
+        if frame.result:
+            if not isinstance(frame.result, str):
+                return
 
-        if not isinstance(frame.result, str):
-            return
+            response = {"response": frame.result}
 
-        response = {"response": frame.result}
-
-        await self._update_function_call_result(frame.function_name, frame.tool_call_id, response)
+            await self._update_function_call_result(
+                frame.function_name, frame.tool_call_id, response
+            )
+        else:
+            await self._update_function_call_result(
+                frame.function_name, frame.tool_call_id, "COMPLETED"
+            )
 
     async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
         await self._update_function_call_result(
