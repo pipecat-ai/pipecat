@@ -511,6 +511,18 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             del self._function_calls_in_progress[frame.tool_call_id]
 
     async def _handle_user_image_frame(self, frame: UserImageRawFrame):
+        logger.debug(
+            f"{self} UserImageRawFrame: [{frame.request.function_name}:{frame.request.tool_call_id}]"
+        )
+
+        if frame.request.tool_call_id not in self._function_calls_in_progress:
+            logger.warning(
+                f"UserImageRawFrame tool_call_id [{frame.request.tool_call_id}] is not running"
+            )
+            return
+
+        del self._function_calls_in_progress[frame.request.tool_call_id]
+
         await self.handle_user_image_frame(frame)
         await self.push_aggregation()
         await self.push_context_frame(FrameDirection.UPSTREAM)
