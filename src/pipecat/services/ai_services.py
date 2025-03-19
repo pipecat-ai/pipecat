@@ -286,7 +286,9 @@ class LLMService(AIService):
         else:
             return
 
-        logger.info(f"Calling function {function_name} with arguments {arguments}")
+        logger.debug(
+            f"{self} Calling function [{function_name}:{tool_call_id}] with arguments {arguments}"
+        )
 
         # NOTE(aleix): This needs to be removed after we remove the deprecation.
         await self.call_start_function(context, function_name)
