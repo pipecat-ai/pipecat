@@ -549,11 +549,25 @@ class WordTTSService(TTSService):
 
 
 class WebsocketTTSService(TTSService, WebsocketService):
-    """This is a base class for websocket-based TTS services."""
+    """This is a base class for websocket-based TTS services.
 
-    def __init__(self, **kwargs):
+    If an error occurs with the websocket, an "on_connection_error" event will
+    be triggered:
+
+       @tts.event_handler("on_connection_error")
+       async def on_connection_error(tts: TTSService, error: str):
+           ...
+
+    """
+
+    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
         TTSService.__init__(self, **kwargs)
-        WebsocketService.__init__(self)
+        WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+        self._register_event_handler("on_connection_error")
+
+    async def _report_error(self, error: ErrorFrame):
+        await self._call_event_handler("on_connection_error", error.error)
+        await self.push_error(error)
 
 
 class InterruptibleTTSService(WebsocketTTSService):
@@ -590,11 +604,23 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
     """This is a base class for websocket-based TTS services that support word
     timestamps.
 
+    If an error occurs with the websocket a "on_connection_error" event will be
+    triggered:
+
+       @tts.event_handler("on_connection_error")
+       async def on_connection_error(tts: TTSService, error: str):
+           ...
+
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
         WordTTSService.__init__(self, **kwargs)
-        WebsocketService.__init__(self)
+        WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+        self._register_event_handler("on_connection_error")
+
+    async def _report_error(self, error: ErrorFrame):
+        await self._call_event_handler("on_connection_error", error.error)
+        await self.push_error(error)
 
 
 class InterruptibleWordTTSService(WebsocketWordTTSService):

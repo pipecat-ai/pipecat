@@ -162,7 +162,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+        self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
         self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
@@ -197,6 +197,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
         try:

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a `reconnect_on_error` parameter to websocket-based TTS services as well
+  as a `on_connection_error` event handler. The `reconnect_on_error` indicates
+  whether the TTS service should reconnect on error. The `on_connection_error`
+  will always get called if there's any error no matter the value of
+  `reconnect_on_error`. This allows, for example, to fallback to a different TTS
+  provider if something goes wrong with the current one.
+
 - Added new `SkipTagsAggregator` that extends `BaseTextAggregator` to aggregate
   text and skips end of sentence matching if aggregated text is between
   start/end tags.

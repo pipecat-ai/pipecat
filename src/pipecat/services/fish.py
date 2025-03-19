@@ -107,7 +107,7 @@ class FishAudioTTSService(InterruptibleTTSService):
     async def _connect(self):
         await self._connect_websocket()
         if not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
         if self._receive_task:
@@ -132,6 +132,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         except Exception as e:
             logger.error(f"Fish Audio initialization error: {e}")
             self._websocket = None
+            await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
         try:
