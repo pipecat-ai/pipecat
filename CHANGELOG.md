@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `SkipTagsAggregator` that extends `BaseTextAggregator` to aggregate
+  text and skips end of sentence matching if aggregated text is between
+  start/end tags.
+
 - Added new `PatternPairAggregator` that extends `BaseTextAggregator` to
   identify content between matching pattern pairs in streamed text. This allows
   for detection and processing of structured content like XML-style tags that
@@ -17,8 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added new `BaseTextAggregator`. Text aggregators are used by the TTS service
   to aggregate LLM tokens and decide when the aggregated text should be pushed
   to the TTS service. They also allow for the text to be manipulated while it's
-  being aggregated. Multiple text aggregators can be passed with
-  `text_aggregators` to the TTS service.
+  being aggregated. A text aggregator can be passed via `text_aggregator` to the
+  TTS service.
 
 - Added new `UltravoxSTTService`.
   (see https://github.com/fixie-ai/ultravox)
@@ -138,6 +142,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `CartesiaTTSService` and `RimeTTSService` issue that would consider
+  text between spelling out tags end of sentence.
+
+- Fixed a `match_endofsentence` issue that would result in floating point
+  numbers to be considered an end of sentence.
+
+- Fixed a `match_endofsentence` issue that would result in emails to be
+  considered an end of sentence.
+
 - Fixed an issue where the RTVI message `disconnect-bot` was pushing an
   `EndFrame`, resulting in the pipeline not shutting down. It now pushes an
   `EndTaskFrame` upstream to shutdown the pipeline.
@@ -152,6 +165,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result in an audio output being generated.
 
 ### Other
+
+- Added a new example `examples/foundational/36-user-email-gathering.py` to show
+  how to gather user emails. The example uses's Cartesia's `<spell></spell>`
+  tags and Rime `spell()` function to spell out the emails for confirmation.
 
 - Update the `34-audio-recording.py` example to include an STT processor.
 
