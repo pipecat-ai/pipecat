@@ -54,7 +54,12 @@ async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context
 
 async def get_image(function_name, tool_call_id, arguments, llm, context, result_callback):
     question = arguments["question"]
-    await llm.request_image_frame(user_id=video_participant_id, text_content=question)
+    await llm.request_image_frame(
+        user_id=video_participant_id,
+        function_name=function_name,
+        tool_call_id=tool_call_id,
+        text_content=question,
+    )
 
 
 async def get_saved_conversation_filenames(

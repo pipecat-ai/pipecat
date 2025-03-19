@@ -49,7 +49,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     URLImageRawFrame,
-    UserImageMessageFrame,
+    UserImageRawFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -624,12 +624,15 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
                     if part.function_response and part.function_response.id == tool_call_id:
                         part.function_response.response = result
 
-    async def handle_image_frame_message(self, frame: UserImageMessageFrame):
+    async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        await self._update_function_call_result(
+            frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
+        )
         self._context.add_image_frame_message(
-            format=frame.user_image_raw_frame.format,
-            size=frame.user_image_raw_frame.size,
-            image=frame.user_image_raw_frame.image,
-            text=frame.text,
+            format=frame.format,
+            size=frame.size,
+            image=frame.image,
+            text=frame.request.context,
         )
 
 
