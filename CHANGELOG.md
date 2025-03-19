@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added new `BaseTextAggregator`. Text aggregators are used by the TTS service
   to aggregate LLM tokens and decide when the aggregated text should be pushed
-  to the TTS service. It also allows for the text to be manipulated while it's
-  being aggregated.
+  to the TTS service. They also allow for the text to be manipulated while it's
+  being aggregated. Multiple text aggregators can be passed with
+  `text_aggregators` to the TTS service.
 
 - Added new `UltravoxSTTService`.
   (see https://github.com/fixie-ai/ultravox)
@@ -112,6 +113,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated the default mode for `CartesiaTTSService` and
   `CartesiaHttpTTSService` to `sonic-2`.
+
+### Deprecated
+
+- `TTSService` parameter `text_filter` is now deprecated, use `text_filters`
+  instead which is now a list. This allows passing multiple filters that will be
+  executed in order.
 
 ### Removed
 
