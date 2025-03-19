@@ -811,8 +811,6 @@ class STTService(AIService):
             return
 
         await self.process_generator(self.run_stt(frame.audio))
-        if self._audio_passthrough:
-            await self.push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes a frame of audio data, either buffering or transcribing it."""
@@ -823,6 +821,8 @@ class STTService(AIService):
             # push a TextFrame. We also push audio downstream in case someone
             # else needs it.
             await self.process_audio_frame(frame, direction)
+            if self._audio_passthrough:
+                await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, STTMuteFrame):
