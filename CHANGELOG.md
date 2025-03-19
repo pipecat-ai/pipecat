@@ -130,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added support in `OpenAIRealtimeBetaLLMService` for a slate of new features:
 
-  - The `'gpt-4o-transcribe-latest'` input audio transcription model.
+  - The `'gpt-4o-transcribe-latest'` input audio transcription model, along
+    with new `language` and `prompt` options specific to that model.
   - The `input_audio_noise_reduction` session property.
 
     ```python
@@ -170,9 +171,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated the default model for `CartesiaTTSService` and
   `CartesiaHttpTTSService` to `sonic-2`.
-
-- Updated the default model for `OpenAIRealtimeBetaLLMService` to
-  `gpt-4o-realtime-preview-latest`.
 
 - Function calls are now executed in tasks. This means that the pipeline will
   not be blocked while the function call is being executed.
