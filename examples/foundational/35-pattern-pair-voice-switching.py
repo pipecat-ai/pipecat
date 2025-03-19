@@ -119,7 +119,7 @@ async def main():
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id=VOICE_IDS["narrator"],
-            text_aggregator=pattern_aggregator,
+            text_aggregators=[pattern_aggregator],
         )
 
         # Initialize LLM
