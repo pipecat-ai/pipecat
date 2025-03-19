@@ -239,7 +239,7 @@ class TTSService(AIService):
         # TTS output sample rate
         sample_rate: Optional[int] = None,
         # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
-        text_aggregators: Sequence[BaseTextAggregator] = [],
+        text_aggregator: Optional[BaseTextAggregator] = None,
         # Text filter executed after text has been aggregated.
         text_filters: Sequence[BaseTextFilter] = [],
         text_filter: Optional[BaseTextFilter] = None,
@@ -257,10 +257,7 @@ class TTSService(AIService):
         self._sample_rate = 0
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
-        # Ensure there's at least one text aggregator.
-        self._text_aggregators: Sequence[BaseTextAggregator] = text_aggregators or [
-            SimpleTextAggregator()
-        ]
+        self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
         self._text_filters: Sequence[BaseTextFilter] = text_filters
         if text_filter:
             import warnings
@@ -358,8 +355,8 @@ class TTSService(AIService):
             # pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
 
-            sentence = self._text_aggregators[-1].text
-            self._reset_aggregators()
+            sentence = self._text_aggregator.text
+            self._text_aggregator.reset()
             self._processing_text = False
             await self._push_tts_frames(sentence)
             if isinstance(frame, LLMFullResponseEndFrame):
@@ -405,8 +402,7 @@ class TTSService(AIService):
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         self._processing_text = False
-        for aggregator in self._text_aggregators:
-            aggregator.handle_interruption()
+        self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
             filter.handle_interruption()
 
@@ -418,25 +414,12 @@ class TTSService(AIService):
         if self._pause_frame_processing:
             await self.resume_processing_frames()
 
-    def _reset_aggregators(self):
-        for aggregator in self._text_aggregators:
-            aggregator.reset()
-
     async def _process_text_frame(self, frame: TextFrame):
         text: Optional[str] = None
         if not self._aggregate_sentences:
             text = frame.text
         else:
-            current_text = frame.text
-
-            # Process all aggregators except the last one.
-            for aggregator in self._text_aggregators[:-1]:
-                aggregator.aggregate(current_text)
-                current_text = aggregator.text
-
-            # The last aggregator decides whether we are sending text to the
-            # TTS or not.
-            text = self._text_aggregators[-1].aggregate(current_text)
+            text = self._text_aggregator.aggregate(frame.text)
 
         if text:
             await self._push_tts_frames(text)

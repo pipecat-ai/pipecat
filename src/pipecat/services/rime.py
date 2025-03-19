@@ -27,6 +27,8 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
+from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 
 try:
     import websockets
@@ -78,6 +80,7 @@ class RimeTTSService(AudioContextWordTTSService):
         model: str = "mistv2",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
+        text_aggregator: Optional[BaseTextAggregator] = None,
         **kwargs,
     ):
         """Initialize Rime TTS service.
@@ -97,6 +100,7 @@ class RimeTTSService(AudioContextWordTTSService):
             push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            text_aggregator=text_aggregator or SkipTagsAggregator([("spell(", ")")]),
             **kwargs,
         )
 
