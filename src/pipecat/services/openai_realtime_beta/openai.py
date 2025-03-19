@@ -91,6 +91,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         session_properties: events.SessionProperties = events.SessionProperties(),
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
+        push_silence_after_stop: bool = False,
+        silence_time_s: float = 2.0,
         **kwargs,
     ):
         full_url = f"{base_url}?model={model}"
@@ -101,6 +103,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self._session_properties: events.SessionProperties = session_properties
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
+        self._push_silence_after_stop = push_silence_after_stop
+        self._silence_time_s = silence_time_s
         self._websocket = None
         self._receive_task = None
         self._context = None
@@ -407,6 +411,15 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             await self.push_frame(TTSStoppedFrame())
             # Don't clear the self._current_audio_response here. We need to wait until we
             # receive a BotStoppedSpeakingFrame from the output transport.
+            if self._push_silence_after_stop:
+                silence_num_bytes = int(self._silence_time_s * 24000 * 2)  # 16-bit
+                await self.push_frame(
+                    TTSAudioRawFrame(
+                        audio=b"\x00" * silence_num_bytes,
+                        sample_rate=24000,
+                        num_channels=1,
+                    )
+                )
 
     async def _handle_evt_conversation_item_created(self, evt):
         # This will get sent from the server every time a new "message" is added
