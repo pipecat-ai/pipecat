@@ -142,6 +142,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `SegmentedSTTService` based services
+  (e.g. `GroqSTTService`) that was not allow audio to pass-through downstream.
+
 - Fixed a `CartesiaTTSService` and `RimeTTSService` issue that would consider
   text between spelling out tags end of sentence.
 
