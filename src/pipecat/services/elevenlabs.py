@@ -462,7 +462,7 @@ class ElevenLabsHttpTTSService(TTSService):
         use_speaker_boost: Optional[bool] = None
         speed: Optional[float] = None
         context: Optional[List[dict]] = None
-        """Optionally provide a context for previous_text parameter use"""
+        """Optionally provide a context for previous_text parameter for "context-aware" TTS resulting in more consistant TTS output"""
         context_max_previous_text: int = 3
         """The max number of previous assistant messages that will be used for the previous_text parameter"""
 
