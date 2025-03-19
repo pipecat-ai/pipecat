@@ -241,6 +241,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
+            "speed": params.speed,
             "auto_mode": str(params.auto_mode).lower(),
         }
         self.set_model_name(model)
