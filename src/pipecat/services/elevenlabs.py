@@ -541,7 +541,9 @@ class ElevenLabsHttpTTSService(TTSService):
                     for msg in self._params.context
                     if msg.get("role") == "assistant" and isinstance(msg.get("content"), str)
                 ]
-                previous_assistant_messages = previous_assistant_messages[-self._params.context_max_previous_text:]
+                previous_assistant_messages = previous_assistant_messages[
+                    -self._params.context_max_previous_text :
+                ]
 
             if len(previous_assistant_messages) > 0:
                 payload["previous_text"] = " ".join(previous_assistant_messages)
