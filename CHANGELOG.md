@@ -169,6 +169,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `OpenAISTTService` to use `gpt-4o-transcribe` as the default
+  transcription model.
+
+- Updated `OpenAITTSService` to use `gpt-4o-mini-tts` as the default TTS model.
+
 - Updated the default model for `CartesiaTTSService` and
   `CartesiaHttpTTSService` to `sonic-2`.
 
