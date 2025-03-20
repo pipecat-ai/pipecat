@@ -26,7 +26,8 @@ from pipecat.services.openai_realtime_beta import (
     InputAudioTranscription,
     OpenAIRealtimeBetaLLMService,
     SessionProperties,
-    TurnDetection,
+    SemanticTurnDetection,
+    InputAudioNoiseReduction
 )
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -91,9 +92,10 @@ async def main():
             input_audio_transcription=InputAudioTranscription(),
             # Set openai TurnDetection parameters. Not setting this at all will turn it
             # on by default
-            turn_detection=TurnDetection(silence_duration_ms=1000),
+            turn_detection=SemanticTurnDetection(),
             # Or set to False to disable openai turn detection and use transport VAD
             # turn_detection=False,
+            input_audio_noise_reduction=InputAudioNoiseReduction(type='near_field'),
             # tools=tools,
             instructions="""Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
 
