@@ -547,7 +547,6 @@ class ElevenLabsHttpTTSService(TTSService):
 
             if len(previous_assistant_messages) > 0:
                 payload["previous_text"] = " ".join(previous_assistant_messages)
-                logger.debug(f"using TTS previous text: {payload['previous_text']}")
 
         language = self._settings["language"]
         if self._model_name in ELEVENLABS_MULTILINGUAL_MODELS and language:
