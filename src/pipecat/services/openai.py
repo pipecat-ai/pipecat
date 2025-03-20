@@ -472,22 +472,16 @@ class OpenAITTSService(TTSService):
     """OpenAI Text-to-Speech service that generates audio from text.
 
     This service uses the OpenAI TTS API to generate PCM-encoded audio at 24kHz.
-    When using with DailyTransport, configure the sample rate in DailyParams
-    as shown below:
-
-    DailyParams(
-        audio_out_enabled=True,
-        audio_out_sample_rate=24_000,
-    )
 
     Args:
         api_key: OpenAI API key. Defaults to None.
         voice: Voice ID to use. Defaults to "alloy".
-        model: TTS model to use ("tts-1" or "tts-1-hd"). Defaults to "tts-1".
-        sample_rate: Output audio sample rate in Hz. Defaults to 24000.
+        model: TTS model to use. Defaults to "tts-1".
+        sample_rate: Output audio sample rate in Hz. Defaults to None.
         **kwargs: Additional keyword arguments passed to TTSService.
 
     The service returns PCM-encoded audio at the specified sample rate.
+
     """
 
     OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
@@ -497,7 +491,7 @@ class OpenAITTSService(TTSService):
         *,
         api_key: Optional[str] = None,
         voice: str = "alloy",
-        model: Literal["tts-1", "tts-1-hd"] = "tts-1",
+        model: str = "tts-1",
         sample_rate: Optional[int] = None,
         **kwargs,
     ):
