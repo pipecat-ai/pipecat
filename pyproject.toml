@@ -83,6 +83,7 @@ together = []
 ultravox = [ "transformers~=4.48.0", "vllm~=0.7.3" ]
 websocket = [ "websockets~=13.1", "fastapi~=0.115.6" ]
 whisper = [ "faster-whisper~=1.1.1" ]
+mem0 = [ "mem0ai~=0.1.69" ]
 openrouter = []
 
 [tool.setuptools.packages.find]
