@@ -20,7 +20,6 @@ the conversation flow.
 import asyncio
 import os
 import sys
-from typing import Literal
 
 import aiohttp
 from dotenv import load_dotenv
@@ -36,12 +35,10 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     LLMMessagesFrame,
-    LLMTextFrame,
     OutputImageRawFrame,
     SpriteFrame,
     STTMuteFrame,
     TranscriptionFrame,
-    TransportMessageUrgentFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -51,11 +48,9 @@ from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFil
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import (
     RTVIConfig,
-    RTVIMessageLiteral,
     RTVIObserver,
     RTVIProcessor,
     RTVIServerMessageFrame,
-    RTVIUserTranscriptionMessageData,
 )
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
