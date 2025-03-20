@@ -9,6 +9,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- When registering a function call it is now possible to indicate if you want
+  the function call to be cancelled if there's a user interruption via
+  `cancel_on_interruption` (defaults to False). This is now possible because
+  function calls are executed concurrently.
+
+- Added support for detecting idle pipelines. By default, if no activity has
+  been detected during 5 minutes, the `PipelineTask` will be automatically
+  cancelled. It is possible to override this behavior by passing
+  `cancel_on_idle_timeout=False`. It is also possible to change the default
+  timeout with `idle_timeout_secs` or the frames that prevent the pipeline from
+  being idle with `idle_timeout_frames`. Finally, an `on_idle_timeout` event
+  handler will be triggered if the idle timeout is reached (whether the pipeline
+  task is cancelled or not).
+
+- Added `FalSTTService`, which provides STT for Fal's Wizper API.
+
+- Added a `reconnect_on_error` parameter to websocket-based TTS services as well
+  as a `on_connection_error` event handler. The `reconnect_on_error` indicates
+  whether the TTS service should reconnect on error. The `on_connection_error`
+  will always get called if there's any error no matter the value of
+  `reconnect_on_error`. This allows, for example, to fallback to a different TTS
+  provider if something goes wrong with the current one.
+
+- Added new `SkipTagsAggregator` that extends `BaseTextAggregator` to aggregate
+  text and skips end of sentence matching if aggregated text is between
+  start/end tags.
+
+- Added new `PatternPairAggregator` that extends `BaseTextAggregator` to
+  identify content between matching pattern pairs in streamed text. This allows
+  for detection and processing of structured content like XML-style tags that
+  may span across multiple text chunks or sentence boundaries.
+
+- Added new `BaseTextAggregator`. Text aggregators are used by the TTS service
+  to aggregate LLM tokens and decide when the aggregated text should be pushed
+  to the TTS service. They also allow for the text to be manipulated while it's
+  being aggregated. A text aggregator can be passed via `text_aggregator` to the
+  TTS service.
+
+- Added new `sample_rate` constructor parameter to `TavusVideoService` to allow
+  changing the output sample rate.
+
+- Added new `UltravoxSTTService`.
+  (see https://github.com/fixie-ai/ultravox)
+
+- Added `on_frame_reached_upstream` and `on_frame_reached_downstream` event
+  handlers to `PipelineTask`. Those events will be called when a frame reaches
+  the beginning or end of the pipeline respectively. Note that by default, the
+  event handlers will not be called unless a filter is set with
+  `PipelineTask.set_reached_upstream_filter()` or
+  `PipelineTask.set_reached_downstream_filter()`.
+
+- Added support for Chirp voices in `GoogleTTSService`.
+
+- Added a `flush_audio()` method to `FishTTSService` and `LmntTTSService`.
+
+- Added a `set_language` convenience method for `GoogleSTTService`, allowing
+  you to set a single language. This is in addition to the `set_languages`
+  method which allows you to set a list of languages.
+
 - Added `on_user_turn_audio_data` and `on_bot_turn_audio_data` to
   `AudioBufferProcessor`. This gives the ability to grab the audio of only that
   turn for both the user and the bot.
@@ -64,6 +123,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `AzureRealtimeBetaLLMService` to support Azure's OpeanAI Realtime API. Added
   foundational example `19a-azure-realtime-beta.py`.
+
+- Introduced `GoogleVertexLLMService`, a new class for integrating with Vertex AI
+  Gemini models. Added foundational example
+  `14p-function-calling-gemini-vertex-ai.py`.
+
+### Changed
+
+- Function calls are now executed in tasks. This means that the pipeline will
+  not be blocked while the function call is being executed.
+
+- ⚠️ `PipelineTask` will now be automatically cancelled if no bot activity is
+  happening in the pipeline. There are a few settings to configure this
+  behavior, see `PipelineTask` documentation for more details.
+
+- All event handlers are now executed in separate tasks in order to prevent
+  blocking the pipeline. It is possible that event handlers take some time to
+  execute in which case the pipeline would be blocked waiting for the event
+  handler to complete.
+
+- Updated `TranscriptProcessor` to support text output from
+  `OpenAIRealtimeBetaLLMService`.
+
+- `OpenAIRealtimeBetaLLMService` and `GeminiMultimodalLiveLLMService` now push
+  a `TTSTextFrame`.
+
+- Updated the default mode for `CartesiaTTSService` and
+  `CartesiaHttpTTSService` to `sonic-2`.
+
+### Deprecated
+
+- Passing a `start_callback` to `LLMService.register_function()` is now
+  deprecated, simply move the code from the start callback to the function call.
+
+- `TTSService` parameter `text_filter` is now deprecated, use `text_filters`
+  instead which is now a list. This allows passing multiple filters that will be
+  executed in order.
+
+### Removed
+
+- Removed deprecated `audio.resample_audio()`, use `create_default_resampler()`
+  instead.
+
+- Removed deprecated`stt_service` parameter from `STTMuteFilter`.
+
+- Removed deprecated RTVI processors, use an `RTVIObserver` instead.
+
+- Removed deprecated `AWSTTSService`, use `PollyTTSService` instead.
+
+- Removed deprecated field `tier` from `DailyTranscriptionSettings`, use `model`
+  instead.
+
+- Removed deprecated `pipecat.vad` package, use `pipecat.audio.vad` instead.
+
+### Fixed
+
+- Fixed an assistant aggregator issue that could cause assistant text to be
+  split into multiple chunks during function calls.
+
+- Fixed an assistant aggregator issue that was causing assistant text to not be
+  added to the context during function calls. This could lead to duplications.
+
+- Fixed a `SegmentedSTTService` issue that was causing audio to be sent
+  prematurely to the STT service. Instead of analyzing the volume in this
+  service we rely on VAD events which use both VAD and volume.
+
+- Fixed a `GeminiMultimodalLiveLLMService` issue that was causing messages to be
+  duplicated in the context when pushing `LLMMessagesAppendFrame` frames.
+
+- Fixed an issue with `SegmentedSTTService` based services
+  (e.g. `GroqSTTService`) that was not allow audio to pass-through downstream.
+
+- Fixed a `CartesiaTTSService` and `RimeTTSService` issue that would consider
+  text between spelling out tags end of sentence.
+
+- Fixed a `match_endofsentence` issue that would result in floating point
+  numbers to be considered an end of sentence.
+
+- Fixed a `match_endofsentence` issue that would result in emails to be
+  considered an end of sentence.
+
+- Fixed an issue where the RTVI message `disconnect-bot` was pushing an
+  `EndFrame`, resulting in the pipeline not shutting down. It now pushes an
+  `EndTaskFrame` upstream to shutdown the pipeline.
+
+- Fixed an issue with the `GoogleSTTService` where stream timeouts during
+  periods of inactivity were causing connection failures. The service now
+  properly detects timeout errors and handles reconnection gracefully,
+  ensuring continuous operation even after periods of silence or when using an
+  `STTMuteFilter`.
+
+- Fixed an issue in `RimeTTSService` where the last line of text sent didn't
+  result in an audio output being generated.
+
+### Other
+
+- Add foundational example `07w-interruptible-fal.py`, showing `FalSTTService`.
+
+- Added a new example `examples/foundational/36-user-email-gathering.py` to show
+  how to gather user emails. The example uses's Cartesia's `<spell></spell>`
+  tags and Rime `spell()` function to spell out the emails for confirmation.
+
+- Update the `34-audio-recording.py` example to include an STT processor.
+
+- Added foundational example `35-voice-switching.py` showing how to use the new
+  `PatternPairAggregator`. This example shows how to encode information for the
+  LLM to instruct TTS voice changes, but this can be used to encode any
+  information into the LLM response, which you want to parse and use in other
+  parts of your application.
+
+- Added a Pipecat Cloud deployment example to the `examples` directory.
+
+- Removed foundational examples 28b and 28c as the TranscriptProcessor no
+  longer has an LLM depedency. Renamed foundational example 28a to
+  `28-transcript-processor.py`.
 
 ## [0.0.58] - 2025-02-26
 
@@ -1829,7 +2002,7 @@ async def on_connected(processor):
   completed. If a task is never ran `has_finished()` will return False.
 
 - `PipelineRunner` now supports SIGTERM. If received, the runner will be
-  canceled.
+  cancelled.
 
 ### Fixed
 

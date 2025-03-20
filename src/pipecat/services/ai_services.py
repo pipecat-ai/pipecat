@@ -8,13 +8,13 @@ import asyncio
 import io
 import wave
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Tuple, Type
+from dataclasses import dataclass
+from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Set, Tuple, Type
 
 from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
-from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 from pipecat.frames.frames import (
     AudioRawFrame,
     BotStartedSpeakingFrame,
@@ -23,6 +23,9 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     StartFrame,
@@ -38,6 +41,8 @@ from pipecat.frames.frames import (
     TTSTextFrame,
     TTSUpdateSettingsFrame,
     UserImageRequestFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import MetricsData
@@ -45,8 +50,9 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.string import match_endofsentence
+from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
+from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 from pipecat.utils.time import seconds_to_nanoseconds
 
 
@@ -136,6 +142,13 @@ class AIService(FrameProcessor):
                     await self.push_frame(f)
 
 
+@dataclass
+class FunctionEntry:
+    function_name: Optional[str]
+    callback: Any  # TODO(aleix): add proper typing.
+    cancel_on_interruption: bool
+
+
 class LLMService(AIService):
     """This class is a no-op but serves as a base class for LLM services."""
 
@@ -145,38 +158,74 @@ class LLMService(AIService):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._callbacks = {}
+        self._functions = {}
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
+        self._function_call_tasks: Set[Tuple[asyncio.Task, str, str]] = set()
+
+        self._register_event_handler("on_completion_timeout")
 
     def get_llm_adapter(self) -> BaseLLMAdapter:
         return self._adapter
 
     def create_context_aggregator(
-        self, context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        self,
+        context: OpenAILLMContext,
+        *,
+        user_kwargs: Mapping[str, Any] = {},
+        assistant_kwargs: Mapping[str, Any] = {},
     ) -> Any:
         pass
 
-        self._register_event_handler("on_completion_timeout")
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
 
-    # TODO-CB: callback function type
-    def register_function(self, function_name: Optional[str], callback, start_callback=None):
+        if isinstance(frame, StartInterruptionFrame):
+            await self._handle_interruptions(frame)
+
+    async def _handle_interruptions(self, frame: StartInterruptionFrame):
+        for function_name, entry in self._functions.items():
+            if entry.cancel_on_interruption:
+                await self._cancel_function_call(function_name)
+
+    def register_function(
+        self,
+        function_name: Optional[str],
+        callback: Any,
+        start_callback=None,
+        *,
+        cancel_on_interruption: bool = False,
+    ):
         # Registering a function with the function_name set to None will run that callback
         # for all functions
-        self._callbacks[function_name] = callback
-        # QUESTION FOR CB: maybe this isn't needed anymore?
+        self._functions[function_name] = FunctionEntry(
+            function_name=function_name,
+            callback=callback,
+            cancel_on_interruption=cancel_on_interruption,
+        )
+
+        # Start callbacks are now deprecated.
         if start_callback:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'start_callback' is deprecated, just put your code on top of the actual function call instead.",
+                    DeprecationWarning,
+                )
+
             self._start_callbacks[function_name] = start_callback
 
     def unregister_function(self, function_name: Optional[str]):
-        del self._callbacks[function_name]
+        del self._functions[function_name]
         if self._start_callbacks[function_name]:
             del self._start_callbacks[function_name]
 
     def has_function(self, function_name: str):
-        if None in self._callbacks.keys():
+        if None in self._functions.keys():
             return True
-        return function_name in self._callbacks.keys()
+        return function_name in self._functions.keys()
 
     async def call_function(
         self,
@@ -186,36 +235,143 @@ class LLMService(AIService):
         function_name: str,
         arguments: str,
         run_llm: bool = True,
-    ) -> None:
-        f = None
-        if function_name in self._callbacks.keys():
-            f = self._callbacks[function_name]
-        elif None in self._callbacks.keys():
-            f = self._callbacks[None]
-        else:
-            return None
-        await self.call_start_function(context, function_name)
-        await context.call_function(
-            f,
-            function_name=function_name,
-            tool_call_id=tool_call_id,
-            arguments=arguments,
-            llm=self,
-            run_llm=run_llm,
+    ):
+        if not function_name in self._functions.keys() and not None in self._functions.keys():
+            return
+
+        task = self.create_task(
+            self._run_function_call(context, tool_call_id, function_name, arguments, run_llm)
         )
 
-    # QUESTION FOR CB: maybe this isn't needed anymore?
+        self._function_call_tasks.add((task, tool_call_id, function_name))
+
+        task.add_done_callback(self._function_call_task_finished)
+
     async def call_start_function(self, context: OpenAILLMContext, function_name: str):
         if function_name in self._start_callbacks.keys():
             await self._start_callbacks[function_name](function_name, self, context)
         elif None in self._start_callbacks.keys():
             return await self._start_callbacks[None](function_name, self, context)
 
-    async def request_image_frame(self, user_id: str, *, text_content: Optional[str] = None):
+    async def request_image_frame(
+        self,
+        user_id: str,
+        *,
+        function_name: Optional[str] = None,
+        tool_call_id: Optional[str] = None,
+        text_content: Optional[str] = None,
+    ):
         await self.push_frame(
-            UserImageRequestFrame(user_id=user_id, context=text_content),
+            UserImageRequestFrame(
+                user_id=user_id,
+                function_name=function_name,
+                tool_call_id=tool_call_id,
+                context=text_content,
+            ),
             FrameDirection.UPSTREAM,
         )
+
+    async def _run_function_call(
+        self,
+        context: OpenAILLMContext,
+        tool_call_id: str,
+        function_name: str,
+        arguments: str,
+        run_llm: bool = True,
+    ):
+        if function_name in self._functions.keys():
+            entry = self._functions[function_name]
+        elif None in self._functions.keys():
+            entry = self._functions[None]
+        else:
+            return
+
+        logger.debug(
+            f"{self} Calling function [{function_name}:{tool_call_id}] with arguments {arguments}"
+        )
+
+        # NOTE(aleix): This needs to be removed after we remove the deprecation.
+        await self.call_start_function(context, function_name)
+
+        # Push a SystemFrame downstream. This frame will let our assistant context aggregator
+        # know that we are in the middle of a function call. Some contexts/aggregators may
+        # not need this. But some definitely do (Anthropic, for example).
+        # Also push a SystemFrame upstream for use by other processors, like STTMuteFilter.
+        progress_frame_downstream = FunctionCallInProgressFrame(
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+            cancel_on_interruption=entry.cancel_on_interruption,
+        )
+        progress_frame_upstream = FunctionCallInProgressFrame(
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+            cancel_on_interruption=entry.cancel_on_interruption,
+        )
+
+        # Push frame both downstream and upstream
+        await self.push_frame(progress_frame_downstream, FrameDirection.DOWNSTREAM)
+        await self.push_frame(progress_frame_upstream, FrameDirection.UPSTREAM)
+
+        # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
+        async def function_call_result_callback(result, *, properties=None):
+            result_frame_downstream = FunctionCallResultFrame(
+                function_name=function_name,
+                tool_call_id=tool_call_id,
+                arguments=arguments,
+                result=result,
+                properties=properties,
+            )
+            result_frame_upstream = FunctionCallResultFrame(
+                function_name=function_name,
+                tool_call_id=tool_call_id,
+                arguments=arguments,
+                result=result,
+                properties=properties,
+            )
+
+            await self.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
+            await self.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
+
+        await entry.callback(
+            function_name, tool_call_id, arguments, self, context, function_call_result_callback
+        )
+
+    async def _cancel_function_call(self, function_name: str):
+        cancelled_tasks = set()
+        for task, tool_call_id, name in self._function_call_tasks:
+            if name == function_name:
+                # We remove the callback because we are going to cancel the task
+                # now, otherwise we will be removing it from the set while we
+                # are iterating.
+                task.remove_done_callback(self._function_call_task_finished)
+
+                logger.debug(f"{self} Cancelling function call [{name}:{tool_call_id}]...")
+
+                await self.cancel_task(task)
+
+                frame = FunctionCallCancelFrame(
+                    function_name=function_name, tool_call_id=tool_call_id
+                )
+                await self.push_frame(frame)
+
+                logger.debug(f"{self} Function call [{name}:{tool_call_id}] has been cancelled")
+
+                cancelled_tasks.add(task)
+
+        # Remove all cancelled tasks from our set.
+        for task in cancelled_tasks:
+            self._function_call_task_finished(task)
+
+    def _function_call_task_finished(self, task: asyncio.Task):
+        tuple_to_remove = next((t for t in self._function_call_tasks if t[0] == task), None)
+        if tuple_to_remove:
+            self._function_call_tasks.discard(tuple_to_remove)
+            # The task is finished so this should exit immediately. We need to
+            # do this because otherwise the task manager would have a dangling
+            # task if we don't remove it.
+            asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
 
 
 class TTSService(AIService):
@@ -238,6 +394,10 @@ class TTSService(AIService):
         pause_frame_processing: bool = False,
         # TTS output sample rate
         sample_rate: Optional[int] = None,
+        # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
+        text_aggregator: Optional[BaseTextAggregator] = None,
+        # Text filter executed after text has been aggregated.
+        text_filters: Sequence[BaseTextFilter] = [],
         text_filter: Optional[BaseTextFilter] = None,
         **kwargs,
     ):
@@ -253,12 +413,22 @@ class TTSService(AIService):
         self._sample_rate = 0
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
-        self._text_filter: Optional[BaseTextFilter] = text_filter
+        self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
+        self._text_filters: Sequence[BaseTextFilter] = text_filters
+        if text_filter:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'text_filter' is deprecated, use 'text_filters' instead.",
+                    DeprecationWarning,
+                )
+            self._text_filters = [text_filter]
 
         self._stop_frame_task: Optional[asyncio.Task] = None
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
-        self._current_sentence: str = ""
         self._processing_text: bool = False
 
     @property
@@ -271,10 +441,6 @@ class TTSService(AIService):
     def set_voice(self, voice: str):
         self._voice_id = voice
 
-    @abstractmethod
-    async def flush_audio(self):
-        pass
-
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -284,6 +450,9 @@ class TTSService(AIService):
         return Language(language)
 
     async def update_setting(self, key: str, value: Any):
+        pass
+
+    async def flush_audio(self):
         pass
 
     async def start(self, frame: StartFrame):
@@ -315,8 +484,9 @@ class TTSService(AIService):
                 self.set_model_name(value)
             elif key == "voice":
                 self.set_voice(value)
-            elif key == "text_filter" and self._text_filter:
-                self._text_filter.update_settings(value)
+            elif key == "text_filter":
+                for filter in self._text_filters:
+                    filter.update_settings(value)
             else:
                 logger.warning(f"Unknown setting for TTS service: {key}")
 
@@ -341,8 +511,8 @@ class TTSService(AIService):
             # pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
 
-            sentence = self._current_sentence
-            self._current_sentence = ""
+            sentence = self._text_aggregator.text
+            self._text_aggregator.reset()
             self._processing_text = False
             await self._push_tts_frames(sentence)
             if isinstance(frame, LLMFullResponseEndFrame):
@@ -351,12 +521,14 @@ class TTSService(AIService):
             else:
                 await self.push_frame(frame, direction)
         elif isinstance(frame, TTSSpeakFrame):
+            # Store if we were processing text or not so we can set it back.
+            processing_text = self._processing_text
             await self._push_tts_frames(frame.text)
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
             await self._maybe_pause_frame_processing()
             await self.flush_audio()
-            self._processing_text = False
+            self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, BotStoppedSpeakingFrame):
@@ -387,10 +559,10 @@ class TTSService(AIService):
             await self._stop_frame_queue.put(frame)
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
-        self._current_sentence = ""
         self._processing_text = False
-        if self._text_filter:
-            self._text_filter.handle_interruption()
+        self._text_aggregator.handle_interruption()
+        for filter in self._text_filters:
+            filter.handle_interruption()
 
     async def _maybe_pause_frame_processing(self):
         if self._processing_text and self._pause_frame_processing:
@@ -405,11 +577,7 @@ class TTSService(AIService):
         if not self._aggregate_sentences:
             text = frame.text
         else:
-            self._current_sentence += frame.text
-            eos_end_marker = match_endofsentence(self._current_sentence)
-            if eos_end_marker:
-                text = self._current_sentence[:eos_end_marker]
-                self._current_sentence = self._current_sentence[eos_end_marker:]
+            text = self._text_aggregator.aggregate(frame.text)
 
         if text:
             await self._push_tts_frames(text)
@@ -429,14 +597,16 @@ class TTSService(AIService):
         self._processing_text = True
 
         await self.start_processing_metrics()
-        if self._text_filter:
-            self._text_filter.reset_interruption()
-            text = self._text_filter.filter(text)
-            # Check again after running the filter
-            if not text.strip():
-                return
-        await self.process_generator(self.run_tts(text.strip()))
+
+        # Process all filter.
+        for filter in self._text_filters:
+            filter.reset_interruption()
+            text = filter.filter(text)
+
+        await self.process_generator(self.run_tts(text))
+
         await self.stop_processing_metrics()
+
         if self._push_text_frames:
             # We send the original text after the audio. This way, if we are
             # interrupted, the text is not added to the assistant context.
@@ -537,11 +707,25 @@ class WordTTSService(TTSService):
 
 
 class WebsocketTTSService(TTSService, WebsocketService):
-    """This is a base class for websocket-based TTS services."""
+    """This is a base class for websocket-based TTS services.
 
-    def __init__(self, **kwargs):
+    If an error occurs with the websocket, an "on_connection_error" event will
+    be triggered:
+
+       @tts.event_handler("on_connection_error")
+       async def on_connection_error(tts: TTSService, error: str):
+           ...
+
+    """
+
+    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
         TTSService.__init__(self, **kwargs)
-        WebsocketService.__init__(self)
+        WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+        self._register_event_handler("on_connection_error")
+
+    async def _report_error(self, error: ErrorFrame):
+        await self._call_event_handler("on_connection_error", error.error)
+        await self.push_error(error)
 
 
 class InterruptibleTTSService(WebsocketTTSService):
@@ -578,11 +762,23 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
     """This is a base class for websocket-based TTS services that support word
     timestamps.
 
+    If an error occurs with the websocket a "on_connection_error" event will be
+    triggered:
+
+       @tts.event_handler("on_connection_error")
+       async def on_connection_error(tts: TTSService, error: str):
+           ...
+
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
         WordTTSService.__init__(self, **kwargs)
-        WebsocketService.__init__(self)
+        WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
+        self._register_event_handler("on_connection_error")
+
+    async def _report_error(self, error: ErrorFrame):
+        await self._call_event_handler("on_connection_error", error.error)
+        await self.push_error(error)
 
 
 class InterruptibleWordTTSService(WebsocketWordTTSService):
@@ -766,11 +962,9 @@ class STTService(AIService):
     def sample_rate(self) -> int:
         return self._sample_rate
 
-    @abstractmethod
     async def set_model(self, model: str):
         self.set_model_name(model)
 
-    @abstractmethod
     async def set_language(self, language: Language):
         pass
 
@@ -801,8 +995,6 @@ class STTService(AIService):
             return
 
         await self.process_generator(self.run_stt(frame.audio))
-        if self._audio_passthrough:
-            await self.push_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes a frame of audio data, either buffering or transcribing it."""
@@ -813,6 +1005,8 @@ class STTService(AIService):
             # push a TextFrame. We also push audio downstream in case someone
             # else needs it.
             await self.process_audio_frame(frame, direction)
+            if self._audio_passthrough:
+                await self.push_frame(frame, direction)
         elif isinstance(frame, STTUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, STTMuteFrame):
@@ -823,79 +1017,64 @@ class STTService(AIService):
 
 
 class SegmentedSTTService(STTService):
-    """SegmentedSTTService is an STTService that will detect speech and will run
-    speech-to-text on speech segments only, instead of a continous stream.
+    """SegmentedSTTService is an STTService that uses VAD events to detect
+    speech and will run speech-to-text on speech segments only, instead of a
+    continous stream. Since it uses VAD it means that VAD needs to be enabled in
+    the pipeline.
+
+    This service always keeps a small audio buffer to take into account that VAD
+    events are delayed from when the user speech really starts.
 
     """
 
-    def __init__(
-        self,
-        *,
-        min_volume: float = 0.6,
-        max_silence_secs: float = 0.3,
-        max_buffer_secs: float = 1.5,
-        sample_rate: Optional[int] = None,
-        **kwargs,
-    ):
+    def __init__(self, *, sample_rate: Optional[int] = None, **kwargs):
         super().__init__(sample_rate=sample_rate, **kwargs)
-        self._min_volume = min_volume
-        self._max_silence_secs = max_silence_secs
-        self._max_buffer_secs = max_buffer_secs
         self._content = None
         self._wave = None
-        self._silence_num_frames = 0
-        # Volume exponential smoothing
-        self._smoothing_factor = 0.2
-        self._prev_volume = 0
-
-    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
-        # Try to filter out empty background noise
-        volume = self._get_smoothed_volume(frame)
-        if volume >= self._min_volume:
-            # If volume is high enough, write new data to wave file
-            self._wave.writeframes(frame.audio)
-            self._silence_num_frames = 0
-        else:
-            self._silence_num_frames += frame.num_frames
-        self._prev_volume = volume
-
-        # If buffer is not empty and we have enough data or there's been a long
-        # silence, transcribe the audio gathered so far.
-        silence_secs = self._silence_num_frames / self.sample_rate
-        buffer_secs = self._wave.getnframes() / self.sample_rate
-        if self._content.tell() > 0 and (
-            buffer_secs > self._max_buffer_secs or silence_secs > self._max_silence_secs
-        ):
-            self._silence_num_frames = 0
-            self._wave.close()
-            self._content.seek(0)
-            await self.process_generator(self.run_stt(self._content.read()))
-            (self._content, self._wave) = self._new_wave()
+        self._audio_buffer = bytearray()
+        self._audio_buffer_size_1s = 0
+        self._user_speaking = False
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        if not self._wave:
-            (self._content, self._wave) = self._new_wave()
+        self._audio_buffer_size_1s = self.sample_rate * 2
 
-    async def stop(self, frame: EndFrame):
-        await super().stop(frame)
-        self._wave.close()
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
 
-    async def cancel(self, frame: CancelFrame):
-        await super().cancel(frame)
-        self._wave.close()
+        if isinstance(frame, UserStartedSpeakingFrame):
+            await self._handle_user_started_speaking(frame)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_user_stopped_speaking(frame)
 
-    def _new_wave(self):
+    async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
+        self._user_speaking = True
+
+    async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
+        self._user_speaking = False
+
         content = io.BytesIO()
-        ww = wave.open(content, "wb")
-        ww.setsampwidth(2)
-        ww.setnchannels(1)
-        ww.setframerate(self.sample_rate)
-        return (content, ww)
+        wav = wave.open(content, "wb")
+        wav.setsampwidth(2)
+        wav.setnchannels(1)
+        wav.setframerate(self.sample_rate)
+        wav.writeframes(self._audio_buffer)
+        wav.close()
+        content.seek(0)
 
-    def _get_smoothed_volume(self, frame: AudioRawFrame) -> float:
-        volume = calculate_audio_volume(frame.audio, frame.sample_rate)
-        return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
+        await self.process_generator(self.run_stt(content.read()))
+
+        # Start clean.
+        self._audio_buffer.clear()
+
+    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
+        # If the user is speaking the audio buffer will keep growin.
+        self._audio_buffer += frame.audio
+
+        # If the user is not speaking we keep just a little bit of audio.
+        if not self._user_speaking and len(self._audio_buffer) > self._audio_buffer_size_1s:
+            discarded = len(self._audio_buffer) - self._audio_buffer_size_1s
+            self._audio_buffer = self._audio_buffer[discarded:]
 
 
 class ImageGenService(AIService):

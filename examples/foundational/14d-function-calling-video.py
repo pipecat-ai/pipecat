@@ -39,7 +39,12 @@ async def get_weather(function_name, tool_call_id, arguments, llm, context, resu
 async def get_image(function_name, tool_call_id, arguments, llm, context, result_callback):
     logger.debug(f"!!! IN get_image {video_participant_id}, {arguments}")
     question = arguments["question"]
-    await llm.request_image_frame(user_id=video_participant_id, text_content=question)
+    await llm.request_image_frame(
+        user_id=video_participant_id,
+        function_name=function_name,
+        tool_call_id=tool_call_id,
+        text_content=question,
+    )
 
 
 async def main():
@@ -60,7 +65,7 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
@@ -141,7 +146,7 @@ indicate you should use the get_image tool are:
             await transport.capture_participant_transcription(participant["id"])
             await transport.capture_participant_video(video_participant_id, framerate=0)
             # Kick off the conversation.
-            await tts.say("Hi! Ask me about the weather in San Francisco.")
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         runner = PipelineRunner()
 

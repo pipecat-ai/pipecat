@@ -27,23 +27,20 @@ from pydantic import BaseModel, Field
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
+    FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    FunctionCallResultProperties,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
-    OpenAILLMContextAssistantTimestampFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     URLImageRawFrame,
     UserImageRawFrame,
-    UserImageRequestFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -63,7 +60,6 @@ from pipecat.services.ai_services import (
 )
 from pipecat.services.base_whisper import BaseWhisperSTTService, Transcription
 from pipecat.transcriptions.language import Language
-from pipecat.utils.time import time_now_iso8601
 
 ValidVoice = Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
 
@@ -475,22 +471,16 @@ class OpenAITTSService(TTSService):
     """OpenAI Text-to-Speech service that generates audio from text.
 
     This service uses the OpenAI TTS API to generate PCM-encoded audio at 24kHz.
-    When using with DailyTransport, configure the sample rate in DailyParams
-    as shown below:
-
-    DailyParams(
-        audio_out_enabled=True,
-        audio_out_sample_rate=24_000,
-    )
 
     Args:
         api_key: OpenAI API key. Defaults to None.
         voice: Voice ID to use. Defaults to "alloy".
-        model: TTS model to use ("tts-1" or "tts-1-hd"). Defaults to "tts-1".
-        sample_rate: Output audio sample rate in Hz. Defaults to 24000.
+        model: TTS model to use. Defaults to "tts-1".
+        sample_rate: Output audio sample rate in Hz. Defaults to None.
         **kwargs: Additional keyword arguments passed to TTSService.
 
     The service returns PCM-encoded audio at the specified sample rate.
+
     """
 
     OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
@@ -500,7 +490,7 @@ class OpenAITTSService(TTSService):
         *,
         api_key: Optional[str] = None,
         voice: str = "alloy",
-        model: Literal["tts-1", "tts-1-hd"] = "tts-1",
+        model: str = "tts-1",
         sample_rate: Optional[int] = None,
         **kwargs,
     ):
@@ -567,156 +557,67 @@ class OpenAITTSService(TTSService):
             logger.exception(f"{self} error generating TTS: {e}")
 
 
-# internal use only -- todo: refactor
-@dataclass
-class OpenAIImageMessageFrame(Frame):
-    user_image_raw_frame: UserImageRawFrame
-    text: Optional[str] = None
-
-
 class OpenAIUserContextAggregator(LLMUserContextAggregator):
-    def __init__(self, context: OpenAILLMContext, **kwargs):
-        super().__init__(context=context, **kwargs)
-
-    async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-        # Our parent method has already called push_frame(). So we can't interrupt the
-        # flow here and we don't need to call push_frame() ourselves.
-        try:
-            if isinstance(frame, UserImageRequestFrame):
-                # The LLM sends a UserImageRequestFrame upstream. Cache any context provided with
-                # that frame so we can use it when we assemble the image message in the assistant
-                # context aggregator.
-                if frame.context:
-                    if isinstance(frame.context, str):
-                        self._context._user_image_request_context[frame.user_id] = frame.context
-                    else:
-                        logger.error(
-                            f"Unexpected UserImageRequestFrame context type: {type(frame.context)}"
-                        )
-                        del self._context._user_image_request_context[frame.user_id]
-                else:
-                    if frame.user_id in self._context._user_image_request_context:
-                        del self._context._user_image_request_context[frame.user_id]
-            elif isinstance(frame, UserImageRawFrame):
-                # Push a new OpenAIImageMessageFrame with the text context we cached
-                # downstream to be handled by our assistant context aggregator. This is
-                # necessary so that we add the message to the context in the right order.
-                text = self._context._user_image_request_context.get(frame.user_id) or ""
-                if text:
-                    del self._context._user_image_request_context[frame.user_id]
-                frame = OpenAIImageMessageFrame(user_image_raw_frame=frame, text=text)
-                await self.push_frame(frame)
-        except Exception as e:
-            logger.error(f"Error processing frame: {e}")
+    pass
 
 
 class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, context: OpenAILLMContext, **kwargs):
-        super().__init__(context=context, **kwargs)
-        self._function_calls_in_progress = {}
-        self._function_call_result = None
-        self._pending_image_frame_message = None
+    async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
+        self._context.add_message(
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": frame.tool_call_id,
+                        "function": {
+                            "name": frame.function_name,
+                            "arguments": json.dumps(frame.arguments),
+                        },
+                        "type": "function",
+                    }
+                ],
+            }
+        )
+        self._context.add_message(
+            {
+                "role": "tool",
+                "content": "IN_PROGRESS",
+                "tool_call_id": frame.tool_call_id,
+            }
+        )
 
-    async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-        # See note above about not calling push_frame() here.
-        if isinstance(frame, StartInterruptionFrame):
-            self._function_calls_in_progress.clear()
-            self._function_call_finished = None
-        elif isinstance(frame, FunctionCallInProgressFrame):
-            logger.debug(f"FunctionCallInProgressFrame: {frame}")
-            self._function_calls_in_progress[frame.tool_call_id] = frame
-        elif isinstance(frame, FunctionCallResultFrame):
-            logger.debug(f"FunctionCallResultFrame: {frame}")
-            if frame.tool_call_id in self._function_calls_in_progress:
-                del self._function_calls_in_progress[frame.tool_call_id]
-                self._function_call_result = frame
-                # TODO-CB: Kwin wants us to refactor this out of here but I REFUSE
-                await self.push_aggregation()
-            else:
-                logger.warning(
-                    "FunctionCallResultFrame tool_call_id does not match any function call in progress"
-                )
-                self._function_call_result = None
-        elif isinstance(frame, OpenAIImageMessageFrame):
-            self._pending_image_frame_message = frame
-            await self.push_aggregation()
+    async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+        if frame.result:
+            result = json.dumps(frame.result)
+            await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
+        else:
+            await self._update_function_call_result(
+                frame.function_name, frame.tool_call_id, "COMPLETED"
+            )
 
-    async def push_aggregation(self):
-        if not (
-            self._aggregation or self._function_call_result or self._pending_image_frame_message
-        ):
-            return
+    async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
+        await self._update_function_call_result(
+            frame.function_name, frame.tool_call_id, "CANCELLED"
+        )
 
-        run_llm = False
-        properties: Optional[FunctionCallResultProperties] = None
+    async def _update_function_call_result(
+        self, function_name: str, tool_call_id: str, result: str
+    ):
+        for message in self._context.messages:
+            if (
+                message["role"] == "tool"
+                and message["tool_call_id"]
+                and message["tool_call_id"] == tool_call_id
+            ):
+                message["content"] = result
 
-        aggregation = self._aggregation.strip()
-        self.reset()
-
-        try:
-            if aggregation:
-                self._context.add_message({"role": "assistant", "content": aggregation})
-
-            if self._function_call_result:
-                frame = self._function_call_result
-                properties = frame.properties
-                self._function_call_result = None
-                if frame.result:
-                    self._context.add_message(
-                        {
-                            "role": "assistant",
-                            "tool_calls": [
-                                {
-                                    "id": frame.tool_call_id,
-                                    "function": {
-                                        "name": frame.function_name,
-                                        "arguments": json.dumps(frame.arguments),
-                                    },
-                                    "type": "function",
-                                }
-                            ],
-                        }
-                    )
-                    self._context.add_message(
-                        {
-                            "role": "tool",
-                            "content": json.dumps(frame.result),
-                            "tool_call_id": frame.tool_call_id,
-                        }
-                    )
-                    if properties and properties.run_llm is not None:
-                        # If the tool call result has a run_llm property, use it
-                        run_llm = properties.run_llm
-                    else:
-                        # Default behavior is to run the LLM if there are no function calls in progress
-                        run_llm = not bool(self._function_calls_in_progress)
-
-            if self._pending_image_frame_message:
-                frame = self._pending_image_frame_message
-                self._pending_image_frame_message = None
-                self._context.add_image_frame_message(
-                    format=frame.user_image_raw_frame.format,
-                    size=frame.user_image_raw_frame.size,
-                    image=frame.user_image_raw_frame.image,
-                    text=frame.text,
-                )
-                run_llm = True
-
-            if run_llm:
-                await self.push_context_frame(FrameDirection.UPSTREAM)
-
-            # Emit the on_context_updated callback once the function call result is added to the context
-            if properties and properties.on_context_updated is not None:
-                await properties.on_context_updated()
-
-            # Push context frame
-            await self.push_context_frame()
-
-            # Push timestamp frame with current time
-            timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
-            await self.push_frame(timestamp_frame)
-
-        except Exception as e:
-            logger.error(f"Error processing frame: {e}")
+    async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        await self._update_function_call_result(
+            frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
+        )
+        self._context.add_image_frame_message(
+            format=frame.format,
+            size=frame.size,
+            image=frame.image,
+            text=frame.request.context,
+        )
