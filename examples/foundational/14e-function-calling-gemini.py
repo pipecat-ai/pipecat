@@ -33,13 +33,8 @@ logger.add(sys.stderr, level="DEBUG")
 video_participant_id = None
 
 
-async def start_fetch_weather(function_name, llm, context):
-    """Push a frame to the LLM; this is handy when the LLM response might take a while."""
-    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
-
-
 async def get_weather(function_name, tool_call_id, arguments, llm, context, result_callback):
+    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
     location = arguments["location"]
     await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
@@ -47,7 +42,12 @@ async def get_weather(function_name, tool_call_id, arguments, llm, context, resu
 async def get_image(function_name, tool_call_id, arguments, llm, context, result_callback):
     logger.debug(f"!!! IN get_image {video_participant_id}, {arguments}")
     question = arguments["question"]
-    await llm.request_image_frame(user_id=video_participant_id, text_content=question)
+    await llm.request_image_frame(
+        user_id=video_participant_id,
+        function_name=function_name,
+        tool_call_id=tool_call_id,
+        text_content=question,
+    )
 
 
 async def main():
@@ -72,7 +72,7 @@ async def main():
         )
 
         llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
-        llm.register_function("get_weather", get_weather, start_fetch_weather)
+        llm.register_function("get_weather", get_weather)
         llm.register_function("get_image", get_image)
 
         weather_function = FunctionSchema(
