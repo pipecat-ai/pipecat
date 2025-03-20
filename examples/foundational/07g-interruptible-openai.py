@@ -51,9 +51,11 @@ async def main():
         #     api_key="gsk_***",
         #     model="whisper-large-v3",
         # )
-        stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"), model="whisper-1")
+        stt = OpenAISTTService(
+            api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-transcribe-latest"
+        )
 
-        tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), voice="alloy")
+        tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini-tts-latest")
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
