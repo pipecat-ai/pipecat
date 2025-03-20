@@ -44,8 +44,6 @@ from pipecat.tests.utils import SleepFrame, run_test
 
 AGGREGATION_TIMEOUT = 0.1
 AGGREGATION_SLEEP = 0.15
-BOT_INTERRUPTION_TIMEOUT = 0.2
-BOT_INTERRUPTION_SLEEP = 0.25
 
 
 class BaseTestUserContextAggregator:
@@ -388,14 +386,13 @@ class BaseTestUserContextAggregator:
         aggregator = self.AGGREGATOR_CLASS(
             context,
             aggregation_timeout=AGGREGATION_TIMEOUT,
-            bot_interruption_timeout=BOT_INTERRUPTION_TIMEOUT,
         )
         frames_to_send = [
             UserStartedSpeakingFrame(),
             InterimTranscriptionFrame(text="How ", user_id="cat", timestamp=""),
             SleepFrame(),
             UserStoppedSpeakingFrame(),
-            SleepFrame(BOT_INTERRUPTION_SLEEP),
+            SleepFrame(AGGREGATION_SLEEP),
             InterimTranscriptionFrame(text="are you?", user_id="cat", timestamp=""),
             TranscriptionFrame(text="How are you?", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
@@ -405,12 +402,10 @@ class BaseTestUserContextAggregator:
             UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
         ]
-        expected_up_frames = [EmulateUserStartedSpeakingFrame, EmulateUserStoppedSpeakingFrame]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
-            expected_up_frames=expected_up_frames,
         )
         self.check_message_content(context, 0, "How are you?")
 

@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added new `sample_rate` constructor parameter to `TavusVideoService` to allow
   changing the output sample rate.
 
+- Added new `NeuphonicTTSService`.
+  (see https://neuphonic.com)
+
 - Added new `UltravoxSTTService`.
   (see https://github.com/fixie-ai/ultravox)
 
@@ -269,6 +272,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add foundational example `07w-interruptible-fal.py`, showing `FalSTTService`.
 
+- Added a new Ultravox example
+  `examples/foundational/07u-interruptible-ultravox.py`.
+
+- Added new Neuphonic examples
+  `examples/foundational/07v-interruptible-neuphonic.py` and
+  `examples/foundational/07v-interruptible-neuphonic-http.py`.
+
 - Added a new example `examples/foundational/36-user-email-gathering.py` to show
   how to gather user emails. The example uses's Cartesia's `<spell></spell>`
   tags and Rime `spell()` function to spell out the emails for confirmation.
@@ -367,6 +377,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed an issue that would cause undesired interruptions via
+  `EmulateUserStartedSpeakingFrame`.
+
 - Fixed a `GoogleLLMService` that was causing an exception when sending inline
   audio in some cases.
 
@@ -382,10 +395,6 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
   interruption being played after an interruption.
 
 - Fixed `match_endofsentence` support for ellipses.
-
-- Fixed an issue that would cause undesired interruptions via
-  `EmulateUserStartedSpeakingFrame` when only interim transcriptions (i.e. no
-  final transcriptions) where received.
 
 - Fixed an issue where `EndTaskFrame` was not triggering
   `on_client_disconnected` or closing the WebSocket in FastAPI.
