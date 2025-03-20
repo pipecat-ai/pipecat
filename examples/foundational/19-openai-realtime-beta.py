@@ -23,11 +23,11 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai_realtime_beta import (
+    InputAudioNoiseReduction,
     InputAudioTranscription,
     OpenAIRealtimeBetaLLMService,
-    SessionProperties,
     SemanticTurnDetection,
-    InputAudioNoiseReduction
+    SessionProperties,
 )
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -95,7 +95,7 @@ async def main():
             turn_detection=SemanticTurnDetection(),
             # Or set to False to disable openai turn detection and use transport VAD
             # turn_detection=False,
-            input_audio_noise_reduction=InputAudioNoiseReduction(type='near_field'),
+            input_audio_noise_reduction=InputAudioNoiseReduction(type="near_field"),
             # tools=tools,
             instructions="""Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
 
