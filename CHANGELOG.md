@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handler will be triggered if the idle timeout is reached (whether the pipeline
   task is cancelled or not).
 
+- Added `FalSTTService`, which provides STT for Fal's Wizper API.
+
 - Added a `reconnect_on_error` parameter to websocket-based TTS services as well
   as a `on_connection_error` event handler. The `reconnect_on_error` indicates
   whether the TTS service should reconnect on error. The `on_connection_error`
@@ -215,6 +217,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result in an audio output being generated.
 
 ### Other
+
+- Add foundational example `07w-interruptible-fal.py`, showing `FalSTTService`.
 
 - Added a new example `examples/foundational/36-user-email-gathering.py` to show
   how to gather user emails. The example uses's Cartesia's `<spell></spell>`
