@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `default_headers` parameter to `BaseOpenAILLMService` constructor.
 
+### Changed
+
+- Changed the default `InputAudioTranscription` model to `gpt-4o-transcribe`
+  for `OpenAIRealtimeBetaLLMService`.
+
+### Other
+
+- Update the `19-openai-realtime-beta.py` and `19a-azure-realtime-beta.py`
+  examples to use the FunctionSchema format.
+
 ## [0.0.59] - 2025-03-20
 
 ### Added
