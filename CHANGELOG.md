@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.59] - 2025-03-20
 
 ### Added
 
@@ -49,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added new `sample_rate` constructor parameter to `TavusVideoService` to allow
   changing the output sample rate.
+
+- Added new `NeuphonicTTSService`.
+  (see https://neuphonic.com)
 
 - Added new `UltravoxSTTService`.
   (see https://github.com/fixie-ai/ultravox)
@@ -128,7 +131,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Gemini models. Added foundational example
   `14p-function-calling-gemini-vertex-ai.py`.
 
+- Added support in `OpenAIRealtimeBetaLLMService` for a slate of new features:
+
+  - The `'gpt-4o-transcribe'` input audio transcription model, along
+    with new `language` and `prompt` options specific to that model.
+  - The `input_audio_noise_reduction` session property.
+
+    ```python
+    session_properties = SessionProperties(
+      # ...
+      input_audio_noise_reduction=InputAudioNoiseReduction(
+        type="near_field" # also supported: "far_field"
+      )
+      # ...
+    )
+    ```
+
+  - The `'semantic_vad'` `turn_detection` session property value, a more
+    sophisticated model for detecting when the user has stopped speaking.
+  - `on_conversation_item_created` and `on_conversation_item_updated`
+    events to `OpenAIRealtimeBetaLLMService`.
+
+    ```python
+    @llm.event_handler("on_conversation_item_created")
+    async def on_conversation_item_created(llm, item_id, item):
+      # ...
+
+    @llm.event_handler("on_conversation_item_updated")
+    async def on_conversation_item_updated(llm, item_id, item):
+      # `item` may not always be available here
+      # ...
+    ```
+
+  - The `retrieve_conversation_item(item_id)` method for introspecting a
+    conversation item on the server.
+
+    ```python
+    item = await llm.retrieve_conversation_item(item_id)
+    ```
+
 ### Changed
+
+- Updated `OpenAISTTService` to use `gpt-4o-transcribe` as the default
+  transcription model.
+
+- Updated `OpenAITTSService` to use `gpt-4o-mini-tts` as the default TTS model.
 
 - Function calls are now executed in tasks. This means that the pipeline will
   not be blocked while the function call is being executed.
@@ -216,9 +263,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `RimeTTSService` where the last line of text sent didn't
   result in an audio output being generated.
 
+- Fixed `OpenAIRealtimeBetaLLMService` by adding proper handling for:
+  - The `conversation.item.input_audio_transcription.delta` server message,
+    which was added server-side at some point and not handled client-side.
+  - Errors reported by the `response.done` server message.
+
 ### Other
 
 - Add foundational example `07w-interruptible-fal.py`, showing `FalSTTService`.
+
+- Added a new Ultravox example
+  `examples/foundational/07u-interruptible-ultravox.py`.
+
+- Added new Neuphonic examples
+  `examples/foundational/07v-interruptible-neuphonic.py` and
+  `examples/foundational/07v-interruptible-neuphonic-http.py`.
 
 - Added a new example `examples/foundational/36-user-email-gathering.py` to show
   how to gather user emails. The example uses's Cartesia's `<spell></spell>`
@@ -318,6 +377,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed an issue that would cause undesired interruptions via
+  `EmulateUserStartedSpeakingFrame`.
+
 - Fixed a `GoogleLLMService` that was causing an exception when sending inline
   audio in some cases.
 
@@ -333,10 +395,6 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
   interruption being played after an interruption.
 
 - Fixed `match_endofsentence` support for ellipses.
-
-- Fixed an issue that would cause undesired interruptions via
-  `EmulateUserStartedSpeakingFrame` when only interim transcriptions (i.e. no
-  final transcriptions) where received.
 
 - Fixed an issue where `EndTaskFrame` was not triggering
   `on_client_disconnected` or closing the WebSocket in FastAPI.

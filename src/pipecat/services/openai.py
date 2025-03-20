@@ -412,13 +412,13 @@ class OpenAIImageGenService(ImageGenService):
 
 
 class OpenAISTTService(BaseWhisperSTTService):
-    """OpenAI Whisper speech-to-text service.
+    """OpenAI Speech-to-Text service that generates text from audio.
 
-    Uses OpenAI's Whisper API to convert audio to text. Requires an OpenAI API key
+    Uses OpenAI's transcription API to convert audio to text. Requires an OpenAI API key
     set via the api_key parameter or OPENAI_API_KEY environment variable.
 
     Args:
-        model: Whisper model to use. Defaults to "whisper-1".
+        model: Model to use — either gpt-4o or Whisper. Defaults to "gpt-4o-transcribe".
         api_key: OpenAI API key. Defaults to None.
         base_url: API base URL. Defaults to None.
         language: Language of the audio input. Defaults to English.
@@ -430,7 +430,7 @@ class OpenAISTTService(BaseWhisperSTTService):
     def __init__(
         self,
         *,
-        model: str = "whisper-1",
+        model: str = "gpt-4o-transcribe",
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         language: Optional[Language] = Language.EN,
@@ -475,7 +475,7 @@ class OpenAITTSService(TTSService):
     Args:
         api_key: OpenAI API key. Defaults to None.
         voice: Voice ID to use. Defaults to "alloy".
-        model: TTS model to use. Defaults to "tts-1".
+        model: TTS model to use. Defaults to "gpt-4o-mini-tts".
         sample_rate: Output audio sample rate in Hz. Defaults to None.
         **kwargs: Additional keyword arguments passed to TTSService.
 
@@ -490,7 +490,7 @@ class OpenAITTSService(TTSService):
         *,
         api_key: Optional[str] = None,
         voice: str = "alloy",
-        model: str = "tts-1",
+        model: str = "gpt-4o-mini-tts",
         sample_rate: Optional[int] = None,
         **kwargs,
     ):
