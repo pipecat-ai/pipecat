@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
@@ -46,28 +48,25 @@ async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context
     )
 
 
-tools = [
-    {
-        "type": "function",
-        "name": "get_current_weather",
-        "description": "Get the current weather",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "location": {
-                    "type": "string",
-                    "description": "The city and state, e.g. San Francisco, CA",
-                },
-                "format": {
-                    "type": "string",
-                    "enum": ["celsius", "fahrenheit"],
-                    "description": "The temperature unit to use. Infer this from the users location.",
-                },
-            },
-            "required": ["location", "format"],
+weather_function = FunctionSchema(
+    name="get_current_weather",
+    description="Get the current weather",
+    properties={
+        "location": {
+            "type": "string",
+            "description": "The city and state, e.g. San Francisco, CA",
         },
-    }
-]
+        "format": {
+            "type": "string",
+            "enum": ["celsius", "fahrenheit"],
+            "description": "The temperature unit to use. Infer this from the users location.",
+        },
+    },
+    required=["location", "format"],
+)
+
+# Create tools schema
+tools = ToolsSchema(standard_tools=[weather_function])
 
 
 async def main():
