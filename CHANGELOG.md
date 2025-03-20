@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for detecting idle pipelines. By default, if no activity has
+  been detected during 5 minutes, the `PipelineTask` will be automatically
+  cancelled. It is possible to override this behavior by passing
+  `cancel_on_idle_timeout=False`. It is also possible to change the default
+  timeout with `idle_timeout_secs` or the frames that prevent the pipeline from
+  being idle with `idle_timeout_frames`. Finally, an `on_idle_timeout` event
+  handler will be triggered if the idle timeout is reached (whether the pipeline
+  task is cancelled or not).
+
 - Added a `reconnect_on_error` parameter to websocket-based TTS services as well
   as a `on_connection_error` event handler. The `reconnect_on_error` indicates
   whether the TTS service should reconnect on error. The `on_connection_error`
@@ -110,6 +119,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `14p-function-calling-gemini-vertex-ai.py`.
 
 ### Changed
+
+- ⚠️ `PipelineTask` will now be automatically cancelled if no bot activity is
+  happening in the pipeline. There are a few settings to configure this
+  behavior, see `PipelineTask` documentation for more details.
 
 - All event handlers are now executed in separate tasks in order to prevent
   blocking the pipeline. It is possible that event handlers take some time to
