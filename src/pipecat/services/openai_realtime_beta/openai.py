@@ -23,8 +23,6 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
-import re
-
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -130,14 +128,20 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     async def retrieve_conversation_item(self, item_id: str):
         future = self.get_event_loop().create_future()
-        retrieval_in_progress = False
+        retrieval_in_flight = False
         if not self._retrieve_conversation_item_futures.get(item_id):
             self._retrieve_conversation_item_futures[item_id] = []
         else:
-            retrieval_in_progress = True
+            retrieval_in_flight = True
         self._retrieve_conversation_item_futures[item_id].append(future)
-        if not retrieval_in_progress:
-            await self.send_client_event(events.ConversationItemRetrieveEvent(item_id=item_id))
+        if not retrieval_in_flight:
+            await self.send_client_event(
+                # Set event_id to "rci_{item_id}" so that we can identiy an
+                # error later if the retrieval fails. We don't need a UUID
+                # suffix to the event_id because we're ensuring only one
+                # in-flight retrieval per item_id
+                events.ConversationItemRetrieveEvent(item_id=item_id, event_id=f"rci_{item_id}")
+            )
         return await future
 
     #
@@ -543,11 +547,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         Otherwise:
         - return false
         """
-        match = re.match(
-            r"^Error retrieving item: the item with id '(.*)' does not exist\.$", evt.error.message
-        )
-        if match:
-            item_id = match.group(1)
+        if evt.error.code == "item_retrieve_invalid_item_id":
+            item_id = evt.error.event_id.split("_", 1)[1]  # event_id is of the form "rci_{item_id}"
             futures = self._retrieve_conversation_item_futures.pop(item_id, None)
             if futures:
                 for future in futures:
