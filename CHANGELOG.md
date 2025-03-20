@@ -130,7 +130,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added support in `OpenAIRealtimeBetaLLMService` for a slate of new features:
 
-  - The `'gpt-4o-transcribe-latest'` input audio transcription model, along
+  - The `'gpt-4o-transcribe'` input audio transcription model, along
     with new `language` and `prompt` options specific to that model.
   - The `input_audio_noise_reduction` session property.
 
