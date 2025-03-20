@@ -171,7 +171,7 @@ class RimeTTSService(AudioContextWordTTSService):
         await self._connect_websocket()
 
         if not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
         """Close websocket connection and clean up tasks."""
@@ -194,6 +194,7 @@ class RimeTTSService(AudioContextWordTTSService):
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
         """Close websocket connection and reset state."""

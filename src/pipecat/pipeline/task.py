@@ -425,12 +425,14 @@ class PipelineTask(BaseTask):
                 # Tell the task we should stop nicely.
                 await self.queue_frame(StopFrame())
             elif isinstance(frame, ErrorFrame):
-                logger.error(f"Error running app: {frame}")
                 if frame.fatal:
+                    logger.error(f"A fatal error occurred: {frame}")
                     # Cancel all tasks downstream.
                     await self.queue_frame(CancelFrame())
                     # Tell the task we should stop.
                     await self.queue_frame(StopTaskFrame())
+                else:
+                    logger.warning(f"Something went wrong: {frame}")
             self._up_queue.task_done()
 
     async def _process_down_queue(self):
