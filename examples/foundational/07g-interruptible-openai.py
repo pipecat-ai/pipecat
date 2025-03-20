@@ -52,7 +52,9 @@ async def main():
         #     model="whisper-large-v3",
         # )
         stt = OpenAISTTService(
-            api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-transcribe-latest"
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="gpt-4o-transcribe-latest",
+            prompt="Expect words related to dogs, such as breed names.",
         )
 
         tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini-tts-latest")
@@ -62,7 +64,7 @@ async def main():
         messages = [
             {
                 "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": "You are very knowledgable about dogs. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
             },
         ]
 
