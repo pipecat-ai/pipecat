@@ -367,6 +367,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed an issue that would cause undesired interruptions via
+  `EmulateUserStartedSpeakingFrame`.
+
 - Fixed a `GoogleLLMService` that was causing an exception when sending inline
   audio in some cases.
 
@@ -382,10 +385,6 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
   interruption being played after an interruption.
 
 - Fixed `match_endofsentence` support for ellipses.
-
-- Fixed an issue that would cause undesired interruptions via
-  `EmulateUserStartedSpeakingFrame` when only interim transcriptions (i.e. no
-  final transcriptions) where received.
 
 - Fixed an issue where `EndTaskFrame` was not triggering
   `on_client_disconnected` or closing the WebSocket in FastAPI.
