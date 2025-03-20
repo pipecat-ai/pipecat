@@ -128,7 +128,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Gemini models. Added foundational example
   `14p-function-calling-gemini-vertex-ai.py`.
 
+- Added support in `OpenAIRealtimeBetaLLMService` for a slate of new features:
+
+  - The `'gpt-4o-transcribe'` input audio transcription model, along
+    with new `language` and `prompt` options specific to that model.
+  - The `input_audio_noise_reduction` session property.
+
+    ```python
+    session_properties = SessionProperties(
+      # ...
+      input_audio_noise_reduction=InputAudioNoiseReduction(
+        type="near_field" # also supported: "far_field"
+      )
+      # ...
+    )
+    ```
+
+  - The `'semantic_vad'` `turn_detection` session property value, a more
+    sophisticated model for detecting when the user has stopped speaking.
+  - `on_conversation_item_created` and `on_conversation_item_updated`
+    events to `OpenAIRealtimeBetaLLMService`.
+
+    ```python
+    @llm.event_handler("on_conversation_item_created")
+    async def on_conversation_item_created(llm, item_id, item):
+      # ...
+
+    @llm.event_handler("on_conversation_item_updated")
+    async def on_conversation_item_updated(llm, item_id, item):
+      # `item` may not always be available here
+      # ...
+    ```
+
+  - The `retrieve_conversation_item(item_id)` method for introspecting a
+    conversation item on the server.
+
+    ```python
+    item = await llm.retrieve_conversation_item(item_id)
+    ```
+
 ### Changed
+
+- Updated `OpenAISTTService` to use `gpt-4o-transcribe` as the default
+  transcription model.
+
+- Updated `OpenAITTSService` to use `gpt-4o-mini-tts` as the default TTS model.
 
 - Function calls are now executed in tasks. This means that the pipeline will
   not be blocked while the function call is being executed.
@@ -215,6 +259,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue in `RimeTTSService` where the last line of text sent didn't
   result in an audio output being generated.
+
+- Fixed `OpenAIRealtimeBetaLLMService` by adding proper handling for:
+  - The `conversation.item.input_audio_transcription.delta` server message,
+    which was added server-side at some point and not handled client-side.
+  - Errors reported by the `response.done` server message.
 
 ### Other
 
