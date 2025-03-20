@@ -149,6 +149,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `SegmentedSTTService` issue that was causing audio to be sent
+  prematurely to the STT service. Instead of analyzing the volume in this
+  service we rely on VAD events which use both VAD and volume.
+
 - Fixed a `GeminiMultimodalLiveLLMService` issue that was causing messages to be
   duplicated in the context when pushing `LLMMessagesAppendFrame` frames.
 
