@@ -122,6 +122,7 @@ class RealtimeError(BaseModel):
     code: Optional[str] = ""
     message: str
     param: Optional[str] = None
+    event_id: Optional[str] = None
 
 
 #
