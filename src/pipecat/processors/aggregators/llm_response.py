@@ -5,7 +5,6 @@
 #
 
 import asyncio
-import time
 from abc import abstractmethod
 from typing import Dict, List
 
@@ -222,17 +221,15 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self,
         context: OpenAILLMContext,
         aggregation_timeout: float = 1.0,
-        bot_interruption_timeout: float = 5.0,
         **kwargs,
     ):
         super().__init__(context=context, role="user", **kwargs)
         self._aggregation_timeout = aggregation_timeout
-        self._bot_interruption_timeout = bot_interruption_timeout
 
         self._seen_interim_results = False
         self._user_speaking = False
-        self._last_user_speaking_time = 0
         self._emulating_vad = False
+        self._waiting_for_aggregation = False
 
         self._aggregation_event = asyncio.Event()
         self._aggregation_task = None
@@ -240,6 +237,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     def reset(self):
         super().reset()
         self._seen_interim_results = False
+        self._waiting_for_aggregation = False
 
     async def handle_aggregation(self, aggregation: str):
         self._context.add_message({"role": self.role, "content": self._aggregation})
@@ -285,13 +283,10 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
-            self._aggregation = ""
+            self.reset()
 
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
-
-            # Reset our accumulator state.
-            self.reset()
 
     async def _start(self, frame: StartFrame):
         self._create_aggregation_task()
@@ -303,12 +298,14 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         await self._cancel_aggregation_task()
 
     async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
-        self._last_user_speaking_time = time.time()
         self._user_speaking = True
+        self._waiting_for_aggregation = True
 
     async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
-        self._last_user_speaking_time = time.time()
         self._user_speaking = False
+        # We just stopped speaking. Let's see if there's some aggregation to
+        # push. If the last thing we saw is an interim transcription, let's wait
+        # pushing the aggregation as we will probably get a final transcription.
         if not self._seen_interim_results:
             await self.push_aggregation()
 
@@ -361,18 +358,13 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         frame we might want to interrupt the bot.
 
         """
-        if not self._user_speaking:
-            diff_time = time.time() - self._last_user_speaking_time
-            if diff_time > self._bot_interruption_timeout:
-                # If we reach this case we received a transcription but VAD was
-                # not able to detect voice (e.g. when you whisper a short
-                # utterance). So, we need to emulate VAD (i.e. user
-                # start/stopped speaking).
-                await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
-                self._emulating_vad = True
-
-                # Reset time so we don't interrupt again right away.
-                self._last_user_speaking_time = time.time()
+        if not self._user_speaking and not self._waiting_for_aggregation:
+            # If we reach this case we received a transcription but VAD was not
+            # able to detect voice (e.g. when you whisper a short
+            # utterance). So, we need to emulate VAD (i.e. user start/stopped
+            # speaking).
+            await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+            self._emulating_vad = True
 
 
 class LLMAssistantContextAggregator(LLMContextResponseAggregator):
@@ -554,13 +546,10 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
-            self._aggregation = ""
+            self.reset()
 
             frame = LLMMessagesFrame(self._context.messages)
             await self.push_frame(frame)
-
-            # Reset our accumulator state.
-            self.reset()
 
 
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
@@ -573,10 +562,7 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
-            self._aggregation = ""
+            self.reset()
 
             frame = LLMMessagesFrame(self._context.messages)
             await self.push_frame(frame)
-
-            # Reset our accumulator state.
-            self.reset()
