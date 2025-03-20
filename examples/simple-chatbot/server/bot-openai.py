@@ -20,6 +20,7 @@ the conversation flow.
 import asyncio
 import os
 import sys
+from typing import Literal
 
 import aiohttp
 from dotenv import load_dotenv
@@ -40,6 +41,7 @@ from pipecat.frames.frames import (
     SpriteFrame,
     STTMuteFrame,
     TranscriptionFrame,
+    TransportMessageUrgentFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -47,7 +49,14 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFilter, STTMuteStrategy
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import (
+    RTVIConfig,
+    RTVIMessageLiteral,
+    RTVIObserver,
+    RTVIProcessor,
+    RTVIServerMessageFrame,
+    RTVIUserTranscriptionMessageData,
+)
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
@@ -77,6 +86,12 @@ class TranscriptionMuteProcessor(FrameProcessor):
         if isinstance(frame, STTMuteFrame):
             logger.debug(f"TranscriptionMuteProcessor: Mute state: {frame.mute}")
             self._is_muted = frame.mute
+
+            frame = RTVIServerMessageFrame(
+                data={"type": "user-muted-event", "payload": {"is_muted": self._is_muted}}
+            )
+
+            self.push_frame(frame)
 
         if isinstance(
             frame,
