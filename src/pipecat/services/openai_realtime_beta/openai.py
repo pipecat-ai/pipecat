@@ -136,10 +136,11 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self._retrieve_conversation_item_futures[item_id].append(future)
         if not retrieval_in_flight:
             await self.send_client_event(
-                # Set event_id to "rci_{item_id}" so that we can identiy an
+                # Set event_id to "rci_{item_id}" so that we can identify an
                 # error later if the retrieval fails. We don't need a UUID
                 # suffix to the event_id because we're ensuring only one
-                # in-flight retrieval per item_id
+                # in-flight retrieval per item_id. (Note: "rci" = "retrieve
+                # conversation item")
                 events.ConversationItemRetrieveEvent(item_id=item_id, event_id=f"rci_{item_id}")
             )
         return await future
