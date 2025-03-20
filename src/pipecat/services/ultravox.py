@@ -328,6 +328,12 @@ class UltravoxSTTService(AIService):
                             
             # Concatenate audio frames - all should be int16 now
             audio_data = np.concatenate(audio_arrays)
+
+            audio_int16 = audio_data  # Already in int16 format
+            # Save int16 audio
+
+            # Convert int16 to float32 and normalize for model input
+            audio_float32 = audio_int16.astype(np.float32) / 32768.0
             
             # Generate text using the model
             if self.model:
@@ -346,7 +352,7 @@ class UltravoxSTTService(AIService):
                         }],
                         temperature=self.temperature,
                         max_tokens=self.max_tokens,
-                        audio=audio_data
+                        audio=audio_float32
                     ):
                         # Stop TTFB metrics after first response
                         await self.stop_ttfb_metrics()
@@ -362,18 +368,20 @@ class UltravoxSTTService(AIService):
                     await self.stop_processing_metrics()
                     
                     logger.info(f"Generated text: {full_response}")
-                    
                     # Create a transcription frame with the generated text
-                    transcription = full_response.strip()
-                    if transcription:
-                        yield TranscriptionFrame(
-                            text=transcription,
-                            interim_text="",
-                            timestamp=time_now_iso8601()
-                        )
-                    else:
-                        logger.warning("Empty transcription result")
-                        yield ErrorFrame("Empty transcription result")
+                    sentences = []
+                    current = ""
+                    for char in full_response.strip():
+                        current += char
+                        if char in '.!?':
+                            sentences.append(current.strip())
+                            current = ""
+                    if current.strip():  # Add any remaining text
+                        sentences.append(current.strip())
+
+                    for sentence in sentences:
+                        text_frame = TextFrame(text=sentence)
+                        yield text_frame
                 
                 except Exception as e:
                     logger.error(f"Error generating text from model: {e}")
