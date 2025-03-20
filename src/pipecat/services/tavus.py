@@ -37,6 +37,7 @@ class TavusVideoService(AIService):
         replica_id: str,
         persona_id: str = "pipecat0",  # Use `pipecat0` so that your TTS voice is used in place of the Tavus persona
         session: aiohttp.ClientSession,
+        sample_rate: int = 16000,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -44,6 +45,7 @@ class TavusVideoService(AIService):
         self._replica_id = replica_id
         self._persona_id = persona_id
         self._session = session
+        self._sample_rate = sample_rate
 
         self._conversation_id: str
 
@@ -94,7 +96,7 @@ class TavusVideoService(AIService):
     async def _encode_audio_and_send(self, audio: bytes, in_rate: int, done: bool) -> None:
         """Encodes audio to base64 and sends it to Tavus"""
         if not done:
-            audio = await self._resampler.resample(audio, in_rate, 16000)
+            audio = await self._resampler.resample(audio, in_rate, self._sample_rate)
         audio_base64 = base64.b64encode(audio).decode("utf-8")
         logger.trace(f"{self}: sending {len(audio)} bytes")
         await self._send_audio_message(audio_base64, done=done)
@@ -108,7 +110,7 @@ class TavusVideoService(AIService):
         elif isinstance(frame, TTSAudioRawFrame):
             await self._encode_audio_and_send(frame.audio, frame.sample_rate, done=False)
         elif isinstance(frame, TTSStoppedFrame):
-            await self._encode_audio_and_send(b"\x00", 16000, done=True)
+            await self._encode_audio_and_send(b"\x00", self._sample_rate, done=True)
             await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
         elif isinstance(frame, StartInterruptionFrame):
@@ -137,6 +139,7 @@ class TavusVideoService(AIService):
                     "inference_id": self._current_idx_str,
                     "audio": audio_base64,
                     "done": done,
+                    "sample_rate": self._sample_rate,
                 },
             }
         )

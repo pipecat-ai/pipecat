@@ -30,10 +30,6 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def start_fetch_weather(function_name, llm, context):
-    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
-
-
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
     # Add a delay to test interruption during function calls
     logger.info("Weather API call starting...")
@@ -72,7 +68,7 @@ async def main():
         tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
-        llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
+        llm.register_function("get_current_weather", fetch_weather_from_api)
 
         tools = [
             ChatCompletionToolParam(
