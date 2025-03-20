@@ -101,7 +101,11 @@ async def run_test(
 
     pipeline = Pipeline([source, processor, sink])
 
-    task = PipelineTask(pipeline, params=PipelineParams(start_metadata=start_metadata))
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(start_metadata=start_metadata),
+        cancel_on_idle_timeout=False,
+    )
 
     async def push_frames():
         # Just give a little head start to the runner.
