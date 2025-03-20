@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Rollback to `deepgram-sdk` 3.8.0 since 3.10.1 was causing connections issues.
+
 - Changed the default `InputAudioTranscription` model to `gpt-4o-transcribe`
   for `OpenAIRealtimeBetaLLMService`.
 
