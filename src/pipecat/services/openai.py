@@ -112,6 +112,7 @@ class BaseOpenAILLMService(LLMService):
         base_url=None,
         organization=None,
         project=None,
+        default_headers: Mapping[str, str] | None = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -128,11 +129,24 @@ class BaseOpenAILLMService(LLMService):
         }
         self.set_model_name(model)
         self._client = self.create_client(
-            api_key=api_key, base_url=base_url, organization=organization, project=project, **kwargs
+            api_key=api_key,
+            base_url=base_url,
+            organization=organization,
+            project=project,
+            default_headers=default_headers,
+            **kwargs,
         )
         logger.info(f"{self}: using model {self.model_name}")
 
-    def create_client(self, api_key=None, base_url=None, organization=None, project=None, **kwargs):
+    def create_client(
+        self,
+        api_key=None,
+        base_url=None,
+        organization=None,
+        project=None,
+        default_headers=None,
+        **kwargs,
+    ):
         return AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -145,6 +159,7 @@ class BaseOpenAILLMService(LLMService):
                     keepalive_expiry=None,
                 )
             ),
+            default_headers=default_headers,
         )
 
     def can_generate_metrics(self) -> bool:
