@@ -79,7 +79,6 @@ class TranscriptionMuteProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, STTMuteFrame):
-            logger.debug(f"TranscriptionMuteProcessor: Mute state: {frame.mute}")
             self._is_muted = frame.mute
 
             frame = RTVIServerMessageFrame(
@@ -100,13 +99,10 @@ class TranscriptionMuteProcessor(FrameProcessor):
             if not self._is_muted:
                 await self.push_frame(frame, direction)
             else:
-                logger.debug(
+                logger.trace(
                     f"{frame.__class__.__name__} suppressed - Transcription STT currently muted"
                 )
         else:
-            # Pass all other frames through
-            if not isinstance(frame, BotSpeakingFrame):
-                logger.debug(f"+++ TranscriptionMuteProcessor pushing: {frame}")
             await self.push_frame(frame, direction)
 
 
