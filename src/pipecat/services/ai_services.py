@@ -14,7 +14,6 @@ from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
-from pipecat.audio.utils import calculate_audio_volume, exp_smoothing
 from pipecat.frames.frames import (
     AudioRawFrame,
     BotStartedSpeakingFrame,
@@ -38,6 +37,8 @@ from pipecat.frames.frames import (
     TTSTextFrame,
     TTSUpdateSettingsFrame,
     UserImageRequestFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import MetricsData
@@ -859,79 +860,64 @@ class STTService(AIService):
 
 
 class SegmentedSTTService(STTService):
-    """SegmentedSTTService is an STTService that will detect speech and will run
-    speech-to-text on speech segments only, instead of a continous stream.
+    """SegmentedSTTService is an STTService that uses VAD events to detect
+    speech and will run speech-to-text on speech segments only, instead of a
+    continous stream. Since it uses VAD it means that VAD needs to be enabled in
+    the pipeline.
+
+    This service always keeps a small audio buffer to take into account that VAD
+    events are delayed from when the user speech really starts.
 
     """
 
-    def __init__(
-        self,
-        *,
-        min_volume: float = 0.6,
-        max_silence_secs: float = 0.3,
-        max_buffer_secs: float = 1.5,
-        sample_rate: Optional[int] = None,
-        **kwargs,
-    ):
+    def __init__(self, *, sample_rate: Optional[int] = None, **kwargs):
         super().__init__(sample_rate=sample_rate, **kwargs)
-        self._min_volume = min_volume
-        self._max_silence_secs = max_silence_secs
-        self._max_buffer_secs = max_buffer_secs
         self._content = None
         self._wave = None
-        self._silence_num_frames = 0
-        # Volume exponential smoothing
-        self._smoothing_factor = 0.2
-        self._prev_volume = 0
-
-    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
-        # Try to filter out empty background noise
-        volume = self._get_smoothed_volume(frame)
-        if volume >= self._min_volume:
-            # If volume is high enough, write new data to wave file
-            self._wave.writeframes(frame.audio)
-            self._silence_num_frames = 0
-        else:
-            self._silence_num_frames += frame.num_frames
-        self._prev_volume = volume
-
-        # If buffer is not empty and we have enough data or there's been a long
-        # silence, transcribe the audio gathered so far.
-        silence_secs = self._silence_num_frames / self.sample_rate
-        buffer_secs = self._wave.getnframes() / self.sample_rate
-        if self._content.tell() > 0 and (
-            buffer_secs > self._max_buffer_secs or silence_secs > self._max_silence_secs
-        ):
-            self._silence_num_frames = 0
-            self._wave.close()
-            self._content.seek(0)
-            await self.process_generator(self.run_stt(self._content.read()))
-            (self._content, self._wave) = self._new_wave()
+        self._audio_buffer = bytearray()
+        self._audio_buffer_size_1s = 0
+        self._user_speaking = False
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        if not self._wave:
-            (self._content, self._wave) = self._new_wave()
+        self._audio_buffer_size_1s = self.sample_rate * 2
 
-    async def stop(self, frame: EndFrame):
-        await super().stop(frame)
-        self._wave.close()
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
 
-    async def cancel(self, frame: CancelFrame):
-        await super().cancel(frame)
-        self._wave.close()
+        if isinstance(frame, UserStartedSpeakingFrame):
+            await self._handle_user_started_speaking(frame)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_user_stopped_speaking(frame)
 
-    def _new_wave(self):
+    async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
+        self._user_speaking = True
+
+    async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
+        self._user_speaking = False
+
         content = io.BytesIO()
-        ww = wave.open(content, "wb")
-        ww.setsampwidth(2)
-        ww.setnchannels(1)
-        ww.setframerate(self.sample_rate)
-        return (content, ww)
+        wav = wave.open(content, "wb")
+        wav.setsampwidth(2)
+        wav.setnchannels(1)
+        wav.setframerate(self.sample_rate)
+        wav.writeframes(self._audio_buffer)
+        wav.close()
+        content.seek(0)
 
-    def _get_smoothed_volume(self, frame: AudioRawFrame) -> float:
-        volume = calculate_audio_volume(frame.audio, frame.sample_rate)
-        return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
+        await self.process_generator(self.run_stt(content.read()))
+
+        # Start clean.
+        self._audio_buffer.clear()
+
+    async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
+        # If the user is speaking the audio buffer will keep growin.
+        self._audio_buffer += frame.audio
+
+        # If the user is not speaking we keep just a little bit of audio.
+        if not self._user_speaking and len(self._audio_buffer) > self._audio_buffer_size_1s:
+            discarded = len(self._audio_buffer) - self._audio_buffer_size_1s
+            self._audio_buffer = self._audio_buffer[discarded:]
 
 
 class ImageGenService(AIService):
