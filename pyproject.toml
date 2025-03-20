@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pipecat-ai"
+name = "pear-pipecat"
 dynamic = ["version"]
 description = "An open source framework for voice (and multimodal) assistants"
 license = { text = "BSD 2-Clause License" }
