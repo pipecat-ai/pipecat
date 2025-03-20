@@ -39,6 +39,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -118,10 +119,10 @@ class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    async def push_aggregation(self):
-        # We don't want to store any images in the context. Revisit this later when the API evolves.
-        self._pending_image_frame_message = None
-        await super().push_aggregation()
+    async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        # We don't want to store any images in the context. Revisit this later
+        # when the API evolves.
+        pass
 
 
 @dataclass

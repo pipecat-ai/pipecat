@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- When registering a function call it is now possible to indicate if you want
+  the function call to be cancelled if there's a user interruption via
+  `cancel_on_interruption` (defaults to False). This is now possible because
+  function calls are executed concurrently.
+
 - Added support for detecting idle pipelines. By default, if no activity has
   been detected during 5 minutes, the `PipelineTask` will be automatically
   cancelled. It is possible to override this behavior by passing
@@ -39,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to the TTS service. They also allow for the text to be manipulated while it's
   being aggregated. A text aggregator can be passed via `text_aggregator` to the
   TTS service.
+
+- Added new `sample_rate` constructor parameter to `TavusVideoService` to allow
+  changing the output sample rate.
 
 - Added new `UltravoxSTTService`.
   (see https://github.com/fixie-ai/ultravox)
@@ -120,6 +128,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Function calls are now executed in tasks. This means that the pipeline will
+  not be blocked while the function call is being executed.
+
 - ⚠️ `PipelineTask` will now be automatically cancelled if no bot activity is
   happening in the pipeline. There are a few settings to configure this
   behavior, see `PipelineTask` documentation for more details.
@@ -139,6 +150,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CartesiaHttpTTSService` to `sonic-2`.
 
 ### Deprecated
+
+- Passing a `start_callback` to `LLMService.register_function()` is now
+  deprecated, simply move the code from the start callback to the function call.
 
 - `TTSService` parameter `text_filter` is now deprecated, use `text_filters`
   instead which is now a list. This allows passing multiple filters that will be
@@ -161,6 +175,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed deprecated `pipecat.vad` package, use `pipecat.audio.vad` instead.
 
 ### Fixed
+
+- Fixed an assistant aggregator issue that could cause assistant text to be
+  split into multiple chunks during function calls.
+
+- Fixed an assistant aggregator issue that was causing assistant text to not be
+  added to the context during function calls. This could lead to duplications.
 
 - Fixed a `SegmentedSTTService` issue that was causing audio to be sent
   prematurely to the STT service. Instead of analyzing the volume in this
@@ -1978,7 +1998,7 @@ async def on_connected(processor):
   completed. If a task is never ran `has_finished()` will return False.
 
 - `PipelineRunner` now supports SIGTERM. If received, the runner will be
-  canceled.
+  cancelled.
 
 ### Fixed
 

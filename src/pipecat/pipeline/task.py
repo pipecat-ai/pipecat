@@ -409,7 +409,7 @@ class PipelineTask(BaseTask):
     async def _process_push_queue(self):
         """This is the task that runs the pipeline for the first time by sending
         a StartFrame and by pushing any other frames queued by the user. It runs
-        until the tasks is canceled or stopped (e.g. with an EndFrame).
+        until the tasks is cancelled or stopped (e.g. with an EndFrame).
 
         """
         self._clock.start()
