@@ -6,6 +6,7 @@
 
 import asyncio
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, Optional
@@ -826,6 +827,10 @@ class DailyInputTransport(BaseInputTransport):
 
         self._video_renderers = {}
 
+        # Dictionary to store the latest frames for each participant
+        # Format: { participant_id: { "buffer": bytes, "size": (w,h), "format": "RGB" } }
+        self._latest_frames = {}
+
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
@@ -946,7 +951,22 @@ class DailyInputTransport(BaseInputTransport):
         if participant_id in self._video_renderers:
             self._video_renderers[participant_id]["render_next_frame"] = True
 
+    async def get_last_frame_for_participant(
+        self, participant_id: str
+    ):
+        """
+        Returns the most recently saved frame for this participant, or None if none stored.
+        """
+        return self._latest_frames.get(participant_id)
+
     async def _on_participant_video_frame(self, participant_id: str, buffer, size, format):
+        # 1) Cache the frame in the _latest_frames dictionary
+        self._latest_frames[participant_id] = {
+            "buffer": buffer,
+            "size": size,
+            "format": format
+        }
+
         render_frame = False
 
         curr_time = time.time()
@@ -1211,6 +1231,14 @@ class DailyTransport(BaseTransport):
 
     async def update_remote_participants(self, remote_participants: Mapping[str, Any] = None):
         await self._client.update_remote_participants(remote_participants=remote_participants)
+        
+    async def get_last_frame_for_participant(self, participant_id: str):
+        """
+        Returns the most recently saved frame for this participant, or None if none stored.
+        """
+        if self._input:
+            return await self._input.get_last_frame_for_participant(participant_id)
+        return None
 
     async def _on_joined(self, data):
         await self._call_event_handler("on_joined", data)
