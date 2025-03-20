@@ -26,7 +26,6 @@ from pipecat.services.openai_realtime_beta import (
     AzureRealtimeBetaLLMService,
     InputAudioTranscription,
     SessionProperties,
-    TurnDetection,
 )
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
