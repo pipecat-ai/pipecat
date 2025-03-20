@@ -275,7 +275,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self,
         context: OpenAILLMContext,
         aggregation_timeout: float = 1.0,
-        bot_interruption_timeout: float = 2.0,
+        bot_interruption_timeout: float = 5.0,
         **kwargs,
     ):
         super().__init__(context=context, role="user", **kwargs)
