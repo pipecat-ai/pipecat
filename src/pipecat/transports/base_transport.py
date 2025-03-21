@@ -19,6 +19,7 @@ from pipecat.utils.base_object import BaseObject
 class TransportParams(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    camera_in_enabled: bool = False
     camera_out_enabled: bool = False
     camera_out_is_live: bool = False
     camera_out_width: int = 1024
