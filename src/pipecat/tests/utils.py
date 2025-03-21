@@ -6,7 +6,7 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, Optional, Sequence, Tuple
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -80,8 +80,8 @@ async def run_test(
     processor: FrameProcessor,
     *,
     frames_to_send: Sequence[Frame],
-    expected_down_frames: Sequence[type],
-    expected_up_frames: Sequence[type] = [],
+    expected_down_frames: Optional[Sequence[type]] = None,
+    expected_up_frames: Optional[Sequence[type]] = None,
     ignore_start: bool = True,
     start_metadata: Dict[str, Any] = {},
     send_end_frame: bool = True,
@@ -101,7 +101,11 @@ async def run_test(
 
     pipeline = Pipeline([source, processor, sink])
 
-    task = PipelineTask(pipeline, params=PipelineParams(start_metadata=start_metadata))
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(start_metadata=start_metadata),
+        cancel_on_idle_timeout=False,
+    )
 
     async def push_frames():
         # Just give a little head start to the runner.
@@ -122,33 +126,35 @@ async def run_test(
     # Down frames
     #
     received_down_frames: Sequence[Frame] = []
-    while not received_down.empty():
-        frame = await received_down.get()
-        if not isinstance(frame, EndFrame) or not send_end_frame:
-            received_down_frames.append(frame)
+    if expected_down_frames is not None:
+        while not received_down.empty():
+            frame = await received_down.get()
+            if not isinstance(frame, EndFrame) or not send_end_frame:
+                received_down_frames.append(frame)
 
-    print("received DOWN frames =", received_down_frames)
-    print("expected DOWN frames =", expected_down_frames)
+        print("received DOWN frames =", received_down_frames)
+        print("expected DOWN frames =", expected_down_frames)
 
-    assert len(received_down_frames) == len(expected_down_frames)
+        assert len(received_down_frames) == len(expected_down_frames)
 
-    for real, expected in zip(received_down_frames, expected_down_frames):
-        assert isinstance(real, expected)
+        for real, expected in zip(received_down_frames, expected_down_frames):
+            assert isinstance(real, expected)
 
     #
     # Up frames
     #
     received_up_frames: Sequence[Frame] = []
-    while not received_up.empty():
-        frame = await received_up.get()
-        received_up_frames.append(frame)
+    if expected_up_frames is not None:
+        while not received_up.empty():
+            frame = await received_up.get()
+            received_up_frames.append(frame)
 
-    print("received UP frames =", received_up_frames)
-    print("expected UP frames =", expected_up_frames)
+        print("received UP frames =", received_up_frames)
+        print("expected UP frames =", expected_up_frames)
 
-    assert len(received_up_frames) == len(expected_up_frames)
+        assert len(received_up_frames) == len(expected_up_frames)
 
-    for real, expected in zip(received_up_frames, expected_up_frames):
-        assert isinstance(real, expected)
+        for real, expected in zip(received_up_frames, expected_up_frames):
+            assert isinstance(real, expected)
 
     return (received_down_frames, received_up_frames)

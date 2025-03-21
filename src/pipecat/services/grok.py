@@ -25,94 +25,15 @@ from pipecat.services.openai import (
 )
 
 
-class GrokAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    """Custom assistant context aggregator for Grok that handles empty content requirement."""
-
-    async def push_aggregation(self):
-        if not (
-            self._aggregation or self._function_call_result or self._pending_image_frame_message
-        ):
-            return
-
-        run_llm = False
-        properties: Optional[FunctionCallResultProperties] = None
-
-        aggregation = self._aggregation.strip()
-        self.reset()
-
-        try:
-            if aggregation:
-                self._context.add_message({"role": "assistant", "content": aggregation})
-
-            if self._function_call_result:
-                frame = self._function_call_result
-                properties = frame.properties
-                self._function_call_result = None
-                if frame.result:
-                    # Grok requires an empty content field for function calls
-                    self._context.add_message(
-                        {
-                            "role": "assistant",
-                            "content": "",  # Required by Grok
-                            "tool_calls": [
-                                {
-                                    "id": frame.tool_call_id,
-                                    "function": {
-                                        "name": frame.function_name,
-                                        "arguments": json.dumps(frame.arguments),
-                                    },
-                                    "type": "function",
-                                }
-                            ],
-                        }
-                    )
-                    self._context.add_message(
-                        {
-                            "role": "tool",
-                            "content": json.dumps(frame.result),
-                            "tool_call_id": frame.tool_call_id,
-                        }
-                    )
-                    if properties and properties.run_llm is not None:
-                        # If the tool call result has a run_llm property, use it
-                        run_llm = properties.run_llm
-                    else:
-                        # Default behavior is to run the LLM if there are no function calls in progress
-                        run_llm = not bool(self._function_calls_in_progress)
-
-            if self._pending_image_frame_message:
-                frame = self._pending_image_frame_message
-                self._pending_image_frame_message = None
-                self._context.add_image_frame_message(
-                    format=frame.user_image_raw_frame.format,
-                    size=frame.user_image_raw_frame.size,
-                    image=frame.user_image_raw_frame.image,
-                    text=frame.text,
-                )
-                run_llm = True
-
-            if run_llm:
-                await self.push_context_frame(FrameDirection.UPSTREAM)
-
-            # Emit the on_context_updated callback once the function call result is added to the context
-            if properties and properties.on_context_updated is not None:
-                await properties.on_context_updated()
-
-            await self.push_context_frame()
-
-        except Exception as e:
-            logger.error(f"Error processing frame: {e}")
-
-
 @dataclass
 class GrokContextAggregatorPair:
     _user: "OpenAIUserContextAggregator"
-    _assistant: "GrokAssistantContextAggregator"
+    _assistant: "OpenAIAssistantContextAggregator"
 
     def user(self) -> "OpenAIUserContextAggregator":
         return self._user
 
-    def assistant(self) -> "GrokAssistantContextAggregator":
+    def assistant(self) -> "OpenAIAssistantContextAggregator":
         return self._assistant
 
 
@@ -206,8 +127,8 @@ class GrokLLMService(OpenAILLMService):
         if tokens.completion_tokens > self._completion_tokens:
             self._completion_tokens = tokens.completion_tokens
 
-    @staticmethod
     def create_context_aggregator(
+        self,
         context: OpenAILLMContext,
         *,
         user_kwargs: Mapping[str, Any] = {},
@@ -232,6 +153,8 @@ class GrokLLMService(OpenAILLMService):
             GrokContextAggregatorPair.
 
         """
+        context.set_llm_adapter(self.get_llm_adapter())
+
         user = OpenAIUserContextAggregator(context, **user_kwargs)
-        assistant = GrokAssistantContextAggregator(context, **assistant_kwargs)
+        assistant = OpenAIAssistantContextAggregator(context, **assistant_kwargs)
         return GrokContextAggregatorPair(_user=user, _assistant=assistant)

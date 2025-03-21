@@ -144,7 +144,7 @@ async def main():
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="34dbb662-8e98-413c-a1ef-1a3407675fe7",  # Spanish Narrator Man
-            model="sonic-multilingual",
+            model="sonic-2",
         )
 
         in_language = "English"

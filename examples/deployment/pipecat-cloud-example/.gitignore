@@ -1,0 +1,94 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.installed.cfg
+.eggs/
+downloads/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+MANIFEST
+
+# Virtual Environments
+venv/
+env/
+.env
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.idea/
+.vscode/
+.spyderproject
+.spyproject
+.ropeproject
+
+# Testing and Coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+cover/
+
+# Logs and Databases
+*.log
+*.db
+db.sqlite3
+db.sqlite3-journal
+pip-log.txt
+
+# System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*.bak
+*.tmp
+*~
+
+# Build and Documentation
+docs/_build/
+.pybuilder/
+target/
+instance/
+.webassets-cache
+.pdm.toml
+.pdm-python
+.pdm-build/
+__pypackages__/
+
+# Other
+*.mo
+*.pot
+*.sage.py
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+cython_debug/
+.ipynb_checkpoints
+
+# Pipecat cloud
+.pcc-deploy.toml

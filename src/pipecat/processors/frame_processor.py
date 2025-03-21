@@ -5,7 +5,6 @@
 #
 
 import asyncio
-import inspect
 from enum import Enum
 from typing import Awaitable, Callable, Coroutine, Optional
 
@@ -24,7 +23,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio import BaseTaskManager
-from pipecat.utils.utils import obj_count, obj_id
+from pipecat.utils.base_object import BaseObject
 
 
 class FrameDirection(Enum):
@@ -32,7 +31,7 @@ class FrameDirection(Enum):
     UPSTREAM = 2
 
 
-class FrameProcessor:
+class FrameProcessor(BaseObject):
     def __init__(
         self,
         *,
@@ -40,13 +39,10 @@ class FrameProcessor:
         metrics: Optional[FrameProcessorMetrics] = None,
         **kwargs,
     ):
-        self._id: int = obj_id()
-        self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
+        super().__init__(name=name)
         self._parent: Optional["FrameProcessor"] = None
         self._prev: Optional["FrameProcessor"] = None
         self._next: Optional["FrameProcessor"] = None
-
-        self._event_handlers: dict = {}
 
         # Clock
         self._clock: Optional[BaseClock] = None
@@ -168,6 +164,7 @@ class FrameProcessor:
         await self._task_manager.wait_for_task(task, timeout)
 
     async def cleanup(self):
+        await super().cleanup()
         await self.__cancel_input_task()
         await self.__cancel_push_task()
 
@@ -253,23 +250,6 @@ class FrameProcessor:
             await self.__internal_push_frame(frame, direction)
         else:
             await self.__push_queue.put((frame, direction))
-
-    def event_handler(self, event_name: str):
-        def decorator(handler):
-            self.add_event_handler(event_name, handler)
-            return handler
-
-        return decorator
-
-    def add_event_handler(self, event_name: str, handler):
-        if event_name not in self._event_handlers:
-            raise Exception(f"Event handler {event_name} not registered")
-        self._event_handlers[event_name].append(handler)
-
-    def _register_event_handler(self, event_name: str):
-        if event_name in self._event_handlers:
-            raise Exception(f"Event handler {event_name} already registered")
-        self._event_handlers[event_name] = []
 
     async def __start(self, frame: StartFrame):
         self.__create_input_task()
@@ -385,16 +365,3 @@ class FrameProcessor:
             (frame, direction) = await self.__push_queue.get()
             await self.__internal_push_frame(frame, direction)
             self.__push_queue.task_done()
-
-    async def _call_event_handler(self, event_name: str, *args, **kwargs):
-        try:
-            for handler in self._event_handlers[event_name]:
-                if inspect.iscoroutinefunction(handler):
-                    await handler(self, *args, **kwargs)
-                else:
-                    handler(self, *args, **kwargs)
-        except Exception as e:
-            logger.exception(f"Exception in event handler {event_name}: {e}")
-
-    def __str__(self):
-        return self.name

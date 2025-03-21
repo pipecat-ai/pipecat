@@ -12,10 +12,10 @@ from typing import Optional
 from loguru import logger
 
 from pipecat.pipeline.task import PipelineTask
-from pipecat.utils.utils import obj_count, obj_id
+from pipecat.utils.base_object import BaseObject
 
 
-class PipelineRunner:
+class PipelineRunner(BaseObject):
     def __init__(
         self,
         *,
@@ -24,8 +24,7 @@ class PipelineRunner:
         force_gc: bool = False,
         loop: Optional[asyncio.AbstractEventLoop] = None,
     ):
-        self.id: int = obj_id()
-        self.name: str = name or f"{self.__class__.__name__}#{obj_count(self)}"
+        super().__init__(name=name)
 
         self._tasks = {}
         self._sig_task = None
@@ -41,12 +40,18 @@ class PipelineRunner:
         task.set_event_loop(self._loop)
         await task.run()
         del self._tasks[task.name]
+
+        # Cleanup base object.
+        await self.cleanup()
+
         # If we are cancelling through a signal, make sure we wait for it so
         # everything gets cleaned up nicely.
         if self._sig_task:
             await self._sig_task
+
         if self._force_gc:
             self._gc_collect()
+
         logger.debug(f"Runner {self} finished running {task}")
 
     async def stop_when_done(self):
@@ -74,6 +79,3 @@ class PipelineRunner:
         collected = gc.collect()
         logger.debug(f"Garbage collector: collected {collected} objects.")
         logger.debug(f"Garbage collector: uncollectable objects {gc.garbage}")
-
-    def __str__(self):
-        return self.name
