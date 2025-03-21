@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- ElevenLabs TTS services now support a sample rate of 8000.
+
 ### Fixed
 
 - Fixed an issue in `UltravoxSTTService` that caused improper audio processing
