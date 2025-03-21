@@ -63,7 +63,7 @@ class VideoInputMessage(BaseModel):
     @classmethod
     def from_image_frame(cls, frame: ImageRawFrame) -> "VideoInputMessage":
         buffer = io.BytesIO()
-        Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
+        Image.frombytes("RGB", frame.size, frame.image).save(buffer, format="JPEG")
         data = base64.b64encode(buffer.getvalue()).decode("utf-8")
         return cls(
             realtimeInput=RealtimeInput(mediaChunks=[MediaChunk(mimeType=f"image/jpeg", data=data)])
