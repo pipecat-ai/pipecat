@@ -157,7 +157,7 @@ class OpenAILLMContext:
         self._tool_choice = tool_choice
 
     def set_tools(self, tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = NOT_GIVEN):
-        if tools != NOT_GIVEN and len(tools) == 0:
+        if tools != NOT_GIVEN and isinstance(tools, list) and len(tools) == 0:
             tools = NOT_GIVEN
         self._tools = tools
 
