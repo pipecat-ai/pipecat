@@ -1,0 +1,386 @@
+"""
+call_routing.py
+
+Manages customer/operator relationships and call routing for voice bots.
+Provides mapping between customers and operators, and functions for retrieving
+contact information.
+"""
+
+import json
+from typing import Dict, Any, Optional, List, Union
+from loguru import logger
+
+
+class CallRoutingManager:
+    """Manages customer/operator relationships and call routing."""
+
+    # Maps customer names to their contact information
+    CUSTOMER_MAP: Dict[str, Dict[str, str]] = {
+        "Dominic": {
+            "phoneNumber": "+12345678903",
+            "callerId": "dominic-caller-id-uuid",
+            "sipUri": "sip:dominic@example.com",
+        },
+        "Sarah": {
+            "sipUri": "sip:sarah@example.com",
+        },
+        "Michael": {
+            "phoneNumber": "+16505557890",
+            "callerId": "michael-caller-id-uuid",
+        },
+    }
+
+    # Maps customer names to their assigned operator names (can be a single name or multiple)
+    CUSTOMER_TO_OPERATOR_MAP: Dict[str, Union[str, List[str]]] = {
+        "Dominic": ["Paul", "Maria"],  # Dominic's calls try Paul first, then Maria
+        "Sarah": "Jennifer",  # Sarah's calls go to Jennifer
+        "Michael": "Paul",  # Michael's calls go to Paul
+    }
+
+    # Maps operator names to their contact details (single object with optional fields)
+    OPERATOR_CONTACT_MAP: Dict[str, Dict[str, str]] = {
+        "Paul": {
+            "phoneNumber": "+12345678904",
+            "callerId": "paul-caller-id-uuid",
+        },
+        "Maria": {
+            "sipUri": "sip:maria@example.com",
+        },
+        "Jennifer": {"phoneNumber": "+14155559876", "callerId": "jennifer-caller-id-uuid"},
+        "Default": {"phoneNumber": "+18005551234", "callerId": "default-caller-id-uuid"},
+    }
+
+    def __init__(self, body_data: Dict[str, Any] = None):
+        """Initialize with optional body data.
+
+        Args:
+            body_data: Optional dictionary containing request body data
+        """
+        self.body = body_data or {}
+        self._build_reverse_lookup_maps()
+
+    def _build_reverse_lookup_maps(self):
+        """Build reverse lookup maps for phone numbers and SIP URIs to customer names."""
+        self._PHONE_TO_CUSTOMER_MAP = {}
+        self._SIP_TO_CUSTOMER_MAP = {}
+
+        for customer_name, contact_info in self.CUSTOMER_MAP.items():
+            if "phoneNumber" in contact_info:
+                self._PHONE_TO_CUSTOMER_MAP[contact_info["phoneNumber"]] = customer_name
+            if "sipUri" in contact_info:
+                self._SIP_TO_CUSTOMER_MAP[contact_info["sipUri"]] = customer_name
+
+    @classmethod
+    def from_json_string(cls, json_string: str):
+        """Create a CallRoutingManager from a JSON string.
+
+        Args:
+            json_string: JSON string containing body data
+
+        Returns:
+            CallRoutingManager instance with parsed data
+
+        Raises:
+            json.JSONDecodeError: If JSON string is invalid
+        """
+        body_data = json.loads(json_string)
+        return cls(body_data)
+
+    def find_customer_by_contact(self, contact_info: str) -> Optional[str]:
+        """Find customer name from a contact identifier (phone number or SIP URI).
+
+        Args:
+            contact_info: The contact identifier (phone number or SIP URI)
+
+        Returns:
+            The customer name or None if not found
+        """
+        # Check if it's a phone number
+        if contact_info in self._PHONE_TO_CUSTOMER_MAP:
+            return self._PHONE_TO_CUSTOMER_MAP[contact_info]
+
+        # Check if it's a SIP URI
+        if contact_info in self._SIP_TO_CUSTOMER_MAP:
+            return self._SIP_TO_CUSTOMER_MAP[contact_info]
+
+        return None
+
+    def get_customer_name(self, phone_number: str) -> Optional[str]:
+        """Get customer name from their phone number.
+
+        Args:
+            phone_number: The customer's phone number
+
+        Returns:
+            The customer name or None if not found
+        """
+        # Note: In production, this would likely query a database
+        return self.find_customer_by_contact(phone_number)
+
+    def get_operators_for_customer(self, customer_name: Optional[str]) -> List[str]:
+        """Get the operator name(s) assigned to a customer.
+
+        Args:
+            customer_name: The customer's name
+
+        Returns:
+            List of operator names (single item or multiple)
+        """
+        # Note: In production, this would likely query a database
+        if not customer_name or customer_name not in self.CUSTOMER_TO_OPERATOR_MAP:
+            return ["Default"]
+
+        operators = self.CUSTOMER_TO_OPERATOR_MAP[customer_name]
+        # Convert single string to list for consistency
+        if isinstance(operators, str):
+            return [operators]
+        return operators
+
+    def get_operator_dialout_settings(self, operator_name: str) -> Dict[str, str]:
+        """Get an operator's dialout settings from their name.
+
+        Args:
+            operator_name: The operator's name
+
+        Returns:
+            Dictionary with dialout settings for the operator
+        """
+        # Note: In production, this would likely query a database
+        return self.OPERATOR_CONTACT_MAP.get(operator_name, self.OPERATOR_CONTACT_MAP["Default"])
+
+    def get_dialout_settings_for_caller(
+        self, from_number: Optional[str] = None
+    ) -> List[Dict[str, str]]:
+        """Determine the appropriate operator dialout settings based on caller's number.
+
+        This method uses the caller's number to look up the customer name,
+        then finds the assigned operators for that customer, and returns
+        an array of operator dialout settings to try in sequence.
+
+        Args:
+            from_number: The caller's phone number (from dialin_settings)
+
+        Returns:
+            List of operator dialout settings to try
+        """
+        if not from_number:
+            # If we don't have dialin settings, use the Default operator
+            return [self.get_operator_dialout_settings("Default")]
+
+        # Get customer name from phone number
+        customer_name = self.get_customer_name(from_number)
+
+        # Get operator names assigned to this customer
+        operator_names = self.get_operators_for_customer(customer_name)
+
+        # Get dialout settings for each operator
+        return [self.get_operator_dialout_settings(name) for name in operator_names]
+
+    def get_caller_info(self) -> Dict[str, Optional[str]]:
+        """Get caller and dialed numbers from dialin settings in the body.
+
+        Returns:
+            Dictionary containing caller_number and dialed_number
+        """
+        raw_dialin_settings = self.body.get("dialin_settings")
+        if not raw_dialin_settings:
+            return {"caller_number": None, "dialed_number": None}
+
+        # Handle different case variations
+        dialed_number = raw_dialin_settings.get("To") or raw_dialin_settings.get("to")
+        caller_number = raw_dialin_settings.get("From") or raw_dialin_settings.get("from")
+
+        return {"caller_number": caller_number, "dialed_number": dialed_number}
+
+    def get_caller_number(self) -> Optional[str]:
+        """Get the caller's phone number from dialin settings in the body.
+
+        Returns:
+            The caller's phone number or None if not available
+        """
+        return self.get_caller_info()["caller_number"]
+
+    async def start_dialout(self, transport, dialout_settings=None):
+        """Helper function to start dialout using the provided settings or from body.
+
+        Args:
+            transport: The transport instance to use for dialout
+            dialout_settings: Optional override for dialout settings
+
+        Returns:
+            None
+        """
+        # Use provided settings or get from body
+        settings = dialout_settings or self.get_dialout_settings()
+        if not settings:
+            logger.warning("No dialout settings available")
+            return
+
+        for setting in settings:
+            if "phoneNumber" in setting:
+                logger.info(f"Dialing number: {setting['phoneNumber']}")
+                if "callerId" in setting:
+                    logger.info(f"with callerId: {setting['callerId']}")
+                    await transport.start_dialout(
+                        {"phoneNumber": setting["phoneNumber"], "callerId": setting["callerId"]}
+                    )
+                else:
+                    logger.info("with no callerId")
+                    await transport.start_dialout({"phoneNumber": setting["phoneNumber"]})
+            elif "sipUri" in setting:
+                logger.info(f"Dialing sipUri: {setting['sipUri']}")
+                await transport.start_dialout({"sipUri": setting["sipUri"]})
+            else:
+                logger.warning(f"Unknown dialout setting format: {setting}")
+
+    def get_dialout_settings(self) -> Optional[List[Dict[str, Any]]]:
+        """Extract dialout settings from the body.
+
+        Returns:
+            List of dialout setting objects or None if not present
+        """
+        # Check if we have dialout settings
+        if "dialout_settings" in self.body:
+            dialout_settings = self.body["dialout_settings"]
+
+            # Convert to list if it's an object (for backward compatibility)
+            if isinstance(dialout_settings, dict):
+                return [dialout_settings]
+            elif isinstance(dialout_settings, list):
+                return dialout_settings
+
+        return None
+
+    def get_dialin_settings(self) -> Optional[Dict[str, Any]]:
+        """Extract dialin settings from the body.
+
+        Returns:
+            Dictionary containing dialin settings or None if not present
+        """
+        raw_dialin_settings = self.body.get("dialin_settings")
+        if not raw_dialin_settings:
+            return None
+
+        # Normalize dialin settings to handle different case variations
+        dialin_settings = {
+            "call_id": raw_dialin_settings.get("callId") or raw_dialin_settings.get("call_id"),
+            "call_domain": raw_dialin_settings.get("callDomain")
+            or raw_dialin_settings.get("call_domain"),
+        }
+
+        return dialin_settings
+
+    # Bot prompt helper functions - no defaults provided, just return what's in the body
+
+    def get_voicemail_detection_prompt(self) -> Optional[str]:
+        """Get voicemail detection prompt from the body.
+
+        Returns:
+            Prompt string or None if not configured
+        """
+        if "voicemail_detection" in self.body:
+            prompt_settings = self.body["voicemail_detection"].get("prompt", {})
+            return prompt_settings.get("voicemail_detection_prompt")
+        return None
+
+    def get_voicemail_prompt(self) -> Optional[str]:
+        """Get voicemail prompt from the body.
+
+        Returns:
+            Prompt string or None if not configured
+        """
+        if "voicemail_detection" in self.body:
+            prompt_settings = self.body["voicemail_detection"].get("prompt", {})
+            return prompt_settings.get("voicemail_prompt")
+        return None
+
+    def get_human_conversation_prompt(self) -> Optional[str]:
+        """Get human conversation prompt from the body.
+
+        Returns:
+            Prompt string or None if not configured
+        """
+        if "voicemail_detection" in self.body:
+            prompt_settings = self.body["voicemail_detection"].get("prompt", {})
+            return prompt_settings.get("human_conversation_prompt")
+        return None
+
+    def get_call_transfer_initial_prompt(self) -> Optional[str]:
+        """Get call transfer prompt from the body.
+
+        Returns:
+            Prompt string or None if not configured
+        """
+        if "call_transfer" in self.body:
+            return self.body["call_transfer"].get("initial_prompt")
+        return None
+
+    def get_call_transfer_prompt(self) -> Optional[str]:
+        """Get call transfer prompt from the body.
+
+        Returns:
+            Prompt string or None if not configured
+        """
+        if "call_transfer" in self.body:
+            return self.body["call_transfer"].get("transfer_prompt")
+        return None
+
+    def get_call_transfer_finished_prompt(self) -> Optional[str]:
+        """Get call transfer finished prompt from the body.
+
+        Returns:
+            Prompt string or None if not configured
+        """
+        if "call_transfer" in self.body:
+            return self.body["call_transfer"].get("transfer_finished_prompt")
+        return None
+
+    def get_transfer_mode(self) -> Optional[str]:
+        """Get transfer mode from the body.
+
+        Returns:
+            Transfer mode string or None if not configured
+        """
+        if "call_transfer" in self.body:
+            return self.body["call_transfer"].get("mode")
+        return None
+
+    def get_speak_summary(self) -> Optional[bool]:
+        """Get speak summary from the body.
+
+        Returns:
+            Boolean indicating if summary should be spoken or None if not configured
+        """
+        if "call_transfer" in self.body:
+            return self.body["call_transfer"].get("speakSummary")
+        return None
+
+    def get_store_summary(self) -> Optional[bool]:
+        """Get store summary from the body.
+
+        Returns:
+            Boolean indicating if summary should be stored or None if not configured
+        """
+        if "call_transfer" in self.body:
+            return self.body["call_transfer"].get("storeSummary")
+        return None
+
+    def is_test_mode(self) -> bool:
+        """Check if running in test mode.
+
+        Returns:
+            Boolean indicating if test mode is enabled
+        """
+        if "voicemail_detection" in self.body:
+            return bool(self.body["voicemail_detection"].get("testInPrebuilt"))
+        if "call_transfer" in self.body:
+            return bool(self.body["call_transfer"].get("testInPrebuilt"))
+        return False
+
+    def is_voicemail_detection_enabled(self) -> bool:
+        """Check if voicemail detection is enabled in the body.
+
+        Returns:
+            Boolean indicating if voicemail detection is enabled
+        """
+        return bool(self.body.get("voicemail_detection"))
