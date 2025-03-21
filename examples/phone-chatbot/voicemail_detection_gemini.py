@@ -8,8 +8,8 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import Optional
 
+from call_routing import CallRoutingManager
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -32,7 +32,6 @@ from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.google.llm import GoogleLLMContext, GoogleLLMService
 from pipecat.services.llm_service import LLMService
 from pipecat.transports.services.daily import (
-    DailyDialinSettings,
     DailyParams,
     DailyTransport,
 )
@@ -130,11 +129,14 @@ class FunctionHandlers:
         result_callback,
     ):
         """Function the bot can call to leave a voicemail message."""
-        message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and nothing else:
+        if hasattr(self, "prompt") and self.prompt:
+            message = self.prompt
+        else:
+            message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and nothing else:
 
-                    "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
+                        "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
 
-                    After saying this message, call the terminate_call function."""
+                        After saying this message, call the terminate_call function."""
 
         await self.context_switcher.switch_context(system_instruction=message)
         await result_callback("Leaving a voicemail message")
@@ -170,36 +172,15 @@ async def terminate_call(
 async def main(
     room_url: str,
     token: str,
-    callId: Optional[str],
-    callDomain: Optional[str],
-    detect_voicemail: bool,
-    dialout_number: Optional[str],
+    body: dict,
 ):
-    dialin_settings = None
-    if callId and callDomain:
-        dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
-        transport_params = DailyParams(
-            api_url=daily_api_url,
-            api_key=daily_api_key,
-            dialin_settings=dialin_settings,
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            camera_out_enabled=False,
-            vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
-        )
-    else:
-        transport_params = DailyParams(
-            api_url=daily_api_url,
-            api_key=daily_api_key,
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            camera_out_enabled=False,
-            vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
-        )
+    routing_manager = CallRoutingManager.from_json_string(body) if body else CallRoutingManager()
+    dialout_number = routing_manager.get_dialout_number()
+    test_mode = routing_manager.is_test_mode()
+
+    # Get caller info (might be None for dialout scenarios)
+    caller_info = routing_manager.get_caller_info()
+    logger.info(f"Caller info: {caller_info}")
 
     class CallState:
         participant_left_early = False
@@ -210,8 +191,17 @@ async def main(
     transport = DailyTransport(
         room_url,
         token,
-        "Chatbot",
-        transport_params,
+        "Voicemail Detection Bot",
+        DailyParams(
+            api_url=daily_api_url,
+            api_key=daily_api_key,
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            camera_out_enabled=False,
+            vad_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+            vad_audio_passthrough=True,
+        ),
     )
 
     tts = ElevenLabsTTSService(
@@ -242,24 +232,28 @@ async def main(
         }
     ]
 
-    system_instruction = """You are Chatbot trying to determine if this is a voicemail system or a human.
+    voicemail_detection_prompt = routing_manager.get_voicemail_detection_prompt()
+    if voicemail_detection_prompt:
+        system_instruction = voicemail_detection_prompt
+    else:
+        system_instruction = """You are Chatbot trying to determine if this is a voicemail system or a human.
 
-    If you hear any of these phrases (or very similar ones):
-    - "Please leave a message after the beep"
-    - "No one is available to take your call"
-    - "Record your message after the tone"
-    - "You have reached voicemail for..."
-    - "You have reached [phone number]"
-    - "[phone number] is unavailable"
-    - "The person you are trying to reach..."
-    - "The number you have dialed..."
-    - "Your call has been forwarded to an automated voice messaging system"
+        If you hear any of these phrases (or very similar ones):
+        - "Please leave a message after the beep"
+        - "No one is available to take your call"
+        - "Record your message after the tone"
+        - "You have reached voicemail for..."
+        - "You have reached [phone number]"
+        - "[phone number] is unavailable"
+        - "The person you are trying to reach..."
+        - "The number you have dialed..."
+        - "Your call has been forwarded to an automated voice messaging system"
 
-    Then call the function switch_to_voicemail_response.
+        Then call the function switch_to_voicemail_response.
 
-    If it sounds like a human (saying hello, asking questions, etc.), call the function switch_to_human_conversation.
+        If it sounds like a human (saying hello, asking questions, etc.), call the function switch_to_human_conversation.
 
-    DO NOT say anything until you've determined if this is a voicemail or human."""
+        DO NOT say anything until you've determined if this is a voicemail or human."""
 
     voicemail_detection_llm = GoogleLLMService(
         model="models/gemini-2.0-flash-lite",
@@ -275,10 +269,14 @@ async def main(
     context_switcher = ContextSwitcher(
         voicemail_detection_llm, voicemail_detection_context_aggregator.user()
     )
+    voicemail_prompt = routing_manager.get_voicemail_prompt()
+
     handlers = FunctionHandlers(context_switcher)
+    handlers.prompt = voicemail_prompt
 
     voicemail_detection_llm.register_function(
-        "switch_to_voicemail_response", handlers.voicemail_response
+        "switch_to_voicemail_response",
+        handlers.voicemail_response,  # Remove partial
     )
     voicemail_detection_llm.register_function(
         "switch_to_human_conversation", handlers.human_conversation
@@ -332,7 +330,8 @@ async def main(
             # they will answer the phone and say "Hello?" Since we've captured their transcript,
             # That will put a frame into the pipeline and prompt an LLM completion, which is how the
             # bot will then greet the user.
-    elif detect_voicemail:
+
+    if test_mode:
         logger.debug("Detect voicemail example. You can test this in example in Daily Prebuilt")
 
         # For the voicemail detection case, we do not want the bot to answer the phone. We want it to wait for the voicemail
@@ -341,25 +340,6 @@ async def main(
         async def on_first_participant_joined(transport, participant):
             logger.debug("Detect voicemail; capturing participant transcription")
             await transport.capture_participant_transcription(participant["id"])
-    else:
-        logger.debug("+++++ No dialout number; assuming dialin")
-
-        # Different handlers for dialin
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            # This event is not firing for some reason
-            await transport.capture_participant_transcription(participant["id"])
-            dialin_instructions = """Always call the function switch_to_human_conversation"""
-            messages = [
-                {
-                    "role": "system",
-                    "content": dialin_instructions,
-                }
-            ]
-            voicemail_detection_context_aggregator.user().set_messages(messages)
-            await voicemail_detection_pipeline_task.queue_frames(
-                [voicemail_detection_context_aggregator.user().get_context_frame()]
-            )
 
     runner = PipelineRunner()
 
@@ -381,19 +361,23 @@ async def main(
 
     ### HUMAN CONVERSATION PIPELINE
 
-    human_conversation_system_instruction = """You are Chatbot talking to a human. Be friendly and helpful.
+    human_conversation_prompt = routing_manager.get_human_conversation_prompt()
+    if human_conversation_prompt:
+        human_conversation_system_instruction = human_conversation_prompt
+    else:
+        human_conversation_system_instruction = """You are Chatbot talking to a human. Be friendly and helpful.
 
-    Start with: "Hello! I'm a friendly chatbot. How can I help you today?"
+        Start with: "Hello! I'm a friendly chatbot. How can I help you today?"
 
-    Keep your responses brief and to the point. Listen to what the person says.
+        Keep your responses brief and to the point. Listen to what the person says.
 
-    When the person indicates they're done with the conversation by saying something like:
-    - "Goodbye"
-    - "That's all"
-    - "I'm done"
-    - "Thank you, that's all I needed"
+        When the person indicates they're done with the conversation by saying something like:
+        - "Goodbye"
+        - "That's all"
+        - "I'm done"
+        - "Thank you, that's all I needed"
 
-    THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function."""
+        THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function."""
 
     human_conversation_llm = GoogleLLMService(
         model="models/gemini-2.0-flash-001",
@@ -452,13 +436,16 @@ async def main(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Pipecat Simple ChatBot")
-    parser.add_argument("-u", type=str, help="Room URL")
-    parser.add_argument("-t", type=str, help="Token")
-    parser.add_argument("-i", type=str, help="Call ID")
-    parser.add_argument("-d", type=str, help="Call Domain")
-    parser.add_argument("-v", action="store_true", help="Detect voicemail")
-    parser.add_argument("-o", type=str, help="Dialout number", default=None)
-    config = parser.parse_args()
+    parser = argparse.ArgumentParser(description="Pipecat Voicemail Detection Bot")
+    parser.add_argument("-u", "--url", type=str, help="Room URL")
+    parser.add_argument("-t", "--token", type=str, help="Room Token")
+    parser.add_argument("-b", "--body", type=str, help="JSON configuration string")
 
-    asyncio.run(main(config.u, config.t, config.i, config.d, config.v, config.o))
+    args = parser.parse_args()
+
+    # Log the arguments for debugging
+    logger.info(f"Room URL: {args.url}")
+    logger.info(f"Token: {args.token}")
+    logger.info(f"Body provided: {bool(args.body)}")
+
+    asyncio.run(main(args.url, args.token, args.body))
