@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import io
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional
 
@@ -517,6 +519,7 @@ class OpenAITTSService(TTSService):
         self.set_voice(voice)
 
         self._client = AsyncOpenAI(api_key=api_key)
+        self._lock = asyncio.Lock()
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -534,39 +537,45 @@ class OpenAITTSService(TTSService):
             )
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"{self}: Generating TTS [{text}]")
-        try:
-            await self.start_ttfb_metrics()
+        async with self._lock:
+            try:
+                logger.debug(f"{self}: Generating TTS [{text}]")
+                await self.start_ttfb_metrics()
 
-            async with self._client.audio.speech.with_streaming_response.create(
-                input=text or " ",  # Text must contain at least one character
-                model=self.model_name,
-                voice=VALID_VOICES[self._voice_id],
-                response_format="pcm",
-            ) as r:
-                if r.status_code != 200:
-                    error = await r.text()
-                    logger.error(
-                        f"{self} error getting audio (status: {r.status_code}, error: {error})"
-                    )
-                    yield ErrorFrame(
-                        f"Error getting audio (status: {r.status_code}, error: {error})"
-                    )
-                    return
+                async with self._client.audio.speech.with_streaming_response.create(
+                    input=text or " ",  # Text must contain at least one character
+                    model=self.model_name,
+                    voice=VALID_VOICES[self._voice_id],
+                    response_format="pcm",
+                ) as r:
+                    if r.status_code != 200:
+                        error = await r.text()
+                        logger.error(
+                            f"{self} error getting audio (status: {r.status_code}, error: {error})"
+                        )
+                        yield ErrorFrame(
+                            f"Error getting audio (status: {r.status_code}, error: {error})"
+                        )
+                        return
 
-                await self.start_tts_usage_metrics(text)
+                    await self.start_tts_usage_metrics(text)
 
-                CHUNK_SIZE = 1024
-
-                yield TTSStartedFrame()
-                async for chunk in r.iter_bytes(CHUNK_SIZE):
-                    if len(chunk) > 0:
-                        await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
-                        yield frame
-                yield TTSStoppedFrame()
-        except BadRequestError as e:
-            logger.exception(f"{self} error generating TTS: {e}")
+                    CHUNK_SIZE = 1024
+                    start_time, duration = time.time(), 0
+                    yield TTSStartedFrame()
+                    async for chunk in r.iter_bytes(CHUNK_SIZE):
+                        if len(chunk) > 0:
+                            await self.stop_ttfb_metrics()
+                            frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                            yield frame
+                            duration += (CHUNK_SIZE / 2) / self.sample_rate
+                    yield TTSStoppedFrame()
+                    end_time = time.time()
+                    delay = duration - (end_time - start_time)
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+            except BadRequestError as e:
+                logger.exception(f"{self} error generating TTS: {e}")
 
 
 class OpenAIUserContextAggregator(LLMUserContextAggregator):
