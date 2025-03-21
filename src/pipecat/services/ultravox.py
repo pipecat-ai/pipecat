@@ -13,6 +13,9 @@ from huggingface_hub import login
 from pipecat.frames.frames import (
     Frame, 
     AudioRawFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     TranscriptionFrame,
     TextFrame,
     StartFrame,
@@ -369,19 +372,12 @@ class UltravoxSTTService(AIService):
                     
                     logger.info(f"Generated text: {full_response}")
                     # Create a transcription frame with the generated text
-                    sentences = []
-                    current = ""
-                    for char in full_response.strip():
-                        current += char
-                        if char in '.!?':
-                            sentences.append(current.strip())
-                            current = ""
-                    if current.strip():  # Add any remaining text
-                        sentences.append(current.strip())
+                    yield LLMFullResponseStartFrame()
 
-                    for sentence in sentences:
-                        text_frame = TextFrame(text=sentence)
-                        yield text_frame
+                    text_frame = LLMTextFrame(text=full_response.strip())
+                    yield text_frame
+
+                    yield LLMFullResponseEndFrame()
                 
                 except Exception as e:
                     logger.error(f"Error generating text from model: {e}")
