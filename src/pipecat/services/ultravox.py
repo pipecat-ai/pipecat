@@ -17,6 +17,13 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     AudioRawFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+    TranscriptionFrame,
+    TextFrame,
+    StartFrame,
+    EndFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
@@ -339,6 +346,12 @@ class UltravoxSTTService(AIService):
             # Concatenate audio frames - all should be int16 now
             audio_data = np.concatenate(audio_arrays)
 
+            audio_int16 = audio_data  # Already in int16 format
+            # Save int16 audio
+
+            # Convert int16 to float32 and normalize for model input
+            audio_float32 = audio_int16.astype(np.float32) / 32768.0
+
             # Generate text using the model
             if self._model:
                 try:
@@ -349,11 +362,11 @@ class UltravoxSTTService(AIService):
                     await self.start_ttfb_metrics()
                     await self.start_processing_metrics()
 
-                    async for response in self._model.generate(
+                    async for response in self.model.generate(
                         messages=[{"role": "user", "content": "<|audio|>\n"}],
-                        temperature=self._temperature,
-                        max_tokens=self._max_tokens,
-                        audio=audio_data,
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        audio=audio_float32,
                     ):
                         # Stop TTFB metrics after first response
                         await self.stop_ttfb_metrics()
@@ -369,18 +382,13 @@ class UltravoxSTTService(AIService):
                     await self.stop_processing_metrics()
 
                     logger.info(f"Generated text: {full_response}")
-
                     # Create a transcription frame with the generated text
-                    transcription = full_response.strip()
-                    if transcription:
-                        yield TranscriptionFrame(
-                            user_id="",
-                            text=transcription,
-                            timestamp=time_now_iso8601(),
-                        )
-                    else:
-                        logger.warning("Empty transcription result")
-                        yield ErrorFrame("Empty transcription result")
+                    yield LLMFullResponseStartFrame()
+
+                    text_frame = LLMTextFrame(text=full_response.strip())
+                    yield text_frame
+
+                    yield LLMFullResponseEndFrame()
 
                 except Exception as e:
                     logger.error(f"Error generating text from model: {e}")
