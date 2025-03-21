@@ -351,7 +351,7 @@ class UltravoxSTTService(AIService):
 
             # Convert int16 to float32 and normalize for model input
             audio_float32 = audio_int16.astype(np.float32) / 32768.0
-            
+
             # Generate text using the model
             if self._model:
                 try:
@@ -361,15 +361,12 @@ class UltravoxSTTService(AIService):
                     # Start metrics tracking
                     await self.start_ttfb_metrics()
                     await self.start_processing_metrics()
-                    
+
                     async for response in self.model.generate(
-                        messages=[{
-                            'role': 'user',
-                            'content': "<|audio|>\n"
-                        }],
+                        messages=[{"role": "user", "content": "<|audio|>\n"}],
                         temperature=self.temperature,
                         max_tokens=self.max_tokens,
-                        audio=audio_float32
+                        audio=audio_float32,
                     ):
                         # Stop TTFB metrics after first response
                         await self.stop_ttfb_metrics()
@@ -392,7 +389,7 @@ class UltravoxSTTService(AIService):
                     yield text_frame
 
                     yield LLMFullResponseEndFrame()
-                
+
                 except Exception as e:
                     logger.error(f"Error generating text from model: {e}")
                     yield ErrorFrame(f"Error generating text: {str(e)}")
