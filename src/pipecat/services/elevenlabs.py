@@ -102,6 +102,8 @@ def language_to_elevenlabs_language(language: Language) -> Optional[str]:
 
 def output_format_from_sample_rate(sample_rate: int) -> str:
     match sample_rate:
+        case 8000:
+            return "pcm_8000"
         case 16000:
             return "pcm_16000"
         case 22050:
@@ -113,7 +115,7 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
     logger.warning(
         f"ElevenLabsTTSService: No output format available for {sample_rate} sample rate"
     )
-    return "pcm_16000"
+    return "pcm_24000"
 
 
 def build_elevenlabs_voice_settings(
