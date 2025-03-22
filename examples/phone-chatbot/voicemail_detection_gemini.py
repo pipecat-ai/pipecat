@@ -175,7 +175,9 @@ async def main(
     body: dict,
 ):
     routing_manager = CallRoutingManager.from_json_string(body) if body else CallRoutingManager()
-    dialout_number = routing_manager.get_dialout_number()
+
+    # Get important configuration values
+    dialout_settings = routing_manager.get_dialout_settings()
     test_mode = routing_manager.is_test_mode()
 
     # Get caller info (might be None for dialout scenarios)
@@ -306,40 +308,29 @@ async def main(
         params=PipelineParams(allow_interruptions=True),
     )
 
-    if dialout_number:
-        logger.debug("dialout number detected; doing dialout")
+    # Configure some handlers for dialing out
+    @transport.event_handler("on_joined")
+    async def on_joined(transport, data):
+        # Start dialout if needed
+        if dialout_settings:
+            logger.debug("Dialout settings detected; starting dialout")
+            await routing_manager.start_dialout(transport, dialout_settings)
 
-        # Configure some handlers for dialing out
-        @transport.event_handler("on_joined")
-        async def on_joined(transport, data):
-            logger.debug(f"Joined; starting dialout to: {dialout_number}")
-            await transport.start_dialout({"phoneNumber": dialout_number})
+    @transport.event_handler("on_dialout_connected")
+    async def on_dialout_connected(transport, data):
+        logger.debug(f"Dial-out connected: {data}")
 
-        @transport.event_handler("on_dialout_connected")
-        async def on_dialout_connected(transport, data):
-            logger.debug(f"Dial-out connected: {data}")
+    @transport.event_handler("on_dialout_answered")
+    async def on_dialout_answered(transport, data):
+        logger.debug(f"Dial-out answered: {data}")
 
-        @transport.event_handler("on_dialout_answered")
-        async def on_dialout_answered(transport, data):
-            logger.debug(f"Dial-out answered: {data}")
-
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
-            # unlike the dialin case, for the dialout case, the caller will speak first. Presumably
-            # they will answer the phone and say "Hello?" Since we've captured their transcript,
-            # That will put a frame into the pipeline and prompt an LLM completion, which is how the
-            # bot will then greet the user.
+    @transport.event_handler("on_first_participant_joined")
+    async def on_first_participant_joined(transport, participant):
+        logger.debug(f"First participant joined: {participant['id']}")
+        await transport.capture_participant_transcription(participant["id"])
 
     if test_mode:
         logger.debug("Detect voicemail example. You can test this in example in Daily Prebuilt")
-
-        # For the voicemail detection case, we do not want the bot to answer the phone. We want it to wait for the voicemail
-        # machine to say something like 'Leave a message after the beep', or for the user to say 'Hello?'.
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            logger.debug("Detect voicemail; capturing participant transcription")
-            await transport.capture_participant_transcription(participant["id"])
 
     runner = PipelineRunner()
 
