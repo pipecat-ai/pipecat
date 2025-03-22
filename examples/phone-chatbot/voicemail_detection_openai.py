@@ -47,7 +47,6 @@ async def main(
     # Get important configuration values
     dialout_settings = routing_manager.get_dialout_settings()
     test_mode = routing_manager.is_test_mode()
-    voicemail_detection_enabled = routing_manager.is_voicemail_detection_enabled()
 
     # Get caller info (might be None for dialout scenarios)
     caller_info = routing_manager.get_caller_info()
@@ -162,77 +161,26 @@ async def main(
 
     task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
-    class DialoutState:
-        """Tracks the state of dialout attempts."""
-
-        def __init__(self, settings):
-            self.settings = settings or []
-            self.current_index = 0
-            self.connected = False
-
-        def get_current_setting(self):
-            """Get the current dialout setting."""
-            if not self.settings or self.current_index >= len(self.settings):
-                return None
-            return self.settings[self.current_index]
-
-        def move_to_next(self):
-            """Move to the next dialout setting."""
-            self.current_index += 1
-            return self.get_current_setting()
-
-    # Initialize dialout state
-    dialout_state = DialoutState(dialout_settings)
-
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
-        session_id = data.get("meetingSession", {}).get("id", "unknown")
-        bot_id = data.get("participants", {}).get("local", {}).get("id", "unknown")
-        logger.info(f"Session ID: {session_id}, Bot ID: {bot_id}")
-
         # Start dialout if needed
         if dialout_settings:
             logger.debug("Dialout settings detected; starting dialout")
             await routing_manager.start_dialout(transport, dialout_settings)
 
-    @transport.event_handler("on_call_state_updated")
-    async def on_call_state_updated(transport, state):
-        logger.info(f"Call state updated: {state}")
-        if state == "left":
-            await task.cancel()
-
     # Configure handlers for dialing out
     @transport.event_handler("on_dialout_connected")
     async def on_dialout_connected(transport, data):
         logger.debug(f"Dial-out connected: {data}")
-        dialout_state.connected = True
 
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
         logger.debug(f"Dial-out answered: {data}")
-        await transport.capture_participant_transcription(data["sessionId"])
-
-    @transport.event_handler("on_dialout_failed")
-    async def on_dialout_failed(transport, data):
-        logger.debug(f"Dial-out failed: {data}")
-        # Try the next number in our list
-        next_setting = dialout_state.move_to_next()
-        if next_setting:
-            logger.debug(f"Trying next dialout setting: {next_setting}")
-            await routing_manager.start_dialout(transport, [next_setting])
-        else:
-            logger.debug("No more dialout settings to try")
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.debug(f"First participant joined: {participant['id']}")
         await transport.capture_participant_transcription(participant["id"])
-
-        # For dialin scenarios, we may want to greet the user
-        if not dialout_settings and not voicemail_detection_enabled:
-            # For the dialin case without voicemail detection, we want the bot to greet the user
-            logger.debug("Dialin scenario without voicemail detection, greeting user")
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     if test_mode:
         logger.debug("Running in test mode (can be tested in Daily Prebuilt)")
