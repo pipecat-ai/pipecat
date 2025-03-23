@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `UltravoxSTTService` that caused improper audio processing
   and incorrect LLM frame output.
 
+### Other
+
+- Added `examples/foundational/07x-interruptible-local.py` to show how a local
+  transport can be used.
+
 ## [0.0.60] - 2025-03-20
 
 ### Added
