@@ -24,7 +24,7 @@
         let connected = false
         let peerConnection = null
 
-        const waitForIceGatheringComplete = async (pc) => {
+        /*const waitForIceGatheringComplete = async (pc) => {
             if (pc.iceGatheringState === 'complete') return;
             return new Promise((resolve) => {
                 const checkState = () => {
@@ -35,14 +35,14 @@
                 };
                 pc.addEventListener('icegatheringstatechange', checkState);
             });
-        }
+        }*/
 
         const createSmallWebRTCConnection = async (audioTrack) => {
             const pc = new RTCPeerConnection()
             pc.ontrack = e => audioEl.srcObject = e.streams[0]
             pc.addTransceiver(audioTrack, { direction: 'sendrecv' })
             await pc.setLocalDescription(await pc.createOffer())
-            await waitForIceGatheringComplete(pc)
+            //await waitForIceGatheringComplete(pc)
             const offer = pc.localDescription
             const response = await fetch('/api/offer', {
                 body: JSON.stringify({ sdp: offer.sdp, type: offer.type}),

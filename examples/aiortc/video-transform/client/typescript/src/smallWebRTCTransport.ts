@@ -157,7 +157,7 @@ export class SmallWebRTCTransport {
             await this.pc.setLocalDescription(offer);
 
             // Wait for ICE gathering to complete
-            await new Promise<void>((resolve) => {
+            /*await new Promise<void>((resolve) => {
                 if (this.pc!.iceGatheringState === 'complete') {
                     resolve();
                 } else {
@@ -169,7 +169,7 @@ export class SmallWebRTCTransport {
                     };
                     this.pc!.addEventListener('icegatheringstatechange', checkState);
                 }
-            });
+            });*/
 
             let offerSdp = this.pc!.localDescription!;
             let codec: string;
