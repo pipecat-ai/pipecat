@@ -131,24 +131,18 @@ def validate_body(body: Dict[str, Any]) -> None:
         raise HTTPException(status_code=400, detail=error_message)
 
 
-def ensure_prompt_config(body: Dict[str, Any], scenario_type: str) -> Dict[str, Any]:
-    """Ensures the body has appropriate prompt settings, but doesn't add defaults.
+def ensure_prompt_config(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensures the body has appropriate prompts settings, but doesn't add defaults.
     Only makes sure the prompt section exists, allowing the bot script to handle defaults.
 
     Args:
         body: The configuration dictionary
-        scenario_type: Either 'voicemail_detection' or 'call_transfer'
 
     Returns:
         Updated configuration with prompt settings section
     """
-    if scenario_type not in body:
-        body[scenario_type] = {}
-
-    # Only make sure there's a "prompt" section, but don't fill it with defaults
-    if "prompt" not in body[scenario_type]:
-        body[scenario_type]["prompt"] = {}
-
+    if "prompts" not in body:
+        body["prompts"] = []
     return body
 
 
@@ -373,7 +367,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
                 body["dialin_settings"] = {}
 
             # Ensure prompt configuration
-            body = ensure_prompt_config(body, "call_transfer")
+            body = ensure_prompt_config(body)
 
             # Handle call transfer test scenario
             room_details = await create_daily_room(room_url, "dialin")
@@ -391,7 +385,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
         # Regular dialin with call transfer scenario
         elif "dialin_settings" in body and "call_transfer" in body:
             # Ensure prompt configuration
-            body = ensure_prompt_config(body, "call_transfer")
+            body = ensure_prompt_config(body)
 
             # Handle dialin call transfer scenario
             room_details = await create_daily_room(room_url, "dialin")
@@ -417,7 +411,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
                 body["dialout_settings"] = [{}]  # Empty array with one object
 
             # Ensure prompt configuration
-            body = ensure_prompt_config(body, "voicemail_detection")
+            body = ensure_prompt_config(body)
 
             # Handle voicemail detection test scenario
             room_details = await create_daily_room(room_url, "dialout")
@@ -435,7 +429,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
         # Regular voicemail detection scenario
         elif "dialout_settings" in body and "voicemail_detection" in body:
             # Ensure prompt configuration
-            body = ensure_prompt_config(body, "voicemail_detection")
+            body = ensure_prompt_config(body)
 
             # Handle dialout voicemail detection scenario
             room_details = await create_daily_room(room_url, "dialout")
