@@ -52,7 +52,7 @@ export class SmallWebRTCTransport {
 
     private createPeerConnection(): RTCPeerConnection {
         const config: RTCConfiguration = {
-            //iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
+            iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
         };
 
         let pc = new RTCPeerConnection(config);
@@ -208,6 +208,7 @@ export class SmallWebRTCTransport {
             // @ts-ignore
             this.log(`Received answer for peer connection id ${answer.pc_id}`)
             await this.pc!.setRemoteDescription(answer);
+            this.log(`Remote candidate supports trickle ice: ${this.pc.canTrickleIceCandidates}`)
         } catch (e) {
             this.log(`Reconnection attempt ${this.reconnectionAttempts} failed: ${e}`);
             this.isReconnecting = false
