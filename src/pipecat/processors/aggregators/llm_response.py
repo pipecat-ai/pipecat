@@ -6,7 +6,7 @@
 
 import asyncio
 from abc import abstractmethod
-from typing import Dict, List, Set
+from typing import Dict, List
 
 from loguru import logger
 
@@ -380,7 +380,6 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
         self._started = 0
         self._function_calls_in_progress: Dict[str, FunctionCallInProgressFrame] = {}
-        self._context_updated_tasks: Set[asyncio.Task] = ()
 
     async def handle_aggregation(self, aggregation: str):
         self._context.add_message({"role": "assistant", "content": aggregation})
@@ -487,13 +486,10 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             if run_llm:
                 await self.push_context_frame(FrameDirection.UPSTREAM)
 
-        # Call the `on_context_updated` callback once the function call result
-        # is added to the context. Also, run this in a separate task to make
-        # sure we don't block the pipeline.
+        # Emit the on_context_updated callback once the function call
+        # result is added to the context
         if properties and properties.on_context_updated:
-            task = await self.create_task(properties.on_context_updated())
-            self._context_updated_tasks.add(task)
-            task.add_done_callback(self._context_updated_task_finished)
+            await properties.on_context_updated()
 
     async def _handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
         logger.debug(
@@ -538,13 +534,6 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             self._aggregation += f" {frame.text}" if self._aggregation else frame.text
         else:
             self._aggregation += frame.text
-
-    def _context_updated_task_finished(self, task: asyncio.Task):
-        self._context_updated_tasks.discard(task)
-        # The task is finished so this should exit immediately. We need to do
-        # this because otherwise the task manager would report a dangling task
-        # if we don't remove it.
-        asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
 
 
 class LLMUserResponseAggregator(LLMUserContextAggregator):
