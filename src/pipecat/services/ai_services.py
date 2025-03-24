@@ -369,7 +369,7 @@ class LLMService(AIService):
         if tuple_to_remove:
             self._function_call_tasks.discard(tuple_to_remove)
             # The task is finished so this should exit immediately. We need to
-            # do this because otherwise the task manager would have a dangling
+            # do this because otherwise the task manager would report a dangling
             # task if we don't remove it.
             asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
 
