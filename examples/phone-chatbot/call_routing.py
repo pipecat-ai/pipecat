@@ -1,5 +1,4 @@
-"""
-call_routing.py
+"""call_routing.py.
 
 Manages customer/operator relationships and call routing for voice bots.
 Provides mapping between customers and operators, and functions for retrieving
@@ -7,7 +6,8 @@ contact information.
 """
 
 import json
-from typing import Dict, Any, Optional, List, Union
+from typing import Any, Dict, List, Optional, Union
+
 from loguru import logger
 
 
@@ -272,67 +272,19 @@ class CallRoutingManager:
 
     # Bot prompt helper functions - no defaults provided, just return what's in the body
 
-    def get_voicemail_detection_prompt(self) -> Optional[str]:
-        """Get voicemail detection prompt from the body.
+    def get_prompt(self, prompt_name: str) -> Optional[str]:
+        """Retrieve the prompt text for a given prompt name.
+
+        Args:
+            prompt_name: The name of the prompt to retrieve.
 
         Returns:
-            Prompt string or None if not configured
+            The prompt string corresponding to the provided name, or None if not configured.
         """
-        if "voicemail_detection" in self.body:
-            prompt_settings = self.body["voicemail_detection"].get("prompt", {})
-            return prompt_settings.get("voicemail_detection_prompt")
-        return None
-
-    def get_voicemail_prompt(self) -> Optional[str]:
-        """Get voicemail prompt from the body.
-
-        Returns:
-            Prompt string or None if not configured
-        """
-        if "voicemail_detection" in self.body:
-            prompt_settings = self.body["voicemail_detection"].get("prompt", {})
-            return prompt_settings.get("voicemail_prompt")
-        return None
-
-    def get_human_conversation_prompt(self) -> Optional[str]:
-        """Get human conversation prompt from the body.
-
-        Returns:
-            Prompt string or None if not configured
-        """
-        if "voicemail_detection" in self.body:
-            prompt_settings = self.body["voicemail_detection"].get("prompt", {})
-            return prompt_settings.get("human_conversation_prompt")
-        return None
-
-    def get_call_transfer_initial_prompt(self) -> Optional[str]:
-        """Get call transfer prompt from the body.
-
-        Returns:
-            Prompt string or None if not configured
-        """
-        if "call_transfer" in self.body:
-            return self.body["call_transfer"].get("initial_prompt")
-        return None
-
-    def get_call_transfer_prompt(self) -> Optional[str]:
-        """Get call transfer prompt from the body.
-
-        Returns:
-            Prompt string or None if not configured
-        """
-        if "call_transfer" in self.body:
-            return self.body["call_transfer"].get("transfer_prompt")
-        return None
-
-    def get_call_transfer_finished_prompt(self) -> Optional[str]:
-        """Get call transfer finished prompt from the body.
-
-        Returns:
-            Prompt string or None if not configured
-        """
-        if "call_transfer" in self.body:
-            return self.body["call_transfer"].get("transfer_finished_prompt")
+        prompts = self.body.get("prompts", [])
+        for prompt in prompts:
+            if prompt.get("name") == prompt_name:
+                return prompt.get("text")
         return None
 
     def get_transfer_mode(self) -> Optional[str]:

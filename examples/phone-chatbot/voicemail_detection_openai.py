@@ -86,7 +86,8 @@ async def main(
     ]
 
     # Check for custom voicemail detection prompt
-    voicemail_detection_prompt = routing_manager.get_voicemail_detection_prompt()
+    voicemail_detection_prompt = routing_manager.get_prompt("voicemail_detection_prompt")
+
     if voicemail_detection_prompt:
         messages = [
             {

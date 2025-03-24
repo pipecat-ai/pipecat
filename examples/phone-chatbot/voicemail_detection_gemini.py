@@ -234,7 +234,7 @@ async def main(
         }
     ]
 
-    voicemail_detection_prompt = routing_manager.get_voicemail_detection_prompt()
+    voicemail_detection_prompt = routing_manager.get_prompt("voicemail_detection_prompt")
     if voicemail_detection_prompt:
         system_instruction = voicemail_detection_prompt
     else:
@@ -352,7 +352,7 @@ async def main(
 
     ### HUMAN CONVERSATION PIPELINE
 
-    human_conversation_prompt = routing_manager.get_human_conversation_prompt()
+    human_conversation_prompt = routing_manager.get_prompt("human_conversation_prompt")
     if human_conversation_prompt:
         human_conversation_system_instruction = human_conversation_prompt
     else:

@@ -268,9 +268,9 @@ async def main(
         }
     ]
 
-    call_transfer_initial_prompt = routing_manager.get_call_transfer_initial_prompt()
-    call_transfer_prompt = routing_manager.get_call_transfer_prompt()
-    call_transfer_finished_prompt = routing_manager.get_call_transfer_finished_prompt()
+    call_transfer_initial_prompt = routing_manager.get_prompt("call_transfer_initial_prompt")
+    call_transfer_prompt = routing_manager.get_prompt("call_transfer_prompt")
+    call_transfer_finished_prompt = routing_manager.get_prompt("call_transfer_finished_prompt")
 
     # Customize the greeting based on customer name if available
     customer_greeting = f"Hello {customer_name}" if customer_name else "Hello"
