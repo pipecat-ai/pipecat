@@ -74,9 +74,7 @@ class SmallWebRTCConnection(EventEmitter):
 
         @self.pc.on("icegatheringstatechange")
         async def on_icegatheringstatechange():
-            logger.info(
-                f"Ice gathering state is {self.pc.iceGatheringState}"
-            )
+            logger.info(f"Ice gathering state is {self.pc.iceGatheringState}")
 
         @self.pc.on("track")
         async def on_track(track):
