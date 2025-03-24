@@ -21,6 +21,9 @@ class CallRoutingManager:
             "callerId": "dominic-caller-id-uuid",
             "sipUri": "sip:dominic@example.com",
         },
+        "Skype": {
+            "phoneNumber": "+10000000000",
+        },
         "Sarah": {
             "sipUri": "sip:sarah@example.com",
         },
@@ -33,6 +36,7 @@ class CallRoutingManager:
     # Maps customer names to their assigned operator names (can be a single name or multiple)
     CUSTOMER_TO_OPERATOR_MAP: Dict[str, Union[str, List[str]]] = {
         "Dominic": ["Paul", "Maria"],  # Dominic's calls try Paul first, then Maria
+        "Skype": "Dominic",  # Skype's calls go to Dominic
         "Sarah": "Jennifer",  # Sarah's calls go to Jennifer
         "Michael": "Paul",  # Michael's calls go to Paul
     }
@@ -42,6 +46,10 @@ class CallRoutingManager:
         "Paul": {
             "phoneNumber": "+12345678904",
             "callerId": "paul-caller-id-uuid",
+        },
+        "Dominic": {
+            "phoneNumber": "+12092428393",
+            "callerId": "9727ae97-0144-4868-9711-74cddb2788bb",  # bot_number_bdom_pinless_dialin. +12097808812
         },
         "Maria": {
             "sipUri": "sip:maria@example.com",
