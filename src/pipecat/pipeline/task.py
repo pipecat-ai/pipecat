@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import time
 from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
 
 from loguru import logger
@@ -13,6 +14,7 @@ from pydantic import BaseModel, ConfigDict
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
+    BotSpeakingFrame,
     CancelFrame,
     CancelTaskFrame,
     EndFrame,
@@ -20,6 +22,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     HeartbeatFrame,
+    LLMFullResponseEndFrame,
     MetricsFrame,
     StartFrame,
     StopFrame,
@@ -133,12 +136,27 @@ class PipelineTask(BaseTask):
        async def on_frame_reached_downstream(task, frame):
            ...
 
+    It also has an event handler that detects when the pipeline is idle. By
+    default, a pipeline is idle if no `BotSpeakingFrame` or
+    `LLMFullResponseEndFrame` are received within `idle_timeout_secs`.
+
+       @task.event_handler("on_idle_timeout")
+       async def on_idle_timeout(task):
+           ...
+
     Args:
         pipeline: The pipeline to execute.
         params: Configuration parameters for the pipeline.
         observers: List of observers for monitoring pipeline execution.
         clock: Clock implementation for timing operations.
         check_dangling_tasks: Whether to check for processors' tasks finishing properly.
+        idle_timeout_secs: Timeout (in seconds) to consider pipeline idle or
+            None. If a pipeline is idle the pipeline task will be cancelled
+            automatically.
+        idle_timeout_frames: A tuple with the frames that should trigger an idle
+            timeout if not received withing `idle_timeout_seconds`.
+        cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
+            the idle timeout is reached.
 
     """
 
@@ -151,12 +169,21 @@ class PipelineTask(BaseTask):
         clock: BaseClock = SystemClock(),
         task_manager: Optional[BaseTaskManager] = None,
         check_dangling_tasks: bool = True,
+        idle_timeout_secs: Optional[float] = 300,
+        idle_timeout_frames: Tuple[Type[Frame], ...] = (
+            BotSpeakingFrame,
+            LLMFullResponseEndFrame,
+        ),
+        cancel_on_idle_timeout: bool = True,
     ):
         super().__init__()
         self._pipeline = pipeline
         self._clock = clock
         self._params = params
         self._check_dangling_tasks = check_dangling_tasks
+        self._idle_timeout_secs = idle_timeout_secs
+        self._idle_timeout_frames = idle_timeout_frames
+        self._cancel_on_idle_timeout = cancel_on_idle_timeout
         if self._params.observers:
             import warnings
 
@@ -178,6 +205,10 @@ class PipelineTask(BaseTask):
         # This is the heartbeat queue. When a heartbeat frame is received in the
         # down queue we add it to the heartbeat queue for processing.
         self._heartbeat_queue = asyncio.Queue()
+        # This is the idle queue. When frames are received downstream they are
+        # put in the queue. If no frame is received the pipeline is considered
+        # idle.
+        self._idle_queue = asyncio.Queue()
         # This event is used to indicate a finalize frame (e.g. EndFrame,
         # StopFrame) has been received in the down queue.
         self._pipeline_end_event = asyncio.Event()
@@ -213,6 +244,7 @@ class PipelineTask(BaseTask):
         self._reached_downstream_types: Tuple[Type[Frame], ...] = ()
         self._register_event_handler("on_frame_reached_upstream")
         self._register_event_handler("on_frame_reached_downstream")
+        self._register_event_handler("on_idle_timeout")
 
     @property
     def params(self) -> PipelineParams:
@@ -328,18 +360,29 @@ class PipelineTask(BaseTask):
                 self._heartbeat_monitor_handler(), f"{self}::_heartbeat_monitor_handler"
             )
 
+    def _maybe_start_idle_task(self):
+        if self._idle_timeout_secs:
+            self._idle_monitor_task = self._task_manager.create_task(
+                self._idle_monitor_handler(), f"{self}::_idle_monitor_handler"
+            )
+
     async def _cancel_tasks(self):
-        await self._maybe_cancel_heartbeat_tasks()
+        await self._observer.stop()
 
         await self._task_manager.cancel_task(self._process_up_task)
         await self._task_manager.cancel_task(self._process_down_task)
 
-        await self._observer.stop()
+        await self._maybe_cancel_heartbeat_tasks()
+        await self._maybe_cancel_idle_task()
 
     async def _maybe_cancel_heartbeat_tasks(self):
         if self._params.enable_heartbeats:
             await self._task_manager.cancel_task(self._heartbeat_push_task)
             await self._task_manager.cancel_task(self._heartbeat_monitor_task)
+
+    async def _maybe_cancel_idle_task(self):
+        if self._idle_timeout_secs:
+            await self._task_manager.cancel_task(self._idle_monitor_task)
 
     def _initial_metrics_frame(self) -> MetricsFrame:
         processors = self._pipeline.processors_with_metrics()
@@ -366,12 +409,13 @@ class PipelineTask(BaseTask):
     async def _process_push_queue(self):
         """This is the task that runs the pipeline for the first time by sending
         a StartFrame and by pushing any other frames queued by the user. It runs
-        until the tasks is canceled or stopped (e.g. with an EndFrame).
+        until the tasks is cancelled or stopped (e.g. with an EndFrame).
 
         """
         self._clock.start()
 
         self._maybe_start_heartbeat_tasks()
+        self._maybe_start_idle_task()
 
         start_frame = StartFrame(
             clock=self._clock,
@@ -445,6 +489,10 @@ class PipelineTask(BaseTask):
         while True:
             frame = await self._down_queue.get()
 
+            # Queue received frame to the idle queue so we can monitor idle
+            # pipelines.
+            await self._idle_queue.put(frame)
+
             if isinstance(frame, self._reached_downstream_types):
                 await self._call_event_handler("on_frame_reached_downstream", frame)
 
@@ -481,6 +529,48 @@ class PipelineTask(BaseTask):
                 logger.warning(
                     f"{self}: heartbeat frame not received for more than {wait_time} seconds"
                 )
+
+    async def _idle_monitor_handler(self):
+        """This tasks monitors activity in the pipeline. If no frames are
+        received (heartbeats don't count) the pipeline is considered idle.
+
+        """
+        running = True
+        last_frame_time = 0
+        while running:
+            try:
+                frame = await asyncio.wait_for(
+                    self._idle_queue.get(), timeout=self._idle_timeout_secs
+                )
+
+                if isinstance(frame, StartFrame) or isinstance(frame, self._idle_timeout_frames):
+                    # If we find a StartFrame or one of the frames that prevents a
+                    # time out we update the time.
+                    last_frame_time = time.time()
+                else:
+                    # If we find any other frame we check if the pipeline is
+                    # idle by checking the last time we received one of the
+                    # valid frames.
+                    diff_time = time.time() - last_frame_time
+                    if diff_time >= self._idle_timeout_secs:
+                        running = await self._idle_timeout_detected()
+
+                self._idle_queue.task_done()
+            except asyncio.TimeoutError:
+                running = await self._idle_timeout_detected()
+
+    async def _idle_timeout_detected(self) -> bool:
+        """Logic for when the pipeline is idle.
+
+        Returns:
+            bool: Whther the pipeline task is being cancelled or not.
+        """
+        await self._call_event_handler("on_idle_timeout")
+        if self._cancel_on_idle_timeout:
+            logger.warning(f"Idle pipeline detected, cancelling pipeline task...")
+            await self.cancel()
+            return False
+        return True
 
     def _print_dangling_tasks(self):
         tasks = [t.get_name() for t in self._task_manager.current_tasks()]

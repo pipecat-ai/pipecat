@@ -903,7 +903,7 @@ class DailyInputTransport(BaseInputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, UserImageRequestFrame):
-            await self.request_participant_image(frame.user_id)
+            await self.request_participant_image(frame)
 
     #
     # Frames
@@ -940,16 +940,16 @@ class DailyInputTransport(BaseInputTransport):
         self._video_renderers[participant_id] = {
             "framerate": framerate,
             "timestamp": 0,
-            "render_next_frame": False,
+            "render_next_frame": [],
         }
 
         await self._client.capture_participant_video(
             participant_id, self._on_participant_video_frame, framerate, video_source, color_format
         )
 
-    async def request_participant_image(self, participant_id: str):
-        if participant_id in self._video_renderers:
-            self._video_renderers[participant_id]["render_next_frame"] = True
+    async def request_participant_image(self, frame: UserImageRequestFrame):
+        if frame.user_id in self._video_renderers:
+            self._video_renderers[frame.user_id]["render_next_frame"].append(frame)
 
     async def get_last_frame_for_participant(
         self, participant_id: str
@@ -973,17 +973,24 @@ class DailyInputTransport(BaseInputTransport):
         prev_time = self._video_renderers[participant_id]["timestamp"]
         framerate = self._video_renderers[participant_id]["framerate"]
 
+        # Some times we render frames because of a request.
+        request_frame = None
+
         if framerate > 0:
             next_time = prev_time + 1 / framerate
             render_frame = (next_time - curr_time) < 0.1
 
         elif self._video_renderers[participant_id]["render_next_frame"]:
-            self._video_renderers[participant_id]["render_next_frame"] = False
+            request_frame = self._video_renderers[participant_id]["render_next_frame"].pop(0)
             render_frame = True
 
         if render_frame:
             frame = UserImageRawFrame(
-                user_id=participant_id, image=buffer, size=size, format=format
+                user_id=participant_id,
+                request=request_frame,
+                image=buffer,
+                size=size,
+                format=format,
             )
             await self.push_frame(frame)
             self._video_renderers[participant_id]["timestamp"] = curr_time
