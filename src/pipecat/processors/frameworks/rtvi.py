@@ -440,7 +440,9 @@ class RTVIObserver(BaseObserver):
 
         if isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame)):
             await self._handle_interruptions(frame)
-        elif isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame)):
+        elif isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame)) and (
+            direction == FrameDirection.UPSTREAM
+        ):
             await self._handle_bot_speaking(frame)
         elif isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame)):
             await self._handle_user_transcriptions(frame)
