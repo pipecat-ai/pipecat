@@ -271,7 +271,7 @@ async def main(
     context_switcher = ContextSwitcher(
         voicemail_detection_llm, voicemail_detection_context_aggregator.user()
     )
-    voicemail_prompt = routing_manager.get_voicemail_prompt()
+    voicemail_prompt = routing_manager.get_prompt("voicemail_prompt")
 
     handlers = FunctionHandlers(context_switcher)
     handlers.prompt = voicemail_prompt
