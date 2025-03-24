@@ -19,9 +19,10 @@ from pipecat.utils.network import exponential_backoff_time
 class WebsocketService(ABC):
     """Base class for websocket-based services with reconnection logic."""
 
-    def __init__(self):
+    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
         """Initialize websocket attributes."""
         self._websocket: Optional[websockets.WebSocketClientProtocol] = None
+        self._reconnect_on_error = reconnect_on_error
 
     async def _verify_connection(self) -> bool:
         """Verify websocket connection is working.
@@ -72,23 +73,28 @@ class WebsocketService(ABC):
                         self._websocket.close_rcvd_then_sent,
                     )
             except Exception as e:
-                retry_count += 1
-                if retry_count >= MAX_RETRIES:
-                    message = f"{self} error receiving messages: {e}"
-                    logger.error(message)
-                    await report_error(ErrorFrame(message, fatal=True))
+                message = f"{self} error receiving messages: {e}"
+                logger.error(message)
+
+                if self._reconnect_on_error:
+                    retry_count += 1
+                    if retry_count >= MAX_RETRIES:
+                        await report_error(ErrorFrame(message, fatal=True))
+                        break
+
+                    logger.warning(f"{self} connection error, will retry: {e}")
+                    await report_error(ErrorFrame(message))
+
+                    try:
+                        if await self._reconnect_websocket(retry_count):
+                            retry_count = 0  # Reset counter on successful reconnection
+                        wait_time = exponential_backoff_time(retry_count)
+                        await asyncio.sleep(wait_time)
+                    except Exception as reconnect_error:
+                        logger.error(f"{self} reconnection failed: {reconnect_error}")
+                else:
+                    await report_error(ErrorFrame(message))
                     break
-
-                logger.warning(f"{self} connection error, will retry: {e}")
-
-                try:
-                    if await self._reconnect_websocket(retry_count):
-                        retry_count = 0  # Reset counter on successful reconnection
-                    wait_time = exponential_backoff_time(retry_count)
-                    await asyncio.sleep(wait_time)
-                except Exception as reconnect_error:
-                    logger.error(f"{self} reconnection failed: {reconnect_error}")
-                    continue
 
     @abstractmethod
     async def _connect(self):

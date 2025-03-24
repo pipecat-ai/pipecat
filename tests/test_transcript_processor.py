@@ -235,8 +235,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             BotStartedSpeakingFrame(),
             SleepFrame(sleep=0.1),
             TTSTextFrame(text="Hello"),
-            TTSTextFrame(text="world"),
-            TTSTextFrame(text="!"),
+            TTSTextFrame(text="world!"),
             SleepFrame(sleep=0.1),
             StartInterruptionFrame(),  # User interrupts here
             BotStartedSpeakingFrame(),
@@ -251,8 +250,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             BotStartedSpeakingFrame,
             TTSTextFrame,  # "Hello"
-            TTSTextFrame,  # "world"
-            TTSTextFrame,  # "!"
+            TTSTextFrame,  # "world!"
             TranscriptionUpdateFrame,  # First message (emitted due to interruption)
             StartInterruptionFrame,  # Interruption frame comes after the update
             BotStartedSpeakingFrame,
@@ -275,7 +273,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         # First update should be interrupted message
         first_message = received_updates[0].messages[0]
         self.assertEqual(first_message.role, "assistant")
-        self.assertEqual(first_message.content, "Hello world !")
+        self.assertEqual(first_message.content, "Hello world!")
         self.assertIsNotNone(first_message.timestamp)
 
         # Second update should be new response
@@ -426,3 +424,57 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received_updates[0].content, "User message")
         self.assertEqual(received_updates[1].role, "assistant")
         self.assertEqual(received_updates[1].content, "Assistant message")
+
+    async def test_text_fragments_with_spaces(self):
+        """Test aggregating text fragments with various spacing patterns"""
+        processor = AssistantTranscriptProcessor()
+
+        # Track received updates
+        received_updates = []
+
+        @processor.event_handler("on_transcript_update")
+        async def handle_update(proc, frame: TranscriptionUpdateFrame):
+            received_updates.append(frame)
+
+        # Test the specific pattern shared
+        frames_to_send = [
+            BotStartedSpeakingFrame(),
+            SleepFrame(sleep=0.1),
+            TTSTextFrame(text="Hello"),
+            TTSTextFrame(text=" there"),
+            TTSTextFrame(text="!"),
+            TTSTextFrame(text=" How"),
+            TTSTextFrame(text="'s"),
+            TTSTextFrame(text=" it"),
+            TTSTextFrame(text=" going"),
+            TTSTextFrame(text="?"),
+            BotStoppedSpeakingFrame(),
+        ]
+
+        expected_down_frames = [
+            BotStartedSpeakingFrame,
+            BotStoppedSpeakingFrame,
+            TTSTextFrame,
+            TTSTextFrame,
+            TTSTextFrame,
+            TTSTextFrame,
+            TTSTextFrame,
+            TTSTextFrame,
+            TTSTextFrame,
+            TTSTextFrame,
+            TranscriptionUpdateFrame,
+        ]
+
+        # Run test
+        received_frames, _ = await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        # Verify result
+        self.assertEqual(len(received_updates), 1)
+        message = received_updates[0].messages[0]
+        self.assertEqual(message.role, "assistant")
+        # Should be properly joined without extra spaces
+        self.assertEqual(message.content, "Hello there! How's it going?")

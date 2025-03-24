@@ -686,8 +686,11 @@ class AzureSTTService(STTService):
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        self._speech_config = SpeechConfig(subscription=api_key, region=region)
-        self._speech_config.speech_recognition_language = language
+        self._speech_config = SpeechConfig(
+            subscription=api_key,
+            region=region,
+            speech_recognition_language=language_to_azure_language(language),
+        )
 
         self._audio_stream = None
         self._speech_recognizer = None
