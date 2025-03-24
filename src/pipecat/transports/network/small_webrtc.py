@@ -285,7 +285,7 @@ class SmallWebRTCClient:
         self._params = _params
 
     async def connect(self):
-        if self._webrtcConnection.is_connected() or self._webrtcConnection.is_connecting():
+        if self._webrtcConnection.is_connected():
             # already initialized
             return
 
@@ -304,6 +304,10 @@ class SmallWebRTCClient:
             self._webrtcConnection.send_app_message(frame.message)
 
     async def _handle_client_connected(self):
+        # There is nothing to do here yet, the pipeline is still not ready
+        if not self._params:
+            return
+
         self._audio_input_track = self._webrtcConnection.audio_input_track()
         self._video_input_track = self._webrtcConnection.video_input_track()
         if self._params.audio_out_enabled:

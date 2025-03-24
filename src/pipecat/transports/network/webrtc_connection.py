@@ -24,7 +24,7 @@ class SmallWebRTCConnection(EventEmitter):
             self.ice_servers = [RTCIceServer(urls=server) for server in ice_servers]
         else:
             self.ice_servers = []
-        self._is_connecting = False
+        self._connect_invoked = False
         self._initialize()
 
     def _initialize(self):
@@ -72,6 +72,12 @@ class SmallWebRTCConnection(EventEmitter):
                 f"Ice connection state is {self.pc.iceConnectionState}, connection is {self.pc.connectionState}"
             )
 
+        @self.pc.on("icegatheringstatechange")
+        async def on_icegatheringstatechange():
+            logger.info(
+                f"Ice gathering state is {self.pc.iceGatheringState}"
+            )
+
         @self.pc.on("track")
         async def on_track(track):
             logger.info(f"Track {track.kind} received")
@@ -92,14 +98,24 @@ class SmallWebRTCConnection(EventEmitter):
         # so we are basically forcing it to act this way
         self.force_transceivers_to_send_recv()
 
-        self.answer = await self.pc.createAnswer()
+        # this answer does not contain the ice candidates, which will be gathered later, after the setLocalDescription
+        logger.info(f"Creating answer")
+        local_answer = await self.pc.createAnswer()
+        await self.pc.setLocalDescription(local_answer)
+        logger.info(f"Setting the answer after the local description is created")
+        self.answer = self.pc.localDescription
 
     async def initialize(self, sdp: str, type: str):
         await self._create_answer(sdp, type)
 
     async def connect(self):
-        self._is_connecting = True
-        await self.pc.setLocalDescription(self.answer)
+        self._connect_invoked = True
+        # If we already connected, trigger again the connected event
+        if self.is_connected():
+            await self.emit("connected", self)
+            # We are renegotiating here, because likely we have loose the first video frames
+            # and aiortc does not handle that pretty well.
+            self.ask_to_renegotiate()
 
     async def renegotiate(self, sdp: str, type: str, restart_pc: bool = False):
         logger.info(f"Renegotiating {self.pc_id}")
@@ -114,7 +130,6 @@ class SmallWebRTCConnection(EventEmitter):
             self._initialize()
 
         await self._create_answer(sdp, type)
-        await self.pc.setLocalDescription(self.answer)
 
         # Maybe we should refactor to receive a message from the client side when the renegotiation is completed.
         # or look at the peer connection listeners
@@ -158,7 +173,6 @@ class SmallWebRTCConnection(EventEmitter):
     async def close(self):
         if self.pc:
             await self.pc.close()
-        self._is_connecting = False
 
     def get_answer(self):
         if not self.answer:
@@ -182,15 +196,17 @@ class SmallWebRTCConnection(EventEmitter):
     # So, there is no advantage in looking at self.pc.connectionState
     # That is why we are trying to keep our own state
     def is_connected(self):
+        # If the small webrtc transport has never invoked to connect
+        # we are acting like if we are not connected
+        if not self._connect_invoked:
+            return False
+
         if self._last_received_time is None:
             # if we have never received a message, it is probably because the client has not created a data channel
             # so we are going to trust aiortc in this case
             return self.pc.connectionState == "connected"
         # Checks if the last received ping was within the last 3 seconds.
         return (time.time() - self._last_received_time) < 3
-
-    def is_connecting(self):
-        return self._is_connecting
 
     def audio_input_track(self):
         # Transceivers always appear in creation-order for both peers
