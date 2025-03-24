@@ -102,6 +102,8 @@ def language_to_elevenlabs_language(language: Language) -> Optional[str]:
 
 def output_format_from_sample_rate(sample_rate: int) -> str:
     match sample_rate:
+        case 8000:
+            return "pcm_8000"
         case 16000:
             return "pcm_16000"
         case 22050:
@@ -113,7 +115,7 @@ def output_format_from_sample_rate(sample_rate: int) -> str:
     logger.warning(
         f"ElevenLabsTTSService: No output format available for {sample_rate} sample rate"
     )
-    return "pcm_16000"
+    return "pcm_24000"
 
 
 def build_elevenlabs_voice_settings(
@@ -309,7 +311,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         await self._connect_websocket()
 
         if not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
         if not self._keepalive_task:
             self._keepalive_task = self.create_task(self._keepalive_task_handler())
@@ -364,6 +366,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
         try:

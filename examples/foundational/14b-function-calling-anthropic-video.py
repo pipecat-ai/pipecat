@@ -39,7 +39,12 @@ async def get_weather(function_name, tool_call_id, arguments, llm, context, resu
 
 async def get_image(function_name, tool_call_id, arguments, llm, context, result_callback):
     question = arguments["question"]
-    await llm.request_image_frame(user_id=video_participant_id, text_content=question)
+    await llm.request_image_frame(
+        user_id=video_participant_id,
+        function_name=function_name,
+        tool_call_id=tool_call_id,
+        text_content=question,
+    )
 
 
 async def main():
@@ -62,13 +67,12 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY"),
-            # model="claude-3-5-sonnet-20240620",
-            model="claude-3-5-sonnet-latest",
+            model="claude-3-7-sonnet-latest",
             enable_prompt_caching_beta=True,
         )
         llm.register_function("get_weather", get_weather)

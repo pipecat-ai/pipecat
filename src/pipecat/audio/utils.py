@@ -18,23 +18,6 @@ def create_default_resampler(**kwargs) -> BaseAudioResampler:
     return SOXRAudioResampler(**kwargs)
 
 
-def resample_audio(audio: bytes, original_rate: int, target_rate: int) -> bytes:
-    import warnings
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("always")
-        warnings.warn(
-            "'resample_audio()' is deprecated, use 'create_default_resampler()' instead.",
-            DeprecationWarning,
-        )
-
-    if original_rate == target_rate:
-        return audio
-    audio_data = np.frombuffer(audio, dtype=np.int16)
-    resampled_audio = soxr.resample(audio_data, original_rate, target_rate)
-    return resampled_audio.astype(np.int16).tobytes()
-
-
 def mix_audio(audio1: bytes, audio2: bytes) -> bytes:
     data1 = np.frombuffer(audio1, dtype=np.int16)
     data2 = np.frombuffer(audio2, dtype=np.int16)

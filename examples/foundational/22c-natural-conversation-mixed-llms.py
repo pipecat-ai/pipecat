@@ -403,13 +403,8 @@ class OutputGate(FrameProcessor):
                 break
 
 
-async def start_fetch_weather(function_name, llm, context):
-    """Push a frame to the LLM; this is handy when the LLM response might take a while."""
-    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
-
-
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
+    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
     await result_callback({"conditions": "nice", "temperature": "75"})
 
 
@@ -433,7 +428,7 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
         # This is the LLM that will be used to detect if the user has finished a
@@ -451,7 +446,7 @@ async def main():
         )
         # Register a function_name of None to get all functions
         # sent to the same callback with an additional function_name parameter.
-        llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
+        llm.register_function("get_current_weather", fetch_weather_from_api)
 
         tools = [
             ChatCompletionToolParam(
