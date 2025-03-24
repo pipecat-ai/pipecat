@@ -5,7 +5,7 @@ import uuid
 from enum import Enum
 from typing import Any, Optional
 
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
 from loguru import logger
 
 from pipecat.utils.event_emitter import EventEmitter
@@ -18,15 +18,21 @@ class SignallingMessage(Enum):
 
 
 class SmallWebRTCConnection(EventEmitter):
-    def __init__(self):
+    def __init__(self, ice_servers=None):
         super().__init__()
+        if ice_servers:
+            self.ice_servers = [RTCIceServer(urls=server) for server in ice_servers]
+        else:
+            self.ice_servers = []
         self._is_connecting = False
         self._initialize()
 
     def _initialize(self):
         logger.info("Initializing new peer connection")
+        rtc_config = RTCConfiguration(iceServers=self.ice_servers)
+
         self.answer: Optional[RTCSessionDescription] = None
-        self.pc = RTCPeerConnection()
+        self.pc = RTCPeerConnection(rtc_config)
         self.pc_id = "PeerConnection(%s)" % uuid.uuid4()
         self._setup_listeners()
         self._tracks = set()

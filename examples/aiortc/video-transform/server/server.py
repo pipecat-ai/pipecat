@@ -21,6 +21,8 @@ app = FastAPI()
 # Store connections by pc_id
 pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
+ice_servers = ["stun:stun.l.google.com:19302"]
+
 
 @app.post("/api/offer")
 async def offer(request: dict, background_tasks: BackgroundTasks):
@@ -33,7 +35,7 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
             sdp=request["sdp"], type=request["type"], restart_pc=request.get("restart_pc", False)
         )
     else:
-        pipecat_connection = SmallWebRTCConnection()
+        pipecat_connection = SmallWebRTCConnection(ice_servers)
         await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
 
         @pipecat_connection.on("closed")
