@@ -618,7 +618,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         for message in self._context.messages:
             if (
                 message["role"] == "tool"
-                and message["tool_call_id"]
+                and message["tool_call_id"] is not None
                 and message["tool_call_id"] == tool_call_id
             ):
                 message["content"] = result
