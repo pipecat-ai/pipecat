@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `GoogleAssistantContextAggregator` issue where function calls
+  placeholders where not being updated when then function call result was
+  different from a string.
+
 - Fixed an issue that would cause `LLMAssistantContextAggregator` to block
   processing more frames while processing a function call result.
 

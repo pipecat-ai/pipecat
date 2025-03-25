@@ -384,7 +384,7 @@ class FunctionCallResultFrame(DataFrame):
 
     function_name: str
     tool_call_id: str
-    arguments: str
+    arguments: Any
     result: Any
     properties: Optional[FunctionCallResultProperties] = None
 
@@ -633,8 +633,8 @@ class FunctionCallInProgressFrame(SystemFrame):
 
     function_name: str
     tool_call_id: str
-    arguments: str
-    cancel_on_interruption: bool
+    arguments: Any
+    cancel_on_interruption: bool = False
 
 
 @dataclass
