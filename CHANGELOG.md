@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where the `RTVIObserver` would report two bot started and
+  stopped speaking events for each bot turn.
+
 - Fixed an issue in `UltravoxSTTService` that caused improper audio processing
   and incorrect LLM frame output.
 
