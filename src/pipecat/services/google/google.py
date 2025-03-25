@@ -601,13 +601,10 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
 
     async def handle_function_call_result(self, frame: FunctionCallResultFrame):
         if frame.result:
-            if not isinstance(frame.result, str):
-                return
-
-            response = {"response": frame.result}
+            result = json.dumps(frame.result)
 
             await self._update_function_call_result(
-                frame.function_name, frame.tool_call_id, response
+                frame.function_name, frame.tool_call_id, result
             )
         else:
             await self._update_function_call_result(
