@@ -584,7 +584,7 @@ class EmulateUserStoppedSpeakingFrame(Frame):
 
 
 @dataclass
-class BotInterruptionFrame(Frame):
+class BotInterruptionFrame(SystemFrame):
     """Emitted by when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the
     UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
@@ -595,21 +595,21 @@ class BotInterruptionFrame(Frame):
 
 
 @dataclass
-class BotStartedSpeakingFrame(Frame):
+class BotStartedSpeakingFrame(SystemFrame):
     """Emitted upstream by transport outputs to indicate the bot started speaking."""
 
     pass
 
 
 @dataclass
-class BotStoppedSpeakingFrame(Frame):
+class BotStoppedSpeakingFrame(SystemFrame):
     """Emitted upstream by transport outputs to indicate the bot stopped speaking."""
 
     pass
 
 
 @dataclass
-class BotSpeakingFrame(Frame):
+class BotSpeakingFrame(SystemFrame):
     """Emitted upstream by transport outputs while the bot is still
     speaking. This can be used, for example, to detect when a user is idle. That
     is, while the bot is speaking we don't want to trigger any user idle timeout
