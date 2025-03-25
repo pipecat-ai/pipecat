@@ -725,7 +725,7 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         )
 
     async def _update_function_call_result(
-        self, function_name: str, tool_call_id: str, result: str
+        self, function_name: str, tool_call_id: str, result: Any
     ):
         for message in self._context.messages:
             if message["role"] == "user":

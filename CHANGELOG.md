@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `GoogleAssistantContextAggregator` issue where function calls
+  placeholders where not being updated when then function call result was
+  different from a string.
+
+- Fixed an issue that would cause `LLMAssistantContextAggregator` to block
+  processing more frames while processing a function call result.
+
 - Fixed an issue where the `RTVIObserver` would report two bot started and
   stopped speaking events for each bot turn.
 
