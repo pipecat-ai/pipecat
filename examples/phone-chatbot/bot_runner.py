@@ -20,8 +20,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from twilio.twiml.voice_response import VoiceResponse
 
-# from twilio.twiml.voice_response import VoiceResponse
 from pipecat.transports.services.helpers.daily_rest import (
     DailyRESTHelper,
     DailyRoomObject,
@@ -38,7 +38,7 @@ load_dotenv(override=True)
 MAX_SESSION_TIME = 5 * 60  # 5 minutes
 
 # Required environment variables
-REQUIRED_ENV_VARS = ["OPENAI_API_KEY", "DAILY_API_KEY", "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"]
+REQUIRED_ENV_VARS = ["OPENAI_API_KEY", "DAILY_API_KEY", "CARTESIA_API_KEY", "DEEPGRAM_API_KEY"]
 
 # Default LLM to use when none is specified - this determines which bot file to execute
 DEFAULT_LLM = "openai"
@@ -133,6 +133,7 @@ def validate_body(body: Dict[str, Any]) -> None:
 
 def ensure_prompt_config(body: Dict[str, Any]) -> Dict[str, Any]:
     """Ensures the body has appropriate prompts settings, but doesn't add defaults.
+
     Only makes sure the prompt section exists, allowing the bot script to handle defaults.
 
     Args:
@@ -190,15 +191,14 @@ def create_call_transfer_settings(body: Dict[str, Any]) -> Dict[str, Any]:
 # ----------------- Daily Room Management ----------------- #
 
 
-async def create_daily_room(room_url: Optional[str], call_type: Literal["dialin", "dialout"]):
+async def create_daily_room(room_url: Optional[str]):
     """Create or retrieve a Daily room with appropriate properties.
 
     Args:
         room_url: Optional existing room URL
-        call_type: Type of call ('dialin' or 'dialout')
 
     Returns:
-        Dict containing room URL and token
+        Dict containing room URL, token, and SIP endpoint
     """
     if not room_url:
         # Create base properties
@@ -208,6 +208,7 @@ async def create_daily_room(room_url: Optional[str], call_type: Literal["dialin"
             )
         )
 
+        # Always enable dialout capability as we may need to transfer to an operator
         properties.enable_dialout = True
 
         params = DailyRoomParams(properties=properties)
@@ -229,7 +230,7 @@ async def create_daily_room(room_url: Optional[str], call_type: Literal["dialin"
     if not room or not token:
         raise HTTPException(status_code=500, detail="Failed to get room or token")
 
-    return {"room": room.url, "token": token}
+    return {"room": room.url, "token": token, "sip_endpoint": room.config.sip_endpoint}
 
 
 # ----------------- Bot Process Management ----------------- #
@@ -247,10 +248,10 @@ async def process_dialin_request(data: Dict[str, Any]) -> Dict[str, Any]:
     # Create base body with dialin settings
     body = {
         "dialin_settings": {
-            "to": data["To"],
-            "from": data["From"],
-            "callId": data["callId"],
-            "callDomain": data["callDomain"],
+            "to": data.get("To", ""),
+            "from": data.get("From", ""),
+            "callId": data.get("callId", data.get("CallSid", "")),
+            "callDomain": data.get("callDomain", ""),
         }
     }
 
@@ -292,6 +293,32 @@ async def start_bot(room_details: Dict[str, str], body: Dict[str, Any], example:
         raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
 
 
+async def start_twilio_bot(room_details: Dict[str, str], call_id: str) -> bool:
+    """Start a Twilio bot process with the given configuration.
+
+    Args:
+        room_details: Room URL, token, and SIP endpoint
+        call_id: Twilio call ID (CallSid)
+
+    Returns:
+        Boolean indicating success
+    """
+    room_url = room_details["room"]
+    token = room_details["token"]
+    sip_endpoint = room_details["sip_endpoint"]
+
+    # Format command for Twilio bot
+    bot_proc = f"python3 -m bot_twilio -u {room_url} -t {token} -i {call_id} -s {sip_endpoint}"
+    print(f"Starting Twilio bot. Room: {room_url}")
+
+    try:
+        command_parts = shlex.split(bot_proc)
+        subprocess.Popen(command_parts, bufsize=1, cwd=os.path.dirname(os.path.abspath(__file__)))
+        return True
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
+
+
 # ----------------- API Setup ----------------- #
 
 
@@ -321,6 +348,47 @@ app.add_middleware(
 # ----------------- API Endpoints ----------------- #
 
 
+@app.post("/twilio_start_bot", response_class=PlainTextResponse)
+async def twilio_start_bot(request: Request):
+    """Handle incoming Twilio webhook calls and start a Twilio bot.
+
+    This endpoint is called directly by Twilio as a webhook when a call is received.
+    It puts the call on hold with music and starts a bot that will handle the call.
+    """
+    print("POST /twilio_start_bot")
+
+    # Get form data from Twilio webhook
+    try:
+        form_data = await request.form()
+        data = dict(form_data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse Twilio form data: {str(e)}")
+
+    # Get default room URL from environment
+    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
+
+    # Extract call ID from Twilio data
+    call_id = data.get("CallSid")
+    if not call_id:
+        raise HTTPException(status_code=400, detail="Missing 'CallSid' in request")
+
+    print(f"CallId: {call_id}")
+
+    # Create Daily room for the Twilio call
+    room_details = await create_daily_room(room_url)
+
+    # Start the Twilio bot
+    await start_twilio_bot(room_details, call_id)
+
+    # Put the call on hold until the bot is ready to handle it
+    # The bot will update the call with the SIP URI when it's ready
+    resp = VoiceResponse()
+    resp.play(
+        url="http://com.twilio.sounds.music.s3.amazonaws.com/MARKOVICHAMP-Borghestral.mp3", loop=10
+    )
+    return str(resp)
+
+
 @app.post("/start")
 async def handle_start_request(request: Request) -> JSONResponse:
     """Unified endpoint to handle bot configuration for different scenarios."""
@@ -328,8 +396,21 @@ async def handle_start_request(request: Request) -> JSONResponse:
     room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
 
     try:
-        # Parse request data
-        data = await request.json()
+        # Check if this is form data (from Twilio) or JSON
+        content_type = request.headers.get("content-type", "").lower()
+
+        if "application/x-www-form-urlencoded" in content_type:
+            # Handle form data from Twilio
+            form_data = await request.form()
+            data = dict(form_data)
+
+            # Check for CallSid which indicates this is a Twilio webhook
+            if "CallSid" in data:
+                # Redirect to Twilio handler for backward compatibility
+                return await twilio_start_bot(request)
+        else:
+            # Parse JSON request data
+            data = await request.json()
 
         # Handle webhook test
         if "test" in data:
@@ -370,7 +451,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
             body = ensure_prompt_config(body)
 
             # Handle call transfer test scenario
-            room_details = await create_daily_room(room_url, "dialin")
+            room_details = await create_daily_room(room_url)
             await start_bot(room_details, body, "call_transfer")
 
             return JSONResponse(
@@ -388,7 +469,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
             body = ensure_prompt_config(body)
 
             # Handle dialin call transfer scenario
-            room_details = await create_daily_room(room_url, "dialin")
+            room_details = await create_daily_room(room_url)
             await start_bot(room_details, body, "call_transfer")
 
             if body.get("call_transfer", {}).get("testInPrebuilt", False):
@@ -414,7 +495,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
             body = ensure_prompt_config(body)
 
             # Handle voicemail detection test scenario
-            room_details = await create_daily_room(room_url, "dialout")
+            room_details = await create_daily_room(room_url)
             await start_bot(room_details, body, "voicemail_detection")
 
             return JSONResponse(
@@ -432,7 +513,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
             body = ensure_prompt_config(body)
 
             # Handle dialout voicemail detection scenario
-            room_details = await create_daily_room(room_url, "dialout")
+            room_details = await create_daily_room(room_url)
             await start_bot(room_details, body, "voicemail_detection")
 
             # Get the first dialout info for logging (if available)
@@ -467,32 +548,17 @@ async def handle_start_request(request: Request) -> JSONResponse:
         )
 
     except json.JSONDecodeError:
+        # Check if this might be form data from Twilio
+        try:
+            content_type = request.headers.get("content-type", "").lower()
+            if "application/x-www-form-urlencoded" in content_type:
+                return await twilio_start_bot(request)
+        except Exception:
+            pass
+
         raise HTTPException(status_code=400, detail="Invalid JSON in request body")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Request processing error: {str(e)}")
-
-
-# # Twilio webhook endpoint (if needed)
-# @app.post("/twilio")
-# async def handle_twilio_call(request: Request) -> PlainTextResponse:
-#     """Handle incoming Twilio calls and provide TwiML response."""
-#     form_data = await request.form()
-#     from_number = form_data.get("From", "unknown")
-#     to_number = form_data.get("To", "unknown")
-#
-#     # Create a routing manager to help with customer identification
-#     routing_manager = CallRoutingManager()
-#
-#     # Get customer name if known
-#     customer_name = routing_manager.find_customer_by_contact(from_number)
-#     greeting = f"Hello {customer_name}" if customer_name else "Hello"
-#
-#     response = VoiceResponse()
-#     response.say(f"{greeting}, thank you for calling. We're connecting you to our service.")
-#
-#     # You could add call transfer logic here if needed
-#
-#     return PlainTextResponse(str(response), media_type="application/xml")
 
 
 # ----------------- Main ----------------- #
