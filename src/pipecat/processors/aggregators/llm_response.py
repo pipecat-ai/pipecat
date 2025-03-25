@@ -251,9 +251,9 @@ class BetterLLMUserContextAggregator(LLMContextResponseAggregator):
         if len(self._aggregation) > 0:
             await self.handle_aggregation(self._aggregation)
 
+            self.reset()
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame, direction)
-            self.reset()
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
