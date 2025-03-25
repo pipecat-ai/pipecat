@@ -3,7 +3,7 @@ import asyncio
 import os
 import sys
 
-from call_routing import CallRoutingManager
+from call_connection_manager import CallConfigManager, SessionManager
 from dotenv import load_dotenv
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
@@ -30,11 +30,20 @@ daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
 async def terminate_call(
-    function_name, tool_call_id, args, llm: LLMService, context, result_callback
+    function_name,
+    tool_call_id,
+    args,
+    llm: LLMService,
+    context,
+    result_callback,
+    session_manager=None,
 ):
     """Function the bot can call to terminate the call upon completion of a voicemail message."""
+    if session_manager:
+        # Mark that the call was terminated by the bot
+        session_manager.call_flow_state.set_call_terminated()
+
     await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-    await result_callback("Goodbye")
 
 
 async def main(
@@ -42,15 +51,18 @@ async def main(
     token: str,
     body: dict,
 ):
-    routing_manager = CallRoutingManager.from_json_string(body) if body else CallRoutingManager()
+    call_config_manager = CallConfigManager.from_json_string(body) if body else CallConfigManager()
 
     # Get important configuration values
-    dialout_settings = routing_manager.get_dialout_settings()
-    test_mode = routing_manager.is_test_mode()
+    dialout_settings = call_config_manager.get_dialout_settings()
+    test_mode = call_config_manager.is_test_mode()
 
     # Get caller info (might be None for dialout scenarios)
-    caller_info = routing_manager.get_caller_info()
+    caller_info = call_config_manager.get_caller_info()
     logger.info(f"Caller info: {caller_info}")
+
+    # Initialize the session manager
+    session_manager = SessionManager()
 
     transport = DailyTransport(
         room_url,
@@ -74,7 +86,12 @@ async def main(
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
-    llm.register_function("terminate_call", terminate_call)
+    # Pass the session_manager to the terminate_call function
+    llm.register_function(
+        "terminate_call",
+        lambda *args, **kwargs: terminate_call(*args, **kwargs, session_manager=session_manager),
+    )
+
     tools = [
         ChatCompletionToolParam(
             type="function",
@@ -86,7 +103,7 @@ async def main(
     ]
 
     # Check for custom voicemail detection prompt
-    voicemail_detection_prompt = routing_manager.get_prompt("voicemail_detection_prompt")
+    voicemail_detection_prompt = call_config_manager.get_prompt("voicemail_detection_prompt")
 
     if voicemail_detection_prompt:
         system_instruction = voicemail_detection_prompt
@@ -159,7 +176,7 @@ async def main(
         # Start dialout if needed
         if dialout_settings:
             logger.debug("Dialout settings detected; starting dialout")
-            await routing_manager.start_dialout(transport, dialout_settings)
+            await call_config_manager.start_dialout(transport, dialout_settings)
 
     # Configure handlers for dialing out
     @transport.event_handler("on_dialout_connected")
@@ -169,11 +186,15 @@ async def main(
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
         logger.debug(f"Dial-out answered: {data}")
+        # Set the customer session ID in the session manager
+        session_manager.set_session_id("customer", data["sessionId"])
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.debug(f"First participant joined: {participant['id']}")
         await transport.capture_participant_transcription(participant["id"])
+        # Track the customer if it's the first participant
+        session_manager.set_session_id("customer", participant["id"])
 
     if test_mode:
         logger.debug("Running in test mode (can be tested in Daily Prebuilt)")
@@ -181,6 +202,12 @@ async def main(
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
         logger.debug(f"Participant left: {participant}, reason: {reason}")
+
+        # Check if this is a customer who left
+        if session_manager.is_participant_type(participant["id"], "customer"):
+            logger.debug("Customer left the call")
+            session_manager.call_flow_state.set_participant_left_early()
+
         await task.cancel()
 
     runner = PipelineRunner()

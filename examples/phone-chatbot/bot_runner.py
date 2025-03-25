@@ -12,10 +12,10 @@ import os
 import shlex
 import subprocess
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, Optional
 
 import aiohttp
-from call_routing import CallRoutingManager
+from call_connection_manager import CallConfigManager
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -171,15 +171,15 @@ def create_call_transfer_settings(body: Dict[str, Any]) -> Dict[str, Any]:
     # Check if we have dialin settings
     if "dialin_settings" in body:
         # Create a temporary routing manager just for customer lookup
-        routing_manager = CallRoutingManager(body)
+        call_config_manager = CallConfigManager(body)
 
         # Get caller info
-        caller_info = routing_manager.get_caller_info()
+        caller_info = call_config_manager.get_caller_info()
         from_number = caller_info.get("caller_number")
 
         if from_number:
             # Get customer name from phone number
-            customer_name = routing_manager.get_customer_name(from_number)
+            customer_name = call_config_manager.get_customer_name(from_number)
 
             # If we know the customer name, add it to the config for the bot to use
             if customer_name:

@@ -1,8 +1,8 @@
-"""call_routing.py.
+"""call_connection_manager.py.
 
 Manages customer/operator relationships and call routing for voice bots.
 Provides mapping between customers and operators, and functions for retrieving
-contact information.
+contact information. Also includes call state management.
 """
 
 import json
@@ -11,7 +11,178 @@ from typing import Any, Dict, List, Optional, Union
 from loguru import logger
 
 
-class CallRoutingManager:
+class CallFlowState:
+    """State for tracking call flow operations and state transitions."""
+
+    def __init__(self):
+        # Operator-related state
+        self.dialed_operator = False
+        self.operator_connected = False
+        self.current_operator_index = 0
+        self.operator_dialout_settings = []
+        self.summary_finished = False
+
+        # Voicemail detection state
+        self.voicemail_detected = False
+        self.human_detected = False
+        self.voicemail_message_left = False
+
+        # Call termination state
+        self.call_terminated = False
+        self.participant_left_early = False
+
+    # Operator-related methods
+    def set_operator_dialed(self):
+        """Mark that an operator has been dialed."""
+        self.dialed_operator = True
+
+    def set_operator_connected(self):
+        """Mark that an operator has connected to the call."""
+        self.operator_connected = True
+        # Summary is not finished when operator first connects
+        self.summary_finished = False
+
+    def set_operator_disconnected(self):
+        """Handle operator disconnection."""
+        self.operator_connected = False
+        self.summary_finished = False
+
+    def set_summary_finished(self):
+        """Mark the summary as finished."""
+        self.summary_finished = True
+
+    def set_operator_dialout_settings(self, settings):
+        """Set the list of operator dialout settings to try."""
+        self.operator_dialout_settings = settings
+        self.current_operator_index = 0
+
+    def get_current_dialout_setting(self):
+        """Get the current operator dialout setting to try."""
+        if not self.operator_dialout_settings or self.current_operator_index >= len(
+            self.operator_dialout_settings
+        ):
+            return None
+        return self.operator_dialout_settings[self.current_operator_index]
+
+    def move_to_next_operator(self):
+        """Move to the next operator in the list."""
+        self.current_operator_index += 1
+        return self.get_current_dialout_setting()
+
+    # Voicemail detection methods
+    def set_voicemail_detected(self):
+        """Mark that a voicemail system has been detected."""
+        self.voicemail_detected = True
+        self.human_detected = False
+
+    def set_human_detected(self):
+        """Mark that a human has been detected (not voicemail)."""
+        self.human_detected = True
+        self.voicemail_detected = False
+
+    def set_voicemail_message_left(self):
+        """Mark that a voicemail message has been left."""
+        self.voicemail_message_left = True
+
+    # Call termination methods
+    def set_call_terminated(self):
+        """Mark that the call has been terminated by the bot."""
+        self.call_terminated = True
+
+    def set_participant_left_early(self):
+        """Mark that a participant left the call early."""
+        self.participant_left_early = True
+
+
+class SessionManager:
+    """Centralized management of session IDs and state for all call participants."""
+
+    def __init__(self):
+        # Track session IDs of different participant types
+        self.session_ids = {
+            "operator": None,
+            "customer": None,
+            "bot": None,
+            # Add other participant types as needed
+        }
+
+        # References for easy access in processors that need mutable containers
+        self.session_id_refs = {
+            "operator": [None],
+            "customer": [None],
+            "bot": [None],
+            # Add other participant types as needed
+        }
+
+        # State object for call flow
+        self.call_flow_state = CallFlowState()
+
+    def set_session_id(self, participant_type, session_id):
+        """Set the session ID for a specific participant type.
+
+        Args:
+            participant_type: Type of participant (e.g., "operator", "customer", "bot")
+            session_id: The session ID to set
+        """
+        if participant_type in self.session_ids:
+            self.session_ids[participant_type] = session_id
+
+            # Also update the corresponding reference if it exists
+            if participant_type in self.session_id_refs:
+                self.session_id_refs[participant_type][0] = session_id
+
+    def get_session_id(self, participant_type):
+        """Get the session ID for a specific participant type.
+
+        Args:
+            participant_type: Type of participant (e.g., "operator", "customer", "bot")
+
+        Returns:
+            The session ID or None if not set
+        """
+        return self.session_ids.get(participant_type)
+
+    def get_session_id_ref(self, participant_type):
+        """Get the mutable reference for a specific participant type.
+
+        Args:
+            participant_type: Type of participant (e.g., "operator", "customer", "bot")
+
+        Returns:
+            A mutable list container holding the session ID or None if not available
+        """
+        return self.session_id_refs.get(participant_type)
+
+    def is_participant_type(self, session_id, participant_type):
+        """Check if a session ID belongs to a specific participant type.
+
+        Args:
+            session_id: The session ID to check
+            participant_type: Type of participant (e.g., "operator", "customer", "bot")
+
+        Returns:
+            True if the session ID matches the participant type, False otherwise
+        """
+        return self.session_ids.get(participant_type) == session_id
+
+    def reset_participant(self, participant_type):
+        """Reset the state for a specific participant type.
+
+        Args:
+            participant_type: Type of participant (e.g., "operator", "customer", "bot")
+        """
+        if participant_type in self.session_ids:
+            self.session_ids[participant_type] = None
+
+            if participant_type in self.session_id_refs:
+                self.session_id_refs[participant_type][0] = None
+
+            # Additional reset actions for specific participant types
+            if participant_type == "operator":
+                self.call_flow_state.set_operator_disconnected()
+
+
+class CallConfigManager:
     """Manages customer/operator relationships and call routing."""
 
     # Maps customer names to their contact information
