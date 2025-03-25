@@ -8,7 +8,7 @@ import asyncio
 import os
 import sys
 
-from call_routing import CallRoutingManager
+from call_connection_manager import CallConfigManager, SessionManager
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -20,20 +20,17 @@ from pipecat.frames.frames import (
     EndFrame,
     EndTaskFrame,
     Frame,
-    InterimTranscriptionFrame,
     TranscriptionFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import LLMService
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.google import GoogleLLMService
 from pipecat.services.google.google import GoogleLLMContext
 from pipecat.transports.services.daily import (
@@ -85,58 +82,23 @@ class TranscriptionModifierProcessor(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class DialOperatorState:
-    """State for tracking whether the operator has been dialed and connected."""
-
-    def __init__(self):
-        self.dialed_operator = False
-        self.operator_connected = False
-        self.current_operator_index = 0
-        self.operator_dialout_settings = []
-
-    def set_operator_dialed(self):
-        self.dialed_operator = True
-
-    def set_operator_connected(self):
-        self.operator_connected = True
-
-    def set_operator_dialout_settings(self, settings):
-        self.operator_dialout_settings = settings
-        self.current_operator_index = 0
-
-    def get_current_dialout_setting(self):
-        """Get the current operator dialout setting to try."""
-        if not self.operator_dialout_settings or self.current_operator_index >= len(
-            self.operator_dialout_settings
-        ):
-            return None
-        return self.operator_dialout_settings[self.current_operator_index]
-
-    def move_to_next_operator(self):
-        """Move to the next operator in the list."""
-        self.current_operator_index += 1
-        return self.get_current_dialout_setting()
-
-
 class SummaryFinished(FrameProcessor):
-    """State for tracking whether the summary has been finished."""
+    """Frame processor that monitors when summary has been finished."""
 
-    def __init__(self):
+    def __init__(self, dial_operator_state):
         super().__init__()
-        self.summary_finished = False
-        self.operator_connected = False
-
-    def set_operator_connected(self, connected: bool):
-        self.operator_connected = connected
-        if not connected:
-            self.summary_finished = False
+        # Store reference to the shared state object
+        self.dial_operator_state = dial_operator_state
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if self.operator_connected and isinstance(frame, BotStoppedSpeakingFrame):
+        # Check if operator is connected and this is the end of bot speaking
+        if self.dial_operator_state.operator_connected and isinstance(
+            frame, BotStoppedSpeakingFrame
+        ):
             logger.debug("Summary finished, bot will stop speaking")
-            self.summary_finished = True
+            self.dial_operator_state.set_summary_finished()
 
         await self.push_frame(frame, direction)
 
@@ -153,32 +115,29 @@ async def main(
     token: str,
     body: dict,
 ):
-    routing_manager = CallRoutingManager.from_json_string(body) if body else CallRoutingManager()
+    call_config_manager = CallConfigManager.from_json_string(body) if body else CallConfigManager()
 
     # Get caller information
-    caller_info = routing_manager.get_caller_info()
+    caller_info = call_config_manager.get_caller_info()
     caller_number = caller_info["caller_number"]
     dialed_number = caller_info["dialed_number"]
 
     # Get customer name based on caller number
-    customer_name = routing_manager.get_customer_name(caller_number) if caller_number else None
+    customer_name = call_config_manager.get_customer_name(caller_number) if caller_number else None
 
     # Get appropriate operator settings based on the caller
-    operator_dialout_settings = routing_manager.get_dialout_settings_for_caller(caller_number)
+    operator_dialout_settings = call_config_manager.get_dialout_settings_for_caller(caller_number)
 
     logger.info(f"Caller number: {caller_number}")
     logger.info(f"Dialed number: {dialed_number}")
     logger.info(f"Customer name: {customer_name}")
     logger.info(f"Operator dialout settings: {operator_dialout_settings}")
 
-    # Using a list as a mutable container for operator session ID
-    operator_session_id_ref = [None]
-
     # Check if in test mode
-    test_mode = routing_manager.is_test_mode()
+    test_mode = call_config_manager.is_test_mode()
 
     # Get dialin settings if present
-    dialin_settings = routing_manager.get_dialin_settings()
+    dialin_settings = call_config_manager.get_dialin_settings()
 
     if test_mode:
         logger.info("Running in test mode")
@@ -209,10 +168,11 @@ async def main(
             transcription_enabled=True,
         )
 
-    # Set up operator dialing state
-    dial_operator_state = DialOperatorState()
-    dial_operator_state.set_operator_dialout_settings(operator_dialout_settings)
-    operator_session_id = None
+    # Initialize the session manager
+    session_manager = SessionManager()
+
+    # Set up the operator dialout settings
+    session_manager.dial_operator_state.set_operator_dialout_settings(operator_dialout_settings)
 
     # Initialize transport
     transport = DailyTransport(
@@ -240,14 +200,14 @@ async def main(
         result_callback: callable,
     ):
         """Function the bot can call to dial an operator."""
-        dialout_setting = dial_operator_state.get_current_dialout_setting()
+        dialout_setting = session_manager.dial_operator_state.get_current_dialout_setting()
 
         if dialout_setting:
-            dial_operator_state.set_operator_dialed()
+            session_manager.dial_operator_state.set_operator_dialed()
             logger.info(f"Dialing operator with settings: {dialout_setting}")
 
             # Use routing manager helper to handle the dialout
-            await routing_manager.start_dialout(transport, [dialout_setting])
+            await call_config_manager.start_dialout(transport, [dialout_setting])
 
         else:
             await result_callback("No operator dialout settings available")
@@ -267,7 +227,7 @@ async def main(
         }
     ]
 
-    call_transfer_initial_prompt = routing_manager.get_prompt("call_transfer_initial_prompt")
+    call_transfer_initial_prompt = call_config_manager.get_prompt("call_transfer_initial_prompt")
 
     # Customize the greeting based on customer name if available
     customer_greeting = f"Hello {customer_name}" if customer_name else "Hello"
@@ -324,11 +284,17 @@ The `dial_operator` and `terminate_call` functions CANNOT wait for additional us
     context = GoogleLLMContext()
     context_aggregator = llm.create_context_aggregator(context)
 
-    summary_finished = SummaryFinished()
-    transcription_modifier = TranscriptionModifierProcessor(operator_session_id_ref)
+    # Use the session manager's references
+    summary_finished = SummaryFinished(session_manager.dial_operator_state)
+    transcription_modifier = TranscriptionModifierProcessor(
+        session_manager.get_session_id_ref("operator")
+    )
 
     async def should_speak(self) -> bool:
-        result = not dial_operator_state.operator_connected or not summary_finished.summary_finished
+        result = (
+            not session_manager.dial_operator_state.operator_connected
+            or not session_manager.dial_operator_state.summary_finished
+        )
         return result
 
     pipeline = Pipeline(
@@ -360,8 +326,7 @@ The `dial_operator` and `terminate_call` functions CANNOT wait for additional us
                 }
             ]
         )
-        # For the dialin case, we want the bot to answer the phone and greet the user. We
-        # can prompt the bot to speak by putting the context into the pipeline.
+        # For the dialin case, we want the bot to answer the phone and greet the user.
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     # User escalates to an operator. Bot should summarize the conversation and stop speaking.
@@ -369,15 +334,26 @@ The `dial_operator` and `terminate_call` functions CANNOT wait for additional us
     async def on_dialout_answered(transport, data):
         logger.debug(f"Dial-out answered: {data}")
         await transport.capture_participant_transcription(data["sessionId"])
-        if dial_operator_state and not dial_operator_state.operator_connected:
+
+        if (
+            session_manager.dial_operator_state
+            and not session_manager.dial_operator_state.operator_connected
+        ):
             logger.debug(f"Operator connected with session ID: {data['sessionId']}")
-            nonlocal operator_session_id
-            operator_session_id = data["sessionId"]
-            operator_session_id_ref[0] = operator_session_id
-            call_transfer_prompt = routing_manager.get_prompt("call_transfer_prompt")
+
+            # Set operator session ID in the session manager
+            session_manager.set_session_id("operator", data["sessionId"])
+
+            call_transfer_prompt = call_config_manager.get_prompt("call_transfer_prompt")
+
             # Add summary request to context
             if call_transfer_prompt:
-                print("++++ Using call transfer prompt")
+                # If customer name is available, replace placeholders in the prompt
+                if customer_name:
+                    call_transfer_prompt = call_transfer_prompt.replace(
+                        "{customer_name}", customer_name
+                    )
+                logger.info("Using custom call transfer prompt")
                 context_aggregator.user().add_messages(
                     [
                         {
@@ -387,7 +363,7 @@ The `dial_operator` and `terminate_call` functions CANNOT wait for additional us
                     ]
                 )
             else:
-                print("++++ Using default call transfer prompt")
+                logger.info("Using default call transfer prompt")
                 context_aggregator.user().add_messages(
                     [
                         {
@@ -410,9 +386,8 @@ The `dial_operator` and `terminate_call` functions CANNOT wait for additional us
                     ]
                 )
 
-            # Update states after queuing the summary request
-            dial_operator_state.set_operator_connected()
-            summary_finished.set_operator_connected(True)
+            # Update state
+            session_manager.dial_operator_state.set_operator_connected()
 
             # Queue the context frame to trigger the summary request
             await task.queue_frames([context_aggregator.user().get_context_frame()])
@@ -421,24 +396,34 @@ The `dial_operator` and `terminate_call` functions CANNOT wait for additional us
 
     @transport.event_handler("on_dialout_stopped")
     async def on_dialout_stopped(transport, data):
-        if operator_session_id and data["sessionId"] == operator_session_id:
+        if session_manager.get_session_id("operator") and data[
+            "sessionId"
+        ] == session_manager.get_session_id("operator"):
             logger.debug("Dialout to operator stopped")
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
         logger.debug(f"Participant left: {participant}, reason: {reason}")
-        if operator_session_id and participant["id"] == operator_session_id:
+
+        if session_manager.get_session_id("operator") and participant[
+            "id"
+        ] == session_manager.get_session_id("operator"):
             logger.debug("Operator left the call")
 
-            # Reset states
-            dial_operator_state.operator_connected = False
-            summary_finished.set_operator_connected(False)
-            call_transfer_finished_prompt = routing_manager.get_prompt(
+            # Reset operator state
+            session_manager.reset_participant("operator")
+
+            call_transfer_finished_prompt = call_config_manager.get_prompt(
                 "call_transfer_finished_prompt"
             )
             # Add message about operator leaving
             if call_transfer_finished_prompt:
-                print("++++ Using call transfer finished prompt")
+                # If customer name is available, replace placeholders in the prompt
+                if customer_name:
+                    call_transfer_finished_prompt = call_transfer_finished_prompt.replace(
+                        "{customer_name}", customer_name
+                    )
+                logger.info("Using custom call transfer finished prompt")
                 context_aggregator.user().add_messages(
                     [
                         {
@@ -447,9 +432,8 @@ The `dial_operator` and `terminate_call` functions CANNOT wait for additional us
                         }
                     ]
                 )
-
             else:
-                print("++++ Using default call transfer finished prompt")
+                logger.info("Using default call transfer finished prompt")
                 context_aggregator.user().add_messages(
                     [
                         {

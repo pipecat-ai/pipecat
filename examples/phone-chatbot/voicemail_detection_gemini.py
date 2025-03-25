@@ -9,7 +9,7 @@ import asyncio
 import os
 import sys
 
-from call_routing import CallRoutingManager
+from call_connection_manager import CallConfigManager, SessionManager
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -49,7 +49,8 @@ system_message = None
 
 
 class UserAudioCollector(FrameProcessor):
-    """This FrameProcessor collects audio frames in a buffer, then adds them to the
+    """This FrameProcessor collects audio frames in a buffer, then adds them to the.
+
     LLM context when the user stops speaking.
     """
 
@@ -93,6 +94,8 @@ class UserAudioCollector(FrameProcessor):
 
 
 class ContextSwitcher:
+    """Switches the context to a new system instruction based on what the bot hears."""
+
     def __init__(self, llm, context_aggregator):
         self._llm = llm
         self._context_aggregator = context_aggregator
@@ -116,8 +119,11 @@ class ContextSwitcher:
 
 
 class FunctionHandlers:
-    def __init__(self, context_switcher):
+    """Handlers for the voicemail detection bot functions."""
+
+    def __init__(self, context_switcher, session_manager):
         self.context_switcher = context_switcher
+        self.session_manager = session_manager
 
     async def voicemail_response(
         self,
@@ -129,6 +135,9 @@ class FunctionHandlers:
         result_callback,
     ):
         """Function the bot can call to leave a voicemail message."""
+        # Update state to indicate voicemail was detected
+        self.session_manager.call_flow_state.set_voicemail_detected()
+
         if hasattr(self, "prompt") and self.prompt:
             message = self.prompt
         else:
@@ -151,6 +160,8 @@ class FunctionHandlers:
         result_callback,
     ):
         """Function the bot can when it detects it's talking to a human."""
+        # Update state to indicate human was detected
+        self.session_manager.call_flow_state.set_human_detected()
         await llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
 
 
@@ -161,12 +172,14 @@ async def terminate_call(
     llm: LLMService,
     context,
     result_callback,
-    call_state=None,
+    session_manager=None,
 ):
     """Function the bot can call to terminate the call upon completion of the call."""
-    if call_state:
-        call_state.bot_terminated_call = True
-    await llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+    if session_manager:
+        # Set call terminated flag in the session manager
+        session_manager.call_flow_state.set_call_terminated()
+
+    await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
 
 async def main(
@@ -174,21 +187,18 @@ async def main(
     token: str,
     body: dict,
 ):
-    routing_manager = CallRoutingManager.from_json_string(body) if body else CallRoutingManager()
+    call_config_manager = CallConfigManager.from_json_string(body) if body else CallConfigManager()
 
     # Get important configuration values
-    dialout_settings = routing_manager.get_dialout_settings()
-    test_mode = routing_manager.is_test_mode()
+    dialout_settings = call_config_manager.get_dialout_settings()
+    test_mode = call_config_manager.is_test_mode()
 
     # Get caller info (might be None for dialout scenarios)
-    caller_info = routing_manager.get_caller_info()
+    caller_info = call_config_manager.get_caller_info()
     logger.info(f"Caller info: {caller_info}")
 
-    class CallState:
-        participant_left_early = False
-        bot_terminated_call = False
-
-    call_state = CallState()
+    # Initialize the session manager
+    session_manager = SessionManager()
 
     transport = DailyTransport(
         room_url,
@@ -234,7 +244,7 @@ async def main(
         }
     ]
 
-    voicemail_detection_prompt = routing_manager.get_prompt("voicemail_detection_prompt")
+    voicemail_detection_prompt = call_config_manager.get_prompt("voicemail_detection_prompt")
     if voicemail_detection_prompt:
         system_instruction = voicemail_detection_prompt
     else:
@@ -271,21 +281,21 @@ async def main(
     context_switcher = ContextSwitcher(
         voicemail_detection_llm, voicemail_detection_context_aggregator.user()
     )
-    voicemail_prompt = routing_manager.get_prompt("voicemail_prompt")
+    voicemail_prompt = call_config_manager.get_prompt("voicemail_prompt")
 
-    handlers = FunctionHandlers(context_switcher)
+    handlers = FunctionHandlers(context_switcher, session_manager)
     handlers.prompt = voicemail_prompt
 
     voicemail_detection_llm.register_function(
         "switch_to_voicemail_response",
-        handlers.voicemail_response,  # Remove partial
+        handlers.voicemail_response,
     )
     voicemail_detection_llm.register_function(
         "switch_to_human_conversation", handlers.human_conversation
     )
     voicemail_detection_llm.register_function(
         "terminate_call",
-        lambda *args, **kwargs: terminate_call(*args, **kwargs, call_state=call_state),
+        lambda *args, **kwargs: terminate_call(*args, **kwargs, session_manager=session_manager),
     )
 
     voicemail_detection_audio_collector = UserAudioCollector(
@@ -314,7 +324,7 @@ async def main(
         # Start dialout if needed
         if dialout_settings:
             logger.debug("Dialout settings detected; starting dialout")
-            await routing_manager.start_dialout(transport, dialout_settings)
+            await call_config_manager.start_dialout(transport, dialout_settings)
 
     @transport.event_handler("on_dialout_connected")
     async def on_dialout_connected(transport, data):
@@ -323,11 +333,15 @@ async def main(
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
         logger.debug(f"Dial-out answered: {data}")
+        # Set the customer session ID in the session manager
+        session_manager.set_session_id("customer", data["sessionId"])
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.debug(f"First participant joined: {participant['id']}")
         await transport.capture_participant_transcription(participant["id"])
+        # Track the customer if it's the first participant
+        session_manager.set_session_id("customer", participant["id"])
 
     if test_mode:
         logger.debug("Detect voicemail example. You can test this in example in Daily Prebuilt")
@@ -336,23 +350,27 @@ async def main(
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        call_state.participant_left_early = True
+        # Mark that a participant left early
+        session_manager.call_flow_state.set_participant_left_early()
         await voicemail_detection_pipeline_task.queue_frame(EndFrame())
 
     print("!!! starting voicemail detection pipeline")
     await runner.run(voicemail_detection_pipeline_task)
     print("!!! Done with voicemail detection pipeline")
 
-    if call_state.participant_left_early or call_state.bot_terminated_call:
-        if call_state.participant_left_early:
+    if (
+        session_manager.call_flow_state.participant_left_early
+        or session_manager.call_flow_state.call_terminated
+    ):
+        if session_manager.call_flow_state.participant_left_early:
             print("!!! Participant left early; terminating call")
-        elif call_state.bot_terminated_call:
+        elif session_manager.call_flow_state.call_terminated:
             print("!!! Bot terminated call; not proceeding to human conversation")
         return
 
     ### HUMAN CONVERSATION PIPELINE
 
-    human_conversation_prompt = routing_manager.get_prompt("human_conversation_prompt")
+    human_conversation_prompt = call_config_manager.get_prompt("human_conversation_prompt")
     if human_conversation_prompt:
         human_conversation_system_instruction = human_conversation_prompt
     else:
@@ -384,7 +402,7 @@ async def main(
 
     human_conversation_llm.register_function(
         "terminate_call",
-        lambda *args, **kwargs: terminate_call(*args, **kwargs, call_state=call_state),
+        lambda *args, **kwargs: terminate_call(*args, **kwargs, session_manager=session_manager),
     )
 
     human_conversation_pipeline = Pipeline(
@@ -406,6 +424,7 @@ async def main(
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
+        session_manager.call_flow_state.set_participant_left_early()
         await voicemail_detection_pipeline_task.queue_frame(EndFrame())
         await human_conversation_pipeline_task.queue_frame(EndFrame())
 
