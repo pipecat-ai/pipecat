@@ -82,7 +82,7 @@ class Mem0MemoryService(FrameProcessor):
         """
         try:
             logger.debug(f"Storing {len(messages)} messages in Mem0")
-            params = {"messages": messages, "metadata": {"platform": "pipecat"}}
+            params = {"messages": messages, "metadata": {"platform": "pipecat"}, "output_format": "v1.1"}
             for id in ["user_id", "agent_id", "run_id"]:
                 if getattr(self, id):
                     params[id] = getattr(self, id)

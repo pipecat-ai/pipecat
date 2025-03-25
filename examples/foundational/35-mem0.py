@@ -4,17 +4,36 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Bot Implementation.
+"""Mem0 Personalized Voice Agent Example with Pipecat.
 
-This module implements a chatbot using OpenAI's GPT-4 model for natural language
-processing. It includes:
-- Real-time audio/video interaction through Daily
-- Animated robot avatar
-- Text-to-speech using ElevenLabs
-- Support for both English and Spanish
+This example demonstrates how to create a conversational AI assistant with memory capabilities
+using Mem0 integration. It shows how to build an agent that remembers previous interactions
+and personalizes responses based on conversation history.
 
-The bot runs as part of a pipeline that processes audio/video frames and manages
-the conversation flow.
+The example:
+    1. Sets up a video/audio conversation between a user and an AI assistant
+    2. Uses Mem0 to store and retrieve memories from conversations
+    3. Creates personalized greetings based on previous interactions
+    4. Handles multi-modal interaction through audio
+
+Example usage (run from pipecat root directory):
+    $ pip install "pipecat-ai[daily,openai,elevenlabs,silero,mem0]"
+    $ python examples/foundational/35-mem0.py
+
+Requirements:
+    - OpenAI API key (for GPT-4o-mini)
+    - ElevenLabs API key (for text-to-speech)
+    - Daily API key (for video/audio transport)
+    - Mem0 API key (for memory storage and retrieval)
+
+    Environment variables (already set in the example):
+        DAILY_SAMPLE_ROOM_URL=daily_sample_room_url
+        DAILY_API_KEY=daily_api_key
+        OPENAI_API_KEY=openai_api_key
+        ELEVENLABS_API_KEY=elevenlabs_api_key
+        MEM0_API_KEY=mem0_api_key
+
+The bot runs as part of a pipeline that processes audio frames and manages the conversation flow.
 """
 
 import asyncio
@@ -22,7 +41,6 @@ import os
 import sys
 
 import aiohttp
-from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
@@ -36,13 +54,15 @@ from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIPro
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-)
+# Set environment variables
+os.environ["DAILY_SAMPLE_ROOM_URL"] = "your_daily_sample_room_url"
+os.environ["DAILY_API_KEY"] = "your_daily_api_key"
+os.environ["OPENAI_API_KEY"] = "your_openai_api_key"
+os.environ["ELEVENLABS_API_KEY"] = "your_elevenlabs_api_key"
+os.environ["MEM0_API_KEY"] = "your_mem0_api_key"
 
 try:
     from mem0 import MemoryClient
@@ -106,7 +126,7 @@ async def main():
     - RTVI event handling
     """
     # Note: You can pass the user_id as a parameter in API call
-    USER_ID = "deshraj"
+    USER_ID = "pipecat-demo-user"
     async with aiohttp.ClientSession() as session:
         (room_url, token) = await configure(session)
 
@@ -123,37 +143,21 @@ async def main():
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 transcription_enabled=True,
-                #
-                # Spanish
-                #
-                # transcription_settings=DailyTranscriptionSettings(
-                #     language="es",
-                #     tier="nova",
-                #     model="2-general"
-                # )
             ),
         )
 
         # Initialize text-to-speech service
         tts = ElevenLabsTTSService(
             api_key=os.getenv("ELEVENLABS_API_KEY"),
-            #
-            # English
-            #
             voice_id="pNInz6obpgDQGcFmaJgB",
-            #
-            # Spanish
-            #
-            # model="eleven_multilingual_v2",
-            # voice_id="gD1IexrzCvsXPHUuT0s3",
         )
 
         # Initialize Mem0 memory service
         memory = Mem0MemoryService(
             api_key=os.getenv("MEM0_API_KEY"),
             user_id=USER_ID,  # Unique identifier for the user
-            # agent_id="life_coach_bot",  # Optional identifier for the agent
-            # run_id="session_1", # Optional identifier for the run
+            # agent_id="agent1",  # Optional identifier for the agent
+            # run_id="session1", # Optional identifier for the run
             params=Mem0MemoryService.InputParams(
                 search_limit=10,
                 search_threshold=0.3,
@@ -165,7 +169,7 @@ async def main():
         )
 
         # Initialize LLM service
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
 
         messages = [
             {
@@ -183,10 +187,6 @@ async def main():
         # The context_aggregator will automatically collect conversation context
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
-
-        #
-        # RTVI events for Pipecat client UI
-        #
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
         pipeline = Pipeline(

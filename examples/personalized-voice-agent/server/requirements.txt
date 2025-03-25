@@ -1,5 +1,0 @@
-python-dotenv
-fastapi[all]
-uvicorn
-pipecat-ai[daily,elevenlabs,openai,silero,google]
-mem0ai>=0.1.69
