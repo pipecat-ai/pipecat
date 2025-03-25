@@ -520,7 +520,9 @@ class OpenAITTSService(TTSService):
         self.set_model_name(model)
         self.set_voice(voice)
         self._instructions = instructions
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, websocket_base_url=websocket_base_url)
+        self._client = AsyncOpenAI(
+            api_key=api_key, base_url=base_url, websocket_base_url=websocket_base_url
+        )
 
     def can_generate_metrics(self) -> bool:
         return True
