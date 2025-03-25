@@ -547,7 +547,7 @@ class StopInterruptionFrame(SystemFrame):
 
 
 @dataclass
-class UserStartedSpeakingFrame(SystemFrame):
+class UserStartedSpeakingFrame(Frame):
     """Emitted by VAD to indicate that a user has started speaking. This can be
     used for interruptions or other times when detecting that someone is
     speaking is more important than knowing what they're saying (as you will
@@ -559,14 +559,14 @@ class UserStartedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class UserStoppedSpeakingFrame(SystemFrame):
+class UserStoppedSpeakingFrame(Frame):
     """Emitted by the VAD to indicate that a user stopped speaking."""
 
     pass
 
 
 @dataclass
-class EmulateUserStartedSpeakingFrame(SystemFrame):
+class EmulateUserStartedSpeakingFrame(Frame):
     """Emitted by internal processors upstream to emulate VAD behavior when a
     user starts speaking.
     """
@@ -575,7 +575,7 @@ class EmulateUserStartedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class EmulateUserStoppedSpeakingFrame(SystemFrame):
+class EmulateUserStoppedSpeakingFrame(Frame):
     """Emitted by internal processors upstream to emulate VAD behavior when a
     user stops speaking.
     """

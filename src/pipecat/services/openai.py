@@ -45,8 +45,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_response import (
+    BetterLLMUserContextAggregator,
     LLMAssistantContextAggregator,
-    LLMUserContextAggregator,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -383,6 +383,7 @@ class OpenAILLMService(BaseOpenAILLMService):
             OpenAIContextAggregatorPair.
 
         """
+        logger.debug(f"{self} , creating context aggregators")
         context.set_llm_adapter(self.get_llm_adapter())
         user = OpenAIUserContextAggregator(context, **user_kwargs)
         assistant = OpenAIAssistantContextAggregator(context, **assistant_kwargs)
@@ -572,7 +573,7 @@ class OpenAITTSService(TTSService):
             logger.exception(f"{self} error generating TTS: {e}")
 
 
-class OpenAIUserContextAggregator(LLMUserContextAggregator):
+class OpenAIUserContextAggregator(BetterLLMUserContextAggregator):
     pass
 
 
