@@ -143,7 +143,8 @@ class BaseLLMResponseAggregator(FrameProcessor):
     @abstractmethod
     def reset(self):
         """Reset the internals of this aggregator. This should not modify the
-        internal messages."""
+        internal messages.
+        """
         pass
 
     @abstractmethod
@@ -206,6 +207,61 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
 
     def reset(self):
         self._aggregation = ""
+
+
+class BetterLLMUserContextAggregator(LLMContextResponseAggregator):
+    def __init__(
+        self,
+        context: OpenAILLMContext,
+        **kwargs,
+    ):
+        super().__init__(context=context, role="user", **kwargs)
+        logger.debug(f"{self}: init")
+
+    def reset(self):
+        super().reset()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserStartedSpeakingFrame):
+            logger.debug(f"{self}: user started speaking")
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, TranscriptionFrame):
+            logger.debug(f"{self}: transcription")
+            await self._handle_transcription(frame)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            logger.debug(f"{self}: user stopped speaking")
+            await self.push_aggregation(direction)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            self.add_messages(frame.messages)
+        elif isinstance(frame, LLMMessagesUpdateFrame):
+            self.set_messages(frame.messages)
+        elif isinstance(frame, LLMSetToolsFrame):
+            self.set_tools(frame.tools)
+        else:
+            await self.push_frame(frame, direction)
+
+    async def handle_aggregation(self, aggregation: str):
+        self._context.add_message({"role": self.role, "content": self._aggregation})
+
+    async def push_aggregation(self, direction: FrameDirection):
+        logger.debug(f"{self}: pushing aggregation")
+        if len(self._aggregation) > 0:
+            await self.handle_aggregation(self._aggregation)
+
+            frame = OpenAILLMContextFrame(self._context)
+            await self.push_frame(frame, direction)
+            self.reset()
+
+    async def _handle_transcription(self, frame: TranscriptionFrame):
+        text = frame.text
+        if not text.strip():
+            return
+
+        self._aggregation += f" {text}" if self._aggregation else text
+        logger.debug(f"{self}: aggregation: {self._aggregation}")
 
 
 class LLMUserContextAggregator(LLMContextResponseAggregator):
@@ -536,7 +592,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             self._aggregation += frame.text
 
 
-class LLMUserResponseAggregator(LLMUserContextAggregator):
+class LLMUserResponseAggregator(BetterLLMUserContextAggregator):
     def __init__(self, messages: List[dict] = [], **kwargs):
         super().__init__(context=OpenAILLMContext(messages), **kwargs)
 
