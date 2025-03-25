@@ -547,7 +547,7 @@ class StopInterruptionFrame(SystemFrame):
 
 
 @dataclass
-class UserStartedSpeakingFrame(SystemFrame):
+class UserStartedSpeakingFrame(Frame):
     """Emitted by VAD to indicate that a user has started speaking. This can be
     used for interruptions or other times when detecting that someone is
     speaking is more important than knowing what they're saying (as you will
@@ -559,14 +559,14 @@ class UserStartedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class UserStoppedSpeakingFrame(SystemFrame):
+class UserStoppedSpeakingFrame(Frame):
     """Emitted by the VAD to indicate that a user stopped speaking."""
 
     pass
 
 
 @dataclass
-class EmulateUserStartedSpeakingFrame(SystemFrame):
+class EmulateUserStartedSpeakingFrame(Frame):
     """Emitted by internal processors upstream to emulate VAD behavior when a
     user starts speaking.
     """
@@ -575,7 +575,7 @@ class EmulateUserStartedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class EmulateUserStoppedSpeakingFrame(SystemFrame):
+class EmulateUserStoppedSpeakingFrame(Frame):
     """Emitted by internal processors upstream to emulate VAD behavior when a
     user stops speaking.
     """
@@ -584,7 +584,7 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class BotInterruptionFrame(SystemFrame):
+class BotInterruptionFrame(Frame):
     """Emitted by when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the
     UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
@@ -595,21 +595,21 @@ class BotInterruptionFrame(SystemFrame):
 
 
 @dataclass
-class BotStartedSpeakingFrame(SystemFrame):
+class BotStartedSpeakingFrame(Frame):
     """Emitted upstream by transport outputs to indicate the bot started speaking."""
 
     pass
 
 
 @dataclass
-class BotStoppedSpeakingFrame(SystemFrame):
+class BotStoppedSpeakingFrame(Frame):
     """Emitted upstream by transport outputs to indicate the bot stopped speaking."""
 
     pass
 
 
 @dataclass
-class BotSpeakingFrame(SystemFrame):
+class BotSpeakingFrame(Frame):
     """Emitted upstream by transport outputs while the bot is still
     speaking. This can be used, for example, to detect when a user is idle. That
     is, while the bot is speaking we don't want to trigger any user idle timeout
