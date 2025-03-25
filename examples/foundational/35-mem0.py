@@ -26,7 +26,7 @@ Requirements:
     - Daily API key (for video/audio transport)
     - Mem0 API key (for memory storage and retrieval)
 
-    Environment variables (already set in the example):
+    Environment variables (set in .env or in your terminal using `export`):
         DAILY_SAMPLE_ROOM_URL=daily_sample_room_url
         DAILY_API_KEY=daily_api_key
         OPENAI_API_KEY=openai_api_key
@@ -41,6 +41,7 @@ import os
 import sys
 
 import aiohttp
+from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
@@ -49,20 +50,16 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.mem0 import Mem0MemoryService
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.mem0 import Mem0MemoryService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
+
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-# Set environment variables
-os.environ["DAILY_SAMPLE_ROOM_URL"] = "your_daily_sample_room_url"
-os.environ["DAILY_API_KEY"] = "your_daily_api_key"
-os.environ["OPENAI_API_KEY"] = "your_openai_api_key"
-os.environ["ELEVENLABS_API_KEY"] = "your_elevenlabs_api_key"
-os.environ["MEM0_API_KEY"] = "your_mem0_api_key"
+load_dotenv(override=True)
 
 try:
     from mem0 import MemoryClient
@@ -74,9 +71,11 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-async def get_initial_greeting(memory_client: MemoryClient, user_id: str, agent_id: str, run_id: str) -> str:
+async def get_initial_greeting(
+    memory_client: MemoryClient, user_id: str, agent_id: str, run_id: str
+) -> str:
     """Fetch all memories for the user and create a personalized greeting.
-    
+
     Returns:
         A personalized greeting based on user memories
     """
@@ -85,21 +84,22 @@ async def get_initial_greeting(memory_client: MemoryClient, user_id: str, agent_
         id_pairs = [("user_id", user_id), ("agent_id", agent_id), ("run_id", run_id)]
         clauses = [{name: value} for name, value in id_pairs if value is not None]
         filters = {"AND": clauses} if clauses else {}
-        
+
         # Get all memories for this user
         memories = memory_client.get_all(filters=filters, version="v2")
 
         if not memories or len(memories) == 0:
+            logger.debug(f"!!! No memories found for this user. {memories}")
             return "Hello! It's nice to meet you. How can I help you today?"
 
         # Create a personalized greeting based on memories
         greeting = "Hello! It's great to see you again. "
-        
+
         # Add some personalization based on memories (limit to 3 memories for brevity)
         if len(memories) > 0:
             greeting += "Based on our previous conversations, I remember: "
             for i, memory in enumerate(memories[:3], 1):
-                memory_content = memory.get('memory', '')
+                memory_content = memory.get("memory", "")
                 # Keep memory references brief
                 if len(memory_content) > 100:
                     memory_content = memory_content[:97] + "..."
@@ -137,9 +137,6 @@ async def main():
             "Chatbot",
             DailyParams(
                 audio_out_enabled=True,
-                camera_out_enabled=True,
-                camera_out_width=1024,
-                camera_out_height=576,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 transcription_enabled=True,
@@ -164,8 +161,8 @@ async def main():
                 api_version="v2",
                 system_prompt="Based on previous conversations, I recall: \n\n",
                 add_as_system_message=True,
-                position=1
-            )
+                position=1,
+            ),
         )
 
         # Initialize LLM service
@@ -179,7 +176,7 @@ async def main():
                             - Make sure your responses are friendly yet short and concise.
                             - If the user asks you to remember something, make sure to remember it.
                             - Greet the user by their name if you know about it.
-                        """
+                        """,
             },
         ]
 
@@ -219,13 +216,15 @@ async def main():
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
-            
+
             # Get personalized greeting based on user memories. Can pass agent_id and run_id as per requirement of the application to manage short term memory or agent specific memory.
-            greeting = await get_initial_greeting(memory_client=memory.memory_client, user_id=USER_ID, agent_id=None, run_id=None)
-            
+            greeting = await get_initial_greeting(
+                memory_client=memory.memory_client, user_id=USER_ID, agent_id=None, run_id=None
+            )
+
             # Add the greeting as an assistant message to start the conversation
             context.add_message({"role": "assistant", "content": greeting})
-            
+
             # Queue the context frame to start the conversation
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 
