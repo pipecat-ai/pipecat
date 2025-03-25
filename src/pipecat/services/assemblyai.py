@@ -17,6 +17,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.services.ai_services import STTService
 from pipecat.transcriptions.language import Language
@@ -41,6 +43,7 @@ class AssemblyAISTTService(STTService):
         sample_rate: Optional[int] = None,
         encoding: AudioEncoding = AudioEncoding("pcm_s16le"),
         language=Language.EN,  # Only English is supported for Realtime
+        vad=False,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -52,6 +55,11 @@ class AssemblyAISTTService(STTService):
             "encoding": encoding,
             "language": language,
         }
+        self._vad = vad
+
+    @property
+    def vad_enabled(self):
+        return self._vad
 
     async def set_language(self, language: Language):
         logger.info(f"Switching STT language to: [{language}]")
@@ -84,13 +92,22 @@ class AssemblyAISTTService(STTService):
             await self.stop_processing_metrics()
         yield None
 
+    async def frame_dispatcher(self, frame, frame_type):
+        if frame_type == "final":
+            if self.vad_enabled:
+                await self.push_frame(UserStartedSpeakingFrame())
+            await self.push_frame(frame)
+            if self.vad_enabled:
+                await self.push_frame(UserStoppedSpeakingFrame())
+        else:
+            await self.push_frame(frame)
+
     async def _connect(self):
         """Establish a connection to the AssemblyAI real-time transcription service.
 
         This method sets up the necessary callback functions and initializes the
         AssemblyAI transcriber.
         """
-
         if self._transcriber:
             return
 
@@ -110,18 +127,23 @@ class AssemblyAISTTService(STTService):
 
             timestamp = time_now_iso8601()
 
+            frame_type = ""
             if isinstance(transcript, aai.RealtimeFinalTranscript):
+                frame_type = "final"
                 frame = TranscriptionFrame(
                     transcript.text, "", timestamp, self._settings["language"]
                 )
             else:
+                frame_type = "interim"
                 frame = InterimTranscriptionFrame(
                     transcript.text, "", timestamp, self._settings["language"]
                 )
 
             # Schedule the coroutine to run in the main event loop
             # This is necessary because this callback runs in a different thread
-            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+            asyncio.run_coroutine_threadsafe(
+                self.frame_dispatcher(frame, frame_type), self.get_event_loop()
+            )
 
         def on_error(error: aai.RealtimeError):
             """Callback for handling errors from AssemblyAI.
@@ -146,6 +168,7 @@ class AssemblyAISTTService(STTService):
             on_error=on_error,
             on_open=on_open,
             on_close=on_close,
+            end_utterance_silence_threshold=200,
         )
         self._transcriber.connect()
 
