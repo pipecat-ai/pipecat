@@ -239,8 +239,6 @@ async def main(
             # Use routing manager helper to handle the dialout
             await routing_manager.start_dialout(transport, [dialout_setting])
 
-            # Provide the bot with an informative response
-            await result_callback("Connecting you to an operator")
         else:
             await result_callback("No operator dialout settings available")
 
