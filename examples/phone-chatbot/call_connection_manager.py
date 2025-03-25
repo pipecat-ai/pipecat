@@ -216,11 +216,11 @@ class CallConfigManager:
     OPERATOR_CONTACT_MAP: Dict[str, Dict[str, str]] = {
         "Paul": {
             "phoneNumber": "+12345678904",
-            "callerId": "paul-caller-id-uuid",
+            "callerId": "paul-caller-id-uuid",  # Caller ID can be retrieved from https://docs.daily.co/reference/rest-api/phone-numbers/purchased-phone-numbers
         },
         "Dominic": {
-            "phoneNumber": "+12092428393",
-            "callerId": "9727ae97-0144-4868-9711-74cddb2788bb",  # bot_number_bdom_pinless_dialin. +12097808812
+            "phoneNumber": "+12092428392",
+            "callerId": "dominic-caller-id-uuid",
         },
         "Maria": {
             "sipUri": "sip:maria@example.com",
