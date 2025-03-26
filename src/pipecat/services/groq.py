@@ -7,7 +7,6 @@
 
 from typing import AsyncGenerator, Optional
 
-from groq import AsyncGroq
 from loguru import logger
 from pydantic import BaseModel
 
@@ -16,6 +15,15 @@ from pipecat.services.ai_services import TTSService
 from pipecat.services.base_whisper import BaseWhisperSTTService, Transcription
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transcriptions.language import Language
+
+try:
+    from groq import AsyncGroq
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use Groq, you need to `pip install pipecat-ai[groq]`. Also, set a `GROQ_API_KEY` environment variable."
+    )
+    raise Exception(f"Missing module: {e}")
 
 
 class GroqLLMService(OpenAILLMService):
