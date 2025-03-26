@@ -540,10 +540,23 @@ class RTVIObserver(BaseObserver):
             await self.push_transport_message_urgent(message)
 
     async def _handle_context(self, frame: OpenAILLMContextFrame):
+        """Process LLM context frames to extract user messages for the RTVI client."""
         try:
             messages = frame.context.messages
-            if len(messages) > 0:
-                message = messages[-1]
+            if not messages:
+                return
+
+            message = messages[-1]
+
+            # Handle Google LLM format (protobuf objects with attributes)
+            if hasattr(message, "role") and message.role == "user" and hasattr(message, "parts"):
+                text = "".join(part.text for part in message.parts if hasattr(part, "text"))
+                if text:
+                    rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
+                    await self.push_transport_message_urgent(rtvi_message)
+
+            # Handle OpenAI format (original implementation)
+            elif isinstance(message, dict):
                 if message["role"] == "user":
                     content = message["content"]
                     if isinstance(content, list):
@@ -552,7 +565,8 @@ class RTVIObserver(BaseObserver):
                         text = content
                     rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
                     await self.push_transport_message_urgent(rtvi_message)
-        except TypeError as e:
+
+        except Exception as e:
             logger.warning(f"Caught an error while trying to handle context: {e}")
 
     async def _handle_metrics(self, frame: MetricsFrame):
