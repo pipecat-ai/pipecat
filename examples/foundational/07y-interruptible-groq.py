@@ -48,7 +48,7 @@ async def main():
 
         llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.3-70b-versatile")
 
-        tts = GroqTTSService(api_key=os.getenv("GROQ_API_KEY"), voice_id="Atlas-PlayAI")
+        tts = GroqTTSService(api_key=os.getenv("GROQ_API_KEY"))
 
         messages = [
             {
