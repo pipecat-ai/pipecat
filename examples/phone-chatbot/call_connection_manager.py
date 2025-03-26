@@ -6,6 +6,8 @@ contact information. Also includes call state management.
 """
 
 import json
+import os
+
 from typing import Any, Dict, List, Optional, Union
 
 from loguru import logger
@@ -185,50 +187,6 @@ class SessionManager:
 class CallConfigManager:
     """Manages customer/operator relationships and call routing."""
 
-    # Maps customer names to their contact information
-    CUSTOMER_MAP: Dict[str, Dict[str, str]] = {
-        "Dominic": {
-            "phoneNumber": "+12345678903",
-            "callerId": "dominic-caller-id-uuid",
-            "sipUri": "sip:dominic@example.com",
-        },
-        "Skype": {
-            "phoneNumber": "+10000000000",
-        },
-        "Sarah": {
-            "sipUri": "sip:sarah@example.com",
-        },
-        "Michael": {
-            "phoneNumber": "+16505557890",
-            "callerId": "michael-caller-id-uuid",
-        },
-    }
-
-    # Maps customer names to their assigned operator names (can be a single name or multiple)
-    CUSTOMER_TO_OPERATOR_MAP: Dict[str, Union[str, List[str]]] = {
-        "Dominic": ["Paul", "Maria"],  # Dominic's calls try Paul first, then Maria
-        "Skype": "Dominic",  # Skype's calls go to Dominic
-        "Sarah": "Jennifer",  # Sarah's calls go to Jennifer
-        "Michael": "Paul",  # Michael's calls go to Paul
-    }
-
-    # Maps operator names to their contact details (single object with optional fields)
-    OPERATOR_CONTACT_MAP: Dict[str, Dict[str, str]] = {
-        "Paul": {
-            "phoneNumber": "+12345678904",
-            "callerId": "paul-caller-id-uuid",  # Caller ID can be retrieved from https://docs.daily.co/reference/rest-api/phone-numbers/purchased-phone-numbers
-        },
-        "Dominic": {
-            "phoneNumber": "+12092428392",
-            "callerId": "dominic-caller-id-uuid",
-        },
-        "Maria": {
-            "sipUri": "sip:maria@example.com",
-        },
-        "Jennifer": {"phoneNumber": "+14155559876", "callerId": "jennifer-caller-id-uuid"},
-        "Default": {"phoneNumber": "+18005551234", "callerId": "default-caller-id-uuid"},
-    }
-
     def __init__(self, body_data: Dict[str, Any] = None):
         """Initialize with optional body data.
 
@@ -236,7 +194,68 @@ class CallConfigManager:
             body_data: Optional dictionary containing request body data
         """
         self.body = body_data or {}
+
+        # Get environment variables with fallbacks
+        self.dial_in_from_number = os.getenv("DIAL_IN_FROM_NUMBER", "+10000000001")
+        self.dial_out_to_number = os.getenv("DIAL_OUT_TO_NUMBER", "+10000000002")
+        self.operator_number = os.getenv("OPERATOR_NUMBER", "+10000000003")
+
+        # Initialize maps with dynamic values
+        self._initialize_maps()
         self._build_reverse_lookup_maps()
+
+    def _initialize_maps(self):
+        """Initialize the customer and operator maps with environment variables."""
+        # Maps customer names to their contact information
+        self.CUSTOMER_MAP = {
+            "Dominic": {
+                "phoneNumber": self.dial_in_from_number,
+            },
+            "Stewart": {
+                "phoneNumber": self.dial_out_to_number,
+            },
+            "James": {
+                "phoneNumber": "+10000000000",
+                "callerId": "james-caller-id-uuid",
+                "sipUri": "sip:james@example.com",
+            },
+            "Sarah": {
+                "sipUri": "sip:sarah@example.com",
+            },
+            "Michael": {
+                "phoneNumber": "+16505557890",
+                "callerId": "michael-caller-id-uuid",
+            },
+        }
+
+        # Maps customer names to their assigned operator names
+        self.CUSTOMER_TO_OPERATOR_MAP = {
+            "Dominic": ["Yunyoung", "Maria"],  # Try Yunyoung first, then Maria
+            "Stewart": "Yunyoung",
+            "James": "Yunyoung",
+            "Sarah": "Jennifer",
+            "Michael": "Paul",
+            # Default mapping to ensure all customers have an operator
+            "Default": "Yunyoung",
+        }
+
+        # Maps operator names to their contact details
+        self.OPERATOR_CONTACT_MAP = {
+            "Paul": {
+                "phoneNumber": "+12345678904",
+                "callerId": "paul-caller-id-uuid",
+            },
+            "Yunyoung": {
+                "phoneNumber": self.operator_number,
+            },
+            "Maria": {
+                "sipUri": "sip:maria@example.com",
+            },
+            "Jennifer": {"phoneNumber": "+14155559876", "callerId": "jennifer-caller-id-uuid"},
+            "Default": {
+                "phoneNumber": self.operator_number,  # Use the operator number as default
+            },
+        }
 
     def _build_reverse_lookup_maps(self):
         """Build reverse lookup maps for phone numbers and SIP URIs to customer names."""

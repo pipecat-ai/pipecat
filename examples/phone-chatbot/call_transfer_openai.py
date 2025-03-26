@@ -15,7 +15,6 @@ from pipecat.frames.frames import (
     Frame,
     TranscriptionFrame,
 )
-from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -24,7 +23,6 @@ from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import LLMService
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
 
@@ -140,7 +138,6 @@ async def main(
             camera_out_enabled=False,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
             transcription_enabled=True,
         )
     else:
@@ -163,7 +160,7 @@ async def main(
     session_manager = SessionManager()
 
     # Set up the operator dialout settings
-    session_manager.dial_operator_state.set_operator_dialout_settings(operator_dialout_settings)
+    session_manager.call_flow_state.set_operator_dialout_settings(operator_dialout_settings)
 
     # Initialize transport
     transport = DailyTransport(
@@ -173,13 +170,11 @@ async def main(
         transport_params,
     )
 
-    # Initialize TTS and STT
+    # Initialize TTS
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="af346552-54bf-4c2b-a4d4-9d2820f51b6c",
     )
-
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     # Define function for bot to dial operator
     async def dial_operator(
@@ -191,10 +186,10 @@ async def main(
         result_callback: callable,
     ):
         """Function the bot can call to dial an operator."""
-        dialout_setting = session_manager.dial_operator_state.get_current_dialout_setting()
+        dialout_setting = session_manager.call_flow_state.get_current_dialout_setting()
 
         if dialout_setting:
-            session_manager.dial_operator_state.set_operator_dialed()
+            session_manager.call_flow_state.set_operator_dialed()
             logger.info(f"Dialing operator with settings: {dialout_setting}")
 
             # Use routing manager helper to handle the dialout
@@ -275,7 +270,7 @@ async def main(
     context_aggregator = llm.create_context_aggregator(context)
 
     # Use the session manager's references
-    summary_finished = SummaryFinished(session_manager.dial_operator_state)
+    summary_finished = SummaryFinished(session_manager.call_flow_state)
     transcription_modifier = TranscriptionModifierProcessor(
         session_manager.get_session_id_ref("operator")
     )
@@ -283,8 +278,8 @@ async def main(
     # Define function to determine if bot should speak
     async def should_speak(self) -> bool:
         result = (
-            not session_manager.dial_operator_state.operator_connected
-            or not session_manager.dial_operator_state.summary_finished
+            not session_manager.call_flow_state.operator_connected
+            or not session_manager.call_flow_state.summary_finished
         )
         return result
 
@@ -292,10 +287,11 @@ async def main(
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,
             transcription_modifier,  # Prepends operator transcription with [OPERATOR]
             context_aggregator.user(),  # User responses
-            ParallelPipeline([FunctionFilter(should_speak), llm, tts]),
+            FunctionFilter(should_speak),
+            llm,
+            tts,
             summary_finished,
             transport.output(),  # Transport bot output
             context_aggregator.assistant(),  # Assistant spoken responses
@@ -322,8 +318,8 @@ async def main(
         await transport.capture_participant_transcription(data["sessionId"])
 
         if (
-            session_manager.dial_operator_state
-            and not session_manager.dial_operator_state.operator_connected
+            session_manager.call_flow_state
+            and not session_manager.call_flow_state.operator_connected
         ):
             logger.debug(f"Operator connected with session ID: {data['sessionId']}")
 
@@ -373,7 +369,7 @@ async def main(
                 )
 
             # Update state
-            session_manager.dial_operator_state.set_operator_connected()
+            session_manager.call_flow_state.set_operator_connected()
 
             # Queue the context frame to trigger the summary request
             await task.queue_frames([context_aggregator.user().get_context_frame()])
