@@ -11,7 +11,9 @@ from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import ErrorFrame, Frame, LLMMessagesFrame
 from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext, OpenAILLMContextFrame)
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
