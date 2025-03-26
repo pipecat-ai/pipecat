@@ -38,6 +38,8 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
+    UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -117,10 +119,10 @@ class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    async def push_aggregation(self):
-        # We don't want to store any images in the context. Revisit this later when the API evolves.
-        self._pending_image_frame_message = None
-        await super().push_aggregation()
+    async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        # We don't want to store any images in the context. Revisit this later
+        # when the API evolves.
+        pass
 
 
 @dataclass
@@ -312,6 +314,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # context.add_message({"role": "assistant", "content": [{"type": "text", "text": text}]})
         await self.push_frame(LLMFullResponseStartFrame())
         await self.push_frame(LLMTextFrame(text=text))
+        await self.push_frame(TTSTextFrame(text=text))
         await self.push_frame(LLMFullResponseEndFrame())
 
     async def _transcribe_audio(self, audio, context):
@@ -339,10 +342,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        # logger.debug(f"Processing frame: {frame}")
-
         if isinstance(frame, TranscriptionFrame):
-            pass
+            await self.push_frame(frame, direction)
         elif isinstance(frame, OpenAILLMContextFrame):
             context: GeminiMultimodalLiveContext = GeminiMultimodalLiveContext.upgrade(
                 frame.context
@@ -359,31 +360,35 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # Support just one tool call per context frame for now
                 tool_result_message = context.messages[-1]
                 await self._tool_result(tool_result_message)
-
         elif isinstance(frame, InputAudioRawFrame):
             await self._send_user_audio(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, InputImageRawFrame):
             await self._send_user_video(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption()
+            await self.push_frame(frame, direction)
         elif isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):
             # Ignore this frame. Use the serverContent API message instead
-            pass
+            await self.push_frame(frame, direction)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             # ignore this frame. Use the serverContent.turnComplete API message
-            pass
+            await self.push_frame(frame, direction)
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._create_single_response(frame.messages)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, LLMSetToolsFrame):
             await self._update_settings()
-
-        await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
 
     #
     # websocket communication

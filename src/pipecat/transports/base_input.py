@@ -152,6 +152,7 @@ class BaseInputTransport(FrameProcessor):
     async def _handle_user_interruption(self, frame: Frame):
         if isinstance(frame, UserStartedSpeakingFrame):
             logger.debug("User started speaking")
+            await self.push_frame(frame)
             # Make sure we notify about interruptions quickly out-of-band.
             if self.interruptions_allowed:
                 await self._start_interruption()
@@ -161,11 +162,10 @@ class BaseInputTransport(FrameProcessor):
                 await self.push_frame(StartInterruptionFrame())
         elif isinstance(frame, UserStoppedSpeakingFrame):
             logger.debug("User stopped speaking")
+            await self.push_frame(frame)
             if self.interruptions_allowed:
                 await self._stop_interruption()
                 await self.push_frame(StopInterruptionFrame())
-
-        await self.push_frame(frame)
 
     #
     # Audio input
