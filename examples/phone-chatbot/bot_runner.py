@@ -43,7 +43,13 @@ load_dotenv(override=True)
 MAX_SESSION_TIME = 5 * 60  # 5 minutes
 
 # Required environment variables
-REQUIRED_ENV_VARS = ["OPENAI_API_KEY", "DAILY_API_KEY", "CARTESIA_API_KEY", "DEEPGRAM_API_KEY"]
+REQUIRED_ENV_VARS = [
+    "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "DAILY_API_KEY",
+    "CARTESIA_API_KEY",
+    "DEEPGRAM_API_KEY",
+]
 
 # Default LLM to use when none is specified - this determines which bot file to execute
 DEFAULT_LLM = "openai"
@@ -286,6 +292,7 @@ async def start_bot(room_details: Dict[str, str], body: Dict[str, Any], example:
 
     # Properly format body as JSON string for command line
     body_json = json.dumps(body).replace('"', '\\"')
+    print(f"++++ Body JSON: {body_json}")
 
     bot_proc = f'python3 -m {example}_{llm_model} -u {room_url} -t {token} -b "{body_json}"'
     print(f"Starting bot. Example: {example}, Model: {llm_model}, Room: {room_url}")
