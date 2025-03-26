@@ -48,7 +48,7 @@ async def main():
         tts = PlayHTTTSService(
             user_id=os.getenv("PLAYHT_USER_ID"),
             api_key=os.getenv("PLAYHT_API_KEY"),
-            voice_url="s3://voice-cloning-zero-shot/d9ff78ba-d016-47f6-b0ef-dd630f59414e/female-cs/manifest.json",
+            voice_url="s3://voice-cloning-zero-shot/e46b4027-b38d-4d24-b292-38fbca2be0ef/original/manifest.json",
             params=PlayHTTTSService.InputParams(language=Language.EN),
         )
 
