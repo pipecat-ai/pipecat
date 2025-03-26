@@ -12,7 +12,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import Frame, TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
-from pipecat.services.ai_services import InterruptibleTTSService
+from pipecat.services.ai_services import TTSService
 from pipecat.services.base_whisper import BaseWhisperSTTService, Transcription
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transcriptions.language import Language
@@ -104,7 +104,7 @@ class GroqSTTService(BaseWhisperSTTService):
         return await self._client.audio.transcriptions.create(**kwargs)
 
 
-class GroqTTSService(InterruptibleTTSService):
+class GroqTTSService(TTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
@@ -117,7 +117,7 @@ class GroqTTSService(InterruptibleTTSService):
         output_format: str = "wav",
         params: InputParams = InputParams(),
         model_name: str = "playai-tts",
-        voice_id: str = "Atlas-PlayAI",
+        voice_id: str = "Celeste-PlayAI",
         **kwargs,
     ):
         super().__init__(
@@ -149,28 +149,15 @@ class GroqTTSService(InterruptibleTTSService):
             input=text,
         )
 
-        async for data in response.iter_bytes(4096):
+        async for data in response.iter_bytes():
             if measuring_ttfb:
                 await self.stop_ttfb_metrics()
                 measuring_ttfb = False
             # remove wav header if present
             if data.startswith(b"RIFF"):
-                continue
+                data = data[44:]
+                if len(data) == 0:
+                    continue
             yield TTSAudioRawFrame(data, 48000, 1)
 
         yield TTSStoppedFrame()
-
-    async def _connect(self) -> None:
-        pass
-
-    async def _disconnect(self) -> None:
-        pass
-
-    async def _connect_websocket(self) -> None:
-        pass
-
-    async def _disconnect_websocket(self) -> None:
-        pass
-
-    async def _receive_messages(self) -> None:
-        pass
