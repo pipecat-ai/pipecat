@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added a new frame, `LLMSetToolChoiceFrame`, which provides a mechanism 
+- Added a new frame, `LLMSetToolChoiceFrame`, which provides a mechanism
   for modifying the `tool_choice` in the context.
 
 - Added support in `DailyTransport` for updating remote participants'
@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ElevenLabs TTS services now support a sample rate of 8000.
 
 ### Fixed
+
+- Fixed an issue in Daily involving switching virtual devices, by bumping the
+  daily-python dependency to >= 0.16.1.
 
 - Fixed a `GoogleAssistantContextAggregator` issue where function calls
   placeholders where not being updated when then function call result was
