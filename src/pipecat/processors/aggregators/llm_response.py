@@ -6,7 +6,7 @@
 
 import asyncio
 from abc import abstractmethod
-from typing import Dict, List, Set
+from typing import Dict, List, Literal, Set
 
 from loguru import logger
 
@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMMessagesFrame,
     LLMMessagesUpdateFrame,
+    LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     OpenAILLMContextAssistantTimestampFrame,
@@ -141,6 +142,11 @@ class BaseLLMResponseAggregator(FrameProcessor):
         pass
 
     @abstractmethod
+    def set_tool_choice(self, tool_choice):
+        """Set the tool choice. This should modify the LLM context."""
+        pass
+
+    @abstractmethod
     def reset(self):
         """Reset the internals of this aggregator. This should not modify the
         internal messages."""
@@ -203,6 +209,9 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
 
     def set_tools(self, tools: List):
         self._context.set_tools(tools)
+
+    def set_tool_choice(self, tool_choice: Literal["none", "auto", "required"] | dict):
+        self._context.set_tool_choice(tool_choice)
 
     def reset(self):
         self._aggregation = ""
@@ -274,6 +283,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             self.set_messages(frame.messages)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
+        elif isinstance(frame, LLMSetToolChoiceFrame):
+            self.set_tool_choice(frame.tool_choice)
         else:
             await self.push_frame(frame, direction)
 
@@ -415,6 +426,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             self.set_messages(frame.messages)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
+        elif isinstance(frame, LLMSetToolChoiceFrame):
+            self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, FunctionCallInProgressFrame):
             await self._handle_function_call_in_progress(frame)
         elif isinstance(frame, FunctionCallResultFrame):
