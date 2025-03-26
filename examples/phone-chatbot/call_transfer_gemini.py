@@ -193,16 +193,18 @@ async def main(
     ):
         """Function the bot can call to dial an operator."""
         dialout_setting = session_manager.call_flow_state.get_current_dialout_setting()
+        if call_config_manager.get_transfer_mode() == "dialout":
+            if dialout_setting:
+                session_manager.call_flow_state.set_operator_dialed()
+                logger.info(f"Dialing operator with settings: {dialout_setting}")
 
-        if dialout_setting:
-            session_manager.call_flow_state.set_operator_dialed()
-            logger.info(f"Dialing operator with settings: {dialout_setting}")
+                # Use routing manager helper to handle the dialout
+                await call_config_manager.start_dialout(transport, [dialout_setting])
 
-            # Use routing manager helper to handle the dialout
-            await call_config_manager.start_dialout(transport, [dialout_setting])
-
+            else:
+                await result_callback("No operator dialout settings available")
         else:
-            await result_callback("No operator dialout settings available")
+            await result_callback("Other mode not supported")
 
     tools = [
         {
