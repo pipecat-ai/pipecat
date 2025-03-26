@@ -735,4 +735,4 @@ class TestGoogleAssistantContextAggregator(
 
     def check_function_call_result(self, context: OpenAILLMContext, index: int, content: Any):
         obj = glm.Content.to_dict(context.messages[index])
-        assert obj["parts"][0]["function_response"]["response"] == content
+        assert obj["parts"][0]["function_response"]["response"]["value"] == json.dumps(content)
