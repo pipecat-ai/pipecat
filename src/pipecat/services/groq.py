@@ -5,10 +5,14 @@
 #
 
 
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
+from groq import AsyncGroq
 from loguru import logger
+from pydantic import BaseModel
 
+from pipecat.frames.frames import Frame, TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
+from pipecat.services.ai_services import InterruptibleTTSService
 from pipecat.services.base_whisper import BaseWhisperSTTService, Transcription
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transcriptions.language import Language
@@ -98,3 +102,75 @@ class GroqSTTService(BaseWhisperSTTService):
             kwargs["temperature"] = self._temperature
 
         return await self._client.audio.transcriptions.create(**kwargs)
+
+
+class GroqTTSService(InterruptibleTTSService):
+    class InputParams(BaseModel):
+        language: Optional[Language] = Language.EN
+        speed: Optional[float] = 1.0
+        seed: Optional[int] = None
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        output_format: str = "wav",
+        params: InputParams = InputParams(),
+        model_name: str = "playai-tts",
+        voice_id: str = "Atlas-PlayAI",
+        **kwargs,
+    ):
+        super().__init__(
+            pause_frame_processing=True,
+            **kwargs,
+        )
+
+        self._api_key = api_key
+        self._model_name = model_name
+        self._output_format = output_format
+        self._voice_id = voice_id
+        self._params = params
+
+        self._client = AsyncGroq(api_key=self._api_key)
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        logger.debug(f"{self}: Generating TTS [{text}]")
+        measuring_ttfb = True
+        await self.start_ttfb_metrics()
+        yield TTSStartedFrame()
+
+        response = await self._client.audio.speech.create(
+            model=self._model_name,
+            voice=self._voice_id,
+            response_format=self._output_format,
+            input=text,
+        )
+
+        async for data in response.iter_bytes(4096):
+            if measuring_ttfb:
+                await self.stop_ttfb_metrics()
+                measuring_ttfb = False
+            # remove wav header if present
+            if data.startswith(b"RIFF"):
+                continue
+            yield TTSAudioRawFrame(data, 48000, 1)
+
+        yield TTSStoppedFrame()
+
+    async def _connect(self) -> None:
+        pass
+
+    async def _disconnect(self) -> None:
+        pass
+
+    async def _connect_websocket(self) -> None:
+        pass
+
+    async def _disconnect_websocket(self) -> None:
+        pass
+
+    async def _receive_messages(self) -> None:
+        pass
