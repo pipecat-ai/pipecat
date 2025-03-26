@@ -30,7 +30,7 @@ from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio import BaseTaskManager
 
 
 class WebsocketClientParams(TransportParams):
@@ -57,12 +57,12 @@ class WebsocketClientSession:
         self._callbacks = callbacks
         self._transport_name = transport_name
 
-        self._task_manager: Optional[TaskManager] = None
+        self._task_manager: Optional[BaseTaskManager] = None
 
-        self._websocket: websockets.WebSocketClientProtocol | None = None
+        self._websocket: Optional[websockets.WebSocketClientProtocol] = None
 
     @property
-    def task_manager(self) -> TaskManager:
+    def task_manager(self) -> BaseTaskManager:
         if not self._task_manager:
             raise Exception(
                 f"{self._transport_name}::WebsocketClientSession: TaskManager not initialized (pipeline not started?)"
@@ -101,7 +101,7 @@ class WebsocketClientSession:
             if self._websocket:
                 await self._websocket.send(message)
         except Exception as e:
-            logger.error(f"{self} exception sending data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
 
     async def _client_task_handler(self):
         try:
@@ -109,7 +109,7 @@ class WebsocketClientSession:
             async for message in self._websocket:
                 await self._callbacks.on_message(self._websocket, message)
         except Exception as e:
-            logger.error(f"{self} exception receiving data (class: {e.__class__.__name__})")
+            logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
         await self._callbacks.on_disconnected(self._websocket)
 
@@ -118,14 +118,21 @@ class WebsocketClientSession:
 
 
 class WebsocketClientInputTransport(BaseInputTransport):
-    def __init__(self, session: WebsocketClientSession, params: WebsocketClientParams):
+    def __init__(
+        self,
+        transport: BaseTransport,
+        session: WebsocketClientSession,
+        params: WebsocketClientParams,
+    ):
         super().__init__(params)
 
+        self._transport = transport
         self._session = session
         self._params = params
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        await self._params.serializer.setup(frame)
         await self._session.setup(frame)
         await self._session.connect()
 
@@ -136,6 +143,10 @@ class WebsocketClientInputTransport(BaseInputTransport):
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._session.disconnect()
+
+    async def cleanup(self):
+        await super().cleanup()
+        await self._transport.cleanup()
 
     async def on_message(self, websocket, message):
         frame = await self._params.serializer.deserialize(message)
@@ -148,17 +159,30 @@ class WebsocketClientInputTransport(BaseInputTransport):
 
 
 class WebsocketClientOutputTransport(BaseOutputTransport):
-    def __init__(self, session: WebsocketClientSession, params: WebsocketClientParams):
+    def __init__(
+        self,
+        transport: BaseTransport,
+        session: WebsocketClientSession,
+        params: WebsocketClientParams,
+    ):
         super().__init__(params)
 
+        self._transport = transport
         self._session = session
         self._params = params
 
-        self._send_interval = (self._audio_chunk_size / self._params.audio_out_sample_rate) / 2
+        # write_raw_audio_frames() is called quickly, as soon as we get audio
+        # (e.g. from the TTS), and since this is just a network connection we
+        # would be sending it to quickly. Instead, we want to block to emulate
+        # an audio device, this is what the send interval is. It will be
+        # computed on StartFrame.
+        self._send_interval = 0
         self._next_send_time = 0
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        self._send_interval = (self._audio_chunk_size / self.sample_rate) / 2
+        await self._params.serializer.setup(frame)
         await self._session.setup(frame)
         await self._session.connect()
 
@@ -170,13 +194,17 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         await super().cancel(frame)
         await self._session.disconnect()
 
+    async def cleanup(self):
+        await super().cleanup()
+        await self._transport.cleanup()
+
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._write_frame(frame)
 
     async def write_raw_audio_frames(self, frames: bytes):
         frame = OutputAudioRawFrame(
             audio=frames,
-            sample_rate=self._params.audio_out_sample_rate,
+            sample_rate=self.sample_rate,
             num_channels=self._params.audio_out_channels,
         )
 
@@ -232,8 +260,8 @@ class WebsocketClientTransport(BaseTransport):
         )
 
         self._session = WebsocketClientSession(uri, params, callbacks, self.name)
-        self._input: WebsocketClientInputTransport | None = None
-        self._output: WebsocketClientOutputTransport | None = None
+        self._input: Optional[WebsocketClientInputTransport] = None
+        self._output: Optional[WebsocketClientOutputTransport] = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
@@ -242,12 +270,12 @@ class WebsocketClientTransport(BaseTransport):
 
     def input(self) -> WebsocketClientInputTransport:
         if not self._input:
-            self._input = WebsocketClientInputTransport(self._session, self._params)
+            self._input = WebsocketClientInputTransport(self, self._session, self._params)
         return self._input
 
     def output(self) -> WebsocketClientOutputTransport:
         if not self._output:
-            self._output = WebsocketClientOutputTransport(self._session, self._params)
+            self._output = WebsocketClientOutputTransport(self, self._session, self._params)
         return self._output
 
     async def _on_connected(self, websocket):

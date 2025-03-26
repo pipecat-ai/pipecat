@@ -10,16 +10,19 @@ from typing import Awaitable, Callable, Optional
 
 import websockets
 from loguru import logger
+from websockets.protocol import State
 
 from pipecat.frames.frames import ErrorFrame
+from pipecat.utils.network import exponential_backoff_time
 
 
 class WebsocketService(ABC):
     """Base class for websocket-based services with reconnection logic."""
 
-    def __init__(self):
+    def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
         """Initialize websocket attributes."""
         self._websocket: Optional[websockets.WebSocketClientProtocol] = None
+        self._reconnect_on_error = reconnect_on_error
 
     async def _verify_connection(self) -> bool:
         """Verify websocket connection is working.
@@ -50,27 +53,6 @@ class WebsocketService(ABC):
         await self._connect_websocket()
         return await self._verify_connection()
 
-    def _calculate_wait_time(
-        self, attempt: int, min_wait: float = 4, max_wait: float = 10, multiplier: float = 1
-    ) -> float:
-        """Calculate exponential backoff wait time.
-
-        Args:
-            attempt: Current attempt number (1-based)
-            min_wait: Minimum wait time in seconds
-            max_wait: Maximum wait time in seconds
-            multiplier: Base multiplier for exponential calculation
-
-        Returns:
-            Wait time in seconds
-        """
-        try:
-            exp = 2 ** (attempt - 1) * multiplier
-            result = max(0, min(exp, max_wait))
-            return max(min_wait, result)
-        except (ValueError, ArithmeticError):
-            return max_wait
-
     async def _receive_task_handler(self, report_error: Callable[[ErrorFrame], Awaitable[None]]):
         """Handles WebSocket message receiving with automatic retry logic.
 
@@ -83,35 +65,63 @@ class WebsocketService(ABC):
         while True:
             try:
                 await self._receive_messages()
-                logger.debug(f"{self} connection established successfully")
                 retry_count = 0  # Reset counter on successful message receive
+                if self._websocket and self._websocket.state == State.CLOSED:
+                    raise websockets.ConnectionClosedOK(
+                        self._websocket.close_rcvd,
+                        self._websocket.close_sent,
+                        self._websocket.close_rcvd_then_sent,
+                    )
             except Exception as e:
-                retry_count += 1
-                if retry_count >= MAX_RETRIES:
-                    message = f"{self} error receiving messages: {e}"
-                    logger.error(message)
-                    await report_error(ErrorFrame(message, fatal=True))
+                message = f"{self} error receiving messages: {e}"
+                logger.error(message)
+
+                if self._reconnect_on_error:
+                    retry_count += 1
+                    if retry_count >= MAX_RETRIES:
+                        await report_error(ErrorFrame(message, fatal=True))
+                        break
+
+                    logger.warning(f"{self} connection error, will retry: {e}")
+                    await report_error(ErrorFrame(message))
+
+                    try:
+                        if await self._reconnect_websocket(retry_count):
+                            retry_count = 0  # Reset counter on successful reconnection
+                        wait_time = exponential_backoff_time(retry_count)
+                        await asyncio.sleep(wait_time)
+                    except Exception as reconnect_error:
+                        logger.error(f"{self} reconnection failed: {reconnect_error}")
+                else:
+                    await report_error(ErrorFrame(message))
                     break
 
-                logger.warning(f"{self} connection error, will retry: {e}")
+    @abstractmethod
+    async def _connect(self):
+        """Implement service-specific connection logic. This function will
+        connect to the websocket via _connect_websocket() among other connection
+        logic."""
+        pass
 
-                try:
-                    if await self._reconnect_websocket(retry_count):
-                        retry_count = 0  # Reset counter on successful reconnection
-                    wait_time = self._calculate_wait_time(retry_count)
-                    await asyncio.sleep(wait_time)
-                except Exception as reconnect_error:
-                    logger.error(f"{self} reconnection failed: {reconnect_error}")
-                    continue
+    @abstractmethod
+    async def _disconnect(self):
+        """Implement service-specific disconnection logic. This function will
+        disconnect to the websocket via _connect_websocket() among other
+        connection logic.
+
+        """
+        pass
 
     @abstractmethod
     async def _connect_websocket(self):
-        """Implement service-specific websocket connection logic."""
+        """Implement service-specific websocket connection logic. This function
+        should only connect to the websocket."""
         pass
 
     @abstractmethod
     async def _disconnect_websocket(self):
-        """Implement service-specific websocket disconnection logic."""
+        """Implement service-specific websocket disconnection logic. This
+        function should only disconnect from the websocket."""
         pass
 
     @abstractmethod

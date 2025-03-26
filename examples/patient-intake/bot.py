@@ -142,7 +142,9 @@ class IntakeProcessor:
                 ]
             )
 
-    async def start_prescriptions(self, function_name, llm, context):
+    async def list_prescriptions(
+        self, function_name, tool_call_id, args, llm, context, result_callback
+    ):
         print(f"!!! doing start prescriptions")
         # Move on to allergies
         context.set_tools(
@@ -182,9 +184,12 @@ class IntakeProcessor:
         print(f"!!! about to await llm process frame in start prescrpitions")
         await llm.queue_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
         print(f"!!! past await process frame in start prescriptions")
+        await self.save_data(args, result_callback)
 
-    async def start_allergies(self, function_name, llm, context):
-        print("!!! doing start allergies")
+    async def list_allergies(
+        self, function_name, tool_call_id, args, llm, context, result_callback
+    ):
+        print("!!! doing list allergies")
         # Move on to conditions
         context.set_tools(
             [
@@ -221,8 +226,11 @@ class IntakeProcessor:
             }
         )
         await llm.queue_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+        await self.save_data(args, result_callback)
 
-    async def start_conditions(self, function_name, llm, context):
+    async def list_conditions(
+        self, function_name, tool_call_id, args, llm, context, result_callback
+    ):
         print("!!! doing start conditions")
         # Move on to visit reasons
         context.set_tools(
@@ -260,8 +268,11 @@ class IntakeProcessor:
             }
         )
         await llm.queue_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+        await self.save_data(args, result_callback)
 
-    async def start_visit_reasons(self, function_name, llm, context):
+    async def list_visit_reasons(
+        self, function_name, tool_call_id, args, llm, context, result_callback
+    ):
         print("!!! doing start visit reasons")
         # move to finish call
         context.set_tools([])
@@ -269,8 +280,9 @@ class IntakeProcessor:
             {"role": "system", "content": "Now, thank the user and end the conversation."}
         )
         await llm.queue_frame(OpenAILLMContextFrame(context), FrameDirection.DOWNSTREAM)
+        await self.save_data(args, result_callback)
 
-    async def save_data(self, function_name, tool_call_id, args, llm, context, result_callback):
+    async def save_data(self, args, result_callback):
         logger.info(f"!!! Saving data: {args}")
         # Since this is supposed to be "async", returning None from the callback
         # will prevent adding anything to context or re-prompting
@@ -303,7 +315,7 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
         # tts = CartesiaTTSService(
@@ -319,18 +331,10 @@ async def main():
 
         intake = IntakeProcessor(context)
         llm.register_function("verify_birthday", intake.verify_birthday)
-        llm.register_function(
-            "list_prescriptions", intake.save_data, start_callback=intake.start_prescriptions
-        )
-        llm.register_function(
-            "list_allergies", intake.save_data, start_callback=intake.start_allergies
-        )
-        llm.register_function(
-            "list_conditions", intake.save_data, start_callback=intake.start_conditions
-        )
-        llm.register_function(
-            "list_visit_reasons", intake.save_data, start_callback=intake.start_visit_reasons
-        )
+        llm.register_function("list_prescriptions", intake.list_prescriptions)
+        llm.register_function("list_allergies", intake.list_allergies)
+        llm.register_function("list_conditions", intake.list_conditions)
+        llm.register_function("list_visit_reasons", intake.list_visit_reasons)
 
         fl = FrameLogger("LLM Output")
 
@@ -346,7 +350,7 @@ async def main():
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=False))
+        task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=False))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

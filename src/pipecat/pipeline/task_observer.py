@@ -12,8 +12,7 @@ from attr import dataclass
 from pipecat.frames.frames import Frame
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio import TaskManager
-from pipecat.utils.utils import obj_count, obj_id
+from pipecat.utils.asyncio import BaseTaskManager
 
 
 @dataclass
@@ -55,20 +54,10 @@ class TaskObserver(BaseObserver):
 
     """
 
-    def __init__(self, *, observers: List[BaseObserver] = [], task_manager: TaskManager):
-        self._id: int = obj_id()
-        self._name: str = f"{self.__class__.__name__}#{obj_count(self)}"
+    def __init__(self, *, observers: List[BaseObserver] = [], task_manager: BaseTaskManager):
         self._observers = observers
         self._task_manager = task_manager
         self._proxies: List[Proxy] = []
-
-    @property
-    def id(self) -> int:
-        return self._id
-
-    @property
-    def name(self) -> str:
-        return self._name
 
     async def start(self):
         """Starts all proxy observer tasks."""
@@ -100,7 +89,7 @@ class TaskObserver(BaseObserver):
             queue = asyncio.Queue()
             task = self._task_manager.create_task(
                 self._proxy_task_handler(queue, observer),
-                f"{self}::{observer.__class__.__name__}::_proxy_task_handler",
+                f"TaskObserver::{observer.__class__.__name__}::_proxy_task_handler",
             )
             proxy = Proxy(queue=queue, task=task, observer=observer)
             proxies.append(proxy)
@@ -112,6 +101,3 @@ class TaskObserver(BaseObserver):
             await observer.on_push_frame(
                 data.src, data.dst, data.frame, data.direction, data.timestamp
             )
-
-    def __str__(self):
-        return self.name

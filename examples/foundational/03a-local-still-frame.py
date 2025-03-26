@@ -18,8 +18,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.services.fal import FalImageGenService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.tk import TkLocalTransport
+from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
 load_dotenv(override=True)
 
@@ -34,7 +33,9 @@ async def main():
 
         transport = TkLocalTransport(
             tk_root,
-            TransportParams(camera_out_enabled=True, camera_out_width=1024, camera_out_height=1024),
+            TkTransportParams(
+                camera_out_enabled=True, camera_out_width=1024, camera_out_height=1024
+            ),
         )
 
         imagegen = FalImageGenService(

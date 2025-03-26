@@ -1,7 +1,8 @@
 repos:
-  - repo: local
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.7
     hooks:
-      - id: ruff-format-hook
-        name: Check ruff formatting
-        entry: sh scripts/pre-commit.sh
-        language: system
+      - id: ruff
+        language_version: python3
+        args: [ --select,  I, ]
+      - id: ruff-format

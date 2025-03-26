@@ -23,7 +23,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.google import GoogleLLMService, LLMSearchResponseFrame
+from pipecat.services.google import GoogleLLMService, GoogleRTVIObserver, LLMSearchResponseFrame
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
 
@@ -96,12 +96,13 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
-            text_filter=MarkdownTextFilter(),
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            text_filters=[MarkdownTextFilter()],
         )
 
         llm = GoogleLLMService(
             api_key=os.getenv("GOOGLE_API_KEY"),
+            model="gemini-1.5-flash-002",
             system_instruction=system_instruction,
             tools=tools,
         )
@@ -139,10 +140,8 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
-                allow_interruptions=True,
-                observers=[rtvi.observer()],
-            ),
+            params=PipelineParams(allow_interruptions=True),
+            observers=[GoogleRTVIObserver(rtvi)],
         )
 
         @rtvi.event_handler("on_client_ready")

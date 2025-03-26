@@ -11,9 +11,10 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -30,13 +31,8 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def start_fetch_weather(function_name, llm, context):
-    """Push a frame to the LLM; this is handy when the LLM response might take a while."""
-    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
-
-
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
+    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
     await result_callback({"conditions": "nice", "temperature": "75"})
 
 
@@ -58,41 +54,34 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
-            # text_filter=MarkdownTextFilter(),
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            # text_filters=[MarkdownTextFilter()],
         )
 
         llm = NimLLMService(
             api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.3-70b-instruct"
         )
-        # Register a function_name of None to get all functions
+        # You can also register a function_name of None to get all functions
         # sent to the same callback with an additional function_name parameter.
-        llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
+        llm.register_function("get_current_weather", fetch_weather_from_api)
 
-        tools = [
-            ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "get_current_weather",
-                    "description": "Returns the current weather at a location, if one is specified, and defaults to the user's location.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "location": {
-                                "type": "string",
-                                "description": "The location to find the weather of, or if not provided, it's the default location.",
-                            },
-                            "format": {
-                                "type": "string",
-                                "enum": ["celsius", "fahrenheit"],
-                                "description": "Whether to use SI or USCS units (celsius or fahrenheit).",
-                            },
-                        },
-                        "required": ["location", "format"],
-                    },
+        weather_function = FunctionSchema(
+            name="get_current_weather",
+            description="Get the current weather",
+            properties={
+                "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA",
                 },
-            )
-        ]
+                "format": {
+                    "type": "string",
+                    "enum": ["celsius", "fahrenheit"],
+                    "description": "The temperature unit to use. Infer this from the user's location.",
+                },
+            },
+            required=["location", "format"],
+        )
+        tools = ToolsSchema(standard_tools=[weather_function])
         messages = [
             {
                 "role": "system",
@@ -116,7 +105,7 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,

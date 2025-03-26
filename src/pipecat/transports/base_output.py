@@ -13,7 +13,7 @@ from typing import AsyncGenerator, List
 from loguru import logger
 from PIL import Image
 
-from pipecat.audio.vad.vad_analyzer import VAD_STOP_SECS
+from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
@@ -37,6 +37,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import nanoseconds_to_seconds
 
+BOT_VAD_STOP_SECS = 0.3
+
 
 class BaseOutputTransport(FrameProcessor):
     def __init__(self, params: TransportParams, **kwargs):
@@ -57,12 +59,12 @@ class BaseOutputTransport(FrameProcessor):
         # framerate.
         self._camera_images = None
 
-        # We will write 20ms audio at a time. If we receive long audio frames we
-        # will chunk them. This will help with interruption handling.
-        audio_bytes_10ms = (
-            int(self._params.audio_out_sample_rate / 100) * self._params.audio_out_channels * 2
-        )
-        self._audio_chunk_size = audio_bytes_10ms * 2
+        # Output sample rate. It will be initialized on StartFrame.
+        self._sample_rate = 0
+        self._resampler = create_default_resampler()
+
+        # Chunk size that will be written. It will be computed on StartFrame
+        self._audio_chunk_size = 0
         self._audio_buffer = bytearray()
 
         self._stopped_event = asyncio.Event()
@@ -70,10 +72,21 @@ class BaseOutputTransport(FrameProcessor):
         # Indicates if the bot is currently speaking.
         self._bot_speaking = False
 
+    @property
+    def sample_rate(self) -> int:
+        return self._sample_rate
+
     async def start(self, frame: StartFrame):
+        self._sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
+
+        # We will write 20ms audio at a time. If we receive long audio frames we
+        # will chunk them. This will help with interruption handling.
+        audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
+        self._audio_chunk_size = audio_bytes_10ms * 2
+
         # Start audio mixer.
         if self._params.audio_out_mixer:
-            await self._params.audio_out_mixer.start(self._params.audio_out_sample_rate)
+            await self._params.audio_out_mixer.start(self._sample_rate)
         self._create_camera_task()
         self._create_sink_tasks()
 
@@ -157,6 +170,8 @@ class BaseOutputTransport(FrameProcessor):
         # TODO(aleix): Images and audio should support presentation timestamps.
         elif frame.pts:
             await self._sink_clock_queue.put((frame.pts, frame.id, frame))
+        elif direction == FrameDirection.UPSTREAM:
+            await self.push_frame(frame, direction)
         else:
             await self._sink_queue.put(frame)
 
@@ -178,12 +193,18 @@ class BaseOutputTransport(FrameProcessor):
         if not self._params.audio_out_enabled:
             return
 
+        # We might need to resample if incoming audio doesn't match the
+        # transport sample rate.
+        resampled = await self._resampler.resample(
+            frame.audio, frame.sample_rate, self._sample_rate
+        )
+
         cls = type(frame)
-        self._audio_buffer.extend(frame.audio)
+        self._audio_buffer.extend(resampled)
         while len(self._audio_buffer) >= self._audio_chunk_size:
             chunk = cls(
                 bytes(self._audio_buffer[: self._audio_chunk_size]),
-                sample_rate=frame.sample_rate,
+                sample_rate=self._sample_rate,
                 num_channels=frame.num_channels,
             )
             await self._sink_queue.put(chunk)
@@ -211,16 +232,21 @@ class BaseOutputTransport(FrameProcessor):
             await self.push_frame(BotStoppedSpeakingFrame())
             await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
             self._bot_speaking = False
+            # Clean audio buffer (there could be tiny left overs if not multiple
+            # to our output chunk size).
+            self._audio_buffer = bytearray()
 
     #
     # Sink tasks
     #
 
     def _create_sink_tasks(self):
-        self._sink_queue = asyncio.Queue()
-        self._sink_clock_queue = asyncio.PriorityQueue()
-        self._sink_task = self.create_task(self._sink_task_handler())
-        self._sink_clock_task = self.create_task(self._sink_clock_task_handler())
+        if not self._sink_task:
+            self._sink_queue = asyncio.Queue()
+            self._sink_task = self.create_task(self._sink_task_handler())
+        if not self._sink_clock_task:
+            self._sink_clock_queue = asyncio.PriorityQueue()
+            self._sink_clock_task = self.create_task(self._sink_clock_task_handler())
 
     async def _cancel_sink_tasks(self):
         # Stop sink tasks.
@@ -298,20 +324,15 @@ class BaseOutputTransport(FrameProcessor):
                     # Generate an audio frame with only the mixer's part.
                     frame = OutputAudioRawFrame(
                         audio=await self._params.audio_out_mixer.mix(silence),
-                        sample_rate=self._params.audio_out_sample_rate,
+                        sample_rate=self._sample_rate,
                         num_channels=self._params.audio_out_channels,
                     )
                     yield frame
 
-        vad_stop_secs = (
-            self._params.vad_analyzer.params.stop_secs
-            if self._params.vad_analyzer
-            else VAD_STOP_SECS
-        )
         if self._params.audio_out_mixer:
-            return with_mixer(vad_stop_secs)
+            return with_mixer(BOT_VAD_STOP_SECS)
         else:
-            return without_mixer(vad_stop_secs)
+            return without_mixer(BOT_VAD_STOP_SECS)
 
     async def _sink_task_handler(self):
         async for frame in self._next_frame():
@@ -342,7 +363,7 @@ class BaseOutputTransport(FrameProcessor):
 
     def _create_camera_task(self):
         # Create camera output queue and task if needed.
-        if self._params.camera_out_enabled:
+        if not self._camera_out_task and self._params.camera_out_enabled:
             self._camera_out_queue = asyncio.Queue()
             self._camera_out_task = self.create_task(self._camera_out_task_handler())
 

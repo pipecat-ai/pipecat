@@ -17,7 +17,29 @@ from pydantic import BaseModel, Field
 
 
 class InputAudioTranscription(BaseModel):
-    model: Optional[str] = "whisper-1"
+    """Configuration for audio transcription settings.
+
+    Attributes:
+        model: Transcription model to use (e.g., "gpt-4o-transcribe", "whisper-1").
+        language: Optional language code for transcription.
+        prompt: Optional transcription hint text.
+    """
+
+    model: str = "gpt-4o-transcribe"
+    language: Optional[str]
+    prompt: Optional[str]
+
+    def __init__(
+        self,
+        model: Optional[str] = "gpt-4o-transcribe",
+        language: Optional[str] = None,
+        prompt: Optional[str] = None,
+    ):
+        super().__init__(model=model, language=language, prompt=prompt)
+        if self.model != "gpt-4o-transcribe" and (self.language or self.prompt):
+            raise ValueError(
+                "Fields 'language' and 'prompt' are only supported when model is 'gpt-4o-transcribe'"
+            )
 
 
 class TurnDetection(BaseModel):
@@ -27,6 +49,17 @@ class TurnDetection(BaseModel):
     silence_duration_ms: Optional[int] = 800
 
 
+class SemanticTurnDetection(BaseModel):
+    type: Optional[Literal["semantic_vad"]] = "semantic_vad"
+    eagerness: Optional[Literal["low", "medium", "high", "auto"]] = None
+    create_response: Optional[bool] = None
+    interrupt_response: Optional[bool] = None
+
+
+class InputAudioNoiseReduction(BaseModel):
+    type: Optional[Literal["near_field", "far_field"]]
+
+
 class SessionProperties(BaseModel):
     modalities: Optional[List[Literal["text", "audio"]]] = None
     instructions: Optional[str] = None
@@ -34,8 +67,11 @@ class SessionProperties(BaseModel):
     input_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
     output_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
     input_audio_transcription: Optional[InputAudioTranscription] = None
+    input_audio_noise_reduction: Optional[InputAudioNoiseReduction] = None
     # set turn_detection to False to disable turn detection
-    turn_detection: Optional[Union[TurnDetection, bool]] = Field(default=None)
+    turn_detection: Optional[Union[TurnDetection, SemanticTurnDetection, bool]] = Field(
+        default=None
+    )
     tools: Optional[List[Dict]] = None
     tool_choice: Optional[Literal["auto", "none", "required"]] = None
     temperature: Optional[float] = None
@@ -93,6 +129,7 @@ class RealtimeError(BaseModel):
     code: Optional[str] = ""
     message: str
     param: Optional[str] = None
+    event_id: Optional[str] = None
 
 
 #
@@ -150,6 +187,11 @@ class ConversationItemDeleteEvent(ClientEvent):
     item_id: str
 
 
+class ConversationItemRetrieveEvent(ClientEvent):
+    type: Literal["conversation.item.retrieve"] = "conversation.item.retrieve"
+    item_id: str
+
+
 class ResponseCreateEvent(ClientEvent):
     type: Literal["response.create"] = "response.create"
     response: Optional[ResponseProperties] = None
@@ -193,6 +235,13 @@ class ConversationItemCreated(ServerEvent):
     item: ConversationItem
 
 
+class ConversationItemInputAudioTranscriptionDelta(ServerEvent):
+    type: Literal["conversation.item.input_audio_transcription.delta"]
+    item_id: str
+    content_index: int
+    delta: str
+
+
 class ConversationItemInputAudioTranscriptionCompleted(ServerEvent):
     type: Literal["conversation.item.input_audio_transcription.completed"]
     item_id: str
@@ -217,6 +266,11 @@ class ConversationItemTruncated(ServerEvent):
 class ConversationItemDeleted(ServerEvent):
     type: Literal["conversation.item.deleted"]
     item_id: str
+
+
+class ConversationItemRetrieved(ServerEvent):
+    type: Literal["conversation.item.retrieved"]
+    item: ConversationItem
 
 
 class ResponseCreated(ServerEvent):
@@ -400,10 +454,12 @@ _server_event_types = {
     "input_audio_buffer.speech_started": InputAudioBufferSpeechStarted,
     "input_audio_buffer.speech_stopped": InputAudioBufferSpeechStopped,
     "conversation.item.created": ConversationItemCreated,
+    "conversation.item.input_audio_transcription.delta": ConversationItemInputAudioTranscriptionDelta,
     "conversation.item.input_audio_transcription.completed": ConversationItemInputAudioTranscriptionCompleted,
     "conversation.item.input_audio_transcription.failed": ConversationItemInputAudioTranscriptionFailed,
     "conversation.item.truncated": ConversationItemTruncated,
     "conversation.item.deleted": ConversationItemDeleted,
+    "conversation.item.retrieved": ConversationItemRetrieved,
     "response.created": ResponseCreated,
     "response.done": ResponseDone,
     "response.output_item.added": ResponseOutputItemAdded,

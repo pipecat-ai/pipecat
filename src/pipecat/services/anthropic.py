@@ -4,34 +4,33 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import copy
 import io
 import json
 import re
-from asyncio import CancelledError
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Union
 
+import httpx
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.frames.frames import (
     Frame,
+    FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    FunctionCallResultProperties,
     LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
-    OpenAILLMContextAssistantTimestampFrame,
-    StartInterruptionFrame,
     UserImageRawFrame,
-    UserImageRequestFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -45,7 +44,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import LLMService
-from pipecat.utils.time import time_now_iso8601
 
 try:
     from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
@@ -56,13 +54,6 @@ except ModuleNotFoundError as e:
         + "Also, set `ANTHROPIC_API_KEY` environment variable."
     )
     raise Exception(f"Missing module: {e}")
-
-
-# internal use only -- todo: refactor
-@dataclass
-class AnthropicImageMessageFrame(Frame):
-    user_image_raw_frame: UserImageRawFrame
-    text: Optional[str] = None
 
 
 @dataclass
@@ -84,6 +75,9 @@ class AnthropicLLMService(LLMService):
     use `AsyncAnthropicBedrock` and `AsyncAnthropicVertex` clients
     """
 
+    # Overriding the default adapter to use the Anthropic one.
+    adapter_class = AnthropicLLMAdapter
+
     class InputParams(BaseModel):
         enable_prompt_caching_beta: Optional[bool] = False
         max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
@@ -96,7 +90,7 @@ class AnthropicLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "claude-3-5-sonnet-20241022",
+        model: str = "claude-3-7-sonnet-20250219",
         params: InputParams = InputParams(),
         client=None,
         **kwargs,
@@ -122,14 +116,38 @@ class AnthropicLLMService(LLMService):
     def enable_prompt_caching_beta(self) -> bool:
         return self._enable_prompt_caching_beta
 
-    @staticmethod
     def create_context_aggregator(
-        context: OpenAILLMContext, *, assistant_expect_stripped_words: bool = True
+        self,
+        context: OpenAILLMContext,
+        *,
+        user_kwargs: Mapping[str, Any] = {},
+        assistant_kwargs: Mapping[str, Any] = {},
     ) -> AnthropicContextAggregatorPair:
-        user = AnthropicUserContextAggregator(context)
-        assistant = AnthropicAssistantContextAggregator(
-            user, expect_stripped_words=assistant_expect_stripped_words
-        )
+        """Create an instance of AnthropicContextAggregatorPair from an
+        OpenAILLMContext. Constructor keyword arguments for both the user and
+        assistant aggregators can be provided.
+
+        Args:
+            context (OpenAILLMContext): The LLM context.
+            user_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the user context aggregator constructor. Defaults
+                to an empty mapping.
+            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
+                arguments for the assistant context aggregator
+                constructor. Defaults to an empty mapping.
+
+        Returns:
+            AnthropicContextAggregatorPair: A pair of context aggregators, one
+            for the user and one for the assistant, encapsulated in an
+            AnthropicContextAggregatorPair.
+
+        """
+        context.set_llm_adapter(self.get_llm_adapter())
+
+        if isinstance(context, OpenAILLMContext):
+            context = AnthropicLLMContext.from_openai_context(context)
+        user = AnthropicUserContextAggregator(context, **user_kwargs)
+        assistant = AnthropicAssistantContextAggregator(context, **assistant_kwargs)
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
     async def _process_context(self, context: OpenAILLMContext):
@@ -149,7 +167,7 @@ class AnthropicLLMService(LLMService):
             await self.start_processing_metrics()
 
             logger.debug(
-                f"Generating chat: {context.system} | {context.get_messages_for_logging()}"
+                f"{self}: Generating chat [{context.system}] | [{context.get_messages_for_logging()}]"
             )
 
             messages = context.messages
@@ -249,12 +267,14 @@ class AnthropicLLMService(LLMService):
                     if total_input_tokens >= 1024:
                         context.turns_above_cache_threshold += 1
 
-        except CancelledError:
+        except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the
             # token estimate. The reraise the exception so all the processors running in this task
             # also get cancelled.
             use_completion_tokens_estimate = True
             raise
+        except httpx.TimeoutException:
+            await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
@@ -326,9 +346,9 @@ class AnthropicLLMService(LLMService):
 class AnthropicLLMContext(OpenAILLMContext):
     def __init__(
         self,
-        messages: list[dict] | None = None,
-        tools: list[dict] | None = None,
-        tool_choice: dict | None = None,
+        messages: Optional[List[dict]] = None,
+        tools: Optional[List[dict]] = None,
+        tool_choice: Optional[dict] = None,
         *,
         system: Union[str, NotGiven] = NOT_GIVEN,
     ):
@@ -357,6 +377,7 @@ class AnthropicLLMContext(OpenAILLMContext):
             tools=openai_context.tools,
             tool_choice=openai_context.tool_choice,
         )
+        self.set_llm_adapter(openai_context.get_llm_adapter())
         self._restructure_from_openai_messages()
         return self
 
@@ -651,45 +672,7 @@ class AnthropicLLMContext(OpenAILLMContext):
 
 
 class AnthropicUserContextAggregator(LLMUserContextAggregator):
-    def __init__(self, context: OpenAILLMContext | AnthropicLLMContext):
-        super().__init__(context=context)
-
-        if isinstance(context, OpenAILLMContext):
-            self._context = AnthropicLLMContext.from_openai_context(context)
-
-    async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-        # Our parent method has already called push_frame(). So we can't interrupt the
-        # flow here and we don't need to call push_frame() ourselves. Possibly something
-        # to talk through (tagging @aleix). At some point we might need to refactor these
-        # context aggregators.
-        try:
-            if isinstance(frame, UserImageRequestFrame):
-                # The LLM sends a UserImageRequestFrame upstream. Cache any context provided with
-                # that frame so we can use it when we assemble the image message in the assistant
-                # context aggregator.
-                if frame.context:
-                    if isinstance(frame.context, str):
-                        self._context._user_image_request_context[frame.user_id] = frame.context
-                    else:
-                        logger.error(
-                            f"Unexpected UserImageRequestFrame context type: {type(frame.context)}"
-                        )
-                        del self._context._user_image_request_context[frame.user_id]
-                else:
-                    if frame.user_id in self._context._user_image_request_context:
-                        del self._context._user_image_request_context[frame.user_id]
-            elif isinstance(frame, UserImageRawFrame):
-                # Push a new AnthropicImageMessageFrame with the text context we cached
-                # downstream to be handled by our assistant context aggregator. This is
-                # necessary so that we add the message to the context in the right order.
-                text = self._context._user_image_request_context.get(frame.user_id) or ""
-                if text:
-                    del self._context._user_image_request_context[frame.user_id]
-                frame = AnthropicImageMessageFrame(user_image_raw_frame=frame, text=text)
-                await self.push_frame(frame)
-        except Exception as e:
-            logger.error(f"Error processing frame: {e}")
+    pass
 
 
 #
@@ -703,115 +686,64 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
 
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
-    def __init__(self, user_context_aggregator: AnthropicUserContextAggregator, **kwargs):
-        super().__init__(context=user_context_aggregator._context, **kwargs)
-        self._user_context_aggregator = user_context_aggregator
-        self._function_call_in_progress = None
-        self._function_call_result = None
-        self._pending_image_frame_message = None
+    async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
+        assistant_message = {"role": "assistant", "content": []}
+        assistant_message["content"].append(
+            {
+                "type": "tool_use",
+                "id": frame.tool_call_id,
+                "name": frame.function_name,
+                "input": frame.arguments,
+            }
+        )
+        self._context.add_message(assistant_message)
+        self._context.add_message(
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": frame.tool_call_id,
+                        "content": "IN_PROGRESS",
+                    }
+                ],
+            }
+        )
 
-    async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-        # See note above about not calling push_frame() here.
-        if isinstance(frame, StartInterruptionFrame):
-            self._function_call_in_progress = None
-            self._function_call_finished = None
-        elif isinstance(frame, FunctionCallInProgressFrame):
-            self._function_call_in_progress = frame
-        elif isinstance(frame, FunctionCallResultFrame):
-            if (
-                self._function_call_in_progress
-                and self._function_call_in_progress.tool_call_id == frame.tool_call_id
-            ):
-                self._function_call_in_progress = None
-                self._function_call_result = frame
-                await self._push_aggregation()
-            else:
-                logger.warning(
-                    "FunctionCallResultFrame tool_call_id != InProgressFrame tool_call_id"
-                )
-                self._function_call_in_progress = None
-                self._function_call_result = None
-        elif isinstance(frame, AnthropicImageMessageFrame):
-            self._pending_image_frame_message = frame
-            await self._push_aggregation()
+    async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+        if frame.result:
+            result = json.dumps(frame.result)
+            await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
+        else:
+            await self._update_function_call_result(
+                frame.function_name, frame.tool_call_id, "COMPLETED"
+            )
 
-    async def _push_aggregation(self):
-        if not (
-            self._aggregation or self._function_call_result or self._pending_image_frame_message
-        ):
-            return
+    async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
+        await self._update_function_call_result(
+            frame.function_name, frame.tool_call_id, "CANCELLED"
+        )
 
-        run_llm = False
-        properties: Optional[FunctionCallResultProperties] = None
+    async def _update_function_call_result(
+        self, function_name: str, tool_call_id: str, result: Any
+    ):
+        for message in self._context.messages:
+            if message["role"] == "user":
+                for content in message["content"]:
+                    if (
+                        isinstance(content, dict)
+                        and content["type"] == "tool_result"
+                        and content["tool_use_id"] == tool_call_id
+                    ):
+                        content["content"] = result
 
-        aggregation = self._aggregation
-        self._reset()
-
-        try:
-            if self._function_call_result:
-                frame = self._function_call_result
-                properties = frame.properties
-                self._function_call_result = None
-                if frame.result:
-                    assistant_message = {"role": "assistant", "content": []}
-                    if aggregation:
-                        assistant_message["content"].append({"type": "text", "text": aggregation})
-                    assistant_message["content"].append(
-                        {
-                            "type": "tool_use",
-                            "id": frame.tool_call_id,
-                            "name": frame.function_name,
-                            "input": frame.arguments,
-                        }
-                    )
-                    self._context.add_message(assistant_message)
-                    self._context.add_message(
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": frame.tool_call_id,
-                                    "content": json.dumps(frame.result),
-                                }
-                            ],
-                        }
-                    )
-                    if properties and properties.run_llm is not None:
-                        # If the tool call result has a run_llm property, use it
-                        run_llm = properties.run_llm
-                    else:
-                        # Default behavior
-                        run_llm = True
-            elif aggregation:
-                self._context.add_message({"role": "assistant", "content": aggregation})
-
-            if self._pending_image_frame_message:
-                frame = self._pending_image_frame_message
-                self._pending_image_frame_message = None
-                self._context.add_image_frame_message(
-                    format=frame.user_image_raw_frame.format,
-                    size=frame.user_image_raw_frame.size,
-                    image=frame.user_image_raw_frame.image,
-                    text=frame.text,
-                )
-                run_llm = True
-
-            if run_llm:
-                await self._user_context_aggregator.push_context_frame()
-
-            # Emit the on_context_updated callback once the function call result is added to the context
-            if properties and properties.on_context_updated is not None:
-                await properties.on_context_updated()
-
-            # Push context frame
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
-
-            # Push timestamp frame with current time
-            timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
-            await self.push_frame(timestamp_frame)
-
-        except Exception as e:
-            logger.error(f"Error processing frame: {e}")
+    async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        await self._update_function_call_result(
+            frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
+        )
+        self._context.add_image_frame_message(
+            format=frame.format,
+            size=frame.size,
+            image=frame.image,
+            text=frame.request.context,
+        )

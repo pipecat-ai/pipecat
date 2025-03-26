@@ -10,6 +10,7 @@ from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
+from openai import AsyncAzureOpenAI
 from PIL import Image
 from pydantic import BaseModel
 
@@ -48,7 +49,6 @@ try:
         PushAudioInputStream,
     )
     from azure.cognitiveservices.speech.dialog import AudioConfig
-    from openai import AsyncAzureOpenAI
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -57,7 +57,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_azure_language(language: Language) -> str | None:
+def language_to_azure_language(language: Language) -> Optional[str]:
     language_map = {
         # Afrikaans
         Language.AF: "af-ZA",
@@ -450,14 +450,13 @@ class AzureBaseTTSService(TTSService):
         api_key: str,
         region: str,
         voice="en-US-SaraNeural",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = {
-            "sample_rate": sample_rate,
             "emphasis": params.emphasis,
             "language": self.language_to_service_language(params.language)
             if params.language
@@ -478,7 +477,7 @@ class AzureBaseTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_azure_language(language)
 
     def _construct_ssml(self, text: str) -> str:
@@ -530,25 +529,36 @@ class AzureBaseTTSService(TTSService):
 class AzureTTSService(AzureBaseTTSService):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._speech_config = None
+        self._speech_synthesizer = None
+        self._audio_queue = asyncio.Queue()
 
-        speech_config = SpeechConfig(
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+
+        if self._speech_config:
+            return
+
+        # Now self.sample_rate is properly initialized
+        self._speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
             speech_recognition_language=self._settings["language"],
         )
-        speech_config.set_speech_synthesis_output_format(
-            sample_rate_to_output_format(self._settings["sample_rate"])
+        self._speech_config.set_speech_synthesis_output_format(
+            sample_rate_to_output_format(self.sample_rate)
         )
-        speech_config.set_service_property(
+        self._speech_config.set_service_property(
             "synthesizer.synthesis.connection.synthesisConnectionImpl",
             "websocket",
             ServicePropertyChannel.UriQueryParameter,
         )
 
-        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+        self._speech_synthesizer = SpeechSynthesizer(
+            speech_config=self._speech_config, audio_config=None
+        )
 
         # Set up event handlers
-        self._audio_queue = asyncio.Queue()
         self._speech_synthesizer.synthesizing.connect(self._handle_synthesizing)
         self._speech_synthesizer.synthesis_completed.connect(self._handle_completed)
         self._speech_synthesizer.synthesis_canceled.connect(self._handle_canceled)
@@ -567,58 +577,78 @@ class AzureTTSService(AzureBaseTTSService):
         logger.error(f"Speech synthesis canceled: {evt.result.cancellation_details.reason}")
         self._audio_queue.put_nowait(None)
 
+    async def flush_audio(self):
+        logger.trace(f"{self}: flushing audio")
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            await self.start_ttfb_metrics()
-            yield TTSStartedFrame()
+            if self._speech_synthesizer is None:
+                error_msg = "Speech synthesizer not initialized."
+                logger.error(error_msg)
+                yield ErrorFrame(error_msg)
+                return
 
-            ssml = self._construct_ssml(text)
+            try:
+                await self.start_ttfb_metrics()
+                yield TTSStartedFrame()
 
-            # Start synthesis
-            self._speech_synthesizer.speak_ssml_async(ssml)
+                ssml = self._construct_ssml(text)
+                self._speech_synthesizer.speak_ssml_async(ssml)
+                await self.start_tts_usage_metrics(text)
 
-            await self.start_tts_usage_metrics(text)
+                # Stream audio chunks as they arrive
+                while True:
+                    chunk = await self._audio_queue.get()
+                    if chunk is None:  # End of stream
+                        break
 
-            # Stream audio chunks as they arrive
-            while True:
-                chunk = await self._audio_queue.get()
-                if chunk is None:  # End of stream
-                    break
+                    await self.stop_ttfb_metrics()
+                    yield TTSAudioRawFrame(
+                        audio=chunk,
+                        sample_rate=self.sample_rate,
+                        num_channels=1,
+                    )
 
-                await self.stop_ttfb_metrics()
+                yield TTSStoppedFrame()
 
-                yield TTSAudioRawFrame(
-                    audio=chunk,
-                    sample_rate=self._settings["sample_rate"],
-                    num_channels=1,
-                )
-
-            yield TTSStoppedFrame()
+            except Exception as e:
+                logger.error(f"{self} error during synthesis: {e}")
+                yield TTSStoppedFrame()
+                # Could add reconnection logic here if needed
+                return
 
         except Exception as e:
-            logger.error(f"{self} error generating TTS: {e}")
-            yield ErrorFrame(f"{self} error: {str(e)}")
+            logger.error(f"{self} exception: {e}")
 
 
 class AzureHttpTTSService(AzureBaseTTSService):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self._speech_config = None
+        self._speech_synthesizer = None
 
-        speech_config = SpeechConfig(
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+
+        if self._speech_config:
+            return
+
+        self._speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
             speech_recognition_language=self._settings["language"],
         )
-        speech_config.set_speech_synthesis_output_format(
-            sample_rate_to_output_format(self._settings["sample_rate"])
+        self._speech_config.set_speech_synthesis_output_format(
+            sample_rate_to_output_format(self.sample_rate)
+        )
+        self._speech_synthesizer = SpeechSynthesizer(
+            speech_config=self._speech_config, audio_config=None
         )
 
-        self._speech_synthesizer = SpeechSynthesizer(speech_config=speech_config, audio_config=None)
-
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         await self.start_ttfb_metrics()
 
@@ -633,7 +663,7 @@ class AzureHttpTTSService(AzureBaseTTSService):
             # Azure always sends a 44-byte header. Strip it off.
             yield TTSAudioRawFrame(
                 audio=result.audio_data[44:],
-                sample_rate=self._settings["sample_rate"],
+                sample_rate=self.sample_rate,
                 num_channels=1,
             )
             yield TTSStoppedFrame()
@@ -650,44 +680,62 @@ class AzureSTTService(STTService):
         *,
         api_key: str,
         region: str,
-        language=Language.EN_US,
-        sample_rate=24000,
-        channels=1,
+        language: Language = Language.EN_US,
+        sample_rate: Optional[int] = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
-        speech_config = SpeechConfig(subscription=api_key, region=region)
-        speech_config.speech_recognition_language = language
-
-        stream_format = AudioStreamFormat(samples_per_second=sample_rate, channels=channels)
-        self._audio_stream = PushAudioInputStream(stream_format)
-
-        audio_config = AudioConfig(stream=self._audio_stream)
-        self._speech_recognizer = SpeechRecognizer(
-            speech_config=speech_config, audio_config=audio_config
+        self._speech_config = SpeechConfig(
+            subscription=api_key,
+            region=region,
+            speech_recognition_language=language_to_azure_language(language),
         )
-        self._speech_recognizer.recognized.connect(self._on_handle_recognized)
+
+        self._audio_stream = None
+        self._speech_recognizer = None
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_processing_metrics()
-        self._audio_stream.write(audio)
+        if self._audio_stream:
+            self._audio_stream.write(audio)
         await self.stop_processing_metrics()
         yield None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._audio_stream:
+            return
+
+        stream_format = AudioStreamFormat(samples_per_second=self.sample_rate, channels=1)
+        self._audio_stream = PushAudioInputStream(stream_format)
+
+        audio_config = AudioConfig(stream=self._audio_stream)
+
+        self._speech_recognizer = SpeechRecognizer(
+            speech_config=self._speech_config, audio_config=audio_config
+        )
+        self._speech_recognizer.recognized.connect(self._on_handle_recognized)
         self._speech_recognizer.start_continuous_recognition_async()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
-        self._speech_recognizer.stop_continuous_recognition_async()
-        self._audio_stream.close()
+
+        if self._speech_recognizer:
+            self._speech_recognizer.stop_continuous_recognition_async()
+
+        if self._audio_stream:
+            self._audio_stream.close()
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
-        self._speech_recognizer.stop_continuous_recognition_async()
-        self._audio_stream.close()
+
+        if self._speech_recognizer:
+            self._speech_recognizer.stop_continuous_recognition_async()
+
+        if self._audio_stream:
+            self._audio_stream.close()
 
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:

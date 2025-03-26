@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
@@ -41,32 +43,6 @@ async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context
     )
 
 
-tools = [
-    {
-        "function_declarations": [
-            {
-                "name": "get_current_weather",
-                "description": "Get the current weather",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "location": {
-                            "type": "string",
-                            "description": "The city and state, e.g. San Francisco, CA",
-                        },
-                        "format": {
-                            "type": "string",
-                            "enum": ["celsius", "fahrenheit"],
-                            "description": "The temperature unit to use. Infer this from the users location.",
-                        },
-                    },
-                    "required": ["location", "format"],
-                },
-            },
-        ]
-    }
-]
-
 system_instruction = """
 You are a helpful assistant who can answer questions and use tools.
 
@@ -84,8 +60,6 @@ async def main():
             token,
             "Respond bot",
             DailyParams(
-                audio_in_sample_rate=16000,
-                audio_out_sample_rate=24000,
                 audio_out_enabled=True,
                 vad_enabled=True,
                 vad_audio_passthrough=True,
@@ -95,6 +69,27 @@ async def main():
                 # endpointing, for now.
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
             ),
+        )
+
+        weather_function = FunctionSchema(
+            name="get_current_weather",
+            description="Get the current weather",
+            properties={
+                "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["celsius", "fahrenheit"],
+                    "description": "The temperature unit to use. Infer this from the user's location.",
+                },
+            },
+            required=["location", "format"],
+        )
+        search_tool = {"google_search": {}}
+        tools = ToolsSchema(
+            standard_tools=[weather_function], custom_tools={AdapterType.GEMINI: [search_tool]}
         )
 
         llm = GeminiMultimodalLiveLLMService(
@@ -122,7 +117,7 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,

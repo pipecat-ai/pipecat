@@ -20,13 +20,12 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InputAudioRawFrame,
-    LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesFrame,
     StartFrame,
     StartInterruptionFrame,
-    StopInterruptionFrame,
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
@@ -37,7 +36,7 @@ from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMResponseAggregator
+from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -55,13 +54,9 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-# TRANSCRIBER_MODEL = "gemini-1.5-flash-latest"
-# CLASSIFIER_MODEL = "gemini-1.5-flash-latest"
-# CONVERSATION_MODEL = "gemini-1.5-flash-latest"
-
-TRANSCRIBER_MODEL = "gemini-2.0-flash-exp"
-CLASSIFIER_MODEL = "gemini-2.0-flash-exp"
-CONVERSATION_MODEL = "gemini-2.0-flash-exp"
+TRANSCRIBER_MODEL = "gemini-2.0-flash-001"
+CLASSIFIER_MODEL = "gemini-2.0-flash-001"
+CONVERSATION_MODEL = "gemini-2.0-flash-001"
 
 transcriber_system_instruction = """You are an audio transcriber. You are receiving audio from a user. Your job is to
 transcribe the input audio to text exactly as it was said by the user.
@@ -393,7 +388,7 @@ class AudioAccumulator(FrameProcessor):
             )
             self._user_speaking = False
             context = GoogleLLMContext()
-            context.add_audio_frames_message(text="Audio follows", audio_frames=self._audio_frames)
+            context.add_audio_frames_message(audio_frames=self._audio_frames)
             await self.push_frame(OpenAILLMContextFrame(context=context))
         elif isinstance(frame, InputAudioRawFrame):
             # Append the audio frame to our buffer. Treat the buffer as a ring buffer, dropping the oldest
@@ -436,7 +431,11 @@ class CompletenessCheck(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStartedSpeakingFrame):
+        if isinstance(frame, (EndFrame, CancelFrame)):
+            if self._idle_task:
+                await self.cancel_task(self._idle_task)
+                self._idle_task = None
+        elif isinstance(frame, UserStartedSpeakingFrame):
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
         elif isinstance(frame, TextFrame) and frame.text.startswith("YES"):
@@ -478,19 +477,11 @@ class CompletenessCheck(FrameProcessor):
             self._idle_task = None
 
 
-class UserAggregatorBuffer(LLMResponseAggregator):
+class LLMAggregatorBuffer(LLMAssistantResponseAggregator):
     """Buffers the output of the transcription LLM. Used by the bot output gate."""
 
     def __init__(self, **kwargs):
-        super().__init__(
-            messages=None,
-            role=None,
-            start_frame=LLMFullResponseStartFrame,
-            end_frame=LLMFullResponseEndFrame,
-            accumulator_frame=TextFrame,
-            handle_interruptions=True,
-            expect_stripped_words=False,
-        )
+        super().__init__(expect_stripped_words=False)
         self._transcription = ""
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -499,7 +490,7 @@ class UserAggregatorBuffer(LLMResponseAggregator):
         if isinstance(frame, UserStartedSpeakingFrame):
             self._transcription = ""
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         if self._aggregation:
             self._transcription = self._aggregation
             self._aggregation = ""
@@ -548,7 +539,7 @@ class OutputGate(FrameProcessor):
         self,
         notifier: BaseNotifier,
         context: OpenAILLMContext,
-        user_transcription_buffer: "UserAggregatorBuffer",
+        llm_transcription_buffer: LLMAggregatorBuffer,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -556,7 +547,8 @@ class OutputGate(FrameProcessor):
         self._frames_buffer = []
         self._notifier = notifier
         self._context = context
-        self._transcription_buffer = user_transcription_buffer
+        self._transcription_buffer = llm_transcription_buffer
+        self._gate_task = None
 
     def close_gate(self):
         self._gate_open = False
@@ -576,6 +568,11 @@ class OutputGate(FrameProcessor):
             if isinstance(frame, StartInterruptionFrame):
                 self._frames_buffer = []
                 self.close_gate()
+            await self.push_frame(frame, direction)
+            return
+
+        # Don't block function call frames
+        if isinstance(frame, (FunctionCallInProgressFrame, FunctionCallResultFrame)):
             await self.push_frame(frame, direction)
             return
 
@@ -599,10 +596,13 @@ class OutputGate(FrameProcessor):
 
     async def _start(self):
         self._frames_buffer = []
-        self._gate_task = self.create_task(self._gate_task_handler())
+        if not self._gate_task:
+            self._gate_task = self.create_task(self._gate_task_handler())
 
     async def _stop(self):
-        await self.cancel_task(self._gate_task)
+        if self._gate_task:
+            await self.cancel_task(self._gate_task)
+            self._gate_task = None
 
     async def _gate_task_handler(self):
         while True:
@@ -639,13 +639,12 @@ async def main():
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_audio_passthrough=True,
-                audio_in_sample_rate=16000,
             ),
         )
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
         # This is the LLM that will transcribe user speech.
@@ -677,12 +676,6 @@ async def main():
         context = OpenAILLMContext()
         context_aggregator = conversation_llm.create_context_aggregator(context)
 
-        # We have instructed the LLM to return 'True' if it thinks the user
-        # completed a sentence. So, if it's 'True' we will return true in this
-        # predicate which will wake up the notifier.
-        async def wake_check_filter(frame):
-            return frame.text == "True"
-
         # This is a notifier that we use to synchronize the two LLMs.
         notifier = EventNotifier()
 
@@ -699,20 +692,12 @@ async def main():
         async def block_user_stopped_speaking(frame):
             return not isinstance(frame, UserStoppedSpeakingFrame)
 
-        async def pass_only_llm_trigger_frames(frame):
-            return (
-                isinstance(frame, OpenAILLMContextFrame)
-                or isinstance(frame, LLMMessagesFrame)
-                or isinstance(frame, StartInterruptionFrame)
-                or isinstance(frame, StopInterruptionFrame)
-            )
-
         conversation_audio_context_assembler = ConversationAudioContextAssembler(context=context)
 
-        user_aggregator_buffer = UserAggregatorBuffer()
+        llm_aggregator_buffer = LLMAggregatorBuffer()
 
         bot_output_gate = OutputGate(
-            notifier=notifier, context=context, user_transcription_buffer=user_aggregator_buffer
+            notifier=notifier, context=context, llm_transcription_buffer=llm_aggregator_buffer
         )
 
         pipeline = Pipeline(
@@ -733,7 +718,7 @@ async def main():
                             ],
                             [
                                 tx_llm,
-                                user_aggregator_buffer,
+                                llm_aggregator_buffer,
                             ],
                         )
                     ],
@@ -752,7 +737,7 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,

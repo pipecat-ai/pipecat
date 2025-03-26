@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -37,7 +39,12 @@ async def get_weather(function_name, tool_call_id, arguments, llm, context, resu
 
 async def get_image(function_name, tool_call_id, arguments, llm, context, result_callback):
     question = arguments["question"]
-    await llm.request_image_frame(user_id=video_participant_id, text_content=question)
+    await llm.request_image_frame(
+        user_id=video_participant_id,
+        function_name=function_name,
+        tool_call_id=tool_call_id,
+        text_content=question,
+    )
 
 
 async def main():
@@ -60,48 +67,40 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
         llm = AnthropicLLMService(
             api_key=os.getenv("ANTHROPIC_API_KEY"),
-            # model="claude-3-5-sonnet-20240620",
-            model="claude-3-5-sonnet-latest",
+            model="claude-3-7-sonnet-latest",
             enable_prompt_caching_beta=True,
         )
         llm.register_function("get_weather", get_weather)
         llm.register_function("get_image", get_image)
 
-        tools = [
-            {
-                "name": "get_weather",
-                "description": "Get the current weather in a given location",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "location": {
-                            "type": "string",
-                            "description": "The city and state, e.g. San Francisco, CA",
-                        }
-                    },
-                    "required": ["location"],
+        weather_function = FunctionSchema(
+            name="get_weather",
+            description="Get the current weather",
+            properties={
+                "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA",
                 },
             },
-            {
-                "name": "get_image",
-                "description": "Get an image from the video stream.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "question": {
-                            "type": "string",
-                            "description": "The question that the user is asking about the image.",
-                        }
-                    },
-                    "required": ["question"],
-                },
+            required=["location"],
+        )
+        get_image_function = FunctionSchema(
+            name="get_image",
+            description="Get an image from the video stream.",
+            properties={
+                "question": {
+                    "type": "string",
+                    "description": "The question that the user is asking about the image.",
+                }
             },
-        ]
+            required=["question"],
+        )
+        tools = ToolsSchema(standard_tools=[weather_function, get_image_function])
 
         # todo: test with very short initial user message
 
@@ -153,7 +152,13 @@ If you need to use a tool, simply use the tool. Do not tell the user the tool yo
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True, enable_metrics=True))
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                allow_interruptions=True,
+                enable_metrics=True,
+            ),
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

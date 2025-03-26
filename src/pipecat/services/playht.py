@@ -16,22 +16,18 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.ai_services import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -46,7 +42,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-def language_to_playht_language(language: Language) -> str | None:
+def language_to_playht_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.AF: "afrikans",
         Language.AM: "amharic",
@@ -100,7 +96,7 @@ def language_to_playht_language(language: Language) -> str | None:
     return result
 
 
-class PlayHTTTSService(TTSService, WebsocketService):
+class PlayHTTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
@@ -113,17 +109,16 @@ class PlayHTTTSService(TTSService, WebsocketService):
         user_id: str,
         voice_url: str,
         voice_engine: str = "Play3.0-mini",
-        sample_rate: int = 24000,
+        sample_rate: Optional[int] = None,
         output_format: str = "wav",
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        TTSService.__init__(
-            self,
+        super().__init__(
+            pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._user_id = user_id
@@ -132,7 +127,6 @@ class PlayHTTTSService(TTSService, WebsocketService):
         self._request_id = None
 
         self._settings = {
-            "sample_rate": sample_rate,
             "language": self.language_to_service_language(params.language)
             if params.language
             else "english",
@@ -147,7 +141,7 @@ class PlayHTTTSService(TTSService, WebsocketService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_playht_language(language)
 
     async def start(self, frame: StartFrame):
@@ -165,17 +159,21 @@ class PlayHTTTSService(TTSService, WebsocketService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
-        await self._disconnect_websocket()
-
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
+        await self._disconnect_websocket()
+
     async def _connect_websocket(self):
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to PlayHT")
 
             if not self._websocket_url:
@@ -185,12 +183,14 @@ class PlayHTTTSService(TTSService, WebsocketService):
                 raise ValueError("WebSocket URL is not a string")
 
             self._websocket = await websockets.connect(self._websocket_url)
-        except ValueError as ve:
-            logger.error(f"{self} initialization error: {ve}")
+        except ValueError as e:
+            logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self._call_event_handler("on_connection_error", f"{e}")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
         try:
@@ -250,7 +250,7 @@ class PlayHTTTSService(TTSService, WebsocketService):
                 if message.startswith(b"RIFF"):
                     continue
                 await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(message, self._settings["sample_rate"], 1)
+                frame = TTSAudioRawFrame(message, self.sample_rate, 1)
                 await self.push_frame(frame)
             else:
                 logger.debug(f"Received text message: {message}")
@@ -270,21 +270,8 @@ class PlayHTTTSService(TTSService, WebsocketService):
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        # If we received a TTSSpeakFrame and the LLM response included text (it
-        # might be that it's only a function calling response) we pause
-        # processing more frames until we receive a BotStoppedSpeakingFrame.
-        if isinstance(frame, TTSSpeakFrame):
-            await self.pause_processing_frames()
-        elif isinstance(frame, LLMFullResponseEndFrame) and self._request_id:
-            await self.pause_processing_frames()
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.resume_processing_frames()
-
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             # Reconnect if the websocket is closed
@@ -301,7 +288,7 @@ class PlayHTTTSService(TTSService, WebsocketService):
                 "voice": self._voice_id,
                 "voice_engine": self._settings["voice_engine"],
                 "output_format": self._settings["output_format"],
-                "sample_rate": self._settings["sample_rate"],
+                "sample_rate": self.sample_rate,
                 "language": self._settings["language"],
                 "speed": self._settings["speed"],
                 "seed": self._settings["seed"],
@@ -338,8 +325,9 @@ class PlayHTHttpTTSService(TTSService):
         api_key: str,
         user_id: str,
         voice_url: str,
-        voice_engine: str = "Play3.0-mini-http",  # Options: Play3.0-mini-http, Play3.0-mini-ws
-        sample_rate: int = 24000,
+        voice_engine: str = "Play3.0-mini",
+        protocol: str = "http",  # Options: http, ws
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -352,19 +340,35 @@ class PlayHTHttpTTSService(TTSService):
             user_id=self._user_id,
             api_key=self._api_key,
         )
+
+        # Check if voice_engine contains protocol information (backward compatibility)
+        if "-http" in voice_engine:
+            # Extract the base engine name
+            voice_engine = voice_engine.replace("-http", "")
+            protocol = "http"
+        elif "-ws" in voice_engine:
+            # Extract the base engine name
+            voice_engine = voice_engine.replace("-ws", "")
+            protocol = "ws"
+
         self._settings = {
-            "sample_rate": sample_rate,
             "language": self.language_to_service_language(params.language)
             if params.language
             else "english",
             "format": Format.FORMAT_WAV,
             "voice_engine": voice_engine,
+            "protocol": protocol,
             "speed": params.speed,
             "seed": params.seed,
         }
         self.set_model_name(voice_engine)
         self.set_voice(voice_url)
 
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        self._settings["sample_rate"] = self.sample_rate
+
+    def _create_options(self) -> TTSOptions:
         language_str = self._settings["language"]
         playht_language = None
         if language_str:
@@ -374,10 +378,10 @@ class PlayHTHttpTTSService(TTSService):
                     playht_language = lang
                     break
 
-        self._options = TTSOptions(
+        return TTSOptions(
             voice=self._voice_id,
             language=playht_language,
-            sample_rate=self._settings["sample_rate"],
+            sample_rate=self.sample_rate,
             format=self._settings["format"],
             speed=self._settings["speed"],
             seed=self._settings["seed"],
@@ -386,25 +390,30 @@ class PlayHTHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_playht_language(language)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            b = bytearray()
-            in_header = True
+            options = self._create_options()
 
             await self.start_ttfb_metrics()
 
             playht_gen = self._client.tts(
-                text, voice_engine=self._settings["voice_engine"], options=self._options
+                text,
+                voice_engine=self._settings["voice_engine"],
+                protocol=self._settings["protocol"],
+                options=options,
             )
 
             await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()
+
+            b = bytearray()
+            in_header = True
             async for chunk in playht_gen:
                 # skip the RIFF header.
                 if in_header:
@@ -419,11 +428,12 @@ class PlayHTHttpTTSService(TTSService):
                             fh.read(size)
                             (data, size) = struct.unpack("<4sI", fh.read(8))
                         in_header = False
-                else:
-                    if len(chunk):
-                        await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
-                        yield frame
-            yield TTSStoppedFrame()
+                elif len(chunk) > 0:
+                    await self.stop_ttfb_metrics()
+                    frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                    yield frame
         except Exception as e:
             logger.error(f"{self} error generating TTS: {e}")
+        finally:
+            await self.stop_ttfb_metrics()
+            yield TTSStoppedFrame()

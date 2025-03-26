@@ -195,6 +195,10 @@ class DailyMeetingTokenProperties(BaseModel):
         default=None,
         description="Start cloud recording when the user joins the room. This can be used to always record and archive meetings, for example in a customer support context.",
     )
+    permissions: Optional[dict] = Field(
+        default=None,
+        description="Specifies the initial default permissions for a non-meeting-owner participant joining a call.",
+    )
 
 
 class DailyMeetingTokenParams(BaseModel):

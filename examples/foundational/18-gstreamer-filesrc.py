@@ -38,7 +38,6 @@ async def main():
             "GStreamer",
             DailyParams(
                 audio_out_enabled=True,
-                audio_out_is_live=True,
                 camera_out_enabled=True,
                 camera_out_width=1280,
                 camera_out_height=720,
@@ -51,8 +50,6 @@ async def main():
             out_params=GStreamerPipelineSource.OutputParams(
                 video_width=1280,
                 video_height=720,
-                audio_sample_rate=24000,
-                audio_channels=1,
             ),
         )
 

@@ -24,17 +24,15 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
 from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.services.daily import (
-    DailyParams,
-    DailyTransport,
-)
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -146,7 +144,7 @@ async def main():
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="34dbb662-8e98-413c-a1ef-1a3407675fe7",  # Spanish Narrator Man
-            model="sonic-multilingual",
+            model="sonic-2",
         )
 
         in_language = "English"
@@ -166,21 +164,32 @@ async def main():
         async def on_transcript_update(processor, frame):
             await transcript_handler.on_transcript_update(processor, frame)
 
+        rtvi = RTVIProcessor()
+
         pipeline = Pipeline(
             [
                 transport.input(),
+                rtvi,
                 stt,
                 transcript.user(),  # User transcripts
                 tp,
                 llm,
                 tts,
                 transport.output(),
+                transcript.assistant(),
                 context_aggregator.assistant(),
-                transcript.assistant(),  # Assistant transcripts
             ]
         )
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                allow_interruptions=False,  # We don't want to interrupt the translator bot
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
+            observers=[RTVIObserver(rtvi)],
+        )
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
