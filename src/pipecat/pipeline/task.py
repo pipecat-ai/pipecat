@@ -331,9 +331,11 @@ class PipelineTask(BaseTask):
         """
         if isinstance(frames, AsyncIterable):
             async for frame in frames:
+                logger.info(f"Enfileirando frame (async): {frame}")
                 await self.queue_frame(frame)
         elif isinstance(frames, Iterable):
             for frame in frames:
+                logger.info(f"Enfileirando frame: {frame}")
                 await self.queue_frame(frame)
 
     async def _create_tasks(self):
@@ -438,6 +440,7 @@ class PipelineTask(BaseTask):
         cleanup_pipeline = True
         while running:
             frame = await self._push_queue.get()
+            logger.info(f"Processando frame da fila: {frame}")
             await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
             if isinstance(frame, (EndFrame, StopFrame)):
                 await self._wait_for_pipeline_end()
