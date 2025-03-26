@@ -125,6 +125,8 @@ class UserIdleProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
+        print('PROCESSING FRAME');
+
         # Check for end frames before processing
         if isinstance(frame, (EndFrame, CancelFrame)):
             # Stop the idle task, if it exists
