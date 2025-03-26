@@ -444,7 +444,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
 
 
 class ElevenLabsHttpTTSService(TTSService):
-    """ElevenLabs Text-to-Speech service using HTTP streaming.
+    """ElevenLabs Text-to-Speech service using HTTP streaming with caching.
 
     Args:
         api_key: ElevenLabs API key
@@ -454,6 +454,7 @@ class ElevenLabsHttpTTSService(TTSService):
         base_url: API base URL
         sample_rate: Output sample rate
         params: Additional parameters for voice configuration
+        cache_size: Maximum number of cached responses to store (default: 100)
     """
 
     class InputParams(BaseModel):
@@ -475,6 +476,7 @@ class ElevenLabsHttpTTSService(TTSService):
         base_url: str = "https://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
+        cache_size: int = 100,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -499,6 +501,12 @@ class ElevenLabsHttpTTSService(TTSService):
         self.set_voice(voice_id)
         self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
+        
+        # Cache for storing TTS results
+        self._cache = {}
+        self._cache_order = []
+        self._cache_size = cache_size
+        self._cache_lock = asyncio.Lock()
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -510,17 +518,51 @@ class ElevenLabsHttpTTSService(TTSService):
         await super().start(frame)
         self._output_format = output_format_from_sample_rate(self.sample_rate)
 
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """Generate speech from text using ElevenLabs streaming API.
-
-        Args:
-            text: The text to convert to speech
-
-        Yields:
-            Frames containing audio data and status information
+    def _generate_cache_key(self, text: str) -> str:
+        """Generate a unique cache key based on text and current settings.
+        
+        This ensures that caching considers not just the text but also the voice,
+        model, and other parameters that affect the audio output.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
+        key_components = [
+            text,
+            self._voice_id,
+            self._model_name,
+            self._output_format,
+            str(self._voice_settings),
+            self._settings.get("language", ""),
+        ]
+        key_string = "_".join([str(comp) for comp in key_components])
+        return hashlib.md5(key_string.encode()).hexdigest()
 
+    async def _add_to_cache(self, key: str, audio_chunks: List[bytes]):
+        """Add audio chunks to the cache with LRU eviction policy."""
+        async with self._cache_lock:
+            # If this key already exists in the cache, remove it to update its position
+            if key in self._cache:
+                self._cache_order.remove(key)
+            
+            # Add to cache
+            self._cache[key] = audio_chunks
+            self._cache_order.append(key)
+            
+            # Enforce cache size limit (LRU eviction)
+            if len(self._cache_order) > self._cache_size:
+                oldest_key = self._cache_order.pop(0)
+                del self._cache[oldest_key]
+
+    async def _get_from_cache(self, key: str) -> Optional[List[bytes]]:
+        """Get audio chunks from cache and update its LRU status."""
+        async with self._cache_lock:
+            if key in self._cache:
+                # Update LRU order
+                self._cache_order.remove(key)
+                self._cache_order.append(key)
+                return self._cache[key]
+            return None
+
+    async def _fetch_and_cache_audio(self, text: str, cache_key: str) -> AsyncGenerator[bytes, None]:
+        """Fetch audio from ElevenLabs API and cache the result."""
         url = f"{self._base_url}/v1/text-to-speech/{self._voice_id}/stream"
 
         payload: Dict[str, Union[str, Dict[str, Union[float, bool]]]] = {
@@ -554,31 +596,99 @@ class ElevenLabsHttpTTSService(TTSService):
 
         logger.debug(f"ElevenLabs request - payload: {payload}, params: {params}")
 
+        # Collect chunks for caching while also yielding them
+        chunks_for_cache = []
+        CHUNK_SIZE = 1024
+
+        async with self._session.post(
+            url, json=payload, headers=headers, params=params
+        ) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                logger.error(f"{self} error: {error_text}")
+                raise Exception(f"ElevenLabs API error: {error_text}")
+
+            # Process the streaming response
+            async for chunk in response.content.iter_chunked(CHUNK_SIZE):
+                if len(chunk) > 0:
+                    chunks_for_cache.append(chunk)
+                    yield chunk
+
+        # Store in cache after successful completion
+        await self._add_to_cache(cache_key, chunks_for_cache)
+
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using ElevenLabs streaming API with caching.
+
+        Args:
+            text: The text to convert to speech
+
+        Yields:
+            Frames containing audio data and status information
+        """
+        logger.debug(f"{self}: Generating TTS [{text}]")
+
+        # Generate cache key based on text and current settings
+        cache_key = self._generate_cache_key(text)
+
         try:
             await self.start_ttfb_metrics()
-
-            async with self._session.post(
-                url, json=payload, headers=headers, params=params
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"{self} error: {error_text}")
-                    yield ErrorFrame(error=f"ElevenLabs API error: {error_text}")
-                    return
-
+            
+            # Check cache first
+            cached_chunks = await self._get_from_cache(cache_key)
+            
+            if cached_chunks:
+                logger.debug(f"{self}: Cache hit for text '{text}'")
+                
+                # Metrics for cached responses
                 await self.start_tts_usage_metrics(text)
-
-                # Process the streaming response
-                CHUNK_SIZE = 1024
-
+                
                 yield TTSStartedFrame()
-                async for chunk in response.content.iter_chunked(CHUNK_SIZE):
-                    if len(chunk) > 0:
+                
+                # Process cached chunks
+                for chunk in cached_chunks:
+                    await self.stop_ttfb_metrics()
+                    yield TTSAudioRawFrame(chunk, self.sample_rate, 1)
+            else:
+                logger.debug(f"{self}: Cache miss for text '{text}', fetching from API")
+                
+                await self.start_tts_usage_metrics(text)
+                yield TTSStartedFrame()
+                
+                # Fetch from API and cache simultaneously
+                try:
+                    async for chunk in self._fetch_and_cache_audio(text, cache_key):
                         await self.stop_ttfb_metrics()
                         yield TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                except Exception as e:
+                    logger.error(f"Error fetching from API: {e}")
+                    yield ErrorFrame(error=str(e))
+                    return
         except Exception as e:
             logger.error(f"Error in run_tts: {e}")
             yield ErrorFrame(error=str(e))
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
+
+    async def clear_cache(self):
+        """Clear the entire cache."""
+        async with self._cache_lock:
+            self._cache = {}
+            self._cache_order = []
+            
+    async def remove_from_cache(self, text: str):
+        """Remove a specific text entry from the cache."""
+        cache_key = self._generate_cache_key(text)
+        async with self._cache_lock:
+            if cache_key in self._cache:
+                del self._cache[cache_key]
+                self._cache_order.remove(cache_key)
+                
+    def get_cache_stats(self):
+        """Return statistics about the cache."""
+        return {
+            "size": len(self._cache),
+            "max_size": self._cache_size,
+            "memory_usage_estimate": sum(sum(len(chunk) for chunk in chunks) for chunks in self._cache.values()),
+        }

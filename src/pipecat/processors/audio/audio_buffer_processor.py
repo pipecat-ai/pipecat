@@ -91,6 +91,8 @@ class AudioBufferProcessor(FrameProcessor):
 
         self._resampler = create_default_resampler()
 
+        print('123131313123123123');
+
         self._register_event_handler("on_audio_data")
         self._register_event_handler("on_track_audio_data")
         self._register_event_handler("on_user_turn_audio_data")
