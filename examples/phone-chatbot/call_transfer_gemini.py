@@ -337,53 +337,72 @@ The `dial_operator` and `terminate_call` functions CANNOT wait for additional us
             # Set operator session ID in the session manager
             session_manager.set_session_id("operator", data["sessionId"])
 
-            call_transfer_prompt = call_config_manager.get_prompt("call_transfer_prompt")
-
-            # Add summary request to context
-            if call_transfer_prompt:
-                # If customer name is available, replace placeholders in the prompt
-                if customer_name:
-                    call_transfer_prompt = call_transfer_prompt.replace(
-                        "{customer_name}", customer_name
-                    )
-                logger.info("Using custom call transfer prompt")
-                context_aggregator.user().add_messages(
-                    [
-                        {
-                            "role": "system",
-                            "content": call_transfer_prompt,
-                        }
-                    ]
-                )
-            else:
-                logger.info("Using default call transfer prompt")
-                context_aggregator.user().add_messages(
-                    [
-                        {
-                            "role": "system",
-                            "content": """
-                            #### **An Operator has joined the Call**
-                            - When an operator joins the call, you will give a brief summary of the conversation so far.
-                            - After summarizing, you will stop speaking to allow the operator and caller to communicate.
-                            - During this time, you will continue to listen and remember the conversation.
-                            - **IMPORTANT**: You will see messages prefixed with **[OPERATOR]: ** which are from the support operator.
-                            - Messages without this prefix are from the original customer.
-                            - Your job is to observe and remember the conversation but not interrupt while the operator is handling the call.
-                            - You'll only speak again after the operator leaves.
-                        """,
-                        },
-                        {
-                            "role": "user",
-                            "content": "An operator has joined the call. Give a brief summary of the customer's issues so far",
-                        },
-                    ]
-                )
-
             # Update state
             session_manager.call_flow_state.set_operator_connected()
 
-            # Queue the context frame to trigger the summary request
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+            # Check if bot should speak summary
+            if call_config_manager.get_speak_summary():
+                logger.debug("Bot will speak summary")
+                call_transfer_prompt = call_config_manager.get_prompt("call_transfer_prompt")
+
+                # Add summary request to context
+                if call_transfer_prompt:
+                    # If customer name is available, replace placeholders in the prompt
+                    if customer_name:
+                        call_transfer_prompt = call_transfer_prompt.replace(
+                            "{customer_name}", customer_name
+                        )
+                    logger.info("Using custom call transfer prompt")
+                    context_aggregator.user().add_messages(
+                        [
+                            {
+                                "role": "system",
+                                "content": call_transfer_prompt,
+                            }
+                        ]
+                    )
+                else:
+                    logger.info("Using default call transfer prompt")
+                    context_aggregator.user().add_messages(
+                        [
+                            {
+                                "role": "system",
+                                "content": """
+                                #### **An Operator has joined the Call**
+                                - When an operator joins the call, you will give a brief summary of the conversation so far.
+                                - After summarizing, you will stop speaking to allow the operator and caller to communicate.
+                                - During this time, you will continue to listen and remember the conversation.
+                                - **IMPORTANT**: You will see messages prefixed with **[OPERATOR]: ** which are from the support operator.
+                                - Messages without this prefix are from the original customer.
+                                - Your job is to observe and remember the conversation but not interrupt while the operator is handling the call.
+                                - You'll only speak again after the operator leaves.
+                            """,
+                            },
+                            {
+                                "role": "user",
+                                "content": "An operator has joined the call. Give a brief summary of the customer's issues so far",
+                            },
+                        ]
+                    )
+
+                # Queue the context frame to trigger the summary request
+                await task.queue_frames([context_aggregator.user().get_context_frame()])
+            else:
+                logger.debug("Bot will not speak summary")
+                # Default summary with customer name if available
+                customer_info = f" for {customer_name}" if customer_name else ""
+                context_aggregator.user().add_messages(
+                    [
+                        {
+                            "role": "system",
+                            "content": f"""Say "An operator is joining the call{customer_info}." and then STOP SPEAKING. Your role is to observe while the operator handles the call.
+                            """,
+                        }
+                    ]
+                )
+
+                # Queue the context frame to trigger the summary request
+                await task.queue_frames([context_aggregator.user().get_context_frame()])
         else:
             logger.debug(f"Operator already connected: {data}")
 
