@@ -124,9 +124,6 @@ class UserIdleProcessor(FrameProcessor):
             direction: Direction of the frame flow
         """
         await super().process_frame(frame, direction)
-
-        print('PROCESSING FRAME');
-
         # Check for end frames before processing
         if isinstance(frame, (EndFrame, CancelFrame)):
             await self.push_frame(frame, direction)  # Push the frame down the pipeline
