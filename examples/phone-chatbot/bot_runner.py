@@ -1,3 +1,8 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
 """bot_runner.py.
 
 HTTP service that listens for incoming calls from either Daily or Twilio,

@@ -1,3 +1,8 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
 import argparse
 import asyncio
 import os
@@ -326,53 +331,73 @@ async def main(
             # Set operator session ID in the session manager
             session_manager.set_session_id("operator", data["sessionId"])
 
-            call_transfer_prompt = call_config_manager.get_prompt("call_transfer_prompt")
-
-            # Add summary request to context
-            if call_transfer_prompt:
-                # If customer name is available, replace placeholders in the prompt
-                if customer_name:
-                    call_transfer_prompt = call_transfer_prompt.replace(
-                        "{customer_name}", customer_name
-                    )
-
-                logger.info("Using custom call transfer prompt")
-                context_aggregator.user().add_messages(
-                    [
-                        {
-                            "role": "system",
-                            "content": call_transfer_prompt,
-                        }
-                    ]
-                )
-            else:
-                # Default summary with customer name if available
-                customer_info = f" for {customer_name}" if customer_name else ""
-
-                logger.info("Using default call transfer prompt")
-                context_aggregator.user().add_messages(
-                    [
-                        {
-                            "role": "system",
-                            "content": f"""An operator is joining the call{customer_info}. 
-
-                        IMPORTANT: 
-                        - Messages prefixed with [OPERATOR]: are from the support operator
-                        - Messages without this prefix are from the original customer
-                        - Both will appear as 'user' in the chat history
-
-                        Give a brief summary of the customer's issues so far, then STOP SPEAKING. 
-                        Your role is to observe while the operator handles the call.
-                        """,
-                        }
-                    ]
-                )
-
             # Update state
             session_manager.call_flow_state.set_operator_connected()
 
-            # Queue the context frame to trigger the summary request
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+            if call_config_manager.get_speak_summary():
+                logger.debug("Bot will speak summary")
+                call_transfer_prompt = call_config_manager.get_prompt("call_transfer_prompt")
+
+                # Add summary request to context
+                if call_transfer_prompt:
+                    # If customer name is available, replace placeholders in the prompt
+                    if customer_name:
+                        call_transfer_prompt = call_transfer_prompt.replace(
+                            "{customer_name}", customer_name
+                        )
+
+                    logger.info("Using custom call transfer prompt")
+                    context_aggregator.user().add_messages(
+                        [
+                            {
+                                "role": "system",
+                                "content": call_transfer_prompt,
+                            }
+                        ]
+                    )
+                else:
+                    # Default summary with customer name if available
+                    customer_info = f" for {customer_name}" if customer_name else ""
+
+                    logger.info("Using default call transfer prompt")
+                    context_aggregator.user().add_messages(
+                        [
+                            {
+                                "role": "system",
+                                "content": f"""An operator is joining the call{customer_info}. 
+
+                            IMPORTANT: 
+                            - Messages prefixed with [OPERATOR]: are from the support operator
+                            - Messages without this prefix are from the original customer
+                            - Both will appear as 'user' in the chat history
+
+                            Give a brief summary of the customer's issues so far, then STOP SPEAKING. 
+                            Your role is to observe while the operator handles the call.
+                            """,
+                            }
+                        ]
+                    )
+
+                # Queue the context frame to trigger the summary request
+                await task.queue_frames([context_aggregator.user().get_context_frame()])
+
+            else:
+                logger.debug("Bot will not speak summary")
+                # Default summary with customer name if available
+                customer_info = f" for {customer_name}" if customer_name else ""
+                context_aggregator.user().add_messages(
+                    [
+                        {
+                            "role": "system",
+                            "content": f"""Say "An operator is joining the call{customer_info}." and then STOP SPEAKING. Your role is to observe while the operator handles the call.
+                            """,
+                        }
+                    ]
+                )
+
+                # Queue the context frame to trigger the summary request
+                await task.queue_frames([context_aggregator.user().get_context_frame()])
+
         else:
             logger.debug(f"Operator already connected: {data}")
 
