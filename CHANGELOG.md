@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in Daily involving switching virtual devices, by bumping the
+  daily-python dependency to >= 0.16.1.
+
 - Fixed a `GoogleAssistantContextAggregator` issue where function calls
   placeholders where not being updated when then function call result was
   different from a string.
