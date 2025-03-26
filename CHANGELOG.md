@@ -5,6 +5,13 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- It is now possible to tell whether `UserStartedSpeakingFrame` or
+  `UserStoppedSpeakingFrame` have been generated because of emulation frames.
+
 ## [0.0.61] - 2025-03-26
 
 ### Added
@@ -21,9 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ElevenLabs TTS services now support a sample rate of 8000.
 
-- Added support for `instructions` in `OpenAITTSService`
+- Added support for `instructions` in `OpenAITTSService`.
 
-- Added support for `base_url` in `OpenAIImageGenService` and `OpenAITTSService`
+- Added support for `base_url` in `OpenAIImageGenService` and
+  `OpenAITTSService`.
 
 ### Fixed
 
