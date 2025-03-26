@@ -18,9 +18,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai import OpenAILLMService
-from pipecat.services.playht import PlayHTTTSService
-from pipecat.transcriptions.language import Language
+from pipecat.services.groq import GroqLLMService, GroqSTTService, GroqTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -39,20 +37,18 @@ async def main():
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
-                transcription_enabled=True,
+                # transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
         )
 
-        tts = PlayHTTTSService(
-            user_id=os.getenv("PLAYHT_USER_ID"),
-            api_key=os.getenv("PLAYHT_API_KEY"),
-            voice_url="s3://voice-cloning-zero-shot/e46b4027-b38d-4d24-b292-38fbca2be0ef/original/manifest.json",
-            params=PlayHTTTSService.InputParams(language=Language.EN),
-        )
+        stt = GroqSTTService(api_key=os.getenv("GROQ_API_KEY"))
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.3-70b-versatile")
+
+        tts = GroqTTSService(api_key=os.getenv("GROQ_API_KEY"))
 
         messages = [
             {
@@ -67,6 +63,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                stt,
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
@@ -81,7 +78,6 @@ async def main():
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
             ),
         )
 

@@ -9,8 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added a new frame, `LLMSetToolChoiceFrame`, which provides a mechanism 
+- Added a new frame, `LLMSetToolChoiceFrame`, which provides a mechanism
   for modifying the `tool_choice` in the context.
+
+- Added `GroqTTSService` which provides text-to-speech functionality using
+  Groq's API.
 
 - Added support in `DailyTransport` for updating remote participants'
   `canReceive` permission via the `update_remote_participants()` method, by
