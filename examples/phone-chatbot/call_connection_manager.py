@@ -7,8 +7,7 @@ contact information. Also includes call state management.
 
 import json
 import os
-
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -209,7 +208,7 @@ class CallConfigManager:
         # Maps customer names to their contact information
         self.CUSTOMER_MAP = {
             "Dominic": {
-                "phoneNumber": self.dial_in_from_number,
+                "phoneNumber": self.dial_in_from_number,  # I have two phone numbers, one for dialing in and one for dialing out. I give myself a separate name for each.
             },
             "Stewart": {
                 "phoneNumber": self.dial_out_to_number,
@@ -246,7 +245,7 @@ class CallConfigManager:
                 "callerId": "paul-caller-id-uuid",
             },
             "Yunyoung": {
-                "phoneNumber": self.operator_number,
+                "phoneNumber": self.operator_number,  # Dials out to my other phone number.
             },
             "Maria": {
                 "sipUri": "sip:maria@example.com",
