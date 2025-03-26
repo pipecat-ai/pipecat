@@ -118,6 +118,8 @@ class GroqTTSService(TTSService):
         speed: Optional[float] = 1.0
         seed: Optional[int] = None
 
+    GROQ_SAMPLE_RATE = 48000  # Groq TTS only supports 48kHz sample rate
+
     def __init__(
         self,
         *,
@@ -126,10 +128,14 @@ class GroqTTSService(TTSService):
         params: InputParams = InputParams(),
         model_name: str = "playai-tts",
         voice_id: str = "Celeste-PlayAI",
+        sample_rate: Optional[int] = GROQ_SAMPLE_RATE,
         **kwargs,
     ):
+        if sample_rate != self.GROQ_SAMPLE_RATE:
+            logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate. ")
         super().__init__(
             pause_frame_processing=True,
+            sample_rate=sample_rate,
             **kwargs,
         )
 
@@ -166,6 +172,6 @@ class GroqTTSService(TTSService):
                 data = data[44:]
                 if len(data) == 0:
                     continue
-            yield TTSAudioRawFrame(data, 48000, 1)
+            yield TTSAudioRawFrame(data, self.sample_rate, 1)
 
         yield TTSStoppedFrame()
