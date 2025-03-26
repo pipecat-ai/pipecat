@@ -1,20 +1,21 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 from typing import Any, Dict, List
+
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from pipecat.frames.frames import (
-    ErrorFrame,
-    Frame,
-    LLMMessagesFrame,
-)
+from pipecat.frames.frames import ErrorFrame, Frame, LLMMessagesFrame
 from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+    OpenAILLMContext, OpenAILLMContextFrame)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
-    from mem0 import MemoryClient
+    from mem0 import MemoryClient  # noqa: F401
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
