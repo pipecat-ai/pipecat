@@ -391,6 +391,7 @@ class OpenAIImageGenService(ImageGenService):
         self,
         *,
         api_key: str,
+        base_url: Optional[str] = None,
         aiohttp_session: aiohttp.ClientSession,
         image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"],
         model: str = "dall-e-3",
@@ -398,7 +399,7 @@ class OpenAIImageGenService(ImageGenService):
         super().__init__()
         self.set_model_name(model)
         self._image_size = image_size
-        self._client = AsyncOpenAI(api_key=api_key)
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
@@ -501,9 +502,11 @@ class OpenAITTSService(TTSService):
         self,
         *,
         api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         voice: str = "alloy",
         model: str = "gpt-4o-mini-tts",
         sample_rate: Optional[int] = None,
+        instructions: Optional[str] = None,
         **kwargs,
     ):
         if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
@@ -515,8 +518,8 @@ class OpenAITTSService(TTSService):
 
         self.set_model_name(model)
         self.set_voice(voice)
-
-        self._client = AsyncOpenAI(api_key=api_key)
+        self._instructions = instructions
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -538,11 +541,17 @@ class OpenAITTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
+            # Setup extra body parameters
+            extra_body = {}
+            if self._instructions:
+                extra_body["instructions"] = self._instructions
+
             async with self._client.audio.speech.with_streaming_response.create(
                 input=text or " ",  # Text must contain at least one character
                 model=self.model_name,
                 voice=VALID_VOICES[self._voice_id],
                 response_format="pcm",
+                extra_body=extra_body,
             ) as r:
                 if r.status_code != 200:
                     error = await r.text()
