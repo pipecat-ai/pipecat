@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ElevenLabs TTS services now support a sample rate of 8000.
 
+- Added support for `instructions` in `OpenAITTSService`
+
+- Added support for `base_url` in `OpenAIImageGenService` and `OpenAITTSService`
+
 ### Fixed
 
 - Fixed an issue in Daily involving switching virtual devices, by bumping the
