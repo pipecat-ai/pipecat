@@ -8,18 +8,10 @@
 from typing import List
 
 from loguru import logger
+from openai.types.chat import ChatCompletionMessageParam
 
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai import OpenAILLMService
-
-try:
-    from openai.types.chat import ChatCompletionMessageParam
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use Fireworks, you need to `pip install pipecat-ai[fireworks]`. Also, set `FIREWORKS_API_KEY` environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
 
 
 class FireworksLLMService(OpenAILLMService):

@@ -7,6 +7,7 @@
 import asyncio
 import os
 import sys
+from typing import Optional
 
 import aiohttp
 from dotenv import load_dotenv
@@ -32,7 +33,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 class UserImageRequester(FrameProcessor):
-    def __init__(self, participant_id: str | None = None):
+    def __init__(self, participant_id: Optional[str] = None):
         super().__init__()
         self._participant_id = participant_id
 
@@ -72,13 +73,11 @@ async def main():
 
         vision_aggregator = VisionImageFrameAggregator()
 
-        google = GoogleLLMService(
-            model="gemini-1.5-flash-latest", api_key=os.getenv("GOOGLE_API_KEY")
-        )
+        google = GoogleLLMService(model="gemini-2.0-flash-001", api_key=os.getenv("GOOGLE_API_KEY"))
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
         @transport.event_handler("on_first_participant_joined")

@@ -9,7 +9,7 @@ import os
 import uuid
 import wave
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import aiohttp
 from loguru import logger
@@ -62,17 +62,21 @@ class CanonicalMetricsService(AIService):
         self,
         *,
         aiohttp_session: aiohttp.ClientSession,
-        audio_buffer_processor: AudioBufferProcessor,
         call_id: str,
         assistant: str,
         api_key: str,
         api_url: str = "https://voiceapp.canonical.chat/api/v1",
         assistant_speaks_first: bool = True,
         output_dir: str = "recordings",
-        context: OpenAILLMContext | None = None,
+        audio_buffer_processor: Optional[AudioBufferProcessor] = None,
+        context: Optional[OpenAILLMContext] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        # Validate that at least one of audio_buffer_processor or context is provided
+        if audio_buffer_processor is None and context is None:
+            raise ValueError("At least one of audio_buffer_processor or context must be specified")
+
         self._aiohttp_session = aiohttp_session
         self._audio_buffer_processor = audio_buffer_processor
         self._api_key = api_key
@@ -85,15 +89,35 @@ class CanonicalMetricsService(AIService):
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
-        await self._process_audio()
+        await self._process_completion()
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
-        await self._process_audio()
+        await self._process_completion()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
+
+    async def _process_completion(self):
+        if self._audio_buffer_processor is not None:
+            await self._process_audio()
+        elif self._context is not None:
+            await self._process_transcript()
+
+    async def _process_transcript(self):
+        params = {
+            "callId": self._call_id,
+            "assistant": {"id": self._assistant, "speaksFirst": self._assistant_speaks_first},
+            "transcript": self._context.messages,
+        }
+        response = await self._aiohttp_session.post(
+            f"{self._api_url}/call",
+            headers=self._request_headers(),
+            json=params,
+        )
+        if not response.ok:
+            logger.error(f"Failed to process transcript: {await response.text()}")
 
     async def _process_audio(self):
         audio_buffer_processor = self._audio_buffer_processor

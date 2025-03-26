@@ -65,7 +65,6 @@ async def main():
             # English
             #
             voice_id="cgSgspJ2msm6clMCkdW9",
-            aiohttp_session=session,
             #
             # Spanish
             #
@@ -114,13 +113,13 @@ async def main():
                 llm,
                 tts,
                 transport.output(),
-                audio_buffer_processor,  # captures audio into a buffer
                 canonical,  # uploads audio buffer to Canonical AI for metrics
+                audio_buffer_processor,  # captures audio into a buffer
                 context_aggregator.assistant(),
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+        task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

@@ -30,10 +30,6 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def start_fetch_weather(function_name, llm, context):
-    logger.debug(f"Starting fetch_weather_from_api with function_name: {function_name}")
-
-
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
     # Add a delay to test interruption during function calls
     logger.info("Weather API call starting...")
@@ -61,16 +57,18 @@ async def main():
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
         # Configure the mute processor with both strategies
         stt_mute_processor = STTMuteFilter(
-            stt_service=stt,
             config=STTMuteConfig(
-                strategies={STTMuteStrategy.FIRST_SPEECH, STTMuteStrategy.FUNCTION_CALL}
+                strategies={
+                    STTMuteStrategy.MUTE_UNTIL_FIRST_BOT_COMPLETE,
+                    STTMuteStrategy.FUNCTION_CALL,
+                }
             ),
         )
 
         tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
-        llm.register_function(None, fetch_weather_from_api, start_callback=start_fetch_weather)
+        llm.register_function("get_current_weather", fetch_weather_from_api)
 
         tools = [
             ChatCompletionToolParam(
@@ -120,7 +118,7 @@ async def main():
             ]
         )
 
-        task = PipelineTask(pipeline, PipelineParams(allow_interruptions=True))
+        task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):

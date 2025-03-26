@@ -19,7 +19,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai import OpenAILLMService
-from pipecat.services.rime import RimeHttpTTSService
+from pipecat.services.rime import RimeTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -44,10 +44,9 @@ async def main():
             ),
         )
 
-        tts = RimeHttpTTSService(
+        tts = RimeTTSService(
             api_key=os.getenv("RIME_API_KEY", ""),
             voice_id="rex",
-            params=RimeHttpTTSService.InputParams(reduce_latency=True),
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
@@ -75,7 +74,7 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,

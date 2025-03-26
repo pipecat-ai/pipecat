@@ -6,23 +6,30 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, Optional, Sequence, Tuple
 
-from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
-    ControlFrame,
+    EndFrame,
     Frame,
     HeartbeatFrame,
     StartFrame,
+    SystemFrame,
 )
 from pipecat.observers.base_observer import BaseObserver
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio import TaskManager
 
 
 @dataclass
-class EndTestFrame(ControlFrame):
-    pass
+class SleepFrame(SystemFrame):
+    """This frame is used by test framework to introduce some sleep time before
+    the next frame is pushed. This is useful to control system frames vs data or
+    control frames.
+    """
+
+    sleep: float = 0.1
 
 
 class HeartbeatsObserver(BaseObserver):
@@ -48,79 +55,106 @@ class HeartbeatsObserver(BaseObserver):
 
 
 class QueuedFrameProcessor(FrameProcessor):
-    def __init__(self, queue: asyncio.Queue, ignore_start: bool = True):
+    def __init__(
+        self,
+        *,
+        queue: asyncio.Queue,
+        queue_direction: FrameDirection,
+        ignore_start: bool = True,
+    ):
         super().__init__()
         self._queue = queue
+        self._queue_direction = queue_direction
         self._ignore_start = ignore_start
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if self._ignore_start and isinstance(frame, StartFrame):
-            await self.push_frame(frame, direction)
-        else:
-            await self._queue.put(frame)
-            await self.push_frame(frame, direction)
+        if direction == self._queue_direction:
+            if not isinstance(frame, StartFrame) or not self._ignore_start:
+                await self._queue.put(frame)
+        await self.push_frame(frame, direction)
 
 
 async def run_test(
     processor: FrameProcessor,
+    *,
     frames_to_send: Sequence[Frame],
-    expected_down_frames: Sequence[type],
-    expected_up_frames: Sequence[type] = [],
+    expected_down_frames: Optional[Sequence[type]] = None,
+    expected_up_frames: Optional[Sequence[type]] = None,
+    ignore_start: bool = True,
+    start_metadata: Dict[str, Any] = {},
+    send_end_frame: bool = True,
 ) -> Tuple[Sequence[Frame], Sequence[Frame]]:
     received_up = asyncio.Queue()
     received_down = asyncio.Queue()
-    source = QueuedFrameProcessor(received_up)
-    sink = QueuedFrameProcessor(received_down)
+    source = QueuedFrameProcessor(
+        queue=received_up,
+        queue_direction=FrameDirection.UPSTREAM,
+        ignore_start=ignore_start,
+    )
+    sink = QueuedFrameProcessor(
+        queue=received_down,
+        queue_direction=FrameDirection.DOWNSTREAM,
+        ignore_start=ignore_start,
+    )
 
-    source.link(processor)
-    processor.link(sink)
+    pipeline = Pipeline([source, processor, sink])
 
-    task_manager = TaskManager()
-    task_manager.set_event_loop(asyncio.get_event_loop())
-    await source.queue_frame(StartFrame(clock=SystemClock(), task_manager=task_manager))
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(start_metadata=start_metadata),
+        cancel_on_idle_timeout=False,
+    )
 
-    for frame in frames_to_send:
-        await processor.process_frame(frame, FrameDirection.DOWNSTREAM)
+    async def push_frames():
+        # Just give a little head start to the runner.
+        await asyncio.sleep(0.01)
+        for frame in frames_to_send:
+            if isinstance(frame, SleepFrame):
+                await asyncio.sleep(frame.sleep)
+            else:
+                await task.queue_frame(frame)
 
-    await processor.queue_frame(EndTestFrame())
-    await processor.queue_frame(EndTestFrame(), FrameDirection.UPSTREAM)
+        if send_end_frame:
+            await task.queue_frame(EndFrame())
+
+    runner = PipelineRunner()
+    await asyncio.gather(runner.run(task), push_frames())
 
     #
     # Down frames
     #
     received_down_frames: Sequence[Frame] = []
-    running = True
-    while running:
-        frame = await received_down.get()
-        running = not isinstance(frame, EndTestFrame)
-        if running:
-            received_down_frames.append(frame)
+    if expected_down_frames is not None:
+        while not received_down.empty():
+            frame = await received_down.get()
+            if not isinstance(frame, EndFrame) or not send_end_frame:
+                received_down_frames.append(frame)
 
-    print("received DOWN frames =", received_down_frames)
+        print("received DOWN frames =", received_down_frames)
+        print("expected DOWN frames =", expected_down_frames)
 
-    assert len(received_down_frames) == len(expected_down_frames)
+        assert len(received_down_frames) == len(expected_down_frames)
 
-    for real, expected in zip(received_down_frames, expected_down_frames):
-        assert isinstance(real, expected)
+        for real, expected in zip(received_down_frames, expected_down_frames):
+            assert isinstance(real, expected)
 
     #
     # Up frames
     #
     received_up_frames: Sequence[Frame] = []
-    running = True
-    while running:
-        frame = await received_up.get()
-        running = not isinstance(frame, EndTestFrame)
-        if running:
+    if expected_up_frames is not None:
+        while not received_up.empty():
+            frame = await received_up.get()
             received_up_frames.append(frame)
 
-    print("received UP frames =", received_up_frames)
+        print("received UP frames =", received_up_frames)
+        print("expected UP frames =", expected_up_frames)
 
-    assert len(received_up_frames) == len(expected_up_frames)
+        assert len(received_up_frames) == len(expected_up_frames)
 
-    for real, expected in zip(received_up_frames, expected_up_frames):
-        assert isinstance(real, expected)
+        for real, expected in zip(received_up_frames, expected_up_frames):
+            assert isinstance(real, expected)
 
     return (received_down_frames, received_up_frames)

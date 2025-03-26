@@ -12,6 +12,7 @@ import time
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -19,6 +20,8 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     LLMMessagesFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -26,6 +29,7 @@ from pipecat.frames.frames import (
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
+    TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -338,6 +342,7 @@ class OutputGate(FrameProcessor):
         self._gate_open = start_open
         self._frames_buffer = []
         self._notifier = notifier
+        self._gate_task = None
 
     def close_gate(self):
         self._gate_open = False
@@ -360,6 +365,11 @@ class OutputGate(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
+        # Don't block function call frames
+        if isinstance(frame, (FunctionCallInProgressFrame, FunctionCallResultFrame)):
+            await self.push_frame(frame, direction)
+            return
+
         # Ignore frames that are not following the direction of this gate.
         if direction != FrameDirection.DOWNSTREAM:
             await self.push_frame(frame, direction)
@@ -373,10 +383,13 @@ class OutputGate(FrameProcessor):
 
     async def _start(self):
         self._frames_buffer = []
-        self._gate_task = self.create_task(self._gate_task_handler())
+        if not self._gate_task:
+            self._gate_task = self.create_task(self._gate_task_handler())
 
     async def _stop(self):
-        await self.cancel_task(self._gate_task)
+        if self._gate_task:
+            await self.cancel_task(self._gate_task)
+            self._gate_task = None
 
     async def _gate_task_handler(self):
         while True:
@@ -388,6 +401,11 @@ class OutputGate(FrameProcessor):
                 self._frames_buffer = []
             except asyncio.CancelledError:
                 break
+
+
+async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
+    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
+    await result_callback({"conditions": "nice", "temperature": "75"})
 
 
 async def main():
@@ -410,7 +428,7 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
         # This is the LLM that will be used to detect if the user has finished a
@@ -426,6 +444,34 @@ async def main():
             api_key=os.getenv("OPENAI_API_KEY"),
             model="gpt-4o",
         )
+        # Register a function_name of None to get all functions
+        # sent to the same callback with an additional function_name parameter.
+        llm.register_function("get_current_weather", fetch_weather_from_api)
+
+        tools = [
+            ChatCompletionToolParam(
+                type="function",
+                function={
+                    "name": "get_current_weather",
+                    "description": "Get the current weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {
+                                "type": "string",
+                                "description": "The city and state, e.g. San Francisco, CA",
+                            },
+                            "format": {
+                                "type": "string",
+                                "enum": ["celsius", "fahrenheit"],
+                                "description": "The temperature unit to use. Infer this from the users location.",
+                            },
+                        },
+                        "required": ["location", "format"],
+                    },
+                },
+            )
+        ]
 
         messages = [
             {
@@ -434,7 +480,7 @@ async def main():
             },
         ]
 
-        context = OpenAILLMContext(messages)
+        context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
         # We have instructed the LLM to return 'YES' if it thinks the user
@@ -474,6 +520,8 @@ async def main():
                 or isinstance(frame, LLMMessagesFrame)
                 or isinstance(frame, StartInterruptionFrame)
                 or isinstance(frame, StopInterruptionFrame)
+                or isinstance(frame, FunctionCallInProgressFrame)
+                or isinstance(frame, FunctionCallResultFrame)
             )
 
         pipeline = Pipeline(
@@ -511,7 +559,7 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,

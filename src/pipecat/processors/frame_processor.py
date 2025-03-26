@@ -5,7 +5,6 @@
 #
 
 import asyncio
-import inspect
 from enum import Enum
 from typing import Awaitable, Callable, Coroutine, Optional
 
@@ -23,8 +22,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
-from pipecat.utils.asyncio import TaskManager
-from pipecat.utils.utils import obj_count, obj_id
+from pipecat.utils.asyncio import BaseTaskManager
+from pipecat.utils.base_object import BaseObject
 
 
 class FrameDirection(Enum):
@@ -32,7 +31,7 @@ class FrameDirection(Enum):
     UPSTREAM = 2
 
 
-class FrameProcessor:
+class FrameProcessor(BaseObject):
     def __init__(
         self,
         *,
@@ -40,19 +39,16 @@ class FrameProcessor:
         metrics: Optional[FrameProcessorMetrics] = None,
         **kwargs,
     ):
-        self._id: int = obj_id()
-        self._name = name or f"{self.__class__.__name__}#{obj_count(self)}"
+        super().__init__(name=name)
         self._parent: Optional["FrameProcessor"] = None
         self._prev: Optional["FrameProcessor"] = None
         self._next: Optional["FrameProcessor"] = None
-
-        self._event_handlers: dict = {}
 
         # Clock
         self._clock: Optional[BaseClock] = None
 
         # Task Manager
-        self._task_manager: Optional[TaskManager] = None
+        self._task_manager: Optional[BaseTaskManager] = None
 
         # Other properties
         self._allow_interruptions = False
@@ -73,10 +69,11 @@ class FrameProcessor:
         self._metrics.set_processor_name(self.name)
 
         # Processors have an input queue. The input queue will be processed
-        # immediately (default) or it will block if `pause_processing_frames()` is
-        # called. To resume processing frames we need to call
-        # `resume_processing_frames()`.
+        # immediately (default) or it will block if `pause_processing_frames()`
+        # is called. To resume processing frames we need to call
+        # `resume_processing_frames()` which will wake up the event.
         self.__should_block_frames = False
+        self.__input_event = asyncio.Event()
         self.__input_frame_task: Optional[asyncio.Task] = None
 
         # Every processor in Pipecat should only output frames from a single
@@ -150,10 +147,13 @@ class FrameProcessor:
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
-    def create_task(self, coroutine: Coroutine) -> asyncio.Task:
+    def create_task(self, coroutine: Coroutine, name: Optional[str] = None) -> asyncio.Task:
         if not self._task_manager:
             raise Exception(f"{self} TaskManager is still not initialized.")
-        name = f"{self}::{coroutine.cr_code.co_name}"
+        if name:
+            name = f"{self}::{name}"
+        else:
+            name = f"{self}::{coroutine.cr_code.co_name}"
         return self._task_manager.create_task(coroutine, name)
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
@@ -167,6 +167,7 @@ class FrameProcessor:
         await self._task_manager.wait_for_task(task, timeout)
 
     async def cleanup(self):
+        await super().cleanup()
         await self.__cancel_input_task()
         await self.__cancel_push_task()
 
@@ -191,7 +192,7 @@ class FrameProcessor:
             raise Exception(f"{self} Clock is still not initialized.")
         return self._clock
 
-    def get_task_manager(self) -> TaskManager:
+    def get_task_manager(self) -> BaseTaskManager:
         if not self._task_manager:
             raise Exception(f"{self} TaskManager is still not initialized.")
         return self._task_manager
@@ -239,37 +240,28 @@ class FrameProcessor:
         elif isinstance(frame, StopInterruptionFrame):
             self._should_report_ttfb = True
         elif isinstance(frame, CancelFrame):
-            self._cancelling = True
+            await self.__cancel(frame)
 
     async def push_error(self, error: ErrorFrame):
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        if not self._check_ready(frame):
+            return
+
         if isinstance(frame, SystemFrame):
             await self.__internal_push_frame(frame, direction)
         else:
             await self.__push_queue.put((frame, direction))
 
-    def event_handler(self, event_name: str):
-        def decorator(handler):
-            self.add_event_handler(event_name, handler)
-            return handler
-
-        return decorator
-
-    def add_event_handler(self, event_name: str, handler):
-        if event_name not in self._event_handlers:
-            raise Exception(f"Event handler {event_name} not registered")
-        self._event_handlers[event_name].append(handler)
-
-    def _register_event_handler(self, event_name: str):
-        if event_name in self._event_handlers:
-            raise Exception(f"Event handler {event_name} already registered")
-        self._event_handlers[event_name] = []
-
     async def __start(self, frame: StartFrame):
         self.__create_input_task()
         self.__create_push_task()
+
+    async def __cancel(self, frame: CancelFrame):
+        self._cancelling = True
+        await self.__cancel_input_task()
+        await self.__cancel_push_task()
 
     #
     # Handle interruptions
@@ -319,11 +311,21 @@ class FrameProcessor:
             await self.push_error(ErrorFrame(str(e)))
             raise
 
+    def _check_ready(self, frame: Frame):
+        # If we are trying to push a frame but we still have no clock, it means
+        # we didn't process a StartFrame.
+        if not self._clock:
+            logger.error(
+                f"{self} not properly initialized, missing super().process_frame(frame, direction)?"
+            )
+            return False
+        return True
+
     def __create_input_task(self):
         if not self.__input_frame_task:
             self.__should_block_frames = False
+            self.__input_event.clear()
             self.__input_queue = asyncio.Queue()
-            self.__input_event = asyncio.Event()
             self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
     async def __cancel_input_task(self):
@@ -366,16 +368,3 @@ class FrameProcessor:
             (frame, direction) = await self.__push_queue.get()
             await self.__internal_push_frame(frame, direction)
             self.__push_queue.task_done()
-
-    async def _call_event_handler(self, event_name: str, *args, **kwargs):
-        try:
-            for handler in self._event_handlers[event_name]:
-                if inspect.iscoroutinefunction(handler):
-                    await handler(self, *args, **kwargs)
-                else:
-                    handler(self, *args, **kwargs)
-        except Exception as e:
-            logger.exception(f"Exception in event handler {event_name}: {e}")
-
-    def __str__(self):
-        return self.name

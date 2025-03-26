@@ -87,14 +87,65 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """Initialize processor with aggregation state."""
         super().__init__(**kwargs)
         self._current_text_parts: List[str] = []
-        self._aggregation_start_time: Optional[str] | None = None
+        self._aggregation_start_time: Optional[str] = None
 
     async def _emit_aggregated_text(self):
-        """Emit aggregated text as a transcript message."""
+        """Aggregates and emits text fragments as a transcript message.
+
+        This method uses a heuristic to automatically detect whether text fragments
+        use pre-spacing (spaces at the beginning of fragments) or not, and applies
+        the appropriate joining strategy. It handles fragments from different TTS
+        services with different formatting patterns.
+
+        Examples:
+            Pre-spaced fragments (concatenated):
+                ```
+                TTSTextFrame: ["Hello"]
+                TTSTextFrame: [" there"]
+                TTSTextFrame: ["!"]
+                TTSTextFrame: [" How"]
+                TTSTextFrame: ["'s"]
+                TTSTextFrame: [" it"]
+                TTSTextFrame: [" going"]
+                TTSTextFrame: ["?"]
+                ```
+                Result: "Hello there! How's it going?"
+
+            Word-by-word fragments (joined with spaces):
+                ```
+                TTSTextFrame: ["Hello"]
+                TTSTextFrame: ["there!"]
+                TTSTextFrame: ["How"]
+                TTSTextFrame: ["is"]
+                TTSTextFrame: ["it"]
+                TTSTextFrame: ["going?"]
+                ```
+                Result: "Hello there! How is it going?"
+        """
         if self._current_text_parts and self._aggregation_start_time:
-            content = " ".join(self._current_text_parts).strip()
+            # Heuristic to detect pre-spaced fragments
+            uses_prespacing = False
+            if len(self._current_text_parts) > 1:
+                # Check if any fragment after the first one starts with whitespace
+                has_spaced_parts = any(
+                    part and part[0].isspace() for part in self._current_text_parts[1:]
+                )
+                if has_spaced_parts:
+                    uses_prespacing = True
+
+            # Apply appropriate joining method
+            if uses_prespacing:
+                # Pre-spaced fragments - just concatenate
+                content = "".join(self._current_text_parts)
+            else:
+                # Word-by-word fragments - join with spaces
+                content = " ".join(self._current_text_parts)
+
+            # Clean up any excessive whitespace
+            content = content.strip()
+
             if content:
-                logger.debug(f"Emitting aggregated assistant message: {content}")
+                logger.trace(f"Emitting aggregated assistant message: {content}")
                 message = TranscriptionMessage(
                     role="assistant",
                     content=content,
@@ -102,7 +153,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
                 )
                 await self._emit_update([message])
             else:
-                logger.debug("No content to emit after stripping whitespace")
+                logger.trace("No content to emit after stripping whitespace")
 
             # Reset aggregation state
             self._current_text_parts = []

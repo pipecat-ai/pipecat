@@ -9,32 +9,20 @@ import copy
 import io
 import json
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, List, Optional
+from typing import Any, List, Optional
 
-from loguru import logger
+from openai._types import NOT_GIVEN, NotGiven
+from openai.types.chat import (
+    ChatCompletionMessageParam,
+    ChatCompletionToolChoiceOptionParam,
+    ChatCompletionToolParam,
+)
 from PIL import Image
 
-from pipecat.frames.frames import (
-    AudioRawFrame,
-    Frame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
-)
+from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.frames.frames import AudioRawFrame, Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-try:
-    from openai._types import NOT_GIVEN, NotGiven
-    from openai.types.chat import (
-        ChatCompletionMessageParam,
-        ChatCompletionToolChoiceOptionParam,
-        ChatCompletionToolParam,
-    )
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
 
 # JSON custom encoder to handle bytes arrays so that we can log contexts
 # with images to the console.
@@ -51,14 +39,20 @@ class CustomEncoder(json.JSONEncoder):
 class OpenAILLMContext:
     def __init__(
         self,
-        messages: List[ChatCompletionMessageParam] | None = None,
-        tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN,
+        messages: Optional[List[ChatCompletionMessageParam]] = None,
+        tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = NOT_GIVEN,
         tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN,
     ):
         self._messages: List[ChatCompletionMessageParam] = messages if messages else []
         self._tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = tool_choice
-        self._tools: List[ChatCompletionToolParam] | NotGiven = tools
-        self._user_image_request_context = {}
+        self._tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = tools
+        self._llm_adapter: Optional[BaseLLMAdapter] = None
+
+    def get_llm_adapter(self) -> Optional[BaseLLMAdapter]:
+        return self._llm_adapter
+
+    def set_llm_adapter(self, llm_adapter: BaseLLMAdapter):
+        self._llm_adapter = llm_adapter
 
     @staticmethod
     def from_messages(messages: List[dict]) -> "OpenAILLMContext":
@@ -75,7 +69,9 @@ class OpenAILLMContext:
         return self._messages
 
     @property
-    def tools(self) -> List[ChatCompletionToolParam] | NotGiven:
+    def tools(self) -> List[ChatCompletionToolParam] | NotGiven | List[Any]:
+        if self._llm_adapter:
+            return self._llm_adapter.from_standard_tools(self._tools)
         return self._tools
 
     @property
@@ -160,8 +156,8 @@ class OpenAILLMContext:
     def set_tool_choice(self, tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven):
         self._tool_choice = tool_choice
 
-    def set_tools(self, tools: List[ChatCompletionToolParam] | NotGiven = NOT_GIVEN):
-        if tools != NOT_GIVEN and len(tools) == 0:
+    def set_tools(self, tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = NOT_GIVEN):
+        if tools != NOT_GIVEN and isinstance(tools, list) and len(tools) == 0:
             tools = NOT_GIVEN
         self._tools = tools
 
@@ -183,61 +179,6 @@ class OpenAILLMContext:
     def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: str = None):
         # todo: implement for OpenAI models and others
         pass
-
-    async def call_function(
-        self,
-        f: Callable[
-            [str, str, Any, FrameProcessor, "OpenAILLMContext", Callable[[Any], Awaitable[None]]],
-            Awaitable[None],
-        ],
-        *,
-        function_name: str,
-        tool_call_id: str,
-        arguments: str,
-        llm: FrameProcessor,
-        run_llm: bool = True,
-    ) -> None:
-        logger.info(f"Calling function {function_name} with arguments {arguments}")
-        # Push a SystemFrame downstream. This frame will let our assistant context aggregator
-        # know that we are in the middle of a function call. Some contexts/aggregators may
-        # not need this. But some definitely do (Anthropic, for example).
-        # Also push a SystemFrame upstream for use by other processors, like STTMuteFilter.
-        progress_frame_downstream = FunctionCallInProgressFrame(
-            function_name=function_name,
-            tool_call_id=tool_call_id,
-            arguments=arguments,
-        )
-        progress_frame_upstream = FunctionCallInProgressFrame(
-            function_name=function_name,
-            tool_call_id=tool_call_id,
-            arguments=arguments,
-        )
-
-        # Push frame both downstream and upstream
-        await llm.push_frame(progress_frame_downstream, FrameDirection.DOWNSTREAM)
-        await llm.push_frame(progress_frame_upstream, FrameDirection.UPSTREAM)
-
-        # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
-        async def function_call_result_callback(result, *, properties=None):
-            result_frame_downstream = FunctionCallResultFrame(
-                function_name=function_name,
-                tool_call_id=tool_call_id,
-                arguments=arguments,
-                result=result,
-                properties=properties,
-            )
-            result_frame_upstream = FunctionCallResultFrame(
-                function_name=function_name,
-                tool_call_id=tool_call_id,
-                arguments=arguments,
-                result=result,
-                properties=properties,
-            )
-
-            await llm.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
-            await llm.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
-
-        await f(function_name, tool_call_id, arguments, llm, self, function_call_result_callback)
 
     def create_wav_header(self, sample_rate, num_channels, bits_per_sample, data_size):
         # RIFF chunk descriptor

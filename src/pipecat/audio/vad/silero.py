@@ -5,6 +5,7 @@
 #
 
 import time
+from typing import Optional
 
 import numpy as np
 from loguru import logger
@@ -104,11 +105,8 @@ class SileroOnnxModel:
 
 
 class SileroVADAnalyzer(VADAnalyzer):
-    def __init__(self, *, sample_rate: int = 16000, params: VADParams = VADParams()):
-        super().__init__(sample_rate=sample_rate, num_channels=1, params=params)
-
-        if sample_rate != 16000 and sample_rate != 8000:
-            raise ValueError("Silero VAD sample rate needs to be 16000 or 8000")
+    def __init__(self, *, sample_rate: Optional[int] = None, params: VADParams = VADParams()):
+        super().__init__(sample_rate=sample_rate, params=params)
 
         logger.debug("Loading Silero VAD model...")
 
@@ -137,6 +135,12 @@ class SileroVADAnalyzer(VADAnalyzer):
     #
     # VADAnalyzer
     #
+
+    def set_sample_rate(self, sample_rate: int):
+        if sample_rate != 16000 and sample_rate != 8000:
+            raise ValueError("Silero VAD sample rate needs to be 16000 or 8000")
+
+        super().set_sample_rate(sample_rate)
 
     def num_frames_required(self) -> int:
         return 512 if self.sample_rate == 16000 else 256

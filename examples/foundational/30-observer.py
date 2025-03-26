@@ -18,12 +18,10 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    LLMTextFrame,
     StartInterruptionFrame,
 )
 from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.loggers.llm_log_observer import LLMLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -73,38 +71,6 @@ class DebugObserver(BaseObserver):
             logger.info(f"🤖 BOT STOP SPEAKING: {src} {arrow} {dst} at {time_sec:.2f}s")
 
 
-class LLMLogObserver(BaseObserver):
-    """Observer to log LLM activity to the console.
-
-    Logs all frame instances of:
-    - LLMFullResponseStartFrame (only from LLM service)
-    - LLMTextFrame
-    - LLMFullResponseEndFrame (only from LLM service)
-
-    This allows you to track when the LLM starts responding, what it generates, and when it finishes.
-    Log format: [LLM EVENT]: [details] at [timestamp]s
-    """
-
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
-        time_sec = timestamp / 1_000_000_000
-
-        # Only log start/end frames from OpenAILLMService
-        if isinstance(frame, (LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
-            if isinstance(src, OpenAILLMService):
-                event = "START" if isinstance(frame, LLMFullResponseStartFrame) else "END"
-                logger.info(f"🧠 LLM {event} RESPONSE at {time_sec:.2f}s")
-        # Log all LLMTextFrames
-        elif isinstance(frame, LLMTextFrame):
-            logger.info(f"🧠 LLM GENERATING: {frame.text!r} at {time_sec:.2f}s")
-
-
 async def main():
     async with aiohttp.ClientSession() as session:
         (room_url, token) = await configure(session)
@@ -123,7 +89,7 @@ async def main():
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22",  # British Lady
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
@@ -151,13 +117,13 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
                 report_only_initial_ttfb=True,
-                observers=[DebugObserver(), LLMLogObserver()],
             ),
+            observers=[DebugObserver(), LLMLogObserver()],
         )
 
         @transport.event_handler("on_first_participant_joined")

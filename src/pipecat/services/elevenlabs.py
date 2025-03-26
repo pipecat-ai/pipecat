@@ -14,22 +14,18 @@ from loguru import logger
 from pydantic import BaseModel, model_validator
 
 from pipecat.frames.frames import (
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService, WordTTSService
-from pipecat.services.websocket_service import WebsocketService
+from pipecat.services.ai_services import InterruptibleWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for ElevenLabs configuration needed
@@ -55,7 +51,7 @@ ELEVENLABS_MULTILINGUAL_MODELS = {
 }
 
 
-def language_to_elevenlabs_language(language: Language) -> str | None:
+def language_to_elevenlabs_language(language: Language) -> Optional[str]:
     BASE_LANGUAGES = {
         Language.AR: "ar",
         Language.BG: "bg",
@@ -104,17 +100,60 @@ def language_to_elevenlabs_language(language: Language) -> str | None:
     return result
 
 
-def sample_rate_from_output_format(output_format: str) -> int:
-    match output_format:
-        case "pcm_16000":
-            return 16000
-        case "pcm_22050":
-            return 22050
-        case "pcm_24000":
-            return 24000
-        case "pcm_44100":
-            return 44100
-    return 16000
+def output_format_from_sample_rate(sample_rate: int) -> str:
+    match sample_rate:
+        case 8000:
+            return "pcm_8000"
+        case 16000:
+            return "pcm_16000"
+        case 22050:
+            return "pcm_22050"
+        case 24000:
+            return "pcm_24000"
+        case 44100:
+            return "pcm_44100"
+    logger.warning(
+        f"ElevenLabsTTSService: No output format available for {sample_rate} sample rate"
+    )
+    return "pcm_24000"
+
+
+def build_elevenlabs_voice_settings(
+    settings: Dict[str, Any],
+) -> Optional[Dict[str, Union[float, bool]]]:
+    """Build voice settings dictionary for ElevenLabs based on provided settings.
+
+    Args:
+        settings: Dictionary containing voice settings parameters
+
+    Returns:
+        Dictionary of voice settings or None if required parameters are missing
+    """
+    voice_settings = {}
+    if settings["stability"] is not None and settings["similarity_boost"] is not None:
+        voice_settings["stability"] = settings["stability"]
+        voice_settings["similarity_boost"] = settings["similarity_boost"]
+        if settings["style"] is not None:
+            voice_settings["style"] = settings["style"]
+        if settings["use_speaker_boost"] is not None:
+            voice_settings["use_speaker_boost"] = settings["use_speaker_boost"]
+        if settings["speed"] is not None:
+            voice_settings["speed"] = settings["speed"]
+    else:
+        if settings["style"] is not None:
+            logger.warning(
+                "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+            )
+        if settings["use_speaker_boost"] is not None:
+            logger.warning(
+                "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+            )
+        if settings["speed"] is not None:
+            logger.warning(
+                "'speed' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
+            )
+
+    return voice_settings or None
 
 
 def calculate_word_times(
@@ -138,7 +177,7 @@ def calculate_word_times(
     return word_times
 
 
-class ElevenLabsTTSService(WordTTSService, WebsocketService):
+class ElevenLabsTTSService(InterruptibleWordTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = None
         optimize_streaming_latency: Optional[str] = None
@@ -146,6 +185,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         similarity_boost: Optional[float] = None
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
+        speed: Optional[float] = None
         auto_mode: Optional[bool] = True
 
         @model_validator(mode="after")
@@ -165,7 +205,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         voice_id: str,
         model: str = "eleven_flash_v2_5",
         url: str = "wss://api.elevenlabs.io",
-        output_format: ElevenLabsOutputFormat = "pcm_24000",
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -183,34 +223,32 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         # Finally, ElevenLabs doesn't provide information on when the bot stops
         # speaking for a while, so we want the parent class to send TTSStopFrame
         # after a short period not receiving any audio.
-        WordTTSService.__init__(
-            self,
+        super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,
             push_stop_frames=True,
-            stop_frame_timeout_s=2.0,
-            sample_rate=sample_rate_from_output_format(output_format),
+            pause_frame_processing=True,
+            sample_rate=sample_rate,
             **kwargs,
         )
-        WebsocketService.__init__(self)
 
         self._api_key = api_key
         self._url = url
         self._settings = {
-            "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
             else None,
-            "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
+            "speed": params.speed,
             "auto_mode": str(params.auto_mode).lower(),
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
+        self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
 
         # Indicates if we have sent TTSStartedFrame. It will reset to False when
@@ -218,35 +256,17 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         self._started = False
         self._cumulative_time = 0
 
+        self._receive_task = None
+        self._keepalive_task = None
+
     def can_generate_metrics(self) -> bool:
         return True
 
-    def language_to_service_language(self, language: Language) -> str | None:
+    def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_elevenlabs_language(language)
 
     def _set_voice_settings(self):
-        voice_settings = {}
-        if (
-            self._settings["stability"] is not None
-            and self._settings["similarity_boost"] is not None
-        ):
-            voice_settings["stability"] = self._settings["stability"]
-            voice_settings["similarity_boost"] = self._settings["similarity_boost"]
-            if self._settings["style"] is not None:
-                voice_settings["style"] = self._settings["style"]
-            if self._settings["use_speaker_boost"] is not None:
-                voice_settings["use_speaker_boost"] = self._settings["use_speaker_boost"]
-        else:
-            if self._settings["style"] is not None:
-                logger.warning(
-                    "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-                )
-            if self._settings["use_speaker_boost"] is not None:
-                logger.warning(
-                    "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-                )
-
-        return voice_settings or None
+        return build_elevenlabs_voice_settings(self._settings)
 
     async def set_model(self, model: str):
         await super().set_model(model)
@@ -254,7 +274,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         await self._disconnect()
         await self._connect()
 
-    async def _update_settings(self, settings: Dict[str, Any]):
+    async def _update_settings(self, settings: Mapping[str, Any]):
         prev_voice = self._voice_id
         await super()._update_settings(settings)
         if not prev_voice == self._voice_id:
@@ -264,6 +284,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        self._output_format = output_format_from_sample_rate(self.sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -286,24 +307,14 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        # If we received a TTSSpeakFrame and the LLM response included text (it
-        # might be that it's only a function calling response) we pause
-        # processing more frames until we receive a BotStoppedSpeakingFrame.
-        if isinstance(frame, TTSSpeakFrame):
-            await self.pause_processing_frames()
-        elif isinstance(frame, LLMFullResponseEndFrame) and self._started:
-            await self.pause_processing_frames()
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.resume_processing_frames()
-
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.create_task(self._receive_task_handler(self.push_error))
-        self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+
+        if not self._keepalive_task:
+            self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
         if self._receive_task:
@@ -318,11 +329,14 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
 
     async def _connect_websocket(self):
         try:
+            if self._websocket:
+                return
+
             logger.debug("Connecting to ElevenLabs")
 
             voice_id = self._voice_id
             model = self.model_name
-            output_format = self._settings["output_format"]
+            output_format = self._output_format
             url = f"{self._url}/v1/text-to-speech/{voice_id}/stream-input?model_id={model}&output_format={output_format}&auto_mode={self._settings['auto_mode']}"
 
             if self._settings["optimize_streaming_latency"]:
@@ -352,6 +366,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
+            await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
         try:
@@ -367,15 +382,20 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
 
+    def _get_websocket(self):
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
     async def _receive_messages(self):
-        async for message in self._websocket:
+        async for message in self._get_websocket():
             msg = json.loads(message)
             if msg.get("audio"):
                 await self.stop_ttfb_metrics()
                 self.start_word_timestamps()
 
                 audio = base64.b64decode(msg["audio"])
-                frame = TTSAudioRawFrame(audio, self._settings["sample_rate"], 1)
+                frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
                 await self.push_frame(frame)
             if msg.get("alignment"):
                 word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
@@ -385,7 +405,11 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
     async def _keepalive_task_handler(self):
         while True:
             await asyncio.sleep(10)
-            await self._send_text("")
+            try:
+                await self._send_text("")
+            except websockets.ConnectionClosed as e:
+                logger.warning(f"{self} keepalive error: {e}")
+                break
 
     async def _send_text(self, text: str):
         if self._websocket:
@@ -393,7 +417,7 @@ class ElevenLabsTTSService(WordTTSService, WebsocketService):
             await self._websocket.send(json.dumps(msg))
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             if not self._websocket:
@@ -428,7 +452,7 @@ class ElevenLabsHttpTTSService(TTSService):
         aiohttp_session: aiohttp ClientSession
         model: Model ID (default: "eleven_flash_v2_5" for low latency)
         base_url: API base URL
-        output_format: Audio output format (PCM)
+        sample_rate: Output sample rate
         params: Additional parameters for voice configuration
     """
 
@@ -439,6 +463,7 @@ class ElevenLabsHttpTTSService(TTSService):
         similarity_boost: Optional[float] = None
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
+        speed: Optional[float] = None
 
     def __init__(
         self,
@@ -448,65 +473,42 @@ class ElevenLabsHttpTTSService(TTSService):
         aiohttp_session: aiohttp.ClientSession,
         model: str = "eleven_flash_v2_5",
         base_url: str = "https://api.elevenlabs.io",
-        output_format: ElevenLabsOutputFormat = "pcm_24000",
+        sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(sample_rate=sample_rate_from_output_format(output_format), **kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
         self._base_url = base_url
-        self._output_format = output_format
         self._params = params
         self._session = aiohttp_session
 
         self._settings = {
-            "sample_rate": sample_rate_from_output_format(output_format),
             "language": self.language_to_service_language(params.language)
             if params.language
             else None,
-            "output_format": output_format,
             "optimize_streaming_latency": params.optimize_streaming_latency,
             "stability": params.stability,
             "similarity_boost": params.similarity_boost,
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
+            "speed": params.speed,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
+        self._output_format = ""  # initialized in start()
         self._voice_settings = self._set_voice_settings()
 
     def can_generate_metrics(self) -> bool:
         return True
 
-    def _set_voice_settings(self) -> Optional[Dict[str, Union[float, bool]]]:
-        """Configure voice settings if stability and similarity_boost are provided.
+    def _set_voice_settings(self):
+        return build_elevenlabs_voice_settings(self._settings)
 
-        Returns:
-            Dictionary of voice settings or None if required parameters are missing.
-        """
-        voice_settings: Dict[str, Union[float, bool]] = {}
-        if (
-            self._settings["stability"] is not None
-            and self._settings["similarity_boost"] is not None
-        ):
-            voice_settings["stability"] = float(self._settings["stability"])
-            voice_settings["similarity_boost"] = float(self._settings["similarity_boost"])
-            if self._settings["style"] is not None:
-                voice_settings["style"] = float(self._settings["style"])
-            if self._settings["use_speaker_boost"] is not None:
-                voice_settings["use_speaker_boost"] = bool(self._settings["use_speaker_boost"])
-        else:
-            if self._settings["style"] is not None:
-                logger.warning(
-                    "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-                )
-            if self._settings["use_speaker_boost"] is not None:
-                logger.warning(
-                    "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-                )
-
-        return voice_settings or None
+    async def start(self, frame: StartFrame):
+        await super().start(frame)
+        self._output_format = output_format_from_sample_rate(self.sample_rate)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using ElevenLabs streaming API.
@@ -517,7 +519,7 @@ class ElevenLabsHttpTTSService(TTSService):
         Yields:
             Frames containing audio data and status information
         """
-        logger.debug(f"Generating TTS: [{text}]")
+        logger.debug(f"{self}: Generating TTS [{text}]")
 
         url = f"{self._base_url}/v1/text-to-speech/{self._voice_id}/stream"
 
@@ -565,18 +567,18 @@ class ElevenLabsHttpTTSService(TTSService):
                     return
 
                 await self.start_tts_usage_metrics(text)
+
+                # Process the streaming response
+                CHUNK_SIZE = 1024
+
                 yield TTSStartedFrame()
-
-                async for chunk in response.content:
-                    if chunk:
+                async for chunk in response.content.iter_chunked(CHUNK_SIZE):
+                    if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
-                        yield TTSAudioRawFrame(chunk, self._settings["sample_rate"], 1)
-
-                yield TTSStoppedFrame()
-
+                        yield TTSAudioRawFrame(chunk, self.sample_rate, 1)
         except Exception as e:
             logger.error(f"Error in run_tts: {e}")
             yield ErrorFrame(error=str(e))
-
         finally:
+            await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

@@ -23,8 +23,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.fal import FalImageGenService
-from pipecat.services.google import GoogleLLMService
+from pipecat.services.google import GoogleImageGenService, GoogleLLMService
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,
@@ -105,7 +104,7 @@ async def main(room_url, token=None):
 
         main_task = PipelineTask(
             main_pipeline,
-            PipelineParams(
+            params=PipelineParams(
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,

@@ -22,10 +22,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.tk import TkLocalTransport
+from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -62,12 +61,12 @@ async def main():
         tk_root.title("Local Mirror")
 
         daily_transport = DailyTransport(
-            room_url, token, "Test", DailyParams(audio_in_enabled=True, audio_in_sample_rate=24000)
+            room_url, token, "Test", DailyParams(audio_in_enabled=True)
         )
 
         tk_transport = TkLocalTransport(
             tk_root,
-            TransportParams(
+            TkTransportParams(
                 audio_out_enabled=True,
                 camera_out_enabled=True,
                 camera_out_is_live=True,
@@ -82,7 +81,13 @@ async def main():
 
         pipeline = Pipeline([daily_transport.input(), MirrorProcessor(), tk_transport.output()])
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                audio_in_sample_rate=24000,
+                audio_out_sample_rate=24000,
+            ),
+        )
 
         async def run_tk():
             while not task.has_finished():
