@@ -13,27 +13,21 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.azure import AzureLLMService
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.openai import OpenAILLMContext
+from pipecat.services.fal import FalSTTService
+from pipecat.services.gladia import GladiaSTTService
+from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
-
-
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    await result_callback({"conditions": "nice", "temperature": "75"})
 
 
 async def main():
@@ -46,10 +40,14 @@ async def main():
             "Respond bot",
             DailyParams(
                 audio_out_enabled=True,
-                transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
             ),
+        )
+
+        stt = FalSTTService(
+            api_key=os.getenv("FAL_KEY"),
         )
 
         tts = CartesiaTTSService(
@@ -57,32 +55,8 @@ async def main():
             voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
-        llm = AzureLLMService(
-            api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
-            endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-            model=os.getenv("AZURE_CHATGPT_MODEL"),
-        )
-        # You can also register a function_name of None to get all functions
-        # sent to the same callback with an additional function_name parameter.
-        llm.register_function("get_current_weather", fetch_weather_from_api)
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
-        weather_function = FunctionSchema(
-            name="get_current_weather",
-            description="Get the current weather",
-            properties={
-                "location": {
-                    "type": "string",
-                    "description": "The city and state, e.g. San Francisco, CA",
-                },
-                "format": {
-                    "type": "string",
-                    "enum": ["celsius", "fahrenheit"],
-                    "description": "The temperature unit to use. Infer this from the user's location.",
-                },
-            },
-            required=["location", "format"],
-        )
-        tools = ToolsSchema(standard_tools=[weather_function])
         messages = [
             {
                 "role": "system",
@@ -90,17 +64,18 @@ async def main():
             },
         ]
 
-        context = OpenAILLMContext(messages, tools)
+        context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
         pipeline = Pipeline(
             [
-                transport.input(),
-                context_aggregator.user(),
-                llm,
-                tts,
-                transport.output(),
-                context_aggregator.assistant(),
+                transport.input(),  # Transport user input
+                stt,  # STT
+                context_aggregator.user(),  # User responses
+                llm,  # LLM
+                tts,  # TTS
+                transport.output(),  # Transport bot output
+                context_aggregator.assistant(),  # Assistant spoken responses
             ]
         )
 
@@ -110,6 +85,7 @@ async def main():
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
+                report_only_initial_ttfb=True,
             ),
         )
 
@@ -117,7 +93,13 @@ async def main():
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
+            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([context_aggregator.user().get_context_frame()])
+
+        # Register an event handler to exit the application when the user leaves.
+        @transport.event_handler("on_participant_left")
+        async def on_participant_left(transport, participant, reason):
+            await task.cancel()
 
         runner = PipelineRunner()
 

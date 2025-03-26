@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -43,6 +44,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -114,11 +116,34 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self._messages_added_manually = {}
         self._user_and_response_message_tuple = None
 
+        self._register_event_handler("on_conversation_item_created")
+        self._register_event_handler("on_conversation_item_updated")
+        self._retrieve_conversation_item_futures = {}
+
     def can_generate_metrics(self) -> bool:
         return True
 
     def set_audio_input_paused(self, paused: bool):
         self._audio_input_paused = paused
+
+    async def retrieve_conversation_item(self, item_id: str):
+        future = self.get_event_loop().create_future()
+        retrieval_in_flight = False
+        if not self._retrieve_conversation_item_futures.get(item_id):
+            self._retrieve_conversation_item_futures[item_id] = []
+        else:
+            retrieval_in_flight = True
+        self._retrieve_conversation_item_futures[item_id].append(future)
+        if not retrieval_in_flight:
+            await self.send_client_event(
+                # Set event_id to "rci_{item_id}" so that we can identify an
+                # error later if the retrieval fails. We don't need a UUID
+                # suffix to the event_id because we're ensuring only one
+                # in-flight retrieval per item_id. (Note: "rci" = "retrieve
+                # conversation item")
+                events.ConversationItemRetrieveEvent(item_id=item_id, event_id=f"rci_{item_id}")
+            )
+        return await future
 
     #
     # standard AIService frame handling
@@ -353,8 +378,12 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._handle_evt_audio_done(evt)
             elif evt.type == "conversation.item.created":
                 await self._handle_evt_conversation_item_created(evt)
+            elif evt.type == "conversation.item.input_audio_transcription.delta":
+                await self._handle_evt_input_audio_transcription_delta(evt)
             elif evt.type == "conversation.item.input_audio_transcription.completed":
                 await self.handle_evt_input_audio_transcription_completed(evt)
+            elif evt.type == "conversation.item.retrieved":
+                await self._handle_conversation_item_retrieved(evt)
             elif evt.type == "response.done":
                 await self._handle_evt_response_done(evt)
             elif evt.type == "input_audio_buffer.speech_started":
@@ -364,9 +393,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             elif evt.type == "response.audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "error":
-                await self._handle_evt_error(evt)
-                # errors are fatal, so exit the receive loop
-                return
+                if not await self._maybe_handle_evt_retrieve_conversation_item_error(evt):
+                    await self._handle_evt_error(evt)
+                    # errors are fatal, so exit the receive loop
+                    return
 
     async def _handle_evt_session_created(self, evt):
         # session.created is received right after connecting. Send a message
@@ -408,6 +438,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             # receive a BotStoppedSpeakingFrame from the output transport.
 
     async def _handle_evt_conversation_item_created(self, evt):
+        await self._call_event_handler("on_conversation_item_created", evt.item.id, evt.item)
+
         # This will get sent from the server every time a new "message" is added
         # to the server's conversation state, whether we create it via the API
         # or the server creates it from LLM output.
@@ -424,7 +456,16 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             self._current_assistant_response = evt.item
             await self.push_frame(LLMFullResponseStartFrame())
 
+    async def _handle_evt_input_audio_transcription_delta(self, evt):
+        if self._send_transcription_frames:
+            await self.push_frame(
+                # no way to get a language code?
+                InterimTranscriptionFrame(evt.delta, "", time_now_iso8601())
+            )
+
     async def handle_evt_input_audio_transcription_completed(self, evt):
+        await self._call_event_handler("on_conversation_item_updated", evt.item_id, None)
+
         if self._send_transcription_frames:
             await self.push_frame(
                 # no way to get a language code?
@@ -442,6 +483,12 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             # User message without preceding conversation.item.created. Bug?
             logger.warning(f"Transcript for unknown user message: {evt}")
 
+    async def _handle_conversation_item_retrieved(self, evt: events.ConversationItemRetrieved):
+        futures = self._retrieve_conversation_item_futures.pop(evt.item.id, None)
+        if futures:
+            for future in futures:
+                future.set_result(evt.item)
+
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
         # usage metrics
@@ -454,7 +501,15 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self.stop_processing_metrics()
         await self.push_frame(LLMFullResponseEndFrame())
         self._current_assistant_response = None
+        # error handling
+        if evt.response.status == "failed":
+            await self.push_error(
+                ErrorFrame(error=evt.response.status_details["error"]["message"], fatal=True)
+            )
+            return
         # response content
+        for item in evt.response.output:
+            await self._call_event_handler("on_conversation_item_updated", item.id, item)
         pair = self._user_and_response_message_tuple
         if pair:
             user, assistant = pair
@@ -471,6 +526,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_evt_audio_transcript_delta(self, evt):
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
+            await self.push_frame(TTSTextFrame(evt.delta))
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
@@ -484,6 +540,22 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self._stop_interruption()
         await self.push_frame(StopInterruptionFrame())
         await self.push_frame(UserStoppedSpeakingFrame())
+
+    async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt: events.ErrorEvent):
+        """If the given error event is an error retrieving a conversation item:
+        - set an exception on the future that retrieve_conversation_item() is waiting on
+        - return true
+        Otherwise:
+        - return false
+        """
+        if evt.error.code == "item_retrieve_invalid_item_id":
+            item_id = evt.error.event_id.split("_", 1)[1]  # event_id is of the form "rci_{item_id}"
+            futures = self._retrieve_conversation_item_futures.pop(item_id, None)
+            if futures:
+                for future in futures:
+                    future.set_exception(Exception(evt.error.message))
+            return True
+        return False
 
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
@@ -507,7 +579,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             arguments = json.loads(item.arguments)
             if self.has_function(function_name):
                 run_llm = index == total_items - 1
-                if function_name in self._callbacks.keys():
+                if function_name in self._functions.keys():
                     await self.call_function(
                         context=self._context,
                         tool_call_id=tool_id,
@@ -515,7 +587,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                         arguments=arguments,
                         run_llm=run_llm,
                     )
-                elif None in self._callbacks.keys():
+                elif None in self._functions.keys():
                     await self.call_function(
                         context=self._context,
                         tool_call_id=tool_id,

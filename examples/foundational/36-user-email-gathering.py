@@ -11,18 +11,16 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+from openai.types.chat import ChatCompletionToolParam
 from runner import configure
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.cerebras import CerebrasLLMService
-from pipecat.services.openai import OpenAILLMContext
+from pipecat.services.openai import OpenAILLMContext, OpenAILLMService
+from pipecat.services.rime import RimeHttpTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -31,9 +29,8 @@ logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
 
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    await result_callback({"conditions": "nice", "temperature": "75"})
+async def store_user_emails(function_name, tool_call_id, args, llm, context, result_callback):
+    print(f"User emails: {args}")
 
 
 async def main():
@@ -52,47 +49,56 @@ async def main():
             ),
         )
 
+        # Cartesia offers a `<spell></spell>` tags that we can use to ask the user
+        # to confirm the emails.
+        # (see https://docs.cartesia.ai/build-with-sonic/formatting-text-for-sonic/spelling-out-input-text)
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            aiohttp_session=session,
         )
 
-        llm = CerebrasLLMService(api_key=os.getenv("CEREBRAS_API_KEY"), model="llama-3.3-70b")
-        # You can also register a function_name of None to get all functions
+        # Rime offers a function `spell()` that we can use to ask the user
+        # to confirm the emails.
+        # (see https://docs.rime.ai/api-reference/spell)
+        # tts = RimeHttpTTSService(
+        #     api_key=os.getenv("RIME_API_KEY", ""),
+        #     voice_id="eva",
+        #     aiohttp_session=session,
+        # )
+
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        # You can aslo register a function_name of None to get all functions
         # sent to the same callback with an additional function_name parameter.
-        llm.register_function("get_current_weather", fetch_weather_from_api)
+        llm.register_function("store_user_emails", store_user_emails)
 
-        weather_function = FunctionSchema(
-            name="get_current_weather",
-            description="Get the current weather",
-            properties={
-                "location": {
-                    "type": "string",
-                    "description": "The city and state, e.g. San Francisco, CA",
+        tools = [
+            ChatCompletionToolParam(
+                type="function",
+                function={
+                    "name": "store_user_emails",
+                    "description": "Store user emails when confirmed",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "emails": {
+                                "type": "array",
+                                "description": "The list of user emails",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["emails"],
+                    },
                 },
-                "format": {
-                    "type": "string",
-                    "enum": ["celsius", "fahrenheit"],
-                    "description": "The temperature unit to use. Infer this from the user's location.",
-                },
-            },
-            required=["location", "format"],
-        )
-        tools = ToolsSchema(standard_tools=[weather_function])
+            )
+        ]
         messages = [
             {
                 "role": "system",
-                "content": """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
-
-You have one functions available:
-
-1. get_current_weather is used to get current weather information.
-
-Infer whether to use Fahrenheit or Celsius automatically based on the location, unless the user specifies a preference.
-
-Start by asking me for my location. Then, use 'get_weather_current' to give me a forecast.
-
-        Respond to what the user said in a creative and helpful way.""",
+                # Cartesia <spell></spell>
+                "content": "You need to gather a valid email or emails from the user. Your output will be converted to audio so don't include special characters in your answers. If the user provides one or more email addresses confirm them with the user. Enclose all emails with <spell> tags, for example <spell>a@a.com</spell>.",
+                # Rime spell()
+                # "content": "You need to gather a valid email or emails from the user. Your output will be converted to audio so don't include special characters in your answers. If the user provides one or more email addresses confirm them with the user. Enclose all emails with spell(), for example spell(a@a.com).",
             },
         ]
 

@@ -23,7 +23,6 @@ from pipecat.frames.frames import (
     OutputImageRawFrame,
     SpriteFrame,
     TextFrame,
-    UserImageRawFrame,
     UserImageRequestFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline

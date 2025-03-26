@@ -10,6 +10,7 @@ import io
 import json
 import os
 import time
+import uuid
 
 from google.api_core.exceptions import DeadlineExceeded
 from openai import AsyncStream
@@ -33,20 +34,22 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
-    FunctionCallResultProperties,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
-    OpenAILLMContextAssistantTimestampFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     URLImageRawFrame,
+    UserImageRawFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -71,6 +74,7 @@ try:
     import google.generativeai as gai
     from google import genai
     from google.api_core.client_options import ClientOptions
+    from google.auth.transport.requests import Request
     from google.cloud import speech_v2, texttospeech_v1
     from google.cloud.speech_v2.types import cloud_speech
     from google.genai import types
@@ -564,91 +568,72 @@ class GoogleUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    async def push_aggregation(self):
-        if not (
-            self._aggregation or self._function_call_result or self._pending_image_frame_message
-        ):
-            return
+    async def handle_aggregation(self, aggregation: str):
+        self._context.add_message(glm.Content(role="model", parts=[glm.Part(text=aggregation)]))
 
-        run_llm = False
-        properties: Optional[FunctionCallResultProperties] = None
-
-        aggregation = self._aggregation.strip()
-        self.reset()
-
-        try:
-            if aggregation:
-                self._context.add_message(
-                    glm.Content(role="model", parts=[glm.Part(text=aggregation)])
-                )
-
-            if self._function_call_result:
-                frame = self._function_call_result
-                properties = frame.properties
-                self._function_call_result = None
-                if frame.result:
-                    logger.debug(f"FunctionCallResultFrame result: {frame.arguments}")
-                    self._context.add_message(
-                        glm.Content(
-                            role="model",
-                            parts=[
-                                glm.Part(
-                                    function_call=glm.FunctionCall(
-                                        name=frame.function_name, args=frame.arguments
-                                    )
-                                )
-                            ],
+    async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
+        self._context.add_message(
+            glm.Content(
+                role="model",
+                parts=[
+                    glm.Part(
+                        function_call=glm.FunctionCall(
+                            id=frame.tool_call_id, name=frame.function_name, args=frame.arguments
                         )
                     )
-                    response = frame.result
-                    if isinstance(response, str):
-                        response = {"response": response}
-                    self._context.add_message(
-                        glm.Content(
-                            role="user",
-                            parts=[
-                                glm.Part(
-                                    function_response=glm.FunctionResponse(
-                                        name=frame.function_name, response=response
-                                    )
-                                )
-                            ],
+                ],
+            )
+        )
+        self._context.add_message(
+            glm.Content(
+                role="user",
+                parts=[
+                    glm.Part(
+                        function_response=glm.FunctionResponse(
+                            id=frame.tool_call_id,
+                            name=frame.function_name,
+                            response={"response": "IN_PROGRESS"},
                         )
                     )
-                    if properties and properties.run_llm is not None:
-                        # If the tool call result has a run_llm property, use it
-                        run_llm = properties.run_llm
-                    else:
-                        # Default behavior is to run the LLM if there are no function calls in progress
-                        run_llm = not bool(self._function_calls_in_progress)
+                ],
+            )
+        )
 
-            if self._pending_image_frame_message:
-                frame = self._pending_image_frame_message
-                self._pending_image_frame_message = None
-                self._context.add_image_frame_message(
-                    format=frame.user_image_raw_frame.format,
-                    size=frame.user_image_raw_frame.size,
-                    image=frame.user_image_raw_frame.image,
-                    text=frame.text,
-                )
-                run_llm = True
+    async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+        if frame.result:
+            await self._update_function_call_result(
+                frame.function_name, frame.tool_call_id, frame.result
+            )
+        else:
+            response = {"response": "COMPLETED"}
+            await self._update_function_call_result(
+                frame.function_name, frame.tool_call_id, response
+            )
 
-            if run_llm:
-                await self.push_context_frame(FrameDirection.UPSTREAM)
+    async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
+        response = {"response": "CANCELLED"}
+        await self._update_function_call_result(frame.function_name, frame.tool_call_id, response)
 
-            # Emit the on_context_updated callback once the function call result is added to the context
-            if properties and properties.on_context_updated is not None:
-                await properties.on_context_updated()
+    async def _update_function_call_result(
+        self, function_name: str, tool_call_id: str, result: Any
+    ):
+        for message in self._context.messages:
+            if message.role == "user":
+                for part in message.parts:
+                    if part.function_response and part.function_response.id == tool_call_id:
+                        part.function_response.response = result
 
-            # Push context frame
-            await self.push_context_frame()
-
-            # Push timestamp frame with current time
-            timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
-            await self.push_frame(timestamp_frame)
-
-        except Exception as e:
-            logger.exception(f"Error processing frame: {e}")
+    async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        response = {"response": "COMPLETED"}
+        await self._update_function_call_result(
+            frame.request.function_name, frame.request.tool_call_id, response
+        )
+        self._context.add_image_frame_message(
+            format=frame.format,
+            size=frame.size,
+            image=frame.image,
+            text=frame.request.context,
+        )
 
 
 @dataclass
@@ -1070,7 +1055,7 @@ class GoogleLLMService(LLMService):
                             args = type(c.function_call).to_dict(c.function_call).get("args", {})
                             await self.call_function(
                                 context=context,
-                                tool_call_id="what_should_this_be",
+                                tool_call_id=str(uuid.uuid4()),
                                 function_name=c.function_call.name,
                                 arguments=args,
                             )
@@ -1331,6 +1316,82 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
                     raise OpenAIUnhandledFunctionException(
                         f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
                     )
+
+
+class GoogleVertexLLMService(OpenAILLMService):
+    """Implements inference with Google's AI models via Vertex AI while
+    maintaining OpenAI API compatibility.
+
+    Reference:
+    https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library
+
+    """
+
+    class InputParams(OpenAILLMService.InputParams):
+        """Input parameters specific to Vertex AI."""
+
+        # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations
+        location: str = "us-east4"
+        project_id: str
+
+    def __init__(
+        self,
+        *,
+        credentials: Optional[str] = None,
+        credentials_path: Optional[str] = None,
+        model: str = "google/gemini-2.0-flash-001",
+        params: InputParams = OpenAILLMService.InputParams(),
+        **kwargs,
+    ):
+        """Initializes the VertexLLMService.
+        Args:
+            credentials (Optional[str]): JSON string of service account credentials.
+            credentials_path (Optional[str]): Path to the service account JSON file.
+            model (str): Model identifier. Defaults to "google/gemini-2.0-flash-001".
+            params (InputParams): Vertex AI input parameters.
+            **kwargs: Additional arguments for OpenAILLMService.
+        """
+        base_url = self._get_base_url(params)
+        self._api_key = self._get_api_token(credentials, credentials_path)
+
+        super().__init__(api_key=self._api_key, base_url=base_url, model=model, **kwargs)
+
+    @staticmethod
+    def _get_base_url(params: InputParams) -> str:
+        """Constructs the base URL for Vertex AI API."""
+        return (
+            f"https://{params.location}-aiplatform.googleapis.com/v1/"
+            f"projects/{params.project_id}/locations/{params.location}/endpoints/openapi"
+        )
+
+    @staticmethod
+    def _get_api_token(credentials: Optional[str], credentials_path: Optional[str]) -> str:
+        """Retrieves an authentication token using Google service account credentials.
+        Args:
+            credentials (Optional[str]): JSON string of service account credentials.
+            credentials_path (Optional[str]): Path to the service account JSON file.
+        Returns:
+            str: OAuth token for API authentication.
+        """
+        creds: Optional[service_account.Credentials] = None
+
+        if credentials:
+            # Parse and load credentials from JSON string
+            creds = service_account.Credentials.from_service_account_info(
+                json.loads(credentials), scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+        elif credentials_path:
+            # Load credentials from JSON file
+            creds = service_account.Credentials.from_service_account_file(
+                credentials_path, scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+
+        if not creds:
+            raise ValueError("No valid credentials provided.")
+
+        creds.refresh(Request())  # Ensure token is up-to-date, lifetime is 1 hour.
+
+        return creds.token
 
 
 class GoogleTTSService(TTSService):
@@ -1972,7 +2033,8 @@ class GoogleSTTService(STTService):
                         break
 
                 except Exception as e:
-                    logger.error(f"Stream error, attempting to reconnect: {e}")
+                    logger.warning(f"{self} Reconnecting: {e}")
+
                     await asyncio.sleep(1)  # Brief delay before reconnecting
                     self._stream_start_time = int(time.time() * 1000)
                     continue
@@ -2025,3 +2087,6 @@ class GoogleSTTService(STTService):
 
         except Exception as e:
             logger.error(f"Error processing Google STT responses: {e}")
+
+            # Re-raise the exception to let it propagate (e.g. in the case of a timeout, propagate to _stream_audio to reconnect)
+            raise

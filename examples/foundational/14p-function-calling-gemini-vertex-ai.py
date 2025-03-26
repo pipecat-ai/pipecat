@@ -20,8 +20,8 @@ from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.cerebras import CerebrasLLMService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
+from pipecat.services.google import GoogleVertexLLMService
 from pipecat.services.openai import OpenAILLMContext
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -52,13 +52,18 @@ async def main():
             ),
         )
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        tts = ElevenLabsTTSService(
+            api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+            voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
         )
 
-        llm = CerebrasLLMService(api_key=os.getenv("CEREBRAS_API_KEY"), model="llama-3.3-70b")
-        # You can also register a function_name of None to get all functions
+        llm = GoogleVertexLLMService(
+            # credentials="<json-credentials>",
+            params=GoogleVertexLLMService.InputParams(
+                project_id="<google-project-id>",
+            )
+        )
+        # You can aslo register a function_name of None to get all functions
         # sent to the same callback with an additional function_name parameter.
         llm.register_function("get_current_weather", fetch_weather_from_api)
 
@@ -79,20 +84,11 @@ async def main():
             required=["location", "format"],
         )
         tools = ToolsSchema(standard_tools=[weather_function])
+
         messages = [
             {
-                "role": "system",
-                "content": """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
-
-You have one functions available:
-
-1. get_current_weather is used to get current weather information.
-
-Infer whether to use Fahrenheit or Celsius automatically based on the location, unless the user specifies a preference.
-
-Start by asking me for my location. Then, use 'get_weather_current' to give me a forecast.
-
-        Respond to what the user said in a creative and helpful way.""",
+                "role": "user",
+                "content": "Start a conversation with 'Hey there' to get the current weather.",
             },
         ]
 
@@ -116,7 +112,6 @@ Start by asking me for my location. Then, use 'get_weather_current' to give me a
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
             ),
         )
 
