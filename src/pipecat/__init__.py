@@ -10,4 +10,4 @@ from loguru import logger
 
 __version__ = version("pipecat-ai")
 
-logger.info(f"ᓚᘏᗢ Pipecat {__version__} ᓚᘏᗢ")
+logger.info(f"ᓚᘏᗢ Pipecat {__version__} ᓚᘏᗢ - Talqover Version")
