@@ -369,7 +369,7 @@ class LLMService(AIService):
         if tuple_to_remove:
             self._function_call_tasks.discard(tuple_to_remove)
             # The task is finished so this should exit immediately. We need to
-            # do this because otherwise the task manager would have a dangling
+            # do this because otherwise the task manager would report a dangling
             # task if we don't remove it.
             asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
 
@@ -1048,9 +1048,14 @@ class SegmentedSTTService(STTService):
             await self._handle_user_stopped_speaking(frame)
 
     async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
+        if frame.emulated:
+            return
         self._user_speaking = True
 
     async def _handle_user_stopped_speaking(self, frame: UserStoppedSpeakingFrame):
+        if frame.emulated:
+            return
+
         self._user_speaking = False
 
         content = io.BytesIO()
@@ -1068,7 +1073,7 @@ class SegmentedSTTService(STTService):
         self._audio_buffer.clear()
 
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
-        # If the user is speaking the audio buffer will keep growin.
+        # If the user is speaking the audio buffer will keep growing.
         self._audio_buffer += frame.audio
 
         # If the user is not speaking we keep just a little bit of audio.

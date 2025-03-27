@@ -117,10 +117,10 @@ class BaseInputTransport(FrameProcessor):
             await self._handle_bot_interruption(frame)
         elif isinstance(frame, EmulateUserStartedSpeakingFrame):
             logger.debug("Emulating user started speaking")
-            await self._handle_user_interruption(UserStartedSpeakingFrame())
+            await self._handle_user_interruption(UserStartedSpeakingFrame(emulated=True))
         elif isinstance(frame, EmulateUserStoppedSpeakingFrame):
             logger.debug("Emulating user stopped speaking")
-            await self._handle_user_interruption(UserStoppedSpeakingFrame())
+            await self._handle_user_interruption(UserStoppedSpeakingFrame(emulated=True))
         # All other system frames
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)

@@ -6,7 +6,7 @@
 
 import asyncio
 from abc import abstractmethod
-from typing import Dict, List
+from typing import Dict, List, Literal, Set
 
 from loguru import logger
 
@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMMessagesFrame,
     LLMMessagesUpdateFrame,
+    LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     OpenAILLMContextAssistantTimestampFrame,
@@ -141,6 +142,11 @@ class BaseLLMResponseAggregator(FrameProcessor):
         pass
 
     @abstractmethod
+    def set_tool_choice(self, tool_choice):
+        """Set the tool choice. This should modify the LLM context."""
+        pass
+
+    @abstractmethod
     def reset(self):
         """Reset the internals of this aggregator. This should not modify the
         internal messages."""
@@ -204,6 +210,9 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     def set_tools(self, tools: List):
         self._context.set_tools(tools)
 
+    def set_tool_choice(self, tool_choice: Literal["none", "auto", "required"] | dict):
+        self._context.set_tool_choice(tool_choice)
+
     def reset(self):
         self._aggregation = ""
 
@@ -240,7 +249,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._waiting_for_aggregation = False
 
     async def handle_aggregation(self, aggregation: str):
-        self._context.add_message({"role": self.role, "content": self._aggregation})
+        self._context.add_message({"role": self.role, "content": aggregation})
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -274,16 +283,20 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             self.set_messages(frame.messages)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
+        elif isinstance(frame, LLMSetToolChoiceFrame):
+            self.set_tool_choice(frame.tool_choice)
         else:
             await self.push_frame(frame, direction)
 
     async def push_aggregation(self):
         if len(self._aggregation) > 0:
-            await self.handle_aggregation(self._aggregation)
+            aggregation = self._aggregation
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
             self.reset()
+
+            await self.handle_aggregation(aggregation)
 
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
@@ -297,9 +310,15 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     async def _cancel(self, frame: CancelFrame):
         await self._cancel_aggregation_task()
 
-    async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
+    async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
         self._user_speaking = True
         self._waiting_for_aggregation = True
+
+        # If we get a non-emulated UserStartedSpeakingFrame but we are in the
+        # middle of emulating VAD, let's stop emulating VAD (i.e. don't send the
+        # EmulateUserStoppedSpeakingFrame).
+        if not frame.emulated and self._emulating_vad:
+            self._emulating_vad = False
 
     async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
         self._user_speaking = False
@@ -380,6 +399,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
         self._started = 0
         self._function_calls_in_progress: Dict[str, FunctionCallInProgressFrame] = {}
+        self._context_updated_tasks: Set[asyncio.Task] = set()
 
     async def handle_aggregation(self, aggregation: str):
         self._context.add_message({"role": "assistant", "content": aggregation})
@@ -414,6 +434,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             self.set_messages(frame.messages)
         elif isinstance(frame, LLMSetToolsFrame):
             self.set_tools(frame.tools)
+        elif isinstance(frame, LLMSetToolChoiceFrame):
+            self.set_tool_choice(frame.tool_choice)
         elif isinstance(frame, FunctionCallInProgressFrame):
             await self._handle_function_call_in_progress(frame)
         elif isinstance(frame, FunctionCallResultFrame):
@@ -486,10 +508,14 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             if run_llm:
                 await self.push_context_frame(FrameDirection.UPSTREAM)
 
-        # Emit the on_context_updated callback once the function call
-        # result is added to the context
+        # Call the `on_context_updated` callback once the function call result
+        # is added to the context. Also, run this in a separate task to make
+        # sure we don't block the pipeline.
         if properties and properties.on_context_updated:
-            await properties.on_context_updated()
+            task_name = f"{frame.function_name}:{frame.tool_call_id}:on_context_updated"
+            task = self.create_task(properties.on_context_updated(), task_name)
+            self._context_updated_tasks.add(task)
+            task.add_done_callback(self._context_updated_task_finished)
 
     async def _handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
         logger.debug(
@@ -534,6 +560,13 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             self._aggregation += f" {frame.text}" if self._aggregation else frame.text
         else:
             self._aggregation += frame.text
+
+    def _context_updated_task_finished(self, task: asyncio.Task):
+        self._context_updated_tasks.discard(task)
+        # The task is finished so this should exit immediately. We need to do
+        # this because otherwise the task manager would report a dangling task
+        # if we don't remove it.
+        asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
 
 
 class LLMUserResponseAggregator(LLMUserContextAggregator):
