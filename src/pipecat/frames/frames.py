@@ -562,14 +562,14 @@ class UserStartedSpeakingFrame(SystemFrame):
 
     """
 
-    pass
+    emulated: bool = False
 
 
 @dataclass
 class UserStoppedSpeakingFrame(SystemFrame):
     """Emitted by the VAD to indicate that a user stopped speaking."""
 
-    pass
+    emulated: bool = False
 
 
 @dataclass

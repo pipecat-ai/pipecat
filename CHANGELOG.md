@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added support for a new TTS service, `PiperTTSService`.
   (see https://github.com/rhasspy/piper/)
 
+- It is now possible to tell whether `UserStartedSpeakingFrame` or
+  `UserStoppedSpeakingFrame` have been generated because of emulation frames.
+
+### Fixed
+
+- Fixed an issue that would cause `SegmentedSTTService` based services
+  (e.g. `OpenAISTTService`) to try to transcribe non-spoken audio, causing
+  invalid transcriptions.
+
 ## [0.0.61] - 2025-03-26
 
 ### Added
@@ -28,9 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ElevenLabs TTS services now support a sample rate of 8000.
 
-- Added support for `instructions` in `OpenAITTSService`
+- Added support for `instructions` in `OpenAITTSService`.
 
-- Added support for `base_url` in `OpenAIImageGenService` and `OpenAITTSService`
+- Added support for `base_url` in `OpenAIImageGenService` and
+  `OpenAITTSService`.
 
 ### Fixed
 
