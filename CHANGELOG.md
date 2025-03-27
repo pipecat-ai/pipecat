@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for a new TTS service, `PiperTTSService`.
+  (see https://github.com/rhasspy/piper/)
+
 - It is now possible to tell whether `UserStartedSpeakingFrame` or
   `UserStoppedSpeakingFrame` have been generated because of emulation frames.
 
