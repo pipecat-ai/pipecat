@@ -456,6 +456,9 @@ class CallConfigManager:
     def get_dialin_settings(self) -> Optional[Dict[str, Any]]:
         """Extract dialin settings from the body.
 
+        Handles both camelCase and snake_case variations of fields for backward compatibility,
+        but normalizes to snake_case for internal usage.
+
         Returns:
             Dictionary containing dialin settings or None if not present
         """
@@ -464,10 +467,13 @@ class CallConfigManager:
             return None
 
         # Normalize dialin settings to handle different case variations
+        # Prioritize snake_case (call_id, call_domain) but fall back to camelCase (callId, callDomain)
         dialin_settings = {
-            "call_id": raw_dialin_settings.get("callId") or raw_dialin_settings.get("call_id"),
-            "call_domain": raw_dialin_settings.get("callDomain")
-            or raw_dialin_settings.get("call_domain"),
+            "call_id": raw_dialin_settings.get("call_id") or raw_dialin_settings.get("callId"),
+            "call_domain": raw_dialin_settings.get("call_domain")
+            or raw_dialin_settings.get("callDomain"),
+            "to": raw_dialin_settings.get("to") or raw_dialin_settings.get("To"),
+            "from": raw_dialin_settings.get("from") or raw_dialin_settings.get("From"),
         }
 
         return dialin_settings

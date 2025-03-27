@@ -1,16 +1,3 @@
-#
-# Copyright (c) 2024–2025, Daily
-#
-# SPDX-License-Identifier: BSD 2-Clause License
-#
-"""bot_runner.py.
-
-HTTP service that listens for incoming calls from either Daily or Twilio,
-provisioning a room and starting a Pipecat bot in response.
-
-Refer to README for more information.
-"""
-
 import argparse
 import json
 import os
@@ -66,6 +53,45 @@ daily_helpers = {}
 # ----------------- Configuration Helpers ----------------- #
 
 
+def determine_room_capabilities(config_body: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
+    """Determine room capabilities based on the configuration.
+
+    This function examines the configuration to determine which capabilities
+    the Daily room should have enabled.
+
+    Args:
+        config_body: Configuration dictionary that determines room capabilities
+
+    Returns:
+        Dictionary of capability flags
+    """
+    capabilities = {
+        "enable_dialin": False,
+        "enable_dialout": False,
+        # Add more capabilities here in the future as needed
+    }
+
+    if not config_body:
+        return capabilities
+
+    # Check for dialin capability
+    capabilities["enable_dialin"] = "dialin_settings" in config_body
+
+    # Check for dialout capability - needed for outbound calls or transfers
+    has_dialout_settings = "dialout_settings" in config_body
+
+    # Check if there's a transfer to an operator configured
+    has_call_transfer = "call_transfer" in config_body
+    has_operator_number = has_call_transfer and "operatorNumber" in config_body.get(
+        "call_transfer", {}
+    )
+
+    # Enable dialout if any condition requires it
+    capabilities["enable_dialout"] = has_dialout_settings or has_operator_number
+
+    return capabilities
+
+
 def ensure_dialout_settings_array(body: Dict[str, Any]) -> Dict[str, Any]:
     """Ensures dialout_settings is an array of objects.
 
@@ -96,8 +122,6 @@ def validate_body(body: Dict[str, Any]) -> None:
     body = ensure_dialout_settings_array(body)
 
     # Check for incompatible scenario combinations
-    has_dialin = "dialin_settings" in body
-    has_dialout = "dialout_settings" in body
     has_call_transfer = "call_transfer" in body
     has_voicemail = "voicemail_detection" in body
 
@@ -112,11 +136,8 @@ def validate_body(body: Dict[str, Any]) -> None:
     # Error scenarios
     errors = []
 
-    # Cannot have both dialin and dialout settings (unless in test mode)
-    if has_dialin and has_dialout and not (call_transfer_test or voicemail_test):
-        errors.append(
-            "Cannot have both 'dialin_settings' and 'dialout_settings' in the same configuration"
-        )
+    # The restriction for having both dialin and dialout settings has been removed
+    # This allows for future functionality that might use both simultaneously
 
     # Cannot have both call_transfer and voicemail_detection
     if has_call_transfer and has_voicemail:
@@ -124,17 +145,12 @@ def validate_body(body: Dict[str, Any]) -> None:
             "Cannot have both 'call_transfer' and 'voicemail_detection' in the same configuration"
         )
 
-    # Dialin should only be used with call_transfer (unless in test mode)
-    if has_dialin and has_voicemail and not voicemail_test:
-        errors.append(
-            "'dialin_settings' can only be used with 'call_transfer', not with 'voicemail_detection'"
-        )
+    # The restriction that dialin_settings can only be used with call_transfer has been removed
+    # This allows greater flexibility for future scenarios
 
-    # Dialout should only be used with voicemail_detection (unless in test mode)
-    if has_dialout and has_call_transfer and not call_transfer_test:
-        errors.append(
-            "'dialout_settings' can only be used with 'voicemail_detection', not with 'call_transfer'"
-        )
+    # The restriction that dialout_settings can only be used with voicemail_detection has been removed
+    # This allows call_transfer to work with dialout_settings for future functionality
+    # where the bot might need to dial out to customers
 
     # If we have any errors, raise an exception with all the problems
     if errors:
@@ -202,25 +218,37 @@ def create_call_transfer_settings(body: Dict[str, Any]) -> Dict[str, Any]:
 # ----------------- Daily Room Management ----------------- #
 
 
-async def create_daily_room(room_url: Optional[str]):
-    """Create or retrieve a Daily room with appropriate properties.
+async def create_daily_room(room_url: Optional[str], config_body: Optional[Dict[str, Any]] = None):
+    """Create or retrieve a Daily room with appropriate properties based on the configuration.
 
     Args:
         room_url: Optional existing room URL
+        config_body: Optional configuration that determines room capabilities
 
     Returns:
         Dict containing room URL, token, and SIP endpoint
     """
     if not room_url:
-        # Create base properties
-        properties = DailyRoomProperties(
-            sip=DailyRoomSipParams(
+        # Get room capabilities based on the configuration
+        capabilities = determine_room_capabilities(config_body)
+
+        # Configure SIP parameters if dialin is needed
+        sip_params = None
+        if capabilities["enable_dialin"]:
+            sip_params = DailyRoomSipParams(
                 display_name="dialin-user", video=False, sip_mode="dial-in", num_endpoints=1
             )
-        )
 
-        # Always enable dialout capability as we may need to transfer to an operator
-        properties.enable_dialout = True
+        # Create the properties object with the appropriate settings
+        properties = DailyRoomProperties(sip=sip_params)
+
+        # Set dialout capability if needed
+        if capabilities["enable_dialout"]:
+            properties.enable_dialout = True
+
+        # Log the capabilities being used
+        capability_str = ", ".join([f"{k}={v}" for k, v in capabilities.items()])
+        print(f"Creating room with capabilities: {capability_str}")
 
         params = DailyRoomParams(properties=properties)
 
@@ -250,19 +278,22 @@ async def create_daily_room(room_url: Optional[str]):
 async def process_dialin_request(data: Dict[str, Any]) -> Dict[str, Any]:
     """Process incoming dial-in request data to create a properly formatted body.
 
+    Converts camelCase fields received from webhook to snake_case format
+    for internal consistency across the codebase.
+
     Args:
         data: Raw dialin data from webhook
 
     Returns:
-        Properly formatted configuration
+        Properly formatted configuration with snake_case keys
     """
     # Create base body with dialin settings
     body = {
         "dialin_settings": {
             "to": data.get("To", ""),
             "from": data.get("From", ""),
-            "callId": data.get("callId", data.get("CallSid", "")),
-            "callDomain": data.get("callDomain", ""),
+            "call_id": data.get("callId", data.get("CallSid", "")),  # Convert to snake_case
+            "call_domain": data.get("callDomain", ""),  # Convert to snake_case
         }
     }
 
@@ -387,7 +418,7 @@ async def twilio_start_bot(request: Request):
     print(f"CallId: {call_id}")
 
     # Create Daily room for the Twilio call
-    room_details = await create_daily_room(room_url)
+    room_details = await create_daily_room(room_url, None)  # No special config for Twilio rooms
 
     # Start the Twilio bot
     await start_twilio_bot(room_details, call_id)
@@ -463,7 +494,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
             body = ensure_prompt_config(body)
 
             # Handle call transfer test scenario
-            room_details = await create_daily_room(room_url)
+            room_details = await create_daily_room(room_url, body)
             await start_bot(room_details, body, "call_transfer")
 
             return JSONResponse(
@@ -481,7 +512,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
             body = ensure_prompt_config(body)
 
             # Handle dialin call transfer scenario
-            room_details = await create_daily_room(room_url)
+            room_details = await create_daily_room(room_url, body)
             await start_bot(room_details, body, "call_transfer")
 
             if body.get("call_transfer", {}).get("testInPrebuilt", False):
@@ -507,7 +538,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
             body = ensure_prompt_config(body)
 
             # Handle voicemail detection test scenario
-            room_details = await create_daily_room(room_url)
+            room_details = await create_daily_room(room_url, body)
             await start_bot(room_details, body, "voicemail_detection")
 
             return JSONResponse(
@@ -525,7 +556,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
             body = ensure_prompt_config(body)
 
             # Handle dialout voicemail detection scenario
-            room_details = await create_daily_room(room_url)
+            room_details = await create_daily_room(room_url, body)
             await start_bot(room_details, body, "voicemail_detection")
 
             # Get the first dialout info for logging (if available)

@@ -133,9 +133,9 @@ curl -X POST "http://localhost:7860/start" \
      -d '{
          "config": {
             "llm": "openai",
-            "dialout_settings": {
+            "dialout_settings": [{
                "phoneNumber": "+12345678910"
-            },
+            }],
             "voicemail_detection": {
                "testInPrebuilt": false
             }
@@ -264,11 +264,13 @@ When making requests to the `/start` endpoint, the config object can include:
 			"callId": "callid-read-only-string",
 			"callDomain": "callDomain-read-only-string"
 		},
-		"dialout_settings": {
-			"phoneNumber": "+12345678910",
-			"callerId": "caller-id-uuid",
-			"sipUri": "sip:maria@example.com"
-		},
+		"dialout_settings": [
+			{
+				"phoneNumber": "+12345678910",
+				"callerId": "caller-id-uuid",
+				"sipUri": "sip:maria@example.com"
+			}
+		],
 		"call_transfer": {
 			"mode": "dialout",
 			"speakSummary": true,
@@ -300,6 +302,115 @@ When making requests to the `/start` endpoint, the config object can include:
   - `testInPrebuilt`: Test without actual phone calls
 - `voicemail_detection`: For voicemail detection example:
   - `testInPrebuilt`: Test without actual phone calls
+
+## Feature Compatibility
+
+The following table shows which feature combinations are supported when making requests to the `/start` endpoint. The table is organized by use case to help you create the correct configuration.
+
+| Use Case                                                        | `call_transfer` | `voicemail_detection` | `dialin_settings` | `dialout_settings` | `operatorNumber` | `testInPrebuilt` | Status           |
+| --------------------------------------------------------------- | --------------- | --------------------- | ----------------- | ------------------ | ---------------- | ---------------- | ---------------- |
+| **Standard call transfer (incoming call)**                      | ✓               | ✗                     | ✓                 | ✗                  | ✓                | ✗                | ✅ Supported     |
+| **Standard voicemail detection (outgoing call)**                | ✗               | ✓                     | ✗                 | ✓                  | ✗                | ✗                | ✅ Supported     |
+| **Test mode: Call transfer in Daily Prebuilt**                  | ✓               | ✗                     | ✗                 | ✗                  | ✓                | ✓                | ✅ Supported     |
+| **Test mode: Voicemail detection in Daily Prebuilt**            | ✗               | ✓                     | ✗                 | ✗                  | ✗                | ✓                | ✅ Supported     |
+| **Basic incoming call handling (no transfer)**                  | ✗               | ✗                     | ✓                 | ✗                  | ✗                | ✗                | ⏳ Coming Soon   |
+| **Basic outgoing call handling (no voicemail detection)**       | ✗               | ✗                     | ✗                 | ✓                  | ✗                | ✗                | ⏳ Coming Soon   |
+| Call transfer requires operatorNumber                           | ✓               | ✗                     | ✓                 | ✗                  | ✗                | ✓/✗              | ❌ Not Supported |
+| Voicemail detection requires dialout_settings or testInPrebuilt | ✗               | ✓                     | ✓                 | ✗                  | ✗                | ✓/✗              | ❌ Not Supported |
+| Cannot have both call_transfer and voicemail_detection          | ✓               | ✓                     | ✓                 | ✓                  | ✓                | ✓/✗              | ❌ Not Supported |
+| Call_transfer needs dialin_settings in non-test mode            | ✓               | ✗                     | ✗                 | ✗                  | ✓                | ✗                | ❌ Not Supported |
+| Voicemail_detection needs dialout_settings in non-test mode     | ✗               | ✓                     | ✗                 | ✗                  | ✗                | ✗                | ❌ Not Supported |
+| Insufficient configuration                                      | ✗               | ✗                     | ✗                 | ✗                  | ✗                | ✓/✗              | ❌ Not Supported |
+
+### Legend:
+
+- ✓: Required
+- ✗: Not allowed
+- ✓/✗: Optional
+- ✅: Supported
+- ⏳: Coming Soon
+- ❌: Not Supported
+
+### Notes:
+
+- `dialin_settings` is typically populated automatically from webhook data for incoming calls
+- `dialout_settings` must be specified manually for outgoing calls
+- `operatorNumber` is specified within the `call_transfer` object (`"call_transfer": {"operatorNumber": "+1234567890", ...}`)
+- `testInPrebuilt` is specified within either the `call_transfer` or `voicemail_detection` object
+- For call transfers, `operatorNumber` must be provided to specify which operator to dial. If it is not provided, we will base it off of the operator map in call_connection_manager.py
+- In test mode (`testInPrebuilt: true`), some requirements are relaxed to allow testing in Daily Prebuilt
+- The `llm` parameter is required in all configurations (`"openai"` or `"gemini"`)
+- Multiple customers to dial out to can be specified by providing an array of objects in `dialout_settings`
+
+### Configuration Examples
+
+#### Standard call transfer (incoming call):
+
+```json
+{
+	"config": {
+		"llm": "openai",
+		"dialin_settings": {
+			"from": "+12345678901",
+			"to": "+19876543210",
+			"call_id": "call-id-string",
+			"call_domain": "domain-string"
+		},
+		"call_transfer": {
+			"mode": "dialout",
+			"speakSummary": true,
+			"operatorNumber": "+12345678910"
+		}
+	}
+}
+```
+
+#### Test mode: Call transfer in Daily Prebuilt:
+
+```json
+{
+	"config": {
+		"llm": "openai",
+		"call_transfer": {
+			"mode": "dialout",
+			"speakSummary": true,
+			"operatorNumber": "+12345678910",
+			"testInPrebuilt": true
+		}
+	}
+}
+```
+
+#### Test mode: Voicemail detection in Daily Prebuilt:
+
+```json
+{
+	"config": {
+		"llm": "openai",
+		"voicemail_detection": {
+			"testInPrebuilt": true
+		}
+	}
+}
+```
+
+#### Standard voicemail detection :
+
+```json
+{
+	"config": {
+		"llm": "openai",
+		"dialout_settings": [
+			{
+				"phoneNumber": "+12345678910"
+			}
+		],
+		"voicemail_detection": {
+			"testInPrebuilt": false
+		}
+	}
+}
+```
 
 ## Using Twilio (Alternative)
 
@@ -392,9 +503,9 @@ curl -X POST "http://localhost:7860/start" \
                   "text": "Hello, this is ACME Corporation calling. Please call us back at 555-123-4567 regarding your recent order. Thank you!"
                }
             ],
-            "dialout_settings": {
+            "dialout_settings": [{
                "phoneNumber": "+12345678910"
-            },
+            }],
             "voicemail_detection": {
                "testInPrebuilt": false
             }
