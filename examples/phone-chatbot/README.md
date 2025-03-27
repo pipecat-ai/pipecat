@@ -309,7 +309,7 @@ The following table shows which feature combinations are supported when making r
 
 | Use Case                                                        | `call_transfer` | `voicemail_detection` | `dialin_settings` | `dialout_settings` | `operatorNumber` | `testInPrebuilt` | Status           |
 | --------------------------------------------------------------- | --------------- | --------------------- | ----------------- | ------------------ | ---------------- | ---------------- | ---------------- |
-| **Standard call transfer (incoming call)**                      | ✓               | ✗                     | ✓                 | ✗                  | ✓                | ✗                | ✅ Supported     |
+| **Standard call transfer (incoming call)**                      | ✓               | ✗                     | ✓                 | ✗                  | ✓/✗              | ✗                | ✅ Supported     |
 | **Standard voicemail detection (outgoing call)**                | ✗               | ✓                     | ✗                 | ✓                  | ✗                | ✗                | ✅ Supported     |
 | **Test mode: Call transfer in Daily Prebuilt**                  | ✓               | ✗                     | ✗                 | ✗                  | ✓                | ✓                | ✅ Supported     |
 | **Test mode: Voicemail detection in Daily Prebuilt**            | ✗               | ✓                     | ✗                 | ✗                  | ✗                | ✓                | ✅ Supported     |
@@ -437,44 +437,9 @@ Make requests to `/start_twilio_bot` for Twilio-specific functionality.
 
 ## Deployment
 
-A Dockerfile is included for containerized deployment. Here's how to deploy to [fly.io](https://fly.io):
+See Pipecat Cloud deployment docs for how to deploy this example: https://docs.pipecat.daily.co/agents/deploy
 
-1. Build the Docker image:
-
-   ```shell
-   docker build -t tag:project .
-   ```
-
-2. Prepare the fly.toml file:
-
-   ```shell
-   mv fly.example.toml fly.toml
-   ```
-
-3. Launch the fly project:
-
-   ```shell
-   fly launch
-   ```
-
-4. Set secrets:
-
-   ```shell
-   fly secrets set DAILY_API_KEY=... OPENAI_API_KEY=... CARTESIA_API_KEY=... DEEPGRAM_API_KEY=...
-   ```
-
-   For Twilio:
-
-   ```shell
-   fly secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=...
-   ```
-
-5. Deploy:
-   ```shell
-   fly deploy
-   ```
-
-> **Note:** This demo spawns agents as subprocesses for demonstration purposes. For production, consider a different architecture to better handle concurrent calls.
+We also have a great, easy to use quickstart guide here: https://docs.pipecat.daily.co/quickstart
 
 ## Customizing Bot Prompts
 
