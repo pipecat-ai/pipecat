@@ -2,16 +2,20 @@
 
 import asyncio
 
+import aiohttp
 import pytest
 from aiohttp import web
 
 from pipecat.frames.frames import (
     ErrorFrame,
     TTSAudioRawFrame,
+    TTSSpeakFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.services.piper import PiperTTSService
+from pipecat.tests.utils import run_test
 
 
 @pytest.mark.asyncio
@@ -37,8 +41,8 @@ async def test_run_piper_tts_success(aiohttp_client):
 
         # Write out some chunked byte data
         # In reality, you’d return WAV data or similar
-        data_chunk_1 = b"\x00\x01\x02\x03" * 12000  # 48000 bytes
-        data_chunk_2 = b"\x04\x05\x06\x07" * 6000  # another chunk
+        data_chunk_1 = b"\x00\x01\x02\x03" * 1024  # 4096 bytes, 04 TTSAudioRawFrame
+        data_chunk_2 = b"\x04\x05\x06\x07" * 1024  # another chunk
         await resp.write(data_chunk_1)
         await asyncio.sleep(0.01)  # simulate async chunk delay
         await resp.write(data_chunk_2)
@@ -48,30 +52,43 @@ async def test_run_piper_tts_success(aiohttp_client):
 
     # Create an aiohttp test server
     app = web.Application()
-    app.router.add_get("/", handler)
+    app.router.add_post("/", handler)
     client = await aiohttp_client(app)
 
     # Remove trailing slash if present in the test URL
     base_url = str(client.make_url("")).rstrip("/")
 
-    # Instantiate PiperTTSService with our mock server
-    tts_service = PiperTTSService(base_url=base_url)
+    async with aiohttp.ClientSession() as session:
+        # Instantiate PiperTTSService with our mock server
+        tts_service = PiperTTSService(base_url=base_url, aiohttp_session=session, sample_rate=24000)
 
-    # Collect frames from the generator
-    frames = []
-    async for frame in tts_service.run_tts("Hello world."):
-        frames.append(frame)
+        frames_to_send = [
+            TTSSpeakFrame(text="Hello world."),
+        ]
 
-    # Ensure we received frames in the expected order/types
-    assert len(frames) >= 3, "Expecting at least TTSStartedFrame, TTSAudioRawFrame, TTSStoppedFrame"
-    assert isinstance(frames[0], TTSStartedFrame), "First frame must be TTSStartedFrame"
-    assert isinstance(frames[-1], TTSStoppedFrame), "Last frame must be TTSStoppedFrame"
+        expected_returned_frames = [
+            TTSStartedFrame,
+            TTSAudioRawFrame,
+            TTSAudioRawFrame,
+            TTSAudioRawFrame,
+            TTSAudioRawFrame,
+            TTSAudioRawFrame,
+            TTSAudioRawFrame,
+            TTSAudioRawFrame,
+            TTSAudioRawFrame,
+            TTSStoppedFrame,
+            TTSTextFrame,
+        ]
 
-    # Check we have at least one TTSAudioRawFrame
-    audio_frames = [f for f in frames if isinstance(f, TTSAudioRawFrame)]
-    assert len(audio_frames) > 0, "Should have received at least one TTSAudioRawFrame"
-    for a_frame in audio_frames:
-        assert a_frame.sample_rate == 24000, "Sample rate should match the default (24000)"
+        frames_received = await run_test(
+            tts_service,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+        down_frames = frames_received[0]
+        audio_frames = [f for f in down_frames if isinstance(f, TTSAudioRawFrame)]
+        for a_frame in audio_frames:
+            assert a_frame.sample_rate == 24000, "Sample rate should match the default (24000)"
 
 
 @pytest.mark.asyncio
@@ -86,16 +103,30 @@ async def test_run_piper_tts_error(aiohttp_client):
         return web.Response(status=404, text="Not found")
 
     app = web.Application()
-    app.router.add_get("/", handler)
+    app.router.add_post("/", handler)
     client = await aiohttp_client(app)
     base_url = str(client.make_url("")).rstrip("/")
 
-    tts_service = PiperTTSService(base_url=base_url)
+    async with aiohttp.ClientSession() as session:
+        tts_service = PiperTTSService(base_url=base_url, aiohttp_session=session, sample_rate=24000)
 
-    frames = []
-    async for frame in tts_service.run_tts("Error case."):
-        frames.append(frame)
+        frames_to_send = [
+            TTSSpeakFrame(text="Error case."),
+        ]
 
-    assert len(frames) == 1, "Should only receive a single ErrorFrame"
-    assert isinstance(frames[0], ErrorFrame), "Must receive an ErrorFrame for 404"
-    assert "status: 404" in frames[0].error, "ErrorFrame should contain details about the 404"
+        expected_down_frames = [TTSStoppedFrame, TTSTextFrame]
+
+        expected_up_frames = [ErrorFrame]
+
+        frames_received = await run_test(
+            tts_service,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            expected_up_frames=expected_up_frames,
+        )
+        up_frames = frames_received[1]
+
+        assert isinstance(up_frames[0], ErrorFrame), "Must receive an ErrorFrame for 404"
+        assert "status: 404" in up_frames[0].error, (
+            "ErrorFrame should contain details about the 404"
+        )
