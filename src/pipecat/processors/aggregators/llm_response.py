@@ -249,7 +249,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._waiting_for_aggregation = False
 
     async def handle_aggregation(self, aggregation: str):
-        self._context.add_message({"role": self.role, "content": self._aggregation})
+        self._context.add_message({"role": self.role, "content": aggregation})
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -290,11 +290,13 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def push_aggregation(self):
         if len(self._aggregation) > 0:
-            await self.handle_aggregation(self._aggregation)
+            aggregation = self._aggregation
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
             self.reset()
+
+            await self.handle_aggregation(aggregation)
 
             frame = OpenAILLMContextFrame(self._context)
             await self.push_frame(frame)
@@ -308,9 +310,15 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     async def _cancel(self, frame: CancelFrame):
         await self._cancel_aggregation_task()
 
-    async def _handle_user_started_speaking(self, _: UserStartedSpeakingFrame):
+    async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
         self._user_speaking = True
         self._waiting_for_aggregation = True
+
+        # If we get a non-emulated UserStartedSpeakingFrame but we are in the
+        # middle of emulating VAD, let's stop emulating VAD (i.e. don't send the
+        # EmulateUserStoppedSpeakingFrame).
+        if not frame.emulated and self._emulating_vad:
+            self._emulating_vad = False
 
     async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
         self._user_speaking = False
