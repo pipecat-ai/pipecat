@@ -5,10 +5,9 @@ from contextlib import asynccontextmanager
 from typing import Dict
 
 import uvicorn
-from aiortc_bot import run_bot
+from bot import run_bot
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
-from fastapi.responses import FileResponse
 
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
@@ -22,6 +21,8 @@ app = FastAPI()
 # Store connections by pc_id
 pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
+ice_servers = ["stun:stun.l.google.com:19302"]
+
 
 @app.post("/api/offer")
 async def offer(request: dict, background_tasks: BackgroundTasks):
@@ -30,9 +31,11 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
     if pc_id and pc_id in pcs_map:
         pipecat_connection = pcs_map[pc_id]
         logger.info(f"Reusing existing connection for pc_id: {pc_id}")
-        await pipecat_connection.renegotiate(sdp=request["sdp"], type=request["type"])
+        await pipecat_connection.renegotiate(
+            sdp=request["sdp"], type=request["type"], restart_pc=request.get("restart_pc", False)
+        )
     else:
-        pipecat_connection = SmallWebRTCConnection()
+        pipecat_connection = SmallWebRTCConnection(ice_servers)
         await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
 
         @pipecat_connection.on("closed")
@@ -47,11 +50,6 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
     pcs_map[answer["pc_id"]] = pipecat_connection
 
     return answer
-
-
-@app.get("/")
-async def serve_index():
-    return FileResponse("index.html")
 
 
 @asynccontextmanager
