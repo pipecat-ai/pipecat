@@ -1,34 +1,54 @@
-# Video transform
+# Voice Agent
 
-A Pipecat example demonstrating the simplest way to create a voice agent with SmallWebRTCTransport.
+A Pipecat example demonstrating the simplest way to create a voice agent using `SmallWebRTCTransport`.
 
-## Quick Start
+## 🚀 Quick Start
 
-### First, start the bot server:
+### 1️⃣ Start the Bot Server
 
+#### 🔧 Set Up the Environment
 1. Create and activate a virtual environment:
    ```bash
    python3 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
-2. Install requirements:
+
+2. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-3. Copy env.example to .env and configure:
-   - Add your API keys
-4. Start the server:
+
+3. Configure environment variables:
+   - Copy `env.example` to `.env`
    ```bash
-   python server.py
+   cp env.example .env
    ```
+   - Add your API keys
 
-### Next, connect using the client app:
+#### ▶️ Run the Server
+```bash
+python server.py
+```
 
-Visit http://localhost:7860 in your browser.
+### 2️⃣ Connect Using the Client App
 
-## Requirements
+Open your browser and visit:
+```
+http://localhost:7860
+```
 
-- Python 3.10+
-- Node.js 16+ (for JavaScript)
-- Google API key
+## 📌 Requirements
+
+- Python **3.10+**
+- Node.js **16+** (for JavaScript components)
+- Google API Key
 - Modern web browser with WebRTC support
+
+---
+
+### 💡 Notes
+- Ensure all dependencies are installed before running the server.
+- Check the `.env` file for missing configurations.
+- WebRTC requires a secure environment (HTTPS) for full functionality in production.
+
+Happy coding! 🎉
