@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support to `ProtobufFrameSerializer` to send the messages from `TransportMessageFrame` and `TransportMessageUrgentFrame`.
+
 - Added support for a new TTS service, `PiperTTSService`.
   (see https://github.com/rhasspy/piper/)
 
