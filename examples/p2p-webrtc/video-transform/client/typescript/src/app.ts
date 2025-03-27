@@ -1,4 +1,7 @@
-import {SmallWebRTCTransport} from "./smallWebRTCTransport";
+import {
+    SmallWebRTCTransport
+} from "@pipecat-ai/small-webrtc-transport";
+import {Participant, RTVIClient, RTVIClientOptions} from "@pipecat-ai/client-js";
 
 class WebRTCApp {
 
@@ -16,27 +19,74 @@ class WebRTCApp {
     private debugLog: HTMLElement | null = null;
     private statusSpan: HTMLElement | null = null;
 
-    private smallWebRTCTransport: SmallWebRTCTransport;
+    private declare smallWebRTCTransport: SmallWebRTCTransport;
+    private declare rtviClient: RTVIClient;
 
     constructor() {
         this.setupDOMElements();
         this.setupDOMEventListeners();
-
-        this.smallWebRTCTransport = new SmallWebRTCTransport({
-            onConnected: () => {
-                this.onConnectedHandler()
-            },
-            onDisconnected: () => {
-                this.onDisconnectedHandler()
-            },
-            onLog: (message: string) => {
-                this.log(message)
-            },
-            onTrackStarted: (track: MediaStreamTrack) => {
-                this.onTrackStarted(track)
-            }
-        });
+        this.initializeRTVIClient()
         void this.populateDevices();
+    }
+
+    private initializeRTVIClient(): void {
+        const transport = new SmallWebRTCTransport();
+        const RTVIConfig: RTVIClientOptions = {
+            // need to understand why it is complaining
+            // @ts-ignore
+            transport,
+            params: {
+                baseUrl: "/api/offer"
+            },
+            enableMic: true,
+            enableCam: true,
+            callbacks: {
+                onTransportStateChanged: (state) => {
+                    this.log(`Transport state: ${state}`)
+                },
+                onConnected: () => {
+                    this.onConnectedHandler()
+                },
+                onBotReady: () => {
+                    this.log("Bot is ready.")
+                },
+                onDisconnected: () => {
+                    this.onDisconnectedHandler()
+                },
+                onUserStartedSpeaking: () => {
+                    this.log("User started speaking.")
+                },
+                onUserStoppedSpeaking: () => {
+                    this.log("User stopped speaking.")
+                },
+                onBotStartedSpeaking: () => {
+                    this.log("Bot started speaking.")
+                },
+                onBotStoppedSpeaking: () => {
+                    this.log("Bot stopped speaking.")
+                },
+                onUserTranscript: (transcript) => {
+                    if (transcript.final) {
+                        this.log(`User transcript: ${transcript.text}`)
+                    }
+                },
+                onBotTranscript: (transcript) => {
+                    this.log(`Bot transcript: ${transcript.text}`)
+                },
+                onTrackStarted: (track: MediaStreamTrack, participant?: Participant) => {
+                    if (participant?.local) {
+                        return
+                    }
+                    this.onBotTrackStarted(track)
+                },
+                onServerMessage: (msg) => {
+                    this.log(`Server message: ${msg}`)
+                }
+            },
+        }
+        RTVIConfig.customConnectHandler = () => Promise.resolve();
+        this.rtviClient = new RTVIClient(RTVIConfig);
+        this.smallWebRTCTransport = transport
     }
 
     private setupDOMElements(): void {
@@ -58,6 +108,16 @@ class WebRTCApp {
     private setupDOMEventListeners(): void {
         this.connectBtn.addEventListener("click", () => this.start());
         this.disconnectBtn.addEventListener("click", () => this.stop());
+        this.audioInput.addEventListener("change", (e) => {
+            // @ts-ignore
+            let audioDevice = e.target?.value
+            this.rtviClient.updateMic(audioDevice)
+        })
+        this.videoInput.addEventListener("change", (e) => {
+            // @ts-ignore
+            let videoDevice = e.target?.value
+            this.rtviClient.updateCam(videoDevice)
+        })
     }
 
     private log(message: string): void {
@@ -96,7 +156,7 @@ class WebRTCApp {
         if (this.disconnectBtn) this.disconnectBtn.disabled = true;
     }
 
-    private onTrackStarted(track: MediaStreamTrack) {
+    private onBotTrackStarted(track: MediaStreamTrack) {
         if (track.kind === 'video') {
             this.videoElement.srcObject = new MediaStream([track]);
         } else {
@@ -117,9 +177,9 @@ class WebRTCApp {
         };
 
         try {
-            const audioDevices = await this.smallWebRTCTransport.getAllMics();
+            const audioDevices = await this.rtviClient.getAllMics();
             populateSelect(this.audioInput, audioDevices);
-            const videoDevices = await this.smallWebRTCTransport.getAllCams();
+            const videoDevices = await this.rtviClient.getAllCams();
             populateSelect(this.videoInput, videoDevices);
         } catch (e) {
             alert(e);
@@ -132,15 +192,19 @@ class WebRTCApp {
         this.connectBtn.disabled = true;
         this.updateStatus("Connecting")
 
-        const audioDevice = this.audioInput.value;
-        const audioCodec = this.audioCodec.value;
-        const videoDevice = this.videoInput.value;
-        const videoCodec = this.videoCodec.value;
-        await this.smallWebRTCTransport.start(audioDevice, audioCodec, videoCodec, videoDevice)
+        this.smallWebRTCTransport.setAudioCodec(this.audioCodec.value)
+        this.smallWebRTCTransport.setVideoCodec(this.videoCodec.value)
+        try {
+            await this.rtviClient.connect()
+        } catch (e) {
+            console.log(`Failed to connect ${e}`)
+            this.stop()
+        }
+
     }
 
     private stop(): void {
-        this.smallWebRTCTransport.stop()
+        void this.rtviClient.disconnect()
     }
 }
 
