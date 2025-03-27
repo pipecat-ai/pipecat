@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (e.g. `OpenAISTTService`) to try to transcribe non-spoken audio, causing
   invalid transcriptions.
 
+- Fixed an issue where `GoogleTTSService` was emitting two `TTSStoppedFrames`.
+
 ## [0.0.61] - 2025-03-26
 
 ### Added

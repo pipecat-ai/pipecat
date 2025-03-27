@@ -1343,6 +1343,7 @@ class GoogleVertexLLMService(OpenAILLMService):
         **kwargs,
     ):
         """Initializes the VertexLLMService.
+
         Args:
             credentials (Optional[str]): JSON string of service account credentials.
             credentials_path (Optional[str]): Path to the service account JSON file.
@@ -1366,9 +1367,11 @@ class GoogleVertexLLMService(OpenAILLMService):
     @staticmethod
     def _get_api_token(credentials: Optional[str], credentials_path: Optional[str]) -> str:
         """Retrieves an authentication token using Google service account credentials.
+
         Args:
             credentials (Optional[str]): JSON string of service account credentials.
             credentials_path (Optional[str]): Path to the service account JSON file.
+
         Returns:
             str: OAuth token for API authentication.
         """
@@ -1557,8 +1560,6 @@ class GoogleTTSService(TTSService):
             logger.exception(f"{self} error generating TTS: {e}")
             error_message = f"TTS generation error: {str(e)}"
             yield ErrorFrame(error=error_message)
-        finally:
-            yield TTSStoppedFrame()
 
 
 class GoogleImageGenService(ImageGenService):
