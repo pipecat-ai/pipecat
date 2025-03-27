@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.ai_services import TTSService
 
+
 # This assumes a running TTS service running: https://github.com/rhasspy/piper/blob/master/src/python_run/README_http.md
 class PiperTTSService(TTSService):
     """Piper TTS service implementation.
