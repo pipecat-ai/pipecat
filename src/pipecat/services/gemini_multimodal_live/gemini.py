@@ -7,6 +7,7 @@
 import asyncio
 import base64
 import json
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Union
@@ -177,6 +178,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
+        self._last_sent_time = 0
         self.api_key = api_key
         self.base_url = base_url
         self.set_model_name(model)
@@ -548,7 +550,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def _send_user_video(self, frame):
         if self._video_input_paused:
             return
-        # logger.debug(f"Sending video frame to Gemini: {frame}")
+
+        now = time.time()
+        if now - self._last_sent_time < 1:
+            return  # Ignore if less than 1 second has passed
+
+        self._last_sent_time = now  # Update last sent time
+        logger.debug(f"Sending video frame to Gemini: {frame}")
         evt = events.VideoInputMessage.from_image_frame(frame)
         await self.send_client_event(evt)
 
