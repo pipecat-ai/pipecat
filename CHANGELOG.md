@@ -9,9 +9,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- ElevenLabs TTS services now support a sample rate of 8000.
+- Added support to `ProtobufFrameSerializer` to send the messages from `TransportMessageFrame` and `TransportMessageUrgentFrame`.
+
+- Added support for a new TTS service, `PiperTTSService`.
+  (see https://github.com/rhasspy/piper/)
+
+- It is now possible to tell whether `UserStartedSpeakingFrame` or
+  `UserStoppedSpeakingFrame` have been generated because of emulation frames.
 
 ### Fixed
+
+- Fixed an issue that would cause `SegmentedSTTService` based services
+  (e.g. `OpenAISTTService`) to try to transcribe non-spoken audio, causing
+  invalid transcriptions.
+
+- Fixed an issue where `GoogleTTSService` was emitting two `TTSStoppedFrames`.
+
+## [0.0.61] - 2025-03-26
+
+### Added
+
+- Added a new frame, `LLMSetToolChoiceFrame`, which provides a mechanism
+  for modifying the `tool_choice` in the context.
+
+- Added `GroqTTSService` which provides text-to-speech functionality using
+  Groq's API.
+
+- Added support in `DailyTransport` for updating remote participants'
+  `canReceive` permission via the `update_remote_participants()` method, by
+  bumping the daily-python dependency to >= 0.16.0.
+
+- ElevenLabs TTS services now support a sample rate of 8000.
+
+- Added support for `instructions` in `OpenAITTSService`.
+
+- Added support for `base_url` in `OpenAIImageGenService` and
+  `OpenAITTSService`.
+
+### Fixed
+
+- Fixed an issue in `RTVIObserver` that prevented handling of Google LLM
+  context messages. The observer now processes both OpenAI-style and
+  Google-style contexts.
+
+- Fixed an issue in Daily involving switching virtual devices, by bumping the
+  daily-python dependency to >= 0.16.1.
+
+- Fixed a `GoogleAssistantContextAggregator` issue where function calls
+  placeholders where not being updated when then function call result was
+  different from a string.
+
+- Fixed an issue that would cause `LLMAssistantContextAggregator` to block
+  processing more frames while processing a function call result.
 
 - Fixed an issue where the `RTVIObserver` would report two bot started and
   stopped speaking events for each bot turn.
