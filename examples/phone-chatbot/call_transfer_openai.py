@@ -238,7 +238,7 @@ async def main(
         # Queue the message to the context
         await task.queue_frames([LLMMessagesFrame(messages)])
 
-        # Then speak and end the call
+        # Then end the call
         await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
     async def dial_operator(
