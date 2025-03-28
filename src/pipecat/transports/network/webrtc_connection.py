@@ -38,6 +38,19 @@ class SmallWebRTCConnection(BaseObject):
         self._connect_invoked = False
         self._initialize()
 
+        # Register supported handlers. The user will only be able to register
+        # these handlers.
+        self._register_event_handler("appMessage")
+        self._register_event_handler("track-started")
+        self._register_event_handler("track-ended")
+        # connection states
+        self._register_event_handler("connecting")
+        self._register_event_handler("connected")
+        self._register_event_handler("disconnected")
+        self._register_event_handler("closed")
+        self._register_event_handler("failed")
+        self._register_event_handler("new")
+
     @property
     def pc(self) -> RTCPeerConnection:
         return self._pc
