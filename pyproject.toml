@@ -82,6 +82,7 @@ soundfile = [ "soundfile~=0.13.0" ]
 tavus=[]
 together = []
 ultravox = [ "transformers~=4.48.0", "vllm~=0.7.3" ]
+webrtc = [ "aiortc~=1.10.1", "opencv-python~=4.11.0.86" ]
 websocket = [ "websockets~=13.1", "fastapi~=0.115.6" ]
 whisper = [ "faster-whisper~=1.1.1" ]
 
