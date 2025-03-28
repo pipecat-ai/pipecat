@@ -40,7 +40,7 @@ class SmallWebRTCConnection(BaseObject):
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
-        self._register_event_handler("appMessage")
+        self._register_event_handler("app-message")
         self._register_event_handler("track-started")
         self._register_event_handler("track-ended")
         # connection states
@@ -86,7 +86,7 @@ class SmallWebRTCConnection(BaseObject):
                         self._last_received_time = time.time()
                     else:
                         json_message = json.loads(message)
-                        await self._call_event_handler("appMessage", json_message)
+                        await self._call_event_handler("app-message", json_message)
                 except Exception as e:
                     logger.exception(f"Error parsing JSON message {message}, {e}")
 
